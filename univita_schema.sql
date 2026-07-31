@@ -23,7 +23,7 @@ SET @@SESSION.SQL_LOG_BIN= 0;
 -- GTID state at the beginning of the backup 
 --
 
-SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '3bd31b54-ffea-11f0-82d0-74d4dd636397:1-3409';
+
 
 --
 -- Table structure for table `alert_receipts`

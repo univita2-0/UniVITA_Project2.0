@@ -268,7 +268,8 @@ const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 10
 const allowedOrigins = [
   'https://univita.site',
   'http://localhost:3000',
-  'http://localhost:8081' // This is the default Expo/React Native port
+  'http://localhost:8081',
+  'https://univitahct.netlify.app' // This is the default Expo/React Native port
 ];
 
 const corsOptions = {
