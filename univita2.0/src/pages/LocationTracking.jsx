@@ -13,22 +13,18 @@ const LocationTracking = () => {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Date filter
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   
-  // History modal
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyDate, setHistoryDate] = useState(new Date().toISOString().split('T')[0]);
   const [alertHistory, setAlertHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   
-  // Timeline modal (per instructor)
   const [showTimelineModal, setShowTimelineModal] = useState(false);
   const [selectedInstructor, setSelectedInstructor] = useState(null);
-  const [timelineData, setTimelineData] = useState({ timeline: [], alerts: [] });
+  const [timelineData, setTimelineData] = useState({ timeline: [], alerts: [], start_time: null, end_time: null });
   const [timelineLoading, setTimelineLoading] = useState(false);
 
-  // Helper: convert HH:MM:SS to 12‑hour format
   const formatTo12Hour = (timeString) => {
     if (!timeString || timeString === '00:00:00') return 'N/A';
     const [hours, minutes] = timeString.split(':');
@@ -38,7 +34,15 @@ const LocationTracking = () => {
     return `${displayHours}:${minutes} ${ampm}`;
   };
 
-  // Fetch main tracking data for the selected date
+  const isWithinShift = (start, end) => {
+    if (!start || !end) return false;
+    const now = new Date();
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return currentTime >= (sh * 60 + sm) && currentTime <= (eh * 60 + em);
+  };
+
   const fetchData = async (date = selectedDate) => {
     setLoading(true);
     try {
@@ -55,7 +59,6 @@ const LocationTracking = () => {
     }
   };
 
-  // Fetch alert history for the selected date (used in history modal)
   const fetchAlertHistory = async (date) => {
     setHistoryLoading(true);
     try {
@@ -68,7 +71,6 @@ const LocationTracking = () => {
     }
   };
 
-  // Open timeline modal for an instructor on the selected date
   const openTimelineModal = async (employeeId, fullName) => {
     setSelectedInstructor({ id: employeeId, name: fullName });
     setShowTimelineModal(true);
@@ -83,18 +85,15 @@ const LocationTracking = () => {
     }
   };
 
-  // Initial load and whenever date changes
   useEffect(() => {
     fetchData(selectedDate);
   }, [selectedDate]);
 
-  // WebSocket real‑time updates (only for today's data, but we keep it generic)
   useEffect(() => {
     const ws = new WebSocket(`ws://${window.location.hostname}:5000?token=${localStorage.getItem('auth_token')}`);
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'instructor_status_update') {
-        // Only update if we are viewing today
         if (selectedDate === new Date().toISOString().split('T')[0]) {
           setInstructors(prev => prev.map(inst =>
             inst.employee_id === data.instructor.employee_id ? { ...inst, ...data.instructor } : inst
@@ -109,18 +108,79 @@ const LocationTracking = () => {
     return () => ws.close();
   }, [selectedDate]);
 
-  // Load history when modal opens
   useEffect(() => {
     if (showHistoryModal) {
       fetchAlertHistory(historyDate);
     }
   }, [showHistoryModal, historyDate]);
 
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isToday = selectedDate === todayStr;
+
+  // Build unified events for timeline modal
+  const buildUnifiedEvents = () => {
+    const events = [];
+    const timeline = timelineData.timeline || [];
+    const shiftStart = timelineData.start_time;
+    const shiftEnd = timelineData.end_time;
+
+    const isWithinShiftTime = (timeStr) => {
+      if (!shiftStart || !shiftEnd) return true;
+      const t = new Date(timeStr);
+      const hours = t.getHours(), minutes = t.getMinutes();
+      const total = hours * 60 + minutes;
+      const [sh, sm] = shiftStart.split(':').map(Number);
+      const [eh, em] = shiftEnd.split(':').map(Number);
+      return total >= (sh*60+sm) && total <= (eh*60+em);
+    };
+
+    // 1. GPS status changes
+    for (let i = 0; i < timeline.length; i++) {
+      const curr = timeline[i];
+      if (!isWithinShiftTime(curr.ping_time)) continue;
+      const prev = i > 0 ? timeline[i-1] : null;
+      if (prev && prev.location_enabled !== curr.location_enabled) {
+        events.push({
+          time: curr.ping_time,
+          type: 'GPS',
+          detail: curr.location_enabled ? 'GPS turned ON' : 'GPS turned OFF'
+        });
+      }
+    }
+
+    // 2. Campus status changes (inside ↔ outside)
+    for (let i = 0; i < timeline.length; i++) {
+      const curr = timeline[i];
+      if (!isWithinShiftTime(curr.ping_time)) continue;
+      const prev = i > 0 ? timeline[i-1] : null;
+      if (prev && prev.is_inside_campus !== curr.is_inside_campus && curr.location_enabled) {
+        const action = curr.is_inside_campus ? 'Entered campus' : 'Went outside campus';
+        events.push({
+          time: curr.ping_time,
+          type: 'Campus',
+          detail: `${action} (${curr.location_name || 'Unknown'})`
+        });
+      }
+    }
+
+    // 3. Alerts from location_alerts table
+    (timelineData.alerts || []).forEach(alert => {
+      events.push({
+        time: alert.created_at,
+        type: 'Alert',
+        detail: alert.alert_message
+      });
+    });
+
+    // Sort by timestamp
+    events.sort((a, b) => new Date(a.time) - new Date(b.time));
+    return events;
+  };
+
   return (
     <div className="lt-dashboard">
       <div className="lt-header">
         <div>
-          <h1>Location Tracking</h1>
           <p className="subtitle">Real-time campus geofencing compliance</p>
         </div>
         <div className="lt-actions">
@@ -146,19 +206,15 @@ const LocationTracking = () => {
           <div className="stats-row">
             <div className="stat-card">
               <div className="stat-value">{instructors.length}</div>
-              <div className="stat-label">Active</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-value">{instructors.filter(i => i.gps_status === 'GPS ON').length}</div>
-              <div className="stat-label">GPS On</div>
+              <div className="stat-label">Active Shifts</div>
             </div>
             <div className="stat-card">
               <div className="stat-value">{instructors.filter(i => i.last_is_inside === 1).length}</div>
-              <div className="stat-label">On‑Campus</div>
+              <div className="stat-label">On‑Campus (now)</div>
             </div>
             <div className="stat-card">
               <div className="stat-value" style={{ color: '#dc2626' }}>{alerts.length}</div>
-              <div className="stat-label">Alerts</div>
+              <div className="stat-label">Alerts (this date)</div>
             </div>
           </div>
 
@@ -179,19 +235,20 @@ const LocationTracking = () => {
               <tbody>
                 {instructors.length === 0 ? (
                   <tr className="empty-row">
-                    <td colSpan="8">No instructors with schedules on this date.</td>
+                    <td colSpan="8">No active shifts on this date.</td>
                   </tr>
                 ) : (
                   instructors.map(inst => {
                     const isGpsOn = inst.gps_status === 'GPS ON';
                     const isOutside = inst.last_is_inside === 0;
-                    const isAlert = !isGpsOn || isOutside;
+                    const isAlert = isToday && (!isGpsOn || isOutside);
 
                     return (
                       <tr key={inst.employee_id} className={isAlert ? 'alert-row' : ''}>
                         <td>
                           <div className="instructor-name">{inst.full_name}</div>
                           <div className="employee-id">{inst.employee_id}</div>
+                          {isToday && <span className="active-badge">ACTIVE NOW</span>}
                         </td>
                         <td>
                           {inst.schedule_course ? (
@@ -207,7 +264,7 @@ const LocationTracking = () => {
                         </td>
                         <td>
                           <span className={`status-pill ${isGpsOn ? 'pill-gps-on' : 'pill-gps-off'}`}>
-                            {inst.gps_status}
+                            {isGpsOn ? 'ON' : 'OFF'}
                           </span>
                         </td>
                         <td>
@@ -239,7 +296,7 @@ const LocationTracking = () => {
         </>
       )}
 
-      {/* History Modal (enlarged) */}
+      {/* Alert History Modal (unchanged) */}
       <FormalModal
         show={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
@@ -253,6 +310,7 @@ const LocationTracking = () => {
             type="date"
             value={historyDate}
             onChange={e => setHistoryDate(e.target.value)}
+            className="date-picker"
           />
           <button onClick={() => fetchAlertHistory(historyDate)}>Refresh</button>
         </div>
@@ -261,12 +319,7 @@ const LocationTracking = () => {
         ) : (
           <table className="data-table small">
             <thead>
-              <tr>
-                <th>Time</th>
-                <th>Instructor</th>
-                <th>Alert Message</th>
-                <th>Location (lat, lng)</th>
-              </tr>
+              <tr><th>Time</th><th>Instructor</th><th>Alert Message</th><th>Campus</th></tr>
             </thead>
             <tbody>
               {alertHistory.length === 0 ? (
@@ -277,7 +330,7 @@ const LocationTracking = () => {
                     <td>{new Date(alert.created_at).toLocaleString()}</td>
                     <td>{alert.full_name}</td>
                     <td>{alert.alert_message}</td>
-                    <td>{alert.latitude}, {alert.longitude}</td>
+                    <td>{alert.location_name || '—'}</td>
                   </tr>
                 ))
               )}
@@ -286,57 +339,40 @@ const LocationTracking = () => {
         )}
       </FormalModal>
 
-      {/* Timeline Modal (per instructor, enlarged) */}
+      {/* Unified Timeline Modal */}
       <FormalModal
         show={showTimelineModal}
         onClose={() => setShowTimelineModal(false)}
-        title={`Timeline for ${selectedInstructor?.name} (${selectedDate})`}
+        title={`Timeline & Alerts for ${selectedInstructor?.name} (${selectedDate})`}
         wide
         style={{ maxWidth: '85vw', maxHeight: '85vh', overflowY: 'auto' }}
       >
         {timelineLoading ? (
-          <div className="loading-skeleton">Loading timeline...</div>
+          <div>Loading timeline...</div>
         ) : (
           <>
-            <h4>GPS & Campus Status Changes</h4>
-            <table className="data-table small">
+            <h4>Combined Event Log (GPS, Campus, Alerts)</h4>
+            <table className="data-table small unified-events">
               <thead>
                 <tr>
-                  <th>Time (Manila)</th>
-                  <th>GPS Enabled</th>
-                  <th>Campus Status</th>
-                  <th>Location Name</th>
+                  <th>Time</th>
+                  <th>Event Type</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
-                {timelineData.timeline.length === 0 ? (
-                  <tr><td colSpan="4">No tracking records for this date.</td></tr>
+                {buildUnifiedEvents().length === 0 ? (
+                  <tr><td colSpan="3">No events recorded during this shift.</td></tr>
                 ) : (
-                  timelineData.timeline.map((rec, idx) => (
-                    <tr key={idx}>
-                      <td>{new Date(rec.ping_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}</td>
-                      <td>{rec.location_enabled ? 'ON' : 'OFF'}</td>
-                      <td>{rec.is_inside_campus ? 'INSIDE' : 'OUTSIDE'}</td>
-                      <td>{rec.location_name}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-
-            <h4>Alerts</h4>
-            <table className="data-table small">
-              <thead>
-                <tr><th>Time</th><th>Alert Message</th></tr>
-              </thead>
-              <tbody>
-                {timelineData.alerts.length === 0 ? (
-                  <tr><td colSpan="2">No alerts recorded on this date.</td></tr>
-                ) : (
-                  timelineData.alerts.map(alert => (
-                    <tr key={alert.id}>
-                      <td>{new Date(alert.created_at).toLocaleTimeString()}</td>
-                      <td>{alert.alert_message}</td>
+                  buildUnifiedEvents().map((ev, idx) => (
+                    <tr key={idx} className={
+                      ev.type === 'Alert' ? 'alert-row' :
+                      ev.type === 'GPS' ? (ev.detail.includes('ON') ? 'gps-on' : 'gps-off') :
+                      ev.type === 'Campus' ? 'campus-transition' : ''
+                    }>
+                      <td>{new Date(ev.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
+                      <td><strong>{ev.type}</strong></td>
+                      <td>{ev.detail}</td>
                     </tr>
                   ))
                 )}

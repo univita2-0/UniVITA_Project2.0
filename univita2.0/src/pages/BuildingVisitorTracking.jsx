@@ -262,7 +262,10 @@ useEffect(() => {
     prevVisitorsRef.current = visitors;
   }, [visitors]);
 
-  const currentVisitors = visitors.filter(v => v.floor === currentFloor);
+ const currentVisitors = visitors.filter(v => 
+  v.floor === currentFloor && 
+  v.lastSeen !== 'Disconnected' 
+);
   const totalVisitors = visitors.length;
   const activeVisitors = currentVisitors.length;
   const floor3Count = visitors.filter(v => v.floor === '3').length;
@@ -443,8 +446,10 @@ useEffect(() => {
           <div className="record-header">
             <span><strong>{record.visitor_name}</strong> ({record.ble_id})</span>
             <span className={`event-badge ${record.event_type}`}>
-              {record.event_type === 'enter' ? 'Entered' : record.event_type === 'move' ? 'Moved' : 'Exited'}
-            </span>
+  {record.event_type === 'enter' ? 'Entered' : 
+   record.event_type === 'move' ? 'Moved' : 
+   record.event_type === 'connect' ? 'Connected' : 'Disconnected'}
+</span>
           </div>
           <div className="record-details">
             <span>📍 {record.current_room || 'Unknown'}</span>

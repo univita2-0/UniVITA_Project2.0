@@ -17,6 +17,7 @@ const url = require('url');
 const app = express();
 const fs = require('fs');
 const visitorDestinations = {};
+const recentAlertsCache = new Set();
 
 // --------------------------------------------------
 // CONFIGURATION (from .env)
@@ -38,6 +39,7 @@ const isDateWithinAllowedRange = (dateStr) => {
   targetDate.setHours(0, 0, 0, 0);
   return targetDate <= today && targetDate >= thirtyDaysAgo;
 };
+
 
 // Helper: validate schedule exists for an employee on a given date
 const scheduleExistsForDate = async (employeeId, dateStr) => {
@@ -165,9 +167,11 @@ function authenticateToken(req, res, next) {
 
 // Helper to log visitor history (place after db connection)
 function logVisitorHistory(visitorId, visitorName, bleId, floor, currentRoom, eventType, x = null, y = null) {
+  // If visitorId is the bleId (string), we might want to look up the real DB ID
   const sql = `INSERT INTO visitor_history 
-    (visitor_id, visitor_name, ble_id, floor, current_room, event_type, x, y) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+    (visitor_id, visitor_name, ble_id, floor, current_room, event_type, x, y, timestamp) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`;
+    
   db.query(sql, [visitorId, visitorName, bleId, floor, currentRoom, eventType, x, y], (err) => {
     if (err) console.error('Failed to log visitor history:', err);
   });
@@ -501,7 +505,6 @@ const getPHTime = () => {
   const time = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Manila', hour12: false });
   return { date, time };
 };
-
 app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
   const { employee_id, latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
@@ -529,15 +532,15 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'No work schedule found' });
     const { place: schedulePlace, start_time: scheduledStartTime } = schedRows[0];
 
-    // 3. Time Validation
+    // 3. Time Validation (Strictly prevents early clock-ins)
     const scheduledStart = new Date(`1970-01-01T${scheduledStartTime}`);
     const actualTime = new Date(`1970-01-01T${currentTime}`);
     const diffMinutes = (actualTime - scheduledStart) / 60000;
 
-    if (diffMinutes < -15) {
+    if (diffMinutes < 0) {
       return res.status(403).json({
         success: false,
-        message: `Clock-in is only allowed 15 minutes before your scheduled start time (${scheduledStartTime}).`
+        message: `Clock-in is not allowed before your scheduled start time (${scheduledStartTime}).`
       });
     }
 
@@ -1746,25 +1749,44 @@ app.get('/api/ble-tags', (req, res) => {
   });
 });
 
-app.post('/api/ble-tags', authenticateToken, (req, res) => {
+app.post('/api/ble-tags', authenticateToken, async (req, res) => {
+  // 1. Role Authorization
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
     return res.status(403).json({ error: 'Forbidden' });
   }
+
   const { ble_id, label, mac_address } = req.body;
+
+  // 2. Input Validation
   if (!ble_id) return res.status(400).json({ error: "BLE ID is required." });
   if (!mac_address) return res.status(400).json({ error: "MAC address is required." });
-  db.query(
-    "INSERT INTO ble_tags (ble_id, label, mac_address) VALUES (?, ?, ?)",
-    [ble_id, label || '', mac_address],
-    (err, result) => {
-      if (err) {
-        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: "Tag already exists." });
-        return res.status(500).json({ error: err.message });
-      }
-      logAction(req.user.id, 'CREATE_BLE_TAG', 'ble_tag', result.insertId, req);
-      res.json({ success: true, id: result.insertId });
+
+  try {
+    // 3. Pre-check for duplicate BLE ID or MAC Address
+    // Checking both ensures data integrity beyond just the database constraint
+    const [existing] = await db.promise().query(
+      "SELECT id FROM ble_tags WHERE ble_id = ? OR mac_address = ?", 
+      [ble_id, mac_address]
+    );
+
+    if (existing.length > 0) {
+      return res.status(400).json({ error: "A tag with this BLE ID or MAC address already exists." });
     }
-  );
+
+    // 4. Insert new tag
+    const [result] = await db.promise().query(
+      "INSERT INTO ble_tags (ble_id, label, mac_address) VALUES (?, ?, ?)",
+      [ble_id.trim(), label ? label.trim() : '', mac_address.trim()]
+    );
+
+    // 5. Log action
+    logAction(req.user.id, 'CREATE_BLE_TAG', 'ble_tag', result.insertId, req);
+
+    res.status(201).json({ success: true, id: result.insertId });
+  } catch (err) {
+    console.error("BLE Tag creation error:", err);
+    res.status(500).json({ error: "Internal server error while saving tag." });
+  }
 });
 
 app.delete('/api/ble-tags/:id', authenticateToken, (req, res) => {
@@ -2019,91 +2041,110 @@ app.get('/api/dashboard/summary', async (req, res) => {
 // We changed this to an object so it can track multiple different badges at the same time
 let liveVisitors = {}; 
 
-// --- NEW: THE HEARTBEAT CLEANUP ROUTINE ---
-// This runs automatically every 10 seconds in the background
+// Add this at the top level with your 'liveVisitors' object
+let lastKnownVisitors = new Set();
+
 setInterval(() => {
   const now = Date.now();
-  for (const tagId in liveVisitors) {
-    // If the scanner hasn't heard from this tag in 30 seconds (30000 ms)
-    if (now - liveVisitors[tagId].lastSeen > 30000) {
-      console.log(`👻 Visitor ${liveVisitors[tagId].name} timed out. Removing from map.`);
-      delete liveVisitors[tagId]; // Erase them from the server's memory
-    }
-  }
-}, 10000);
+  const currentVisitorIds = Object.keys(liveVisitors);
 
-// Add this in your server.js
-setInterval(async () => {
-  try {
-    // Find all instructors who haven't pinged in 60s but have location enabled
-    const [staleInstructors] = await db.promise().query(`
-      SELECT employee_id, full_name 
-      FROM users 
-      WHERE location_tracking_enabled = 1 
-      AND last_location_ping < DATE_SUB(NOW(), INTERVAL 5 MINUTE)
-    `);
-
-    for (const inst of staleInstructors) {
-      const alertMsg = 'Connection lost: Instructor GPS stopped responding.';
+  // 1. Detect DISCONNECTS
+  // If an ID was in lastKnownVisitors but is NOT in currentVisitorIds
+  for (const bleId of lastKnownVisitors) {
+    if (!currentVisitorIds.includes(bleId)) {
+      console.log(`⚠️ Visitor ${bleId} disconnected.`);
+      const visitor = lastKnownVisitors.lastData || { name: 'Unknown', floor: null, room: 'Disconnected' };
       
-      // 2. Prevent Spam: Check if we already alerted for this user in the last 15 minutes
-      const [existingAlert] = await db.promise().query(`
-        SELECT id FROM location_alerts 
-        WHERE employee_id = ? 
-        AND alert_message = ? 
-        AND created_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)
-      `, [inst.employee_id, alertMsg]);
-
-      if (existingAlert.length === 0) {
-        await insertAndBroadcastAlert(alertMsg, {
-          employeeId: inst.employee_id,
-          fullName: inst.full_name,
-          latitude: 0,
-          longitude: 0
-        });
-      }
-
-      // 3. Mark as disabled to stop tracking until they re-enable it
-      await db.promise().query("UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?", [inst.employee_id]);
+      logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'disconnect', null, null);
     }
-  } catch (err) {
-    console.error("Heartbeat Watchdog Error:", err);
   }
-}, 60000);
-// ------------------------------------------
 
-app.post('/api/ble-data', (req, res) => {
+  // 2. Detect CONNECTS / RECONNECTS
+  // If an ID is in currentVisitorIds but was NOT in lastKnownVisitors
+  for (const bleId of currentVisitorIds) {
+    if (!lastKnownVisitors.has(bleId)) {
+      console.log(`✅ Visitor ${bleId} connected.`);
+      const visitor = liveVisitors[bleId];
+      
+      logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'connect', null, null);
+    }
+  }
+
+  // 3. Purge timed out visitors (the ghost fix)
+  for (const bleId in liveVisitors) {
+    if (now - liveVisitors[bleId].lastSeen > 10000) {
+      console.log(`👻 Visitor ${bleId} timed out. Removing from server memory.`);
+      delete liveVisitors[bleId];
+    }
+  }
+
+  // 4. Update the Set for the next cycle
+  lastKnownVisitors = new Set(Object.keys(liveVisitors));
+}, 5000);
+
+
+app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'instructor') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { enabled } = req.body;
+  const employeeId = req.user.employee_id;
+  await db.promise().query(
+    "UPDATE users SET location_tracking_enabled = ? WHERE employee_id = ?",
+    [enabled ? 1 : 0, employeeId]
+  );
+  res.json({ success: true });
+});
+
+app.post('/api/ble-data', async (req, res) => {
   const { room, floor, beaconId } = req.body;
+  
   if (!beaconId) return res.status(400).json({ error: "No beacon ID received." });
 
+  // 1. Join with visitor_requests and check 'returned = 0'
   const sql = `
-    SELECT vr.first_name, vr.last_name, bt.ble_id, vr.destination
+    SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
     FROM visitor_requests vr
     JOIN ble_tags bt ON vr.ble_id = bt.ble_id
-    WHERE bt.mac_address = ? AND vr.arrived = 1 AND vr.no_show = 0
+    WHERE bt.mac_address = ? 
+    AND vr.arrived = 1 
+    AND vr.no_show = 0 
+    AND vr.returned = 0
     LIMIT 1
   `;
 
-  db.query(sql, [beaconId], (err, results) => {
+  db.query(sql, [beaconId], async (err, results) => {
     if (err) {
       console.error("BLE Data DB Error:", err);
       return res.status(500).json({ error: "Database error" });
     }
     
+    // 2. If no active record is found, force clear memory for this badge
     if (results.length === 0) {
-      return res.json({ success: false, message: "Visitor not found or not checked in" });
+      try {
+        const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE mac_address = ?", [beaconId]);
+        if (tagRes && tagRes.length > 0) {
+          const ghostId = tagRes[0].ble_id;
+          if (liveVisitors[ghostId]) {
+            console.log(`👻 Detected stray signal from returned visitor: ${ghostId}. Cleaning memory.`);
+            delete liveVisitors[ghostId];
+          }
+        }
+      } catch (dbErr) {
+        console.error("Ghost cleanup DB error:", dbErr);
+      }
+      return res.json({ success: false, message: "Visitor not found or already returned" });
     }
 
     const row = results[0];
     const bleId = row.ble_id;
-    const visitorName = row.last_name ? `${row.first_name} ${row.last_name}` : row.first_name;
+    const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
     const destination = row.destination || 'Not Assigned';
 
-    // Check if visitor already exists in liveVisitors
+    // 3. Update liveVisitors (Only if they passed the returned = 0 check)
     const wasPresent = !!liveVisitors[bleId];
     const oldRoom = wasPresent ? liveVisitors[bleId].currentRoom : null;
 
-    // Update liveVisitors
     liveVisitors[bleId] = {
       id: bleId,
       name: visitorName,
@@ -2114,13 +2155,11 @@ app.post('/api/ble-data', (req, res) => {
       lastSeen: Date.now()
     };
 
-    // Log history events
+    // 4. Log history events with coordinate fallback
     if (!wasPresent) {
-      // New visitor – log entry
-      logVisitorHistory(visitorName, visitorName, bleId, floor, room, 'enter', null, null);
+      logVisitorHistory(row.id, visitorName, bleId, floor, room, 'enter', null, null);
     } else if (oldRoom !== room) {
-      // Visitor moved to a different room – log move
-      logVisitorHistory(visitorName, visitorName, bleId, floor, room, 'move', null, null);
+      logVisitorHistory(row.id, visitorName, bleId, floor, room, 'move', null, null);
     }
 
     visitorDestinations[bleId] = destination;
@@ -2130,11 +2169,39 @@ app.post('/api/ble-data', (req, res) => {
 });
 
 // The React Map knocks on this door every 2 seconds to get the latest coordinates
-app.get('/api/positions', (req, res) => {
-  // Convert the liveVisitors object back into an array for the frontend map to read
-  res.json(Object.values(liveVisitors));
-});
+app.get('/api/positions', async (req, res) => {
+  try {
+    const now = Date.now();
+    const TIMEOUT_MS = 10000; // 10 seconds timeout
 
+    // 1. Get database-active visitors
+    const [activeRows] = await db.promise().query(`
+      SELECT ble_id 
+      FROM visitor_requests 
+      WHERE arrived = 1 AND returned = 0 AND ble_id IS NOT NULL
+    `);
+    
+    const validBleIds = new Set(activeRows.map(row => String(row.ble_id).trim()));
+
+    // 2. Memory Purge & Liveness Check
+    for (const bleId in liveVisitors) {
+      const visitor = liveVisitors[bleId];
+      
+      // A. If they aren't in the DB, delete them (the ghost fix)
+      // B. If they haven't pinged in 10 seconds, delete them (the hardware-off fix)
+      if (!validBleIds.has(String(bleId).trim()) || (now - visitor.lastSeen > TIMEOUT_MS)) {
+        console.log(`🧹 Purging: ${bleId} (Reason: ${!validBleIds.has(bleId) ? 'Database Inactive' : 'Signal Timeout'})`);
+        delete liveVisitors[bleId];
+      }
+    }
+
+    // 3. Return only truly active, pinging visitors
+    res.json(Object.values(liveVisitors));
+  } catch (err) {
+    console.error("Sync error:", err);
+    res.status(500).json({ error: "Sync failed" });
+  }
+});
 // ============================================
 // VISIT REASONS MANAGEMENT
 // ============================================
@@ -3028,58 +3095,50 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
+
   const { month, year } = req.body;
   if (!month || !year) return res.status(400).json({ error: 'Month and year required' });
 
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endDate = `${year}-${String(month).padStart(2, '0')}-31`;
+  const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+  const monthYear = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
 
   try {
     const [employees] = await db.promise().query(
       "SELECT id, employee_id, full_name, monthly_salary, work_days_per_month FROM users WHERE LOWER(role) = 'instructor' AND status = 'active'"
     );
+
     const processed = [];
     const skipped = [];
 
     for (const emp of employees) {
-      const monthYear = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+      // 1. Skip if payroll already exists
       const [existing] = await db.promise().query("SELECT id FROM payroll WHERE user_id = ? AND month_year = ?", [emp.id, monthYear]);
       if (existing.length > 0) {
         skipped.push({ employee: emp.full_name, reason: 'Already finalized' });
         continue;
       }
 
-      // Get total hours from attendance
+      // 2. Get total hours from attendance
       const [attendance] = await db.promise().query(
         `SELECT COALESCE(SUM(TIMESTAMPDIFF(MINUTE, time_in, time_out) / 60), 0) as total_hours 
          FROM attendance 
          WHERE user_id = ? AND date BETWEEN ? AND ? AND status IN ('present', 'late')`,
         [emp.employee_id, startDate, endDate]
       );
-      let totalHours = attendance[0]?.total_hours || 0;
-      if (isNaN(totalHours)) totalHours = 0;
+      
+      const totalHours = parseFloat(attendance[0]?.total_hours || 0);
 
-      // Validate salary data
-      let monthlySalary = parseFloat(emp.monthly_salary);
-      let workDays = parseFloat(emp.work_days_per_month);
-      if (isNaN(monthlySalary) || monthlySalary <= 0) monthlySalary = 0;
-      if (isNaN(workDays) || workDays <= 0) workDays = 1; // prevent division by zero
-
-      let hourlyRate = 0;
-      if (monthlySalary > 0 && workDays > 0) {
-        hourlyRate = (monthlySalary / workDays) / 8;
-      }
-
+      // 3. Robust math calculations
+      const monthlySalary = parseFloat(emp.monthly_salary) || 0;
+      const workDays = parseFloat(emp.work_days_per_month) || 22;
+      const hourlyRate = (monthlySalary > 0 && workDays > 0) ? (monthlySalary / workDays) / 8 : 0;
+      
       const grossPay = totalHours * hourlyRate;
       const tax = grossPay * 0.10;
       const netPay = grossPay - tax;
 
-      // Ensure no NaN values
-      const safeGross = isNaN(grossPay) ? 0 : grossPay;
-      const safeTax = isNaN(tax) ? 0 : tax;
-      const safeNet = isNaN(netPay) ? 0 : netPay;
-      const safeHourlyRate = isNaN(hourlyRate) ? 0 : hourlyRate;
-
+      // 4. Insert with sanitized/fixed precision values
       await db.promise().query(
         `INSERT INTO payroll 
           (user_id, month_year, salary_rate, total_hours, overtime_hours, overtime_pay,
@@ -3087,15 +3146,32 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
            pagibig_deduction, loan_deduction, other_deduction, gross_pay, tax_deduction, net_pay,
            status, total_earnings)
          VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, 'paid', ?)`,
-        [emp.id, monthYear, safeHourlyRate, totalHours, safeGross, safeTax, safeNet, safeNet]
+        [
+          emp.id, 
+          monthYear, 
+          hourlyRate.toFixed(2), 
+          totalHours.toFixed(2), 
+          grossPay.toFixed(2), 
+          tax.toFixed(2), 
+          netPay.toFixed(2), 
+          netPay.toFixed(2)
+        ]
       );
-      processed.push({ employee: emp.full_name, totalHours, grossPay: safeGross, netPay: safeNet });
+
+      processed.push({ employee: emp.full_name, totalHours, netPay: netPay.toFixed(2) });
     }
+
     logAction(req.user.id, 'RUN_MONTHLY_PAYROLL', 'payroll', null, req);
-    res.json({ success: true, processed: processed.length, skipped: skipped.length, details: { processed, skipped } });
+    res.json({ 
+      success: true, 
+      processed: processed.length, 
+      skipped: skipped.length, 
+      details: { processed, skipped } 
+    });
+
   } catch (err) {
     console.error('Monthly payroll error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to process payroll: ' + err.message });
   }
 });
 
@@ -3354,365 +3430,273 @@ app.put('/api/visitor-requests/:id/no-show', authenticateToken, (req, res) => {
 });
 
 app.post('/api/instructor/location', authenticateToken, async (req, res) => {
-  console.log("📍 Incoming location ping", req.body);
-  if (req.user.role !== 'instructor') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  if (req.user.role !== 'instructor') return res.status(403).json({ error: 'Forbidden' });
 
   const { latitude, longitude, location_enabled } = req.body;
-  
-  // FIX 1: Grab the internal database 'id' from the token instead
-  const userId = req.user.id; 
-  const now = new Date();
-
-  // We allow latitude/longitude to be null ONLY if GPS is disabled
-  if (location_enabled && (latitude === undefined || longitude === undefined)) {
-    return res.status(400).json({ error: 'Latitude and longitude required when GPS is enabled' });
-  }
+  const userId = req.user.id;
 
   try {
-    // FIX 2: Look up the employee_id from the database using the userId
     const [userRows] = await db.promise().query(
-      "SELECT employee_id, full_name FROM users WHERE id = ?", 
+      "SELECT employee_id, full_name, location_tracking_enabled FROM users WHERE id = ?",
       [userId]
     );
-    
-    // Safety check just in case the user doesn't exist
-    if (userRows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
 
-    // FIX 3: Assign the employeeId safely from the database result
     const employeeId = userRows[0].employee_id;
     const fullName = userRows[0].full_name;
     const { date: today } = getPHTime();
 
-    // Get today's schedule
+    // Find current active schedule
     const [scheduleRows] = await db.promise().query(
-      `SELECT id, place FROM schedules WHERE user_id = ? AND date = ?`,
+      `SELECT id, place, start_time, end_time FROM schedules 
+       WHERE user_id = ? AND date = ? AND TIME(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) BETWEEN start_time AND end_time`,
       [employeeId, today]
     );
+    const currentSchedule = scheduleRows[0];
+    if (!currentSchedule) {
+      return res.json({ success: false, message: "No active shift" });
+    }
 
-    let isInside = true; // Default true if no schedule found
-    let locationName = scheduleRows.length > 0 ? scheduleRows[0].place : "Outside Campus";
-    let scheduleId = null;
+    // Get last known state from the most recent tracking record
+    const [lastRec] = await db.promise().query(
+      `SELECT location_enabled, is_inside_campus 
+       FROM instructor_location_tracking 
+       WHERE employee_id = ? AND schedule_id = ? 
+       ORDER BY ping_time DESC LIMIT 1`,
+      [employeeId, currentSchedule.id]
+    );
+    const lastGpsState = lastRec.length ? lastRec[0].location_enabled : null;
+    const lastInsideState = lastRec.length ? lastRec[0].is_inside_campus : null;
 
-    // ... [Keep the rest of your original route logic exactly the same below this] ...
-
-    // Only geofence if there is a schedule today
-    if (scheduleRows.length > 0 && location_enabled) {
-      const schedule = scheduleRows[0];
-      scheduleId = schedule.id;
-      locationName = schedule.place;
-
+    // Geofencing
+    let isInside = false;
+    let resolvedLocationName = 'Outside Campus';
+    if (location_enabled && latitude && longitude) {
       const [locRows] = await db.promise().query(
         "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
-        [schedule.place]
+        [currentSchedule.place]
       );
-
       if (locRows.length > 0) {
-        const school = locRows[0];
-        const distance = getDistanceFromLatLonInMeters(latitude, longitude, school.latitude, school.longitude);
-        isInside = distance <= school.radius;
+        const dist = getDistanceFromLatLonInMeters(latitude, longitude, locRows[0].latitude, locRows[0].longitude);
+        isInside = dist <= locRows[0].radius;
+        resolvedLocationName = isInside ? currentSchedule.place : 'Outside Campus';
       }
     }
 
-    // Insert tracking record
+    // Insert tracking record (Using proper Manila Time, NOT NOW())
     await db.promise().query(
       `INSERT INTO instructor_location_tracking 
-        (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [employeeId, scheduleId, latitude || 0, longitude || 0, locationName, isInside, location_enabled]
+       (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR))`,
+      [employeeId, currentSchedule.id, latitude || 0, longitude || 0, resolvedLocationName, isInside ? 1 : 0, location_enabled ? 1 : 0]
     );
 
+    // Update user heartbeat
     await db.promise().query(
-      "UPDATE users SET last_location_ping = NOW(), location_tracking_enabled = ? WHERE employee_id = ?",
-      [location_enabled, employeeId]
+      "UPDATE users SET last_location_ping = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR), location_tracking_enabled = ? WHERE employee_id = ?",
+      [location_enabled ? 1 : 0, employeeId]
     );
 
-    // --- ALERT LOGIC ---
-
-    // 1. Alert: GPS Disabled
-    if (!location_enabled) {
-    const alertMsg = 'Instructor disabled location/GPS tracking';
-    const [check] = await db.promise().query(
-        "SELECT id FROM location_alerts WHERE employee_id = ? AND alert_message = ? AND created_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)",
-        [employeeId, alertMsg]
-    );
-    if (check.length === 0) {
-        // We pass the full context for the Admin to see exactly what happened
-        await insertAndBroadcastAlert(alertMsg, { 
-            employeeId, 
-            fullName, 
-            scheduleId, 
-            latitude, 
-            longitude 
-        });
+    // --- Alert ONLY on distinct state changes ---
+    if (lastGpsState !== null && lastGpsState !== (location_enabled ? 1 : 0)) {
+      const alertMsg = location_enabled ? 'GPS turned ON' : 'GPS turned OFF';
+      await insertAndBroadcastAlert(alertMsg, { employeeId, fullName, scheduleId: currentSchedule.id });
     }
-} 
-// 2. Alert: Outside Campus (Only during a scheduled shift)
-else if (location_enabled && !isInside && scheduleRows.length > 0) {
-    const alertMsg = `Instructor outside campus during shift: ${locationName}`;
-    
-    // Check for existing recent alerts for this specific shift to prevent notification fatigue
-    const [check] = await db.promise().query(
-        "SELECT id FROM location_alerts WHERE employee_id = ? AND alert_message = ? AND created_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)",
-        [employeeId, alertMsg]
-    );
-    
-    if (check.length === 0) {
-        await insertAndBroadcastAlert(alertMsg, { 
-            employeeId, 
-            fullName, 
-            scheduleId, 
-            latitude, 
-            longitude 
-        });
-    }
-}
-await broadcastInstructorStatus(employeeId);
 
-    res.json({ success: true, isInside });
+    if (lastInsideState !== null && lastInsideState !== (isInside ? 1 : 0) && location_enabled) {
+      const alertMsg = isInside ? 'Entered campus' : 'Went outside campus';
+      await insertAndBroadcastAlert(alertMsg, { employeeId, fullName, scheduleId: currentSchedule.id, locationName: resolvedLocationName });
+    }
+
+    await broadcastInstructorStatus(employeeId);
+    res.json({ success: true, isInside, inShift: true });
   } catch (err) {
-    console.error('Location error:', err);
+    console.error("Location update error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
 const broadcastInstructorStatus = async (employeeId) => {
-  // Fetch the latest status for this instructor
   const { date: today } = getPHTime();
   const [rows] = await db.promise().query(`
     SELECT 
-      u.employee_id,
-      u.full_name,
-      u.last_location_ping,
-      u.location_tracking_enabled,
-      s.id AS schedule_id,
-      s.place AS schedule_place,
-      s.start_time,
-      s.end_time,
-      CASE WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN TRUE ELSE FALSE END AS is_clocked_out,
-      (SELECT latitude FROM instructor_location_tracking 
-       WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_latitude,
-      (SELECT longitude FROM instructor_location_tracking 
-       WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_longitude,
-      (SELECT is_inside_campus FROM instructor_location_tracking 
-       WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_is_inside,
-      (SELECT ping_time FROM instructor_location_tracking 
-       WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_ping_time
+      u.employee_id, u.full_name, u.last_location_ping, u.location_tracking_enabled,
+      s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course, s.start_time, s.end_time,
+      (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_position_name,
+      (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_is_inside,
+      (CASE 
+        WHEN u.last_location_ping IS NULL THEN 'DISABLED'
+        WHEN u.location_tracking_enabled = 0 THEN 'DISABLED'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) > 120 THEN 'DISABLED'
+        ELSE 'GPS ON'
+      END) AS gps_status
     FROM users u
     LEFT JOIN schedules s ON u.employee_id = s.user_id AND DATE(s.date) = ?
-    LEFT JOIN attendance a ON u.employee_id = a.user_id AND DATE(a.date) = ?
     WHERE u.employee_id = ?
-  `, [today, today, employeeId]);
+  `, [today, employeeId]);
 
   if (rows.length === 0) return;
-  
-  const instructor = rows[0];
-
-  // Calculate staleness
-  const lastPing = new Date(instructor.last_ping_time);
-  const isStale = (new Date() - lastPing) / 1000 > 60;
-
-  // Broadcast to all admin/hr clients
-  // We spread the instructor object and add is_stale for the frontend to use
-  broadcastToAdminAndHR({
-    type: 'instructor_status_update',
-    instructor: {
-      ...instructor,
-      is_stale: isStale
-    }
-  });
+  broadcastToAdminAndHR({ type: 'instructor_status_update', instructor: rows[0] });
 };
 // GET /api/location-tracking/status (admin/hr only)
-app.get('/api/location-tracking/status', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+// GET /api/location-tracking/status (admin/hr only)
+app.get('/api/location-tracking/status', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
 
-  // Get selected date from query, default to today (Manila date)
-  let selectedDate = req.query.date || getPHTime().date;
-  const today = getPHTime().date;
+  const selectedDate = req.query.date || getPHTime().date;
 
-  // If selected date is in the future → no schedules exist → return empty array
-  if (selectedDate > today) {
-    return res.json([]);
-  }
+  try {
+    const [rows] = await db.promise().query(`
+      SELECT 
+        u.employee_id, u.full_name, u.location_tracking_enabled,
+        s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course,
+        s.start_time, s.end_time,
+        COALESCE(ilt.location_name, '—') AS last_position_name, ilt.is_inside_campus AS last_is_inside,
+        u.last_location_ping AS last_ping_time,
+        CASE 
+          WHEN u.last_location_ping IS NULL 
+            OR u.location_tracking_enabled = 0 
+            OR TIMESTAMPDIFF(SECOND, u.last_location_ping, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) > 120 
+          THEN 'GPS OFF'
+          ELSE 'GPS ON'
+        END AS gps_status,
+        (SELECT MIN(ping_time) FROM instructor_location_tracking WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1) AS campus_entry_time,
+        
+        -- STRICT EXIT LOGIC: Only counts as an exit if GPS is ON (location_enabled = 1) AND coordinates are outside (is_inside_campus = 0)
+        (SELECT MAX(ping_time) FROM instructor_location_tracking 
+         WHERE employee_id = u.employee_id 
+           AND schedule_id = s.id 
+           AND is_inside_campus = 0 
+           AND location_enabled = 1 
+           AND ping_time > (SELECT MIN(ping_time) FROM instructor_location_tracking WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1)) AS campus_exit_time
 
-  const { time: currentTime } = getPHTime();
-  const isToday = (selectedDate === today);
+      FROM users u
+      INNER JOIN schedules s ON u.employee_id = s.user_id 
+      LEFT JOIN attendance a ON s.id = a.schedule_id
+      LEFT JOIN (
+          SELECT t1.* FROM instructor_location_tracking t1
+          INNER JOIN (SELECT MAX(id) as max_id FROM instructor_location_tracking GROUP BY employee_id) t2 ON t1.id = t2.max_id
+      ) ilt ON u.employee_id = ilt.employee_id
+      WHERE u.role = 'instructor' AND u.status = 'active' AND s.date = ?
+        AND TIME(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) BETWEEN s.start_time AND s.end_time
+      ORDER BY s.start_time ASC
+    `, [selectedDate]);
 
-  // Base SQL – select instructors that have a schedule on the selected date
-  // For today: also filter by current time to show only ongoing schedules
-  // For past dates: show the full schedule (no time constraints)
-  let sql = `
-    SELECT 
-      u.employee_id,
-      u.full_name,
-      u.location_tracking_enabled,
-      s.place AS schedule_place,
-      s.course AS schedule_course,
-      s.start_time,
-      s.end_time,
-      COALESCE(ilt.location_name, s.place, '—') AS last_position_name,
-      ilt.latitude AS last_latitude,
-      ilt.longitude AS last_longitude,
-      ilt.is_inside_campus AS last_is_inside,
-      ilt.ping_time AS last_ping_time,
-      (CASE 
-        WHEN ilt.ping_time IS NULL THEN 'DISABLED'
-        WHEN TIMESTAMPDIFF(SECOND, ilt.ping_time, NOW()) > 60 THEN 'DISABLED'
-        ELSE 'GPS ON'
-      END) AS gps_status,
-      -- Entry time: first ping of the day where inside campus and GPS enabled
-      (SELECT MIN(ping_time) FROM instructor_location_tracking 
-       WHERE employee_id = u.employee_id 
-         AND DATE(ping_time) = ?
-         AND is_inside_campus = 1 
-         AND location_enabled = 1) AS campus_entry_time,
-      -- Exit time: first ping of the day where outside campus and GPS enabled
-      (SELECT MIN(ping_time) FROM instructor_location_tracking 
-       WHERE employee_id = u.employee_id 
-         AND DATE(ping_time) = ?
-         AND is_inside_campus = 0 
-         AND location_enabled = 1) AS campus_exit_time
-    FROM users u
-    LEFT JOIN schedules s 
-      ON u.employee_id = s.user_id 
-      AND s.date = ?
-    LEFT JOIN (
-        SELECT t1.* FROM instructor_location_tracking t1
-        INNER JOIN (SELECT MAX(id) as max_id FROM instructor_location_tracking GROUP BY employee_id) t2 
-        ON t1.id = t2.max_id
-    ) ilt ON u.employee_id = ilt.employee_id
-    WHERE u.role = 'instructor' 
-      AND u.status = 'active'
-      AND s.id IS NOT NULL   -- Only instructors with a schedule on this date
-  `;
-
-  // For today, add time constraints so that only ongoing shifts are shown
-  if (isToday) {
-    sql += ` AND s.start_time <= ? AND s.end_time >= ?`;
-  }
-
-  sql += ` ORDER BY u.full_name ASC`;
-
-  // Prepare query parameters
-  let params = [selectedDate, selectedDate, selectedDate];
-  if (isToday) {
-    params.push(currentTime, currentTime);
-  }
-
-  db.query(sql, params, (err, results) => {
-    if (err) {
-      console.error("Tracking SQL Error:", err);
-      return res.status(500).json({ error: err.message });
-    }
-
-    // Format the computed entry/exit times to readable strings (e.g., "10:30 AM")
-    results.forEach(row => {
-      if (row.campus_entry_time) {
-        row.campus_entry_time = new Date(row.campus_entry_time).toLocaleTimeString('en-US', {
-          hour: '2-digit', minute: '2-digit', hour12: true
-        });
-      }
-      if (row.campus_exit_time) {
-        row.campus_exit_time = new Date(row.campus_exit_time).toLocaleTimeString('en-US', {
-          hour: '2-digit', minute: '2-digit', hour12: true
-        });
-      }
+    rows.forEach(row => {
+      if (row.campus_entry_time) row.campus_entry_time = new Date(row.campus_entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (row.campus_exit_time) row.campus_exit_time = new Date(row.campus_exit_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     });
 
-    res.json(results);
-  });
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get('/api/location-tracking/instructor-timeline/:employeeId', authenticateToken, (req, res) => {
+app.get('/api/location-tracking/instructor-timeline/:employeeId', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  
   const { employeeId } = req.params;
   const targetDate = req.query.date || getPHTime().date;
   
-  // Fetch all tracking records for that instructor on the given date, ordered by ping_time
-  const sql = `
-    SELECT 
-      ping_time,
-      location_enabled,
-      is_inside_campus,
-      location_name,
-      latitude,
-      longitude,
-      alert_sent
-    FROM instructor_location_tracking
-    WHERE employee_id = ? AND DATE(ping_time) = ?
-    ORDER BY ping_time ASC
-  `;
-  db.query(sql, [employeeId, targetDate], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    // Also fetch alerts from location_alerts table for that instructor on that day
-    const alertSql = `
-      SELECT id, alert_message, latitude, longitude, created_at
+  try {
+    // ✅ Enforce Manila timezone
+    await db.promise().query("SET time_zone = '+08:00'");
+
+    // 1. Fetch tracking records
+    const [rows] = await db.promise().query(`
+      SELECT ping_time, location_enabled, is_inside_campus, location_name, latitude, longitude
+      FROM instructor_location_tracking
+      WHERE employee_id = ? AND DATE(ping_time) = ?
+      ORDER BY ping_time ASC
+    `, [employeeId, targetDate]);
+
+    // 2. Fetch alerts
+    const [alerts] = await db.promise().query(`
+      SELECT id, alert_message, created_at
       FROM location_alerts
       WHERE employee_id = ? AND DATE(created_at) = ?
       ORDER BY created_at ASC
-    `;
-    db.query(alertSql, [employeeId, targetDate], (err2, alerts) => {
-      if (err2) return res.status(500).json({ error: err2.message });
-      res.json({ timeline: rows, alerts });
+    `, [employeeId, targetDate]);
+
+    // 3. Fetch schedule times
+    const [schedule] = await db.promise().query(`
+      SELECT start_time, end_time FROM schedules 
+      WHERE user_id = ? AND date = ? LIMIT 1
+    `, [employeeId, targetDate]);
+
+    res.json({ 
+      timeline: rows, 
+      alerts, 
+      start_time: schedule.length > 0 ? schedule[0].start_time : null,
+      end_time: schedule.length > 0 ? schedule[0].end_time : null
     });
-  });
+    
+  } catch (err) {
+    console.error("Timeline fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/location-tracking/alerts - returns alerts for a given date
-app.get('/api/location-tracking/alerts', authenticateToken, (req, res) => {
+app.get('/api/location-tracking/alerts', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
   const targetDate = req.query.date || getPHTime().date;
 
-  const sql = `
-    SELECT la.*, u.full_name 
-    FROM location_alerts la
-    JOIN users u ON la.employee_id = u.employee_id
-    WHERE DATE(la.created_at) = ?
-    ORDER BY la.created_at DESC
-  `;
+  try {
+    // ✅ Enforce Manila timezone so dates match correctly
+    await db.promise().query("SET time_zone = '+08:00'");
 
-  db.query(sql, [targetDate], (err, rows) => {
-    if (err) {
-      console.error("Alert fetch error:", err);
-      return res.status(500).json({ error: err.message });
-    }
+    const sql = `
+      SELECT 
+        la.*, 
+        u.full_name,
+        s.place AS location_name
+      FROM location_alerts la
+      JOIN users u ON la.employee_id = u.employee_id
+      LEFT JOIN schedules s ON la.employee_id = s.user_id AND DATE(la.created_at) = s.date
+      WHERE DATE(la.created_at) = ?
+      ORDER BY la.created_at DESC
+    `;
+
+    const [rows] = await db.promise().query(sql, [targetDate]);
     res.json(rows);
-  });
+  } catch (err) {
+    console.error("Alert fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
-// --- Add this function to your server.js ---
+
 async function insertAndBroadcastAlert(alertMsg, context) {
   try {
-    // 1. Save alert to the database
     const [result] = await db.promise().query(
-      "INSERT INTO location_alerts (employee_id, alert_message, latitude, longitude, created_at) VALUES (?, ?, ?, ?, NOW())",
-      [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0]
+      `INSERT INTO location_alerts (employee_id, alert_message, latitude, longitude, created_at)
+       SELECT ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)
+       FROM DUAL
+       WHERE NOT EXISTS (
+           SELECT 1 FROM location_alerts 
+           WHERE employee_id = ? AND alert_message = ? 
+             AND created_at > DATE_SUB(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR), INTERVAL 1 MINUTE)
+       )`,
+      [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0, context.employeeId, alertMsg]
     );
 
-    // 2. Prepare the alert object for the dashboard
+    if (result.affectedRows === 0) return;
+
     const alert = {
       id: result.insertId,
       full_name: context.fullName,
       alert_message: alertMsg,
+      location_name: context.locationName || 'Unavailable',
       created_at: new Date()
     };
 
-    // 3. Broadcast to all connected Admins/HR
-    broadcastToAdminAndHR({
-      type: 'new_alert',
-      alert
-    });
-
-    console.log(`🚨 Alert broadcasted for ${context.fullName}: ${alertMsg}`);
+    broadcastToAdminAndHR({ type: 'new_alert', alert });
   } catch (err) {
     console.error("Failed to insert/broadcast alert:", err);
   }

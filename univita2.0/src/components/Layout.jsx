@@ -43,13 +43,7 @@ const menuConfig = [
     ],
     roles: ['admin', 'hr_admin']
   },
- {
-    id: 'payroll-summary',
-    label: 'Payroll Summary',
-    icon: <Wallet size={20} />,
-    path: 'payroll-summary',
-    roles: ['admin']
-  },
+ 
   {
     id: 'salary-list',
     label: 'Payroll',
@@ -93,7 +87,7 @@ const menuConfig = [
     { id: 'today-visitors', label: "Today's Visitors", path: 'today-visitors', roles: ['security'] }, // NEW
     { id: 'completed-visits', label: "Completed Visits", path: 'completed-visits', roles: ['admin', 'security'] },
     { id: 'track-visitor', label: 'Track Visitor', path: 'track-visitor', roles: ['security'] },
-    { id: 'manage-ble', label: 'Manage BLE Tags', path: 'manage-ble', roles: ['security', 'admin'] }
+    { id: 'manage-ble', label: 'Manage BLE Tags', path: 'manage-ble', roles: [ 'admin'] }
   ],
   roles: ['admin', 'security']
 },

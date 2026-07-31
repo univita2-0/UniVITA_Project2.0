@@ -533,33 +533,60 @@ const Schedule = () => {
       )}
 
       <FormalModal show={showDetailModal} onClose={() => setShowDetailModal(false)} title="Schedule Details for the Day" wide>
-        {Array.isArray(detailSession) && detailSession.length > 0 ? (
-          detailSession.map((s, idx) => (
-            <div key={s.schedule_id || idx} className="detail-session">
-              <div className="detail-row">
-                <span className="detail-label">Course</span>
-                <span className="detail-value">{s.course}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">Time</span>
-                <span className="detail-value">{s.start_time?.substring(0,5)} – {s.end_time?.substring(0,5)}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">Location</span>
-                <span className="detail-value">{s.place || 'N/A'}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">Status</span>
-                <span className={`status-value ${s.attendance_status === 'COMPLETED' ? 'status-completed' : s.attendance_status === 'IN PROGRESS' ? 'status-inprogress' : 'status-scheduled'}`}>
-                  {s.attendance_status === 'COMPLETED' ? 'COMPLETED' : (s.attendance_status === 'IN PROGRESS' ? 'NOT COMPLETED' : (s.attendance_status || 'Scheduled'))}
-                </span>
-              </div>
-            </div>
-          ))
-        ) : (
-          <p>No schedule details available.</p>
-        )}
-      </FormalModal>
+  {Array.isArray(detailSession) && detailSession.length > 0 ? (
+    detailSession.map((s, idx) => {
+      // 1. Calculate dynamic status based on time
+      const now = new Date();
+      const [startH, startM] = s.start_time.split(':').map(Number);
+      const [endH, endM] = s.end_time.split(':').map(Number);
+      
+      const startTime = new Date(now); startTime.setHours(startH, startM, 0);
+      const endTime = new Date(now); endTime.setHours(endH, endM, 0);
+      
+      // Determine final status
+      let finalStatus = s.attendance_status;
+      if (s.attendance_status === 'IN PROGRESS' && now > endTime) {
+        finalStatus = 'NOT COMPLETED'; // Shift ended, but time_out missing
+      }
+
+      // 2. Map statuses to UI-friendly labels
+      const statusLabels = {
+        'COMPLETED': 'COMPLETED',
+        'IN PROGRESS': 'IN PROGRESS',
+        'NOT COMPLETED': 'NOT COMPLETED'
+      };
+      
+      const statusClass = finalStatus === 'COMPLETED' ? 'status-completed' : 
+                          finalStatus === 'IN PROGRESS' ? 'status-inprogress' : 
+                          'status-scheduled';
+
+      return (
+        <div key={s.schedule_id || idx} className="detail-session" style={{ marginBottom: '15px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+          <div className="detail-row">
+            <span className="detail-label">Course</span>
+            <span className="detail-value">{s.course}</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">Time</span>
+            <span className="detail-value">{s.start_time?.substring(0,5)} – {s.end_time?.substring(0,5)}</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">Location</span>
+            <span className="detail-value">{s.place || 'N/A'}</span>
+          </div>
+          <div className="detail-row">
+            <span className="detail-label">Status</span>
+            <span className={`status-value ${statusClass}`}>
+              {statusLabels[finalStatus] || 'NOT COMPLETED'}
+            </span>
+          </div>
+        </div>
+      );
+    })
+  ) : (
+    <p>No schedule details available.</p>
+  )}
+</FormalModal>
 
       {/* Schedule Requests Modal */}
       <FormalModal

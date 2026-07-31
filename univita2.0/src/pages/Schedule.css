@@ -228,8 +228,8 @@
   background-color: #DCFCE7;
 }
 .status-inprogress {
-  color: #d97706;
-  background-color: #fffbeb;
+  background-color: #fef3c7; /* light yellow */
+  color: #92400e; /* dark orange */
 }
 .status-scheduled {
   color: #3b82f6;

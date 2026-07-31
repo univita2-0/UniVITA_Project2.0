@@ -1,55 +1,243 @@
-.lt-dashboard { padding: 32px; background: #f8fafc; min-height: 100vh; }
-.lt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
-.lt-actions { display: flex; gap: 12px; }
-.nav-action-btn { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 8px; border: 1px solid #e2e8f0; background: white; font-weight: 600; cursor: pointer; }
-.sync-btn { border-color: #3b82f6; color: #2563eb; background: #eff6ff; }
-.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 2rem; }
-.stat-card { background: white; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; }
-.stat-value { font-size: 1.8rem; font-weight: 800; color: #111827; }
-.stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; margin-top: 4px; }
-.data-table { width: 100%; border-collapse: collapse; background: white; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; }
-.data-table th { background: #f8fafc; padding: 14px 20px; text-align: left; font-size: 0.75rem; color: #64748b; text-transform: uppercase; }
-.data-table td { padding: 16px 20px; border-bottom: 1px solid #f1f5f9; }
-.alert-row { background-color: #fff1f2 !important; }
-.status-pill { padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
+/* LocationTracking.css */
+
+/* --- LAYOUT & CONTAINERS --- */
+.lt-dashboard {
+  padding: 20px; /* Reduced from 32px to maximize screen width */
+  background: #f8fafc;
+  min-height: 100vh;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+.lt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.lt-header h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.6rem;
+}
+
+.subtitle {
+  color: #64748b;
+  margin-top: 4px;
+  font-size: 0.85rem;
+}
+
+.lt-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* --- STATS CARDS --- */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: white;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.stat-value {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.stat-label {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-top: 4px;
+  letter-spacing: 0.5px;
+}
+
+/* --- TABLE STYLES --- */
+.card {
+  width: 100%;
+  background: white;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  /* Removed overflow-x to prevent scrollbars */
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto; 
+  text-align: left;
+}
+
+.data-table th {
+  background: #f8fafc;
+  padding: 12px 10px; /* Tighter padding */
+  font-size: 0.7rem;
+  color: #475569;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid #e2e8f0;
+  /* Removed white-space: nowrap so headers can safely stack if needed */
+}
+
+.data-table td {
+  padding: 12px 10px; /* Tighter padding */
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.8rem; /* Slightly smaller to fit everything */
+  color: #334155;
+  vertical-align: middle;
+  word-wrap: break-word;
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.empty-row td {
+  text-align: center;
+  padding: 40px !important;
+  color: #64748b;
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.alert-row {
+  background-color: #fef2f2 !important;
+  transition: background-color 0.3s ease;
+}
+
+/* --- TYPOGRAPHY & DATA CELLS --- */
+.instructor-name {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 0.85rem;
+}
+
+.employee-id {
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.schedule-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.schedule-course {
+  font-weight: 600;
+  color: #334155;
+}
+
+.schedule-time {
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.no-schedule-text {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-style: italic;
+  background: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px dashed #cbd5e1;
+  display: inline-block;
+}
+
+.coordinates {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: #475569;
+  font-size: 0.75rem;
+}
+
+/* --- STATUS PILLS --- */
+.status-pill {
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  display: inline-block;
+  text-align: center;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
 .pill-active { background: #dcfce7; color: #166534; }
 .pill-outside { background: #fee2e2; color: #991b1b; }
 .pill-gps-on { background: #e0f2fe; color: #075985; }
 .pill-gps-off { background: #f1f5f9; color: #475569; }
-.pill-unknown { background: #f1f5f9; color: #64748b; }
-.no-schedule-text { font-size: 0.8rem; color: #94a3b8; font-style: italic; background: #f8fafc; padding: 4px 8px; border-radius: 6px; border: 1px dashed #cbd5e1; }
-.schedule-badge { display: flex; flex-direction: column; font-size: 0.75rem; color: #1e293b; }
-.schedule-place { font-weight: 600; color: #2563eb; }
-.schedule-badge.inactive {
-  background-color: #f8fafc;
-  border: 1px dashed #e2e8f0;
-  padding: 4px 8px;
+
+/* --- BUTTONS & INPUTS --- */
+.nav-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
   border-radius: 6px;
-  text-align: center;
-}
-
-
-.pill-gps-on { background: #dcfce7; color: #166534; }
-.pill-gps-off { background: #fee2e2; color: #991b1b; }
-.alert-row { background-color: #fff1f2 !important; transition: background 0.3s; }
-.status-pill { padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; display: inline-block; }
-/* Date picker */
-.date-picker {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
   background: white;
-  font-size: 14px;
-  margin-right: 12px;
-  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-/* Actions (eye icon) */
-.eye-icon {
+.nav-action-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.sync-btn {
+  border-color: #bfdbfe;
+  color: #0369a1;
+  background: #f0f9ff;
+}
+
+.sync-btn:hover {
+  background: #e0f2fe;
+  border-color: #7dd3fc;
+}
+
+.date-picker {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: white;
+  font-size: 0.8rem;
+  color: #334155;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.date-picker:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.action-icon {
   background: none;
   border: none;
   cursor: pointer;
-  color: #3b82f6;
   padding: 6px;
   border-radius: 6px;
   transition: all 0.2s;
@@ -57,64 +245,102 @@
   align-items: center;
   justify-content: center;
 }
-.eye-icon:hover {
-  background: #eff6ff;
-  color: #1e40af;
+
+.eye-icon {
+  color: #3b82f6;
 }
 
-/* History modal controls */
+.eye-icon:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* --- MODALS & HISTORY --- */
 .history-controls {
   display: flex;
   gap: 12px;
   align-items: center;
-  margin-bottom: 20px;
-  padding: 8px 0;
+  margin-bottom: 24px;
+  background: #f8fafc;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
 }
+
 .history-controls label {
   font-weight: 600;
   color: #334155;
+  font-size: 0.85rem;
 }
+
 .history-controls button {
   background: #3b82f6;
   border: none;
-  padding: 6px 16px;
+  padding: 8px 16px;
   border-radius: 6px;
   color: white;
+  font-weight: 500;
   cursor: pointer;
+  font-size: 0.85rem;
+  transition: background-color 0.2s;
 }
+
 .history-controls button:hover {
   background: #2563eb;
 }
 
-/* Small table variant for modals */
-.data-table.small td,
+.data-table.small {
+  margin-bottom: 32px;
+}
+
 .data-table.small th {
-  padding: 8px 12px;
+  padding: 10px 12px;
+  font-size: 0.7rem;
+}
+
+.data-table.small td {
+  padding: 10px 12px;
   font-size: 0.8rem;
 }
 
-/* Empty row styling */
-.empty-row td {
-  text-align: center;
-  padding: 40px !important;
-  color: #64748b;
-  font-style: italic;
+.highlight-transition {
+  background-color: #fef9c3 !important;
+  font-weight: 600;
 }
 
-/* Subtitle */
-.subtitle {
-  color: #64748b;
-  margin-top: 4px;
-  font-size: 0.9rem;
+.highlight-transition td {
+  color: #854d0e;
+}
+/* For unified timeline modal */
+.unified-events .gps-on {
+  background-color: #e0f2fe;
+}
+.unified-events .gps-off {
+  background-color: #f1f5f9;
+}
+.unified-events .campus-transition {
+  background-color: #fef9c3;
+}
+.unified-events .alert-row {
+  background-color: #fee2e2;
 }
 
-/* Ensure the table fits on small screens */
-@media (max-width: 1200px) {
-  .data-table {
-    font-size: 0.8rem;
+
+
+/* --- RESPONSIVE ADJUSTMENTS --- */
+@media (max-width: 1024px) {
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr);
   }
-  .data-table td,
-  .data-table th {
-    padding: 10px 12px;
+}
+
+@media (max-width: 768px) {
+  .lt-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .stats-row {
+    grid-template-columns: 1fr;
   }
 }

@@ -724,6 +724,9 @@
   margin-top: 6px;
 }
 
+.event-badge.connect { background: #dcfce7; color: #166534; }
+.event-badge.disconnect { background: #fee2e2; color: #991b1b; }
+
 /* Map Expand / Fullscreen styles */
 .map-panel-wrapper {
   position: relative;
@@ -915,6 +918,7 @@ body:has(.map-panel-wrapper.expanded) {
   background: #fee2e2;
   color: #991b1b;
 }
+
 @media (max-width: 768px) {
   .fullscreen-btn {
     bottom: 15px;

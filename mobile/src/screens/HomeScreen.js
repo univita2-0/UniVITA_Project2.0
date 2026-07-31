@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
-  Alert, RefreshControl, Modal, TextInput, Image, Dimensions, Platform, StatusBar
+  Alert, RefreshControl, Modal, TextInput, Image, Dimensions, Platform, StatusBar, AppState
 } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,68 +18,18 @@ import { useNavigation } from '@react-navigation/native';
 
 import {
   clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule,
-  syncOfflineQueue, fetchEmergencyAlerts, markAlertAsRead, requestAttendanceCorrection
+  syncOfflineQueue, fetchEmergencyAlerts, markAlertAsRead, requestAttendanceCorrection,
+  setTrackingEnabled
 } from './api';
 import ChatScreen from './ChatScreen';
 import { API_URL } from './api';
 
 import {
   Bell, Clock, MapPin, X, MessageCircle, CheckCircle, XCircle,
-  AlertCircle, TrendingUp, FileText, User, Camera, CalendarDays, Award
+  AlertCircle, TrendingUp, FileText, User, Camera, CalendarDays
 } from 'lucide-react-native';
 
 const LOCATION_TASK_NAME = 'background-location-task';
-
-// Background location task
-TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
-  console.log("🔁 Background task fired at", new Date().toLocaleTimeString());
-  if (error) {
-    console.error("Background Location Error:", error);
-    return;
-  }
-  if (data && data.locations && data.locations.length > 0) {
-    const location = data.locations[0];
-    console.log("📍 Background location received", location.coords);
-    const netState = await NetInfo.fetch();
-    if (!netState.isConnected) {
-      console.warn("No internet – skipping sync");
-      return;
-    }
-    try {
-      const token = await AsyncStorage.getItem('auth_token');
-      if (!token) {
-        console.warn("No auth token");
-        return;
-      }
-      const schedule = await AsyncStorage.getItem('today_schedule');
-      const parsed = schedule ? JSON.parse(schedule) : null;
-      const url = `${API_URL}/instructor/location`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          location_enabled: true,
-          location_name: parsed?.place || "Background Tracking"
-        })
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        console.error("Location ping failed:", response.status, text);
-      } else {
-        console.log("✅ Background ping sent");
-      }
-    } catch (err) {
-      console.error("Background fetch error:", err);
-    }
-  } else {
-    console.log("Background task triggered but no location data");
-  }
-});
 
 const disableBatteryOptimization = async () => {
   if (Platform.OS === 'android') {
@@ -94,9 +44,6 @@ const disableBatteryOptimization = async () => {
 };
 
 const { width } = Dimensions.get('window');
-const isSmallDevice = width < 375;
-const isLargeDevice = width > 428;
-
 const getTodayString = () => new Date().toISOString().split('T')[0];
 
 export default function HomeScreen({ navigation }) {
@@ -123,7 +70,6 @@ export default function HomeScreen({ navigation }) {
   const [alertQueue, setAlertQueue] = useState([]);
   const hasSynced = useRef(false);
 
-  // Dynamic greeting
   const getGreeting = () => {
     const hour = currentTime.getHours();
     if (hour < 12) return "Good Morning";
@@ -131,7 +77,9 @@ export default function HomeScreen({ navigation }) {
     return "Good Evening";
   };
 
-  // ---------- BACKGROUND TRACKING ----------
+
+
+  // ---------- INITIAL PERMISSIONS ----------
   useEffect(() => {
     let isMounted = true;
     const initBackgroundTracking = async () => {
@@ -144,26 +92,8 @@ export default function HomeScreen({ navigation }) {
         }
         const { status: notif } = await Notifications.requestPermissionsAsync();
         if (notif !== 'granted') {
-          console.warn("Notification permission not granted – background service may be killed sooner.");
+          console.warn("Notification permission not granted.");
         }
-        const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-        if (isRegistered) {
-          await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-          console.log("Cleared old background task...");
-        }
-        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 20000,
-          distanceInterval: 0,
-          deferredUpdatesInterval: 20000,
-          showsBackgroundLocationIndicator: true,
-          foregroundService: {
-            notificationTitle: "UniVITA Tracking Active",
-            notificationBody: "Monitoring location for shift compliance.",
-            notificationColor: "#059669",
-          },
-        });
-        if (isMounted) console.log("✅ Background location tracking started");
         if (Platform.OS === 'android') {
           await disableBatteryOptimization();
         }
@@ -174,6 +104,171 @@ export default function HomeScreen({ navigation }) {
     initBackgroundTracking();
     return () => { isMounted = false; };
   }, []);
+
+  // 🛡️ BULLETPROOF WATCHDOG
+  // Restarts tracking when shift starts, when app comes to foreground, or if task dies silently
+  useEffect(() => {
+    if (!todaySchedule) return;
+
+    const checkAndEnableTracking = async (forceRestart = false) => {
+      const now = new Date();
+      const [startHour, startMin] = todaySchedule.start_time.split(':').map(Number);
+      const [endHour, endMin] = todaySchedule.end_time.split(':').map(Number);
+      const startTime = new Date(); startTime.setHours(startHour, startMin, 0);
+      const endTime = new Date(); endTime.setHours(endHour, endMin, 0);
+
+      const isActive = now >= startTime && now <= endTime;
+      const willStartSoon = startTime - now > 0 && startTime - now < 30 * 60 * 1000;
+
+      if (isActive) {
+        try {
+          const gpsOn = await Location.hasServicesEnabledAsync();
+          if (gpsOn) {
+            await setTrackingEnabled(true);
+            
+            const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+            
+            if (forceRestart && isRegistered) {
+              await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            }
+            
+            if (!isRegistered || forceRestart) {
+              await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+                accuracy: Location.Accuracy.High,
+                timeInterval: 20000,
+                distanceInterval: 0,
+                deferredUpdatesInterval: 20000,
+                showsBackgroundLocationIndicator: true,
+                foregroundService: {
+                  notificationTitle: "UniVITA Tracking Active",
+                  notificationBody: "Monitoring location for shift compliance.",
+                  notificationColor: "#059669",
+                },
+              });
+              console.log("✅ Background tracking revived/started");
+            }
+          }
+        } catch (e) {
+          console.warn("Watchdog tracking error:", e);
+        }
+      } else if (willStartSoon) {
+        const timer = setTimeout(() => checkAndEnableTracking(true), startTime - now);
+        return () => clearTimeout(timer);
+      }
+    };
+
+    checkAndEnableTracking();
+
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'active') {
+        console.log("📱 App resumed: Reviving GPS task");
+        checkAndEnableTracking(true);
+      }
+    });
+
+    const interval = setInterval(() => {
+      checkAndEnableTracking(false);
+    }, 30000); 
+
+    return () => {
+      subscription.remove();
+      clearInterval(interval);
+    };
+  }, [todaySchedule]);
+
+  // 🚀 FOREGROUND PINGER
+  // Guarantees pings every 20s while the app is actively open on the screen
+  // 🚀 FOREGROUND PINGER
+  // Guarantees pings every 20s while the app is actively open on the screen
+  useEffect(() => {
+    if (!todaySchedule) return;
+
+    const [startHour, startMin] = todaySchedule.start_time.split(':').map(Number);
+    const [endHour, endMin] = todaySchedule.end_time.split(':').map(Number);
+
+    let isPinging = false;
+
+    const pingServer = async () => {
+      if (isPinging) return;
+      
+      const now = new Date();
+      const startTime = new Date(); startTime.setHours(startHour, startMin, 0);
+      const endTime = new Date(); endTime.setHours(endHour, endMin, 0);
+
+      if (now >= startTime && now <= endTime) {
+        isPinging = true;
+        try {
+          // Check permissions AND if device GPS is toggled on
+          const { status } = await Location.getForegroundPermissionsAsync();
+          const gpsOn = await Location.hasServicesEnabledAsync();
+          
+          let lat = 0;
+          let lon = 0;
+          let isLocEnabled = false;
+
+          // Only attempt to get coordinates if we have permission
+          if (status === 'granted' && gpsOn && AppState.currentState === 'active') {
+            try {
+              const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+              lat = loc.coords.latitude;
+              lon = loc.coords.longitude;
+              isLocEnabled = true;
+            } catch (e) {
+              isLocEnabled = false; // Failsafe if GPS is struggling to get a lock
+            }
+          }
+
+          const token = await AsyncStorage.getItem('auth_token');
+          if (token) {
+            await axios.post(`${API_URL}/instructor/location`, {
+              latitude: lat,
+              longitude: lon,
+              location_enabled: isLocEnabled // This explicitly tells the backend if it's ON or OFF
+            }, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            console.log(`📍 FOREGROUND Ping Sent: GPS is ${isLocEnabled ? 'ON' : 'OFF'}`);
+          }
+        } catch (err) {
+          console.warn("Foreground ping error:", err.message);
+        } finally {
+          isPinging = false;
+        }
+      }
+    };
+
+    pingServer();
+    const intervalId = setInterval(pingServer, 20000);
+
+    return () => clearInterval(intervalId);
+  }, [todaySchedule]);
+
+  // ✅ AUTO-STOP BACKGROUND TRACKING WHEN SHIFT ENDS
+  useEffect(() => {
+    if (!todaySchedule) return;
+
+    const checkShiftEnd = async () => {
+      const now = new Date();
+      const [endHour, endMinute] = todaySchedule.end_time.split(':').map(Number);
+      const endTime = new Date();
+      endTime.setHours(endHour, endMinute, 0);
+
+      if (now >= endTime) {
+        try {
+          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+          if (isRegistered) {
+            await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            console.log("📍 Background tracking stopped – shift ended");
+          }
+        } catch (err) {
+          console.warn("Error stopping tracking:", err);
+        }
+      }
+    };
+
+    const interval = setInterval(checkShiftEnd, 60000);
+    return () => clearInterval(interval);
+  }, [todaySchedule]);
 
   // ---------- Helper functions ----------
   const captureSelfie = async () => {
@@ -240,7 +335,6 @@ export default function HomeScreen({ navigation }) {
     setStats(counts);
   };
 
-  // Clock In
   const handleClockIn = async () => {
     if (!todaySchedule) return Alert.alert("Cannot Clock In", "No schedule for today.");
     const selfieUri = await captureSelfie();
@@ -265,7 +359,6 @@ export default function HomeScreen({ navigation }) {
     } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
   };
 
-  // Clock Out with early detection
   const handleClockOut = async () => {
     if (!todaySchedule) {
       Alert.alert("Cannot Clock Out", "No schedule for today.");
@@ -273,11 +366,10 @@ export default function HomeScreen({ navigation }) {
     }
 
     const now = new Date();
-    const currentTimeStr = now.toTimeString().slice(0, 5); // "15:30"
-    const scheduledEndTime = todaySchedule.end_time; // e.g., "17:00:00"
+    const currentTimeStr = now.toTimeString().slice(0, 5); 
+    const scheduledEndTime = todaySchedule.end_time; 
 
     if (currentTimeStr < scheduledEndTime.slice(0, 5)) {
-      // Early clock-out → ask to request correction
       Alert.alert(
         "Early Clock Out",
         `Your shift ends at ${scheduledEndTime.slice(0,5)}. Do you want to request an early clock‑out correction?`,
@@ -300,7 +392,6 @@ export default function HomeScreen({ navigation }) {
       return;
     }
 
-    // Normal clock-out
     const selfieUri = await captureSelfie();
     if (!selfieUri) return Alert.alert('Selfie Required', 'Please take a selfie.');
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -316,6 +407,17 @@ export default function HomeScreen({ navigation }) {
       const result = await clockOut(formData);
       if (result.success) {
         Alert.alert('Success', result.message);
+        
+        try {
+          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+          if (isRegistered) {
+            await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            console.log("📍 Background tracking stopped manually via Clock Out");
+          }
+        } catch (e) {
+          console.warn("Error stopping tracking on clock out:", e);
+        }
+
         await loadData();
       } else {
         Alert.alert('Error', result.message);
@@ -323,7 +425,6 @@ export default function HomeScreen({ navigation }) {
     } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
   };
 
-  // Correction submission (modal)
   const submitCorrection = async () => {
     if (!correctionDate || !correctionTime || !correctionReason.trim()) return Alert.alert('Required', 'Please fill all fields.');
     const selfieUri = correctionSelfie || await captureSelfie();
@@ -349,7 +450,6 @@ export default function HomeScreen({ navigation }) {
     finally { setSubmittingCorrection(false); }
   };
 
-  // Emergency alerts
   useEffect(() => {
     const loadAlerts = async () => {
       if (!user.id) return;
@@ -383,7 +483,6 @@ export default function HomeScreen({ navigation }) {
     } else setShowAlertModal(false);
   };
 
-  // Offline sync
   useEffect(() => {
     if (hasSynced.current) return;
     hasSynced.current = true;
@@ -394,13 +493,11 @@ export default function HomeScreen({ navigation }) {
     return () => unsubscribe();
   }, []);
 
-  // Time ticker
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Chat unread count
   useEffect(() => {
     const fetchUnread = async () => {
       const token = await AsyncStorage.getItem('auth_token');
@@ -585,7 +682,7 @@ export default function HomeScreen({ navigation }) {
           </SafeAreaView>
         </Modal>
 
-        {/* Correction Modal (optional – used if you want modal instead of inline) */}
+        {/* Correction Modal */}
         <Modal visible={showCorrectionModal} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContainer}>

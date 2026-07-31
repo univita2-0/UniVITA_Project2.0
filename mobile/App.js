@@ -6,13 +6,13 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Calendar, Clock, User } from 'lucide-react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Added import
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import ErrorBoundary from './ErrorBoundary';
-
 
 import { API_URL } from './src/screens/api';
 
-// Import Screens
+// Screens
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
@@ -27,50 +27,60 @@ import ScheduleHistoryScreen from './src/screens/ScheduleHistoryScreen';
 import AppealHistoryScreen from './src/screens/AppealHistoryScreen';
 import OvertimeHistoryScreen from './src/screens/OvertimeHistoryScreen';
 
-// ---------- Background Task Definition ----------
 const LOCATION_TASK_NAME = 'background-location-task';
 
+// ---------- GLOBAL BACKGROUND LOCATION TASK ----------
 TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
-  console.log("▶️ Background task triggered by OS at", new Date().toLocaleTimeString());
-
   if (error) {
     console.error("Background Location Error:", error);
     return;
   }
-  
-  if (data && data.locations && data.locations.length > 0) {
-    const location = data.locations[0];
-    
-    try {
-      const token = await AsyncStorage.getItem('auth_token');
-      if (!token) return; // Stop if the user is logged out
 
-      const schedule = await AsyncStorage.getItem('today_schedule');
-      const parsed = schedule ? JSON.parse(schedule) : null;
+  if (!data || !data.locations || data.locations.length === 0) {
+    return;
+  }
 
-      // Use the dynamic API_URL and pass the Authorization token
-      const response = await fetch(`${API_URL}/instructor/location`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          location_enabled: true,
-          location_name: parsed?.place || "Background Tracking"
-        })
-      });
+  const location = data.locations[0];
+  console.log("📍 Background location received:", location.coords.latitude, location.coords.longitude);
 
-      if (response.ok) {
-        console.log("✅ Background ping sent successfully");
-      } else {
-        console.error("Background ping failed with status:", response.status);
-      }
-    } catch (err) {
-      console.error("Failed to send background ping:", err.message);
+  try {
+    // Check internet connectivity
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      console.warn("No internet – skipping ping");
+      return;
     }
+
+    // Grab auth token
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) {
+      console.warn("No auth token – skipping ping");
+      return;
+    }
+
+    // 🚀 REMOVED AsyncStorage schedule checks. 
+    // If this task is running, it's because HomeScreen started it. 
+    // We just send the ping and let the backend do the heavy lifting and verification.
+    const response = await fetch(`${API_URL}/instructor/location`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        location_enabled: true
+      }),
+    });
+
+    if (response.ok) {
+      console.log("✅ Background ping successfully processed by backend");
+    } else {
+      console.error("⚠️ Background ping rejected by backend:", response.status);
+    }
+  } catch (err) {
+    console.error("Failed to send background ping:", err.message);
   }
 });
 
@@ -84,7 +94,7 @@ function ProfileStack() {
         headerShown: true,
         headerTintColor: '#00897B',
         headerTitleAlign: 'center',
-        headerBackTitleVisible: false
+        headerBackTitleVisible: false,
       }}
     >
       <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
@@ -133,7 +143,7 @@ function MainTabs() {
 }
 
 export default function App() {
-  // Ensure Background Permissions are handled at the app root level
+  // Request background permissions once at startup
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestBackgroundPermissionsAsync();

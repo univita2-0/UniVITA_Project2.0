@@ -1,19 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE } from '../api';
 
 const thirdFloorRooms = [
- { name: 'Classroom', xMin: 2.1, xMax: 72.2, yMin: 93.2, yMax: 243.8 },
- { name: 'AHA Room', xMin: 164.9, xMax: 164.9, yMin: 291.9, yMax: 291.9 },
- { name: 'Private Room', xMin: 188.2, xMax: 188.2, yMin: 157.5, yMax: 157.5 },
- { name: 'Delivery Room', xMin: 233.5, xMax: 275.9, yMin: 156.8, yMax: 237.4 }, 
- { name: 'NICU', xMin: 320.5, xMax: 321.2, yMin: 157.5, yMax: 159.0 },
- { name: 'ICU', xMin: 365.8, xMax: 365.8, yMin: 156.1, yMax: 156.1 },
- { name: 'Library', xMin: 84.9, xMax: 142.9, yMin: 42.3, yMax: 155.4 },
- { name: 'Breakout Room 1', xMin: 190.3, xMax: 190.3, yMin: 40.9, yMax: 40.9 },
- { name: 'Breakout Room 2', xMin: 189.6, xMax: 232.1, yMin: 40.9, yMax: 128.6 },
- { name: 'Breakout Room 3', xMin: 232.8, xMax: 278.8, yMin: 40.9, yMax: 130.7 },
- { name: 'Faculty Office', xMin: 321.2, xMax: 321.2, yMin: 6.9, yMax: 6.9 },
- { name: 'Main Entrance', xMin: 323.3, xMax: 397.6, yMin: 6.9, yMax: 94.6 },
+  { name: 'Classroom', xMin: 2.1, xMax: 72.2, yMin: 93.2, yMax: 243.8 },
+  { name: 'AHA Room', xMin: 164.9, xMax: 164.9, yMin: 291.9, yMax: 291.9 },
+  { name: 'Private Room', xMin: 188.2, xMax: 188.2, yMin: 157.5, yMax: 157.5 },
+  { name: 'Delivery Room', xMin: 233.5, xMax: 275.9, yMin: 156.8, yMax: 237.4 }, 
+  { name: 'NICU', xMin: 320.5, xMax: 321.2, yMin: 157.5, yMax: 159.0 },
+  { name: 'ICU', xMin: 365.8, xMax: 365.8, yMin: 156.1, yMax: 156.1 },
+  { name: 'Library', xMin: 84.9, xMax: 142.9, yMin: 42.3, yMax: 155.4 },
+  { name: 'Breakout Room 1', xMin: 190.3, xMax: 190.3, yMin: 40.9, yMax: 40.9 },
+  { name: 'Breakout Room 2', xMin: 189.6, xMax: 232.1, yMin: 40.9, yMax: 128.6 },
+  { name: 'Breakout Room 3', xMin: 232.8, xMax: 278.8, yMin: 40.9, yMax: 130.7 },
+  { name: 'Faculty Office', xMin: 321.2, xMax: 321.2, yMin: 6.9, yMax: 6.9 },
+  { name: 'Main Entrance', xMin: 323.3, xMax: 397.6, yMin: 6.9, yMax: 94.6 },
 ];
 
 const fifthFloorRooms = [
@@ -51,45 +51,42 @@ export default function useBLEPositions() {
   const httpIntervalRef = useRef(null);
 
   useEffect(() => {
-    // Only use HTTP Polling (Port 5000)
     const fetchPositions = async () => {
       try {
         const res = await fetch(`${API_BASE}/positions`);
         const visitors = await res.json();
         
-        const activeIds = new Set(visitors.map(v => String(v.id)));
+        // Fix: If no data returned, explicitly clear the states
+        if (!visitors || visitors.length === 0) {
+          setPositions({});
+          setVisitorMeta({});
+          return;
+        }
 
-        setPositions(prev => {
-          const nextPositions = { ...prev };
-          Object.keys(nextPositions).forEach(id => { if (!activeIds.has(id)) delete nextPositions[id]; });
+        const nextPositions = {};
+        const nextMeta = {};
+
+        visitors.forEach(data => {
+          const id = String(data.id);
+          const roomObj = getRoomByName(data.currentRoom, data.floor);
+          const center = getRoomCenter(roomObj);
           
-          visitors.forEach(data => {
-            const roomObj = getRoomByName(data.currentRoom, data.floor);
-            const center = getRoomCenter(roomObj);
-            nextPositions[data.id] = { x: center.x, y: center.y };
-          });
-          return nextPositions;
+          nextPositions[id] = { x: center.x, y: center.y };
+          nextMeta[id] = {
+            id,
+            name: data.name || 'Visitor',
+            floor: data.floor,
+            bleId: data.bleId || '',
+            currentRoom: data.currentRoom || 'Unknown',
+            destination: data.destination || data.currentRoom || '',
+            lastSeen: 'Just now'
+          };
         });
-        
-        setVisitorMeta(prev => {
-          const nextMeta = { ...prev };
-          Object.keys(nextMeta).forEach(id => { if (!activeIds.has(id)) delete nextMeta[id]; });
 
-          visitors.forEach(data => {
-            const { id, floor, bleId, name, currentRoom, destination } = data;
-            const old = nextMeta[id] || {};
-            nextMeta[id] = {
-              ...old,
-              id,
-              name: name || old.name || id,
-              floor,
-              bleId: bleId || old.bleId || '',
-              currentRoom: currentRoom || old.currentRoom || 'Unknown',
-              destination: destination || old.destination || currentRoom || '',
-            };
-          });
-          return nextMeta;
-        });
+        // Fix: Replace state entirely instead of merging
+        setPositions(nextPositions);
+        setVisitorMeta(nextMeta);
+
       } catch (err) {
         console.error('HTTP polling error:', err);
       }
@@ -98,9 +95,7 @@ export default function useBLEPositions() {
     httpIntervalRef.current = setInterval(fetchPositions, 2000);
     fetchPositions();
 
-    return () => {
-      if (httpIntervalRef.current) clearInterval(httpIntervalRef.current);
-    };
+    return () => clearInterval(httpIntervalRef.current);
   }, []);
 
   const setVisitorDestination = useCallback((visitorId, newDest) => {
@@ -111,17 +106,12 @@ export default function useBLEPositions() {
   }, []);
 
   const getVisitors = useCallback(() => {
-    return Object.values(visitorMeta).map(meta => ({
-      ...meta,
-      x: positions[meta.id]?.x,
-      y: positions[meta.id]?.y,
+    return Object.keys(visitorMeta).map(id => ({
+      ...visitorMeta[id],
+      x: positions[id]?.x || 0,
+      y: positions[id]?.y || 0,
     }));
   }, [visitorMeta, positions]);
 
-  return {
-    positions,
-    visitorMeta,
-    getVisitors,
-    setVisitorDestination,
-  };
+  return { positions, visitorMeta, getVisitors, setVisitorDestination };
 }

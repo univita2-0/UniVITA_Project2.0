@@ -89,6 +89,24 @@ export const syncOfflineQueue = async () => {
   }
 };
 
+export const setTrackingEnabled = async (enabled) => {
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/user/tracking-enabled`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ enabled })
+    });
+    return await response.json();
+  } catch (error) {
+    console.error("Set tracking enabled error:", error);
+    return { success: false };
+  }
+};
+
 // ==========================================
 // AUTHENTICATION
 // ==========================================
