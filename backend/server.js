@@ -15,6 +15,7 @@ const WebSocket = require('ws');
 const url = require('url');
 
 const app = express();
+app.set('trust proxy', 1);
 const fs = require('fs');
 const visitorDestinations = {};
 const recentAlertsCache = new Set();
@@ -144,7 +145,9 @@ function clearPinAttempts(email) {
 // EMAIL TRANSPORTER
 // --------------------------------------------------
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // Use SSL/TLS
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS
