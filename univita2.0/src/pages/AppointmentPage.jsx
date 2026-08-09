@@ -92,14 +92,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
       return;
     }
 
-    // Validation: Office Hours Check (8 AM to 5 PM)
     const hour = parseInt(formData.time.split(':')[0], 10);
     if (hour < 8 || hour > 17) {
       showToast('Please select a time within office hours (8:00 AM - 5:00 PM).', true);
       return;
     }
 
-    // Validation: Companions Check
     if (isMultipleVisitors && additionalVisitors.some(v => !v.name.trim())) {
       showToast('Please provide names for all additional companions.', true);
       return;
@@ -146,13 +144,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const handleResumeChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      // Validation: 5MB size limit
       if (file.size > 5 * 1024 * 1024) {
         showToast('File size must be under 5MB.', true);
         e.target.value = '';
         return;
       }
-      // Validation: Allowed types
       const allowedTypes = [
         'application/pdf', 
         'application/msword', 
@@ -246,7 +242,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       {/* HEADER */}
       <header className="ap-header">
         <div className="ap-header-container">
-          <div className="ap-brand">
+          <div className="ap-brand" onClick={() => setActivePage('home')}>
             <div className="ap-brand-icon-wrapper">
               <Stethoscope size={24} />
             </div>
@@ -308,7 +304,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </section>
 
           {/* ABOUT */}
-          <section id="about" className="ap-section bg-white">
+          <section id="about" className="ap-section ap-bg-white">
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Why HCT Academy</span>
@@ -335,8 +331,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
-          {/* COURSES */}
-          <section id="courses" className="ap-section bg-gray">
+          {/* COURSES (Fixed background class) */}
+          <section id="courses" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Our Programs</span>
@@ -363,7 +359,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </section>
 
           {/* FACILITIES */}
-          <section id="facilities" className="ap-section bg-white">
+          <section id="facilities" className="ap-section ap-bg-white">
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Campus</span>
@@ -390,7 +386,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </section>
 
           {/* CONTACT */}
-          <section id="contact" className="ap-section bg-gray">
+          <section id="contact" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Get In Touch</span>
@@ -426,7 +422,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
       {/* CAREERS PAGE */}
       {activePage === 'careers' && (
-        <section id="careers" className="ap-section bg-white min-h-screen pt-40">
+        <section id="careers" className="ap-section ap-bg-white min-h-screen pt-40">
           <div className="ap-container">
             <div className="ap-section-header">
               <span className="ap-tag">Join Our Team</span>
@@ -589,7 +585,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
-      {/* JOB DETAILS MODAL (REDESIGNED FOOTER & LAYOUT) */}
+      {/* JOB DETAILS MODAL */}
       {showJobDetailsModal && selectedJobDetails && (
         <div className="ap-modal-overlay" onClick={() => setShowJobDetailsModal(false)}>
           <div className="ap-job-modal-content" onClick={e => e.stopPropagation()}>
@@ -644,7 +640,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
               )}
             </div>
 
-            {/* Redesigned Job Details Footer with Proper Padding */}
             <div className="ap-job-modal-footer">
               <button type="button" className="btn-ap-cancel" onClick={() => setShowJobDetailsModal(false)}>Close</button>
               <button type="button" className="btn-ap-primary" onClick={() => { setShowJobDetailsModal(false); openApplyModal(selectedJobDetails); }}>
@@ -655,7 +650,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
-      {/* APPLY MODAL (REDESIGNED SPACING & FILE UPLOAD) */}
+      {/* APPLY MODAL */}
       {showApplyModal && selectedJob && (
         <div className="ap-modal-overlay" onClick={() => setShowApplyModal(false)}>
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
@@ -677,7 +672,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 </div>
                 <div className="ap-form-group">
                   <label>Phone Number</label>
-                  {/* Pattern to allow standard mobile formats */}
                   <input type="tel" name="phone" pattern="[0-9+\-\s()]+" value={applicationForm.phone} onChange={handleApplicationChange} placeholder="e.g. +63 912 345 6789" />
                 </div>
               </div>
@@ -689,11 +683,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
               <div className="ap-form-group">
                 <label>Resume / CV <span className="text-danger">*</span></label>
-                
-                {/* Redesigned File Upload Box */}
                 <div className="ap-file-upload-box">
                   <input type="file" id="resume-upload" accept=".pdf,.doc,.docx" onChange={handleResumeChange} required className="ap-file-input-hidden" />
-                  
                   <div className="ap-file-upload-content">
                     <div className="ap-file-icon">
                       <Upload size={24} />
@@ -707,8 +698,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     </div>
                     <span className="ap-input-hint">Max size: 5MB. Formats: PDF, DOC, DOCX.</span>
                   </div>
-                  
-                  {/* Absolute label layer to make whole box clickable easily */}
                   <label htmlFor="resume-upload" className="ap-file-upload-overlay"></label>
                 </div>
               </div>
