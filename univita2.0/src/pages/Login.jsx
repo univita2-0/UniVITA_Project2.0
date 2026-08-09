@@ -1,14 +1,13 @@
-// src/pages/Login.jsx
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
-import { login } from '../api';
-import { API_BASE } from '../api';
+import { login, requestPasswordReset, resetPassword, API_BASE } from '../api';
 import './Login.css';
 
 const Login = ({ onBack }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [step, setStep] = useState('login'); // 'login' | 'otp'
+  const [newPassword, setNewPassword] = useState('');
+  const [step, setStep] = useState('login'); // 'login' | 'otp' | 'forgot-password' | 'reset-password'
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
@@ -126,6 +125,46 @@ const Login = ({ onBack }) => {
     }
   };
 
+  const handleForgotPasswordSubmit = async (e) => {
+    e.preventDefault();
+    setOtpLoading(true);
+    try {
+      const res = await requestPasswordReset(email);
+      if (res.success) {
+        toast.success(res.message || 'Reset OTP sent to your email.');
+        setStep('reset-password');
+        startResendTimer();
+      } else {
+        toast.error(res.message || 'Failed to request password reset.');
+      }
+    } catch (err) {
+      toast.error('Connection error. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    setOtpLoading(true);
+    try {
+      const res = await resetPassword({ email, otp, newPassword });
+      if (res.success) {
+        toast.success('Password reset successfully. You can now log in.');
+        setStep('login');
+        setOtp('');
+        setNewPassword('');
+        setPassword('');
+      } else {
+        toast.error(res.message || 'Failed to reset password.');
+      }
+    } catch (err) {
+      toast.error('Connection error. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   return (
     <div className="login-page">
       <button className="back-button" onClick={onBack}>
@@ -133,7 +172,7 @@ const Login = ({ onBack }) => {
       </button>
 
       <div className="login-card">
-        {step === 'login' ? (
+        {step === 'login' && (
           <>
             <h1 className="welcome-title">Welcome to Admin Portal</h1>
             <p className="login-instruction">Login to access your account</p>
@@ -160,6 +199,7 @@ const Login = ({ onBack }) => {
               <div className="forgot-link">
                 <button
                   type="button"
+                  onClick={() => setStep('forgot-password')}
                   style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: '0.875rem', padding: '10px 0' }}
                 >
                   Forgot Password?
@@ -170,7 +210,9 @@ const Login = ({ onBack }) => {
               </button>
             </form>
           </>
-        ) : (
+        )}
+
+        {step === 'otp' && (
           <>
             <h1 className="welcome-title">Check Your Email</h1>
             <p className="login-instruction">
@@ -213,6 +255,81 @@ const Login = ({ onBack }) => {
                 style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.85rem' }}
               >
                 ← Back to Login
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === 'forgot-password' && (
+          <>
+            <h1 className="welcome-title">Reset Password</h1>
+            <p className="login-instruction">Enter your email to receive a reset code</p>
+
+            <form onSubmit={handleForgotPasswordSubmit}>
+              <div className="input-group">
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className="login-btn" disabled={otpLoading}>
+                {otpLoading ? 'Sending...' : 'Send Reset Code'}
+              </button>
+            </form>
+
+            <div style={{ textAlign: 'center', marginTop: '12px' }}>
+              <button
+                onClick={() => setStep('login')}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.85rem' }}
+              >
+                ← Back to Login
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === 'reset-password' && (
+          <>
+            <h1 className="welcome-title">Create New Password</h1>
+            <p className="login-instruction">
+              Enter the reset code sent to <strong>{email}</strong> and your new password.
+            </p>
+
+            <form onSubmit={handleResetPasswordSubmit}>
+              <div className="input-group">
+                <input
+                  type="text"
+                  placeholder="Enter 6-digit Code"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  maxLength={6}
+                  required
+                />
+              </div>
+              <div className="input-group">
+                <input
+                  type="password"
+                  placeholder="New Password (min 6 characters)"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  minLength={6}
+                  required
+                />
+              </div>
+              <button type="submit" className="login-btn" disabled={otpLoading}>
+                {otpLoading ? 'Updating...' : 'Update Password'}
+              </button>
+            </form>
+
+            <div style={{ textAlign: 'center', marginTop: '12px' }}>
+              <button
+                onClick={() => { setStep('login'); setOtp(''); setNewPassword(''); }}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.85rem' }}
+              >
+                ← Cancel and Login
               </button>
             </div>
           </>

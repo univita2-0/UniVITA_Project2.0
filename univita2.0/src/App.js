@@ -49,6 +49,7 @@ import ManageReasons from './pages/ManageReasons';
 import ManageBLETags from './pages/ManageBLETags';
 import CompletedVisits from './pages/CompletedVisits';
 import OvertimeRequests from './pages/OvertimeRequests';
+import './App.css'; // Global Enterprise Styles
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -164,10 +165,10 @@ function App() {
       case 'audit-logs': return { title: 'Audit Logs' };
       case 'role-management': return { title: 'Role Management' };
       case 'system-config': return { title: 'System Configuration' };
-      case 'today-visitors': return { title: 'Visitor' };
+      case 'today-visitors': return { title: 'Today\'s Visitors' };
       case 'location-tracking': return { title: 'Location Tracking' };
       case 'manage-reasons': return { title: 'Manage Visit Reasons' };
-      case 'manage-ble-tags': return { title: 'Manage BLE Tags' };
+      case 'manage-ble': return { title: 'Manage BLE Tags' };
       case 'completed-visits': return { title: 'Completed Visits' };
       case 'overtime-requests': return { title: 'Overtime Requests' };
       default: return { title: 'Dashboard' };
@@ -179,63 +180,34 @@ function App() {
     switch (currentView) {
       case 'dashboard': {
         const role = localStorage.getItem('user_role');
-        if (role === 'admin') {
-          return <AdminDashboard setView={handleSetView} onShowPayrollHistory={openPayrollHistory} />;
-        }
-        if (role === 'hr_admin') {
-          return <HRDashboard setView={handleSetView} />;
-        }
-        if (role === 'security') {
-          return <SecurityDashboard setView={handleSetView} />;
-        }
+        if (role === 'admin') return <AdminDashboard setView={handleSetView} onShowPayrollHistory={openPayrollHistory} />;
+        if (role === 'hr_admin') return <HRDashboard setView={handleSetView} />;
+        if (role === 'security') return <SecurityDashboard setView={handleSetView} />;
         return <AdminDashboard setView={handleSetView} onShowPayrollHistory={openPayrollHistory} />;
       }
-      case 'manage-request':
-        return <ManageRequest />;
-      case 'history':
-        return <History />;
-      case 'track-visitor':
-        return <BuildingVisitorTracking />;
-      case 'attendance':
-        return <Attendance />;
-      case 'schedule':
-        return <Schedule />;
-      case 'attendance-correction':
-        return <AttendanceCorrection />;
-      case 'attendance-appeals':
-        return <AttendanceAppeals />;
-      case 'overtime-requests':
-        return <OvertimeRequests />;
-      case 'leave-management':
-        return <LeaveManagement />;
-      case 'shared-calendar':
-        return <SharedCalendar />;
-      case 'job-postings':
-        return <JobPostings />;
-      case 'manage-ble': 
-        return <ManageBLETags />;
-      case 'completed-visits':
-        return <CompletedVisits />;
-      case 'performance':
-        return <PerformanceEvaluation />;
-      case 'location-tracking':
-        return <LocationTracking />;
-      case 'policies':
-        return <Policies />;
-      case 'documents':
-        return <Documents />;
-      case 'audit-logs':
-        return <AuditLogs />;
-      case 'role-management':
-        return <RoleManagement />;
-      case 'manage-reasons':
-        return <ManageReasons />;
-      case 'system-config':
-        return <SystemConfig />;
-      case 'today-visitors':
-        return <TodayVisitors />;
-      case 'payroll':
-        return <Payroll onUnlock={handlePayrollUnlock} adminEmail={adminEmail} />;
+      case 'manage-request': return <ManageRequest />;
+      case 'history': return <History />;
+      case 'track-visitor': return <BuildingVisitorTracking />;
+      case 'attendance': return <Attendance />;
+      case 'schedule': return <Schedule />;
+      case 'attendance-correction': return <AttendanceCorrection />;
+      case 'attendance-appeals': return <AttendanceAppeals />;
+      case 'overtime-requests': return <OvertimeRequests />;
+      case 'leave-management': return <LeaveManagement />;
+      case 'shared-calendar': return <SharedCalendar />;
+      case 'job-postings': return <JobPostings />;
+      case 'manage-ble': return <ManageBLETags />;
+      case 'completed-visits': return <CompletedVisits />;
+      case 'performance': return <PerformanceEvaluation />;
+      case 'location-tracking': return <LocationTracking />;
+      case 'policies': return <Policies />;
+      case 'documents': return <Documents />;
+      case 'audit-logs': return <AuditLogs />;
+      case 'role-management': return <RoleManagement />;
+      case 'manage-reasons': return <ManageReasons />;
+      case 'system-config': return <SystemConfig />;
+      case 'today-visitors': return <TodayVisitors />;
+      case 'payroll': return <Payroll onUnlock={handlePayrollUnlock} adminEmail={adminEmail} />;
       case 'payroll-main':
         return (
           <PayrollMain
@@ -244,30 +216,24 @@ function App() {
             onShowHistory={openPayrollHistory}
           />
         );
-      case 'payroll-history':
-        return <PayrollHistory />;
-      case 'payroll-summary':
-        return <PayrollSummary />;
-      case 'reports':
-        return <Reports />;
-      case 'compliance-reports':
-        return <ComplianceReports />;
-      case 'employee-management':
-        return <EmployeeManagement onOpenPinChange={openPinModalForAdmin} />;
-      case 'locations':
-        return <LocationsManagement />;
-      case 'courses':
-        return <CoursesManagement />;
-      case 'leave-balances':
-        return <LeaveBalancesManagement />;
-      case 'emergency-alerts':
-        return <EmergencyAlerts />;
-      case 'profile':
-        return <Profile />;
-      case 'settings':
-        return <Settings />;
+      case 'payroll-history': return <PayrollHistory />;
+      case 'payroll-summary': return <PayrollSummary />;
+      case 'reports': return <Reports />;
+      case 'compliance-reports': return <ComplianceReports />;
+      case 'employee-management': return <EmployeeManagement onOpenPinChange={openPinModalForAdmin} />;
+      case 'locations': return <LocationsManagement />;
+      case 'courses': return <CoursesManagement />;
+      case 'leave-balances': return <LeaveBalancesManagement />;
+      case 'emergency-alerts': return <EmergencyAlerts />;
+      case 'profile': return <Profile />;
+      case 'settings': return <Settings />;
       default:
-        return <div className="card"><h3>Page Not Found</h3></div>;
+        return (
+          <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }}>
+            <h3 style={{ color: '#111827' }}>Page Not Found</h3>
+            <p style={{ color: '#6B7280' }}>The module you are looking for does not exist or has been moved.</p>
+          </div>
+        );
     }
   };
 
@@ -283,50 +249,43 @@ function App() {
 
   return (
     <NotificationProvider>
-      <>
-        <Layout
-          currentView={currentView}
-          setView={handleSetView}
-          title={title}
-          showBack={
-            showHistoryDetail ||
-            currentView === 'payroll-main' ||
-            currentView === 'profile' ||
-            currentView === 'payroll-history' ||
-            currentView === 'settings' ||
-            currentView === 'payroll-summary'
-          }
-          onBack={() => {
-            if (showHistoryDetail) setShowHistoryDetail(false);
-            else if (currentView === 'payroll-main') setCurrentView('payroll');
-            else if (currentView === 'payroll-history') setCurrentView('payroll-main');
-            else if (currentView === 'payroll-summary') setCurrentView('dashboard');
-            else if (currentView === 'profile') setCurrentView('dashboard');
-            else if (currentView === 'settings') setCurrentView('dashboard');
-            else setCurrentView('dashboard');
-          }}
-          onLogout={handleLogout}
-        >
-          {renderContent()}
-        </Layout>
+      <Layout
+        currentView={currentView}
+        setView={handleSetView}
+        title={title}
+        showBack={
+          showHistoryDetail ||
+          ['payroll-main', 'profile', 'payroll-history', 'settings', 'payroll-summary'].includes(currentView)
+        }
+        onBack={() => {
+          if (showHistoryDetail) setShowHistoryDetail(false);
+          else if (currentView === 'payroll-main') setCurrentView('payroll');
+          else if (currentView === 'payroll-history') setCurrentView('payroll-main');
+          else setCurrentView('dashboard');
+        }}
+        onLogout={handleLogout}
+      >
+        {renderContent()}
+      </Layout>
 
-        <ToastNotification />
+      <ToastNotification />
 
-        {showPinModal && (
-          <PinChangeModal
-            show={showPinModal}
-            onClose={() => setShowPinModal(false)}
-            adminEmail={pinAdminEmail}
-          />
-        )}
-        {showPayrollHistoryModal && (
-          <PayrollHistoryModal
-            show={showPayrollHistoryModal}
-            onClose={() => setShowPayrollHistoryModal(false)}
-          />
-        )}
+      {showPinModal && (
+        <PinChangeModal
+          show={showPinModal}
+          onClose={() => setShowPinModal(false)}
+          adminEmail={pinAdminEmail}
+        />
+      )}
+      
+      {showPayrollHistoryModal && (
+        <PayrollHistoryModal
+          show={showPayrollHistoryModal}
+          onClose={() => setShowPayrollHistoryModal(false)}
+        />
+      )}
 
-        <ToastContainer
+      <ToastContainer
         position="top-right"
         autoClose={3000}
         hideProgressBar={false}
@@ -337,7 +296,6 @@ function App() {
         draggable
         pauseOnHover
       />
-      </>
     </NotificationProvider>
   );
 }

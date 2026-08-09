@@ -1,7 +1,8 @@
+// src/pages/LocationTracking.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { RefreshCw, History, AlertCircle, Eye } from 'lucide-react';
+import { RefreshCw, History, Eye, Map, AlertTriangle, ShieldCheck, Clock } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 import './LocationTracking.css';
@@ -178,164 +179,187 @@ const LocationTracking = () => {
   };
 
   return (
-    <div className="lt-dashboard">
-      <div className="lt-header">
+    <div className="lt-container">
+      <div className="lt-header-row">
         <div>
-          <p className="subtitle">Real-time campus geofencing compliance</p>
+          <h2 className="lt-page-title">Location Tracking</h2>
+          <p className="lt-page-subtitle">Real-time geofencing and campus compliance monitoring.</p>
         </div>
-        <div className="lt-actions">
+        <div className="lt-header-actions">
           <input
             type="date"
             value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)}
-            className="date-picker"
+            className="lt-date-input"
           />
-          <button className="nav-action-btn" onClick={() => setShowHistoryModal(true)}>
-            <History size={16} /> History
+          <button className="btn-lt-outline" onClick={() => setShowHistoryModal(true)}>
+            <History size={16} /> <span>Alert History</span>
           </button>
-          <button className="nav-action-btn sync-btn" onClick={() => fetchData(selectedDate)}>
-            <RefreshCw size={16} /> Sync
+          <button className="btn-lt-primary" onClick={() => fetchData(selectedDate)}>
+            <RefreshCw size={16} /> <span>Sync Data</span>
           </button>
         </div>
       </div>
 
       {loading ? (
-        <div className="loading-skeleton">Loading...</div>
+        <div className="lt-loading-state">Gathering location telemetry...</div>
       ) : (
         <>
-          <div className="stats-row">
-            <div className="stat-card">
-              <div className="stat-value">{instructors.length}</div>
-              <div className="stat-label">Active Shifts</div>
+          <div className="lt-stats-grid">
+            <div className="lt-stat-card">
+              <div className="stat-icon-wrapper active"><Clock size={20} /></div>
+              <div className="stat-info">
+                <span className="stat-label">Active Shifts</span>
+                <span className="stat-value">{instructors.length}</span>
+              </div>
             </div>
-            <div className="stat-card">
-              <div className="stat-value">{instructors.filter(i => i.last_is_inside === 1).length}</div>
-              <div className="stat-label">On‑Campus (now)</div>
+            <div className="lt-stat-card">
+              <div className="stat-icon-wrapper success"><ShieldCheck size={20} /></div>
+              <div className="stat-info">
+                <span className="stat-label">On-Campus Now</span>
+                <span className="stat-value">{instructors.filter(i => i.last_is_inside === 1).length}</span>
+              </div>
             </div>
-            <div className="stat-card">
-              <div className="stat-value" style={{ color: '#dc2626' }}>{alerts.length}</div>
-              <div className="stat-label">Alerts (this date)</div>
+            <div className="lt-stat-card alert">
+              <div className="stat-icon-wrapper danger"><AlertTriangle size={20} /></div>
+              <div className="stat-info">
+                <span className="stat-label">Daily Alerts</span>
+                <span className="stat-value">{alerts.length}</span>
+              </div>
             </div>
           </div>
 
-          <div className="card">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Instructor</th>
-                  <th>Assignment</th>
-                  <th>GPS Status</th>
-                  <th>Campus Status</th>
-                  <th>Last Position</th>
-                  <th>Entered Campus</th>
-                  <th>Went Outside</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {instructors.length === 0 ? (
-                  <tr className="empty-row">
-                    <td colSpan="8">No active shifts on this date.</td>
+          <div className="lt-table-card">
+            <div className="lt-table-wrapper">
+              <table className="lt-table">
+                <thead>
+                  <tr>
+                    <th>Instructor</th>
+                    <th>Assignment</th>
+                    <th className="text-center">GPS</th>
+                    <th className="text-center">Location</th>
+                    <th>Last Known Position</th>
+                    <th>Campus Entry</th>
+                    <th>Campus Exit</th>
+                    <th className="text-center">Timeline</th>
                   </tr>
-                ) : (
-                  instructors.map(inst => {
-                    const isGpsOn = inst.gps_status === 'GPS ON';
-                    const isOutside = inst.last_is_inside === 0;
-                    const isAlert = isToday && (!isGpsOn || isOutside);
+                </thead>
+                <tbody>
+                  {instructors.length === 0 ? (
+                    <tr className="lt-empty-row">
+                      <td colSpan="8">No active shifts scheduled for this date.</td>
+                    </tr>
+                  ) : (
+                    instructors.map(inst => {
+                      const isGpsOn = inst.gps_status === 'GPS ON';
+                      const isOutside = inst.last_is_inside === 0;
+                      const isAlert = isToday && (!isGpsOn || isOutside);
 
-                    return (
-                      <tr key={inst.employee_id} className={isAlert ? 'alert-row' : ''}>
-                        <td>
-                          <div className="instructor-name">{inst.full_name}</div>
-                          <div className="employee-id">{inst.employee_id}</div>
-                          {isToday && <span className="active-badge">ACTIVE NOW</span>}
-                        </td>
-                        <td>
-                          {inst.schedule_course ? (
-                            <div className="schedule-badge">
-                              <span className="schedule-course">{inst.schedule_course}</span>
-                              <span className="schedule-time">
-                                {formatTo12Hour(inst.start_time)} – {formatTo12Hour(inst.end_time)}
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="no-schedule-text">No active shift</div>
-                          )}
-                        </td>
-                        <td>
-                          <span className={`status-pill ${isGpsOn ? 'pill-gps-on' : 'pill-gps-off'}`}>
-                            {isGpsOn ? 'ON' : 'OFF'}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`status-pill ${inst.last_is_inside === 1 ? 'pill-active' : 'pill-outside'}`}>
-                            {inst.last_is_inside === 1 ? 'INSIDE' : 'OUTSIDE'}
-                          </span>
-                        </td>
-                        <td className="coordinates">
-                          {isGpsOn ? (inst.last_position_name || 'Calculating...') : 'Unavailable'}
-                        </td>
-                        <td>{inst.campus_entry_time || '—'}</td>
-                        <td>{inst.campus_exit_time || '—'}</td>
-                        <td>
-                          <button
-                            className="action-icon eye-icon"
-                            onClick={() => openTimelineModal(inst.employee_id, inst.full_name)}
-                            title="View detailed timeline"
-                          >
-                            <Eye size={18} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                      return (
+                        <tr key={inst.employee_id} className={isAlert ? 'lt-alert-row' : ''}>
+                          <td>
+                            <div className="lt-emp-name">{inst.full_name}</div>
+                            <div className="lt-emp-id">{inst.employee_id}</div>
+                          </td>
+                          <td>
+                            {inst.schedule_course ? (
+                              <div className="lt-assignment">
+                                <span className="lt-course">{inst.schedule_course}</span>
+                                <span className="lt-time">
+                                  {formatTo12Hour(inst.start_time)} – {formatTo12Hour(inst.end_time)}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="lt-no-shift">No active shift</span>
+                            )}
+                          </td>
+                          <td className="text-center">
+                            <span className={`lt-status-badge ${isGpsOn ? 'gps-on' : 'gps-off'}`}>
+                              {isGpsOn ? 'ON' : 'OFF'}
+                            </span>
+                          </td>
+                          <td className="text-center">
+                            <span className={`lt-status-badge ${inst.last_is_inside === 1 ? 'inside' : 'outside'}`}>
+                              {inst.last_is_inside === 1 ? 'INSIDE' : 'OUTSIDE'}
+                            </span>
+                          </td>
+                          <td className="lt-mono-text">
+                            {isGpsOn ? (inst.last_position_name || 'Calculating...') : 'Unavailable'}
+                          </td>
+                          <td className="lt-time-text">{inst.campus_entry_time || '—'}</td>
+                          <td className="lt-time-text">{inst.campus_exit_time || '—'}</td>
+                          <td className="text-center">
+                            <button
+                              className="lt-btn-icon"
+                              onClick={() => openTimelineModal(inst.employee_id, inst.full_name)}
+                              title="View Timeline"
+                            >
+                              <Eye size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
 
-      {/* Alert History Modal (unchanged) */}
+      {/* Alert History Modal */}
       <FormalModal
         show={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
-        title="Alert History"
+        title="Tracking Alert History"
         wide
-        style={{ maxWidth: '85vw', maxHeight: '85vh', overflowY: 'auto' }}
+        footer={<button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>Close Window</button>}
       >
-        <div className="history-controls">
-          <label>Filter by date:</label>
-          <input
-            type="date"
-            value={historyDate}
-            onChange={e => setHistoryDate(e.target.value)}
-            className="date-picker"
-          />
-          <button onClick={() => fetchAlertHistory(historyDate)}>Refresh</button>
+        <div className="lt-modal-toolbar">
+          <div className="lt-modal-filter">
+            <label>Filter Date</label>
+            <input
+              type="date"
+              value={historyDate}
+              onChange={e => setHistoryDate(e.target.value)}
+              className="lt-date-input"
+            />
+          </div>
+          <button className="btn-lt-primary" onClick={() => fetchAlertHistory(historyDate)}>
+            <RefreshCw size={14} /> Refresh
+          </button>
         </div>
+        
         {historyLoading ? (
-          <p>Loading...</p>
+          <div className="lt-loading-state">Loading history...</div>
         ) : (
-          <table className="data-table small">
-            <thead>
-              <tr><th>Time</th><th>Instructor</th><th>Alert Message</th><th>Campus</th></tr>
-            </thead>
-            <tbody>
-              {alertHistory.length === 0 ? (
-                <tr><td colSpan="4">No alerts on this date.</td></tr>
-              ) : (
-                alertHistory.map(alert => (
-                  <tr key={alert.id}>
-                    <td>{new Date(alert.created_at).toLocaleString()}</td>
-                    <td>{alert.full_name}</td>
-                    <td>{alert.alert_message}</td>
-                    <td>{alert.location_name || '—'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          <div className="lt-table-wrapper" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+            <table className="lt-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Instructor</th>
+                  <th>Alert Details</th>
+                  <th>Campus Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alertHistory.length === 0 ? (
+                  <tr className="lt-empty-row"><td colSpan="4">No alerts recorded on this date.</td></tr>
+                ) : (
+                  alertHistory.map(alert => (
+                    <tr key={alert.id}>
+                      <td className="lt-time-text">{new Date(alert.created_at).toLocaleString()}</td>
+                      <td className="font-medium text-gray-900">{alert.full_name}</td>
+                      <td className="text-red-600">{alert.alert_message}</td>
+                      <td>{alert.location_name || '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </FormalModal>
 
@@ -343,41 +367,50 @@ const LocationTracking = () => {
       <FormalModal
         show={showTimelineModal}
         onClose={() => setShowTimelineModal(false)}
-        title={`Timeline & Alerts for ${selectedInstructor?.name} (${selectedDate})`}
+        title={`Geofence Timeline: ${selectedInstructor?.name}`}
         wide
-        style={{ maxWidth: '85vw', maxHeight: '85vh', overflowY: 'auto' }}
+        footer={<button className="btn-modal-cancel" onClick={() => setShowTimelineModal(false)}>Close Window</button>}
       >
         {timelineLoading ? (
-          <div>Loading timeline...</div>
+          <div className="lt-loading-state">Compiling timeline...</div>
         ) : (
           <>
-            <h4>Combined Event Log (GPS, Campus, Alerts)</h4>
-            <table className="data-table small unified-events">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Event Type</th>
-                  <th>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {buildUnifiedEvents().length === 0 ? (
-                  <tr><td colSpan="3">No events recorded during this shift.</td></tr>
-                ) : (
-                  buildUnifiedEvents().map((ev, idx) => (
-                    <tr key={idx} className={
-                      ev.type === 'Alert' ? 'alert-row' :
-                      ev.type === 'GPS' ? (ev.detail.includes('ON') ? 'gps-on' : 'gps-off') :
-                      ev.type === 'Campus' ? 'campus-transition' : ''
-                    }>
-                      <td>{new Date(ev.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
-                      <td><strong>{ev.type}</strong></td>
-                      <td>{ev.detail}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+            <div className="lt-modal-info">
+              <Map size={16} />
+              <span>Displaying combined GPS status, campus boundary transitions, and system alerts for <strong>{selectedDate}</strong>.</span>
+            </div>
+            <div className="lt-table-wrapper" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+              <table className="lt-table unified-timeline">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Event Type</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {buildUnifiedEvents().length === 0 ? (
+                    <tr className="lt-empty-row"><td colSpan="3">No telemetry events recorded during this shift.</td></tr>
+                  ) : (
+                    buildUnifiedEvents().map((ev, idx) => (
+                      <tr key={idx} className={
+                        ev.type === 'Alert' ? 'bg-red-50' :
+                        ev.type === 'GPS' ? (ev.detail.includes('ON') ? 'bg-blue-50' : 'bg-gray-50') :
+                        ev.type === 'Campus' ? 'bg-yellow-50' : ''
+                      }>
+                        <td className="lt-mono-text">
+                          {new Date(ev.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </td>
+                        <td>
+                          <span className={`lt-event-badge ${ev.type.toLowerCase()}`}>{ev.type}</span>
+                        </td>
+                        <td className="text-gray-900">{ev.detail}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </FormalModal>

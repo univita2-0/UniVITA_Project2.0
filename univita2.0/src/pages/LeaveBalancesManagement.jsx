@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { RefreshCw, Edit, Save, X, AlertCircle, Search } from 'lucide-react';
+import { RefreshCw, Edit2, Save, X, AlertCircle, Search } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 import './LeaveBalancesManagement.css';
@@ -143,66 +143,74 @@ const LeaveBalancesManagement = () => {
   return (
     <div className="lbm-container">
       <div className="lbm-header">
-        <h3>Employee Leave Balances</h3>
+        <div>
+          <h2 className="lbm-title">Leave Balances</h2>
+          <p className="lbm-subtitle">Monitor and manually adjust employee leave quotas.</p>
+        </div>
         <div className="lbm-controls">
           <div className="lbm-year-selector">
-            <label>Year:</label>
+            <label>Year</label>
             <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))}>
               {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
           </div>
-          <button onClick={loadEmployees} className="btn-refresh" title="Refresh">
-            <RefreshCw size={18} />
+          <button onClick={loadEmployees} className="btn-refresh" title="Refresh Data">
+            <RefreshCw size={16} />
+            <span>Refresh</span>
           </button>
         </div>
       </div>
 
-      <div className="lbm-search">
-        <Search size={16} className="search-icon" />
-        <input
-          type="text"
-          placeholder="Search by name or ID..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
-
-      {loading ? (
-        <div className="loading-spinner">Loading employees...</div>
-      ) : (
-        <div className="lbm-table-wrapper">
-          <table className="lbm-table">
-            <thead>
-              <tr>
-                <th>Employee ID</th>
-                <th>Full Name</th>
-                <th>Email</th>
-                <th style={{ textAlign: 'center' }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredEmployees.length === 0 ? (
-                <tr><td colSpan="4" className="empty-row">No instructors found.</td></tr>
-              ) : (
-                filteredEmployees.map(emp => (
-                  <tr key={emp.id}>
-                    <td>{emp.employee_id}</td>
-                    <td>{emp.full_name}</td>
-                    <td>{emp.email}</td>
-                    <td className="text-center">
-                      <button className="btn-view-balances" onClick={() => openBalanceModal(emp)}>
-                        View / Edit Balances
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      <div className="lbm-card">
+        <div className="lbm-search-row">
+          <div className="lbm-search">
+            <Search size={16} className="search-icon" />
+            <input
+              type="text"
+              placeholder="Search by employee name or ID..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
         </div>
-      )}
+
+        {loading ? (
+          <div className="loading-state">Loading employees...</div>
+        ) : (
+          <div className="lbm-table-wrapper">
+            <table className="lbm-table">
+              <thead>
+                <tr>
+                  <th>Employee ID</th>
+                  <th>Full Name</th>
+                  <th>Email</th>
+                  <th className="text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEmployees.length === 0 ? (
+                  <tr><td colSpan="4" className="empty-row">No active instructors found matching your search.</td></tr>
+                ) : (
+                  filteredEmployees.map(emp => (
+                    <tr key={emp.id}>
+                      <td className="emp-id">{emp.employee_id}</td>
+                      <td className="emp-name">{emp.full_name}</td>
+                      <td className="emp-email">{emp.email}</td>
+                      <td className="text-center">
+                        <button className="btn-view-balances" onClick={() => openBalanceModal(emp)}>
+                          View Balances
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Leave Balances Modal */}
       <FormalModal
@@ -212,16 +220,22 @@ const LeaveBalancesManagement = () => {
           setSelectedEmployee(null);
           setEditingBalance(null);
         }}
-        title={`Leave Balances – ${selectedEmployee?.full_name}`}
+        title={`Leave Balances: ${selectedEmployee?.full_name}`}
         wide
+        footer={
+          <button className="btn-modal-cancel" onClick={() => setShowBalanceModal(false)}>
+            Close Window
+          </button>
+        }
       >
         {modalLoading ? (
-          <div className="loading-spinner">Loading balances...</div>
+          <div className="loading-state">Loading balances...</div>
         ) : (
           <>
             <div className="lbm-modal-info">
-              Balances for year <strong>{selectedYear}</strong>. Adjust remaining days as needed.
+              Displaying balances for the year <strong>{selectedYear}</strong>. You may manually adjust remaining days if necessary.
             </div>
+            
             <div className="lbm-balances-table-wrapper">
               <table className="lbm-balances-table">
                 <thead>
@@ -229,17 +243,17 @@ const LeaveBalancesManagement = () => {
                     <th>Leave Type</th>
                     <th>Annual Quota</th>
                     <th>Remaining Days</th>
-                    <th>Action</th>
+                    <th className="text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {balances.length === 0 ? (
-                    <tr><td colSpan="4" className="empty-row">No leave types configured. Please contact admin.</td></tr>
+                    <tr><td colSpan="4" className="empty-row">No leave types configured in the system.</td></tr>
                   ) : (
                     balances.map(balance => (
                       <tr key={balance.leave_type_id}>
-                        <td><strong>{balance.leave_type}</strong></td>
-                        <td>{balance.annual_quota} days</td>
+                        <td className="font-medium text-gray-900">{balance.leave_type}</td>
+                        <td className="text-gray-500">{balance.annual_quota} days</td>
                         <td>
                           {editingBalance === balance.leave_type_id ? (
                             <input
@@ -251,26 +265,22 @@ const LeaveBalancesManagement = () => {
                               autoFocus
                             />
                           ) : (
-                            <span>{balance.remaining_days} days</span>
+                            <span className="font-semibold text-gray-900">{balance.remaining_days} days</span>
                           )}
                         </td>
-                        <td>
+                        <td className="text-right">
                           {editingBalance === balance.leave_type_id ? (
                             <div className="balance-actions">
-                              <button
-                                onClick={() => handleSaveBalance(balance)}
-                                disabled={saving}
-                                className="btn-save"
-                              >
-                                <Save size={14} /> Save
+                              <button onClick={cancelEdit} className="btn-cancel-edit" title="Cancel">
+                                <X size={14} />
                               </button>
-                              <button onClick={cancelEdit} className="btn-cancel-edit">
-                                <X size={14} /> Cancel
+                              <button onClick={() => handleSaveBalance(balance)} disabled={saving} className="btn-save" title="Save">
+                                <Save size={14} />
                               </button>
                             </div>
                           ) : (
                             <button onClick={() => handleEditBalance(balance)} className="btn-edit-balance">
-                              <Edit size={14} /> Edit
+                              <Edit2 size={14} /> Edit
                             </button>
                           )}
                         </td>
@@ -280,8 +290,10 @@ const LeaveBalancesManagement = () => {
                 </tbody>
               </table>
             </div>
+
             <div className="lbm-note">
-              <AlertCircle size={14} /> Approved leave requests automatically deduct 1 day from the remaining balance.
+              <AlertCircle size={14} /> 
+              <span>Approved leave requests will automatically deduct 1 day from the corresponding remaining balance.</span>
             </div>
           </>
         )}

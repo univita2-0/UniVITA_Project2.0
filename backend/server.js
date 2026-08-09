@@ -543,12 +543,13 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     const actualTime = new Date(`1970-01-01T${currentTime}`);
     const diffMinutes = (actualTime - scheduledStart) / 60000;
 
-    if (diffMinutes < 0) {
-      return res.status(403).json({
-        success: false,
-        message: `Clock-in is not allowed before your scheduled start time (${scheduledStartTime}).`
-      });
-    }
+    // Allow clocking in up to 15 minutes before scheduled start time
+if (diffMinutes < -15) {
+  return res.status(403).json({
+    success: false,
+    message: `Too early to clock in. Allowed from ${-15} minutes before (${scheduledStartTime}).`
+  });
+}
 
     // 4. Geofence Verification
     const [locRows] = await db.promise().query(

@@ -1,277 +1,324 @@
-/* src/pages/Settings.css */
+/* src/pages/Settings.css - Modern Minimalist Redesign */
 
-.settings-container {
-  max-width: 800px;
-  margin: 0 auto;
+.set-container {
   padding: 2rem;
+  background: #FAFAFA;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, sans-serif;
+  display: flex;
+  justify-content: center;
 }
 
-.settings-header {
+.set-wrapper {
+  width: 100%;
+  max-width: 800px; /* Constrains the settings page for better readability */
+}
+
+/* Header */
+.set-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 2rem;
 }
 
-.settings-header h1 {
-  font-size: 2rem;
+.set-title {
+  font-size: 1.75rem;
   font-weight: 700;
-  color: #0f172a;
-  margin-bottom: 0.5rem;
+  color: #111827;
+  margin-bottom: 0.25rem;
+  letter-spacing: -0.02em;
 }
 
-.settings-header p {
-  color: #64748b;
-  font-size: 0.9rem;
+.set-subtitle {
+  color: #6B7280;
+  font-size: 0.95rem;
+  margin: 0;
 }
 
-.settings-message {
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
+/* Messages */
+.set-message {
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
   margin-bottom: 1.5rem;
   font-size: 0.9rem;
+  font-weight: 500;
 }
 
-.settings-message.success {
-  background: #dcfce7;
-  color: #15803d;
-  border: 1px solid #bbf7d0;
+.set-message.success {
+  background: #F0FDFA;
+  color: #0D9488;
+  border: 1px solid #CCFBF1;
 }
 
-.settings-message.error {
-  background: #fee2e2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
+.set-message.error {
+  background: #FEF2F2;
+  color: #DC2626;
+  border: 1px solid #FECACA;
 }
 
-/* Tabs */
-.settings-tabs {
+/* Modern Tabs */
+.set-tabs {
   display: flex;
-  gap: 0.5rem;
-  border-bottom: 1px solid #eef2f6;
+  gap: 1.5rem;
+  border-bottom: 1px solid #E5E7EB;
   margin-bottom: 2rem;
 }
 
-.settings-tab {
+.set-tab {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1.25rem;
+  padding: 0.75rem 0.25rem;
   background: transparent;
   border: none;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   font-weight: 500;
-  color: #64748b;
+  color: #6B7280;
   cursor: pointer;
-  border-radius: 12px 12px 0 0;
-  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px; /* Overlaps the container border */
+  transition: all 0.2s ease;
 }
 
-.settings-tab:hover {
-  color: #0f172a;
-  background: #f1f5f9;
+.set-tab:hover {
+  color: #111827;
 }
 
-.settings-tab.active {
-  color: #0d9488;
-  background: #e0f2f1;
-  border-bottom: 2px solid #0d9488;
-}
-
-/* Form styling */
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.form-group label {
+.set-tab.active {
+  color: #0D9488;
   font-weight: 600;
-  font-size: 0.85rem;
-  color: #334155;
+  border-bottom-color: #0D9488;
 }
 
-.form-group input {
-  padding: 0.75rem;
-  border: 1px solid #e2e8f0;
+/* Cards */
+.set-card {
+  background: #FFFFFF;
   border-radius: 12px;
-  font-size: 0.9rem;
-  transition: all 0.2s;
+  padding: 2rem;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  margin-bottom: 1.5rem;
 }
 
-.form-group input:focus {
-  outline: none;
-  border-color: #0d9488;
-  box-shadow: 0 0 0 3px rgba(13,148,136,0.1);
-}
-
-.password-input-wrapper {
+.set-card-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #F3F4F6;
+}
+
+.set-card-header h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.set-card-icon {
+  color: #0D9488;
+}
+
+/* Forms */
+.set-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.set-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.set-form-group label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4B5563;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.set-input {
+  width: 100%;
+  padding: 0.65rem 1rem;
+  border: 1px solid #D1D5DB;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  color: #111827;
+  background: #FFFFFF;
+  outline: none;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.set-input:focus {
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
+}
+
+.set-password-wrapper {
   position: relative;
+  display: flex;
+  align-items: center;
 }
 
-.password-input-wrapper input {
-  flex: 1;
+.set-password-wrapper .set-input {
+  padding-right: 2.5rem; /* Room for the eye icon */
 }
 
-.password-input-wrapper button {
+.set-eye-btn {
   position: absolute;
-  right: 12px;
+  right: 0.75rem;
   background: none;
   border: none;
   cursor: pointer;
-  color: #64748b;
+  color: #9CA3AF;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.btn-save {
-  background: #0f172a;
-  color: white;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 40px;
+.set-eye-btn:hover {
+  color: #4B5563;
+}
+
+/* Buttons */
+.set-form-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.pin-actions {
+  gap: 0.75rem;
+  justify-content: flex-start;
+  flex-direction: row-reverse; /* Puts Save on the right, Cancel on the left visually */
+}
+
+.btn-set-save, .btn-set-cancel, .btn-set-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  border-radius: 8px;
   font-weight: 600;
+  font-size: 0.9rem;
   cursor: pointer;
-  transition: background 0.2s;
-  align-self: flex-start;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
 }
 
-.btn-save:hover:not(:disabled) {
-  background: #1e293b;
+.btn-set-save {
+  background: #111827;
+  color: #FFFFFF;
 }
 
-.btn-save:disabled {
+.btn-set-save:hover:not(:disabled) {
+  background: #374151;
+}
+
+.btn-set-save:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.btn-cancel {
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  padding: 0.75rem 1.5rem;
-  border-radius: 40px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s;
+.btn-set-cancel {
+  background: #FFFFFF;
+  color: #4B5563;
+  border-color: #D1D5DB;
 }
 
-.btn-cancel:hover {
-  background: #e2e8f0;
+.btn-set-cancel:hover {
+  background: #F9FAFB;
+  border-color: #9CA3AF;
+  color: #111827;
 }
 
-.error-text {
-  color: #dc2626;
-  font-size: 0.75rem;
+.btn-set-outline {
+  background: #FFFFFF;
+  color: #0D9488;
+  border-color: #0D9488;
+}
+
+.btn-set-outline:hover {
+  background: #F0FDFA;
+}
+
+.set-error-text {
+  color: #DC2626;
+  font-size: 0.8rem;
+  font-weight: 500;
   margin-top: -0.5rem;
 }
 
-/* Security tab cards */
-.security-section {
+/* Preferences & Toggle Switches */
+.set-preferences-section {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
 }
 
-.security-card {
-  background: white;
-  border: 1px solid #eef2f6;
-  border-radius: 20px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-}
-
-.security-card h3 {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin-bottom: 1.5rem;
-  color: #0f172a;
-}
-
-.btn-change-pin {
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  padding: 0.6rem 1.2rem;
-  border-radius: 40px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-change-pin:hover {
-  background: #e2e8f0;
-}
-
-.pin-actions {
-  display: flex;
-  gap: 1rem;
-  margin-top: 0.5rem;
-}
-
-/* Preferences */
-.preferences-section {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.preference-item {
+.set-preference-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 0;
-  border-bottom: 1px solid #eef2f6;
+  padding: 1.25rem 0;
+  border-bottom: 1px solid #F3F4F6;
 }
 
-.preference-item:last-child {
+.set-preference-item:last-child {
   border-bottom: none;
+  padding-bottom: 0;
 }
 
-.pref-info h4 {
+.set-preference-item:first-child {
+  padding-top: 0;
+}
+
+.set-pref-info h4 {
   font-weight: 600;
-  margin-bottom: 0.25rem;
-  color: #0f172a;
+  font-size: 1rem;
+  margin: 0 0 0.25rem 0;
+  color: #111827;
 }
 
-.pref-info p {
-  font-size: 0.8rem;
-  color: #64748b;
+.set-pref-info p {
+  font-size: 0.85rem;
+  color: #6B7280;
+  margin: 0;
 }
 
-/* Toggle switch */
-.switch {
+/* Modern Toggle Switch */
+.set-toggle-switch {
   position: relative;
   display: inline-block;
-  width: 50px;
+  width: 44px;
   height: 24px;
+  flex-shrink: 0;
 }
 
-.switch input {
+.set-toggle-switch input {
   opacity: 0;
   width: 0;
   height: 0;
 }
 
-.slider {
+.set-toggle-slider {
   position: absolute;
   cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #cbd5e1;
-  transition: 0.2s;
-  border-radius: 34px;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #E5E7EB;
+  transition: .2s;
+  border-radius: 24px;
 }
 
-.slider:before {
+.set-toggle-slider:before {
   position: absolute;
   content: "";
   height: 18px;
@@ -279,39 +326,29 @@
   left: 3px;
   bottom: 3px;
   background-color: white;
-  transition: 0.2s;
+  transition: .2s;
   border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
-input:checked + .slider {
-  background-color: #0d9488;
+input:checked + .set-toggle-slider {
+  background-color: #0D9488;
 }
 
-input:checked + .slider:before {
-  transform: translateX(26px);
+input:checked + .set-toggle-slider:before {
+  transform: translateX(20px);
 }
 
-input:disabled + .slider {
+input:disabled + .set-toggle-slider {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 /* Responsive */
-@media (max-width: 768px) {
-  .settings-container {
-    padding: 1rem;
-  }
-  .settings-tabs {
-    flex-wrap: wrap;
-  }
-  .settings-tab {
-    padding: 0.5rem 1rem;
-  }
-  .pin-actions {
-    flex-direction: column;
-  }
-  .btn-save, .btn-cancel {
-    width: 100%;
-    text-align: center;
-  }
+@media (max-width: 640px) {
+  .set-container { padding: 1rem; }
+  .set-card { padding: 1.5rem; }
+  .set-tabs { gap: 1rem; overflow-x: auto; }
+  .pin-actions { flex-direction: column; }
+  .btn-set-save, .btn-set-cancel { width: 100%; justify-content: center; }
 }

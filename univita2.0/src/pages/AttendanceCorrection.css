@@ -1,222 +1,353 @@
+/* AttendanceCorrection.css - Modern Minimalist Redesign */
+
 .ac-container {
-  background: white;
-  border-radius: 16px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  background: #FAFAFA;
+  padding: 2rem;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Header Section */
+.ac-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1.5rem;
 }
 
 .ac-title {
-  font-size: 1.2rem;
+  font-size: 1.75rem;
   font-weight: 700;
-  margin-bottom: 1.5rem;
-  color: #0f172a;
+  color: #111827;
+  margin-bottom: 0.25rem;
+  letter-spacing: -0.02em;
 }
 
-/* Search row */
+.ac-subtitle {
+  color: #6B7280;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+/* Search Card Area */
+.ac-search-card {
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+
 .ac-search-row {
   display: flex;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  gap: 1rem;
   align-items: center;
   flex-wrap: wrap;
 }
 
 .ac-search-input-wrapper {
-  flex: 0 0 240px;
+  flex: 1;
+  max-width: 400px;
+  position: relative;
 }
 
-.ac-input {
+.ac-search-icon {
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9CA3AF;
+  pointer-events: none;
+}
+
+.ac-input-search {
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #cbd5e1;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid #D1D5DB;
   border-radius: 8px;
-  font-size: 0.875rem;
-  transition: border-color 0.2s;
-  background: white;
+  font-size: 0.9rem;
+  background: #FFFFFF;
+  color: #111827;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
 }
 
-.ac-input:focus {
+.ac-input-search:focus {
   outline: none;
-  border-color: #00897b;
-  box-shadow: 0 0 0 2px rgba(0,137,123,0.1);
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
+/* Buttons */
 .ac-search-btn {
-  background-color: #00897b;
-  color: white;
+  background-color: #0D9488;
+  color: #FFFFFF;
   border: none;
-  padding: 0.5rem 1rem;
+  padding: 0.75rem 1.5rem;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.9rem;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: background 0.2s;
-  height: 38px;
+  transition: all 0.2s ease;
 }
 
 .ac-search-btn:hover {
-  background-color: #00695c;
+  background-color: #0F766E;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px -1px rgba(13, 148, 136, 0.15);
 }
 
 .ac-pending-btn {
-  background-color: #f1f5f9;
-  color: #334155;
-  border: 1px solid #cbd5e1;
-  padding: 0.5rem 1rem;
+  background-color: #FFFFFF;
+  color: #374151;
+  border: 1px solid #D1D5DB;
+  padding: 0.7rem 1.25rem;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.9rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
-  height: 38px;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
 }
 
 .ac-pending-btn:hover {
-  background-color: #e2e8f0;
+  background-color: #F9FAFB;
+  border-color: #9CA3AF;
+  color: #111827;
 }
 
-/* Table styles */
+/* General Input/Select inside Modals */
+.ac-input, .ac-select {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid #D1D5DB;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #111827;
+  background: #FFFFFF;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.ac-input:focus, .ac-select:focus {
+  outline: none;
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13,148,136,0.1);
+}
+
+.ac-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1.25em 1.25em;
+  padding-right: 2.5rem;
+}
+
+/* Table Styles */
 .ac-table-wrapper {
-  overflow-x: auto;
+  background: #FFFFFF;
   border-radius: 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #E5E7EB;
+  overflow-x: auto;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 
 .ac-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
 }
 
-.ac-table th {
+.ac-table th, .pending-table th {
   text-align: left;
-  padding: 0.75rem 1rem;
-  background-color: #f8fafc;
+  padding: 1rem 1.25rem;
+  background-color: #F9FAFB;
   font-weight: 600;
-  color: #334155;
-  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.75rem;
+  color: #4B5563;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #E5E7EB;
 }
 
-.ac-table td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid #f1f5f9;
+.ac-table td, .pending-table td {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #F3F4F6;
+  font-size: 0.9rem;
+  color: #374151;
   vertical-align: middle;
+}
+
+.ac-table tr:last-child td, .pending-table tr:last-child td {
+  border-bottom: none;
+}
+
+.ac-table tr:hover td, .pending-table tr:hover td {
+  background-color: #F9FAFB;
 }
 
 .ac-empty-row td {
   text-align: center;
-  padding: 2rem;
-  color: #64748b;
+  padding: 4rem 2rem !important;
+  color: #6B7280;
+  font-weight: 500;
 }
 
-.ac-location-cell {
-  max-width: 200px;
+.ac-location-cell, .ac-reason-cell {
+  max-width: 180px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: #4B5563;
 }
 
-.ac-edit-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #00897b;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+/* Edit Form Grid inside Modal */
+.ac-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
 }
 
-.ac-edit-btn:hover {
-  background: #e0f2f1;
-  color: #00695c;
-}
-
-/* Modal form groups */
 .ac-modal-group {
-  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .ac-modal-label {
-  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
+}
+
+/* Table Utilities */
+.text-center { text-align: center !important; }
+.font-medium { font-weight: 500; }
+.text-gray-900 { color: #111827 !important; }
+.text-gray-400 { color: #9CA3AF !important; }
+
+/* Status Badges */
+.ac-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 600;
-  text-transform: uppercase;
-  color: #475569;
-  margin-bottom: 0.25rem;
+  text-transform: capitalize;
+}
+.ac-status-badge.present { background: #ECFDF5; color: #059669; }
+.ac-status-badge.late { background: #FFF7ED; color: #C2410C; }
+.ac-status-badge.absent { background: #FEF2F2; color: #DC2626; }
+.ac-status-badge.default { background: #F3F4F6; color: #4B5563; }
+
+/* Action Icons & Buttons */
+.ac-edit-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: #6B7280;
+  padding: 0.4rem;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: inline-flex;
+}
+.ac-edit-btn:hover {
+  background: #F3F4F6;
+  border-color: #E5E7EB;
+  color: #0D9488;
 }
 
-.ac-select {
-  width: 100%;
-  padding: 0.5rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  background: white;
+.ac-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #0D9488;
+  font-weight: 500;
+  font-size: 0.85rem;
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+.ac-link-btn:hover {
+  background: #F0FDFA;
+  text-decoration: underline;
 }
 
-/* Pending corrections table inside modal */
+/* Pending Corrections Table */
 .pending-table-wrapper {
-  max-height: 500px;
+  max-height: 60vh;
   overflow-y: auto;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
 }
 
 .pending-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8rem;
 }
 
-.pending-table th,
-.pending-table td {
-  padding: 0.6rem;
-  border-bottom: 1px solid #e2e8f0;
-  text-align: left;
-  vertical-align: middle;
-}
+.ac-emp-name { font-weight: 600; color: #111827; margin-bottom: 0.2rem; }
+.ac-emp-id { font-size: 0.8rem; color: #6B7280; }
 
 .action-buttons {
   display: flex;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  justify-content: center;
 }
 
-.approve-correction,
-.reject-correction {
+.approve-correction, .reject-correction {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 0.3rem 0.6rem;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
   border: none;
   border-radius: 6px;
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
 }
 
 .approve-correction {
-  background-color: #e0f2f1;
-  color: #00897b;
+  background-color: #ECFDF5;
+  color: #059669;
 }
-
 .approve-correction:hover {
-  background-color: #b2dfdb;
+  background-color: #D1FAE5;
+  color: #047857;
 }
 
 .reject-correction {
-  background-color: #ffebee;
-  color: #c62828;
+  background-color: #FEF2F2;
+  color: #DC2626;
+}
+.reject-correction:hover {
+  background-color: #FEE2E2;
+  color: #B91C1C;
 }
 
-.reject-correction:hover {
-  background-color: #ffcdd2;
+.ac-loading-state, .ac-empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: #6B7280;
+  font-weight: 500;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .ac-container { padding: 1.5rem; }
+  .ac-search-row { flex-direction: column; align-items: stretch; }
+  .ac-search-input-wrapper { max-width: 100%; }
+  .ac-form-grid { grid-template-columns: 1fr; gap: 1rem; }
+  .action-buttons { flex-direction: column; }
+  .approve-correction, .reject-correction { width: 100%; justify-content: center; }
 }

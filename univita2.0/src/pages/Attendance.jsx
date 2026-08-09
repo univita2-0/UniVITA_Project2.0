@@ -108,7 +108,7 @@ const Attendance = () => {
         setAttendanceData(processed);
         calculateStats(processed);
       } 
-      else { // Monthly view
+      else { 
         const summaryMap = new Map();
         rawData.forEach(record => {
           const empId = record.employee_id;
@@ -191,6 +191,13 @@ const Attendance = () => {
 
   return (
     <div className="attendance-container">
+      <div className="att-header-row">
+        <div>
+          <h2 className="att-page-title">Attendance Tracker</h2>
+          <p className="att-page-subtitle">Monitor and review employee attendance records.</p>
+        </div>
+      </div>
+
       <div className="att-stats-row">
         {[
           { label: "Present Today", value: isFuture ? 0 : stats.present, border: "border-green" },
@@ -205,16 +212,17 @@ const Attendance = () => {
         ))}
       </div>
 
-      <div className="card">
+      <div className="att-main-card">
         <div className="att-controls">
           <div className="view-toggles">
             <button className={`btn-toggle ${view === 'daily' ? 'active' : ''}`} onClick={() => setView('daily')}>Daily View</button>
             <button className={`btn-toggle ${view === 'monthly' ? 'active' : ''}`} onClick={() => setView('monthly')}>Monthly View</button>
           </div>
+          
           <div className="att-actions">
             <div className="att-search">
+              <Search size={16} className="att-search-icon" />
               <input type="text" placeholder="Search employee..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-              <Search size={18} className="att-search-icon" />
             </div>
             {view === 'daily' && (
               <select className="att-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -225,14 +233,14 @@ const Attendance = () => {
                 <option value="Scheduled">Scheduled</option>
               </select>
             )}
-            <button className="btn-export" onClick={() => window.print()}><Download size={18} /> Export Report</button>
+            <button className="btn-export" onClick={() => window.print()}><Download size={16} /> Export</button>
           </div>
         </div>
 
         <div className="date-nav">
-          <button className="nav-arrow" onClick={() => changeDate(-1)}><ChevronLeft size={24} /></button>
-          <div className="current-date-display" onClick={() => dateInputRef.current?.showPicker()} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Calendar size={20} color="#00796b" />
+          <button className="nav-arrow" onClick={() => changeDate(-1)}><ChevronLeft size={20} /></button>
+          <div className="current-date-display" onClick={() => dateInputRef.current?.showPicker()}>
+            <Calendar size={18} color="#0D9488" />
             <span>
               {view === 'daily'
                 ? currentDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -241,12 +249,12 @@ const Attendance = () => {
             <input
               type={view === 'daily' ? "date" : "month"}
               ref={dateInputRef}
-              style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
+              className="hidden-date-input"
               onChange={handleDateSelect}
               value={currentDate.toLocaleDateString('en-CA')}
             />
           </div>
-          <button className="nav-arrow" onClick={() => changeDate(1)}><ChevronRight size={24} /></button>
+          <button className="nav-arrow" onClick={() => changeDate(1)}><ChevronRight size={20} /></button>
         </div>
 
         <div className="table-container">
@@ -254,47 +262,57 @@ const Attendance = () => {
             <thead>
               {view === 'daily' ? (
                 <tr>
-                  <th>EMPLOYEE NAME</th>
-                  <th>STATUS</th>
-                  <th>TIME IN</th>
-                  <th>TIME OUT</th>
-                  <th>TOTAL HOURS</th>
-                  <th>ACTION</th>
+                  <th>Employee</th>
+                  <th>Status</th>
+                  <th>Time In</th>
+                  <th>Time Out</th>
+                  <th>Total Hours</th>
+                  <th>Action</th>
                 </tr>
               ) : (
                 <tr>
-                  <th>EMPLOYEE NAME</th>
-                  <th className="text-center">WORKING DAYS</th>
-                  <th className="text-center">PRESENT</th>
-                  <th className="text-center">ABSENT</th>
-                  <th className="text-center">LATE</th>
+                  <th>Employee</th>
+                  <th className="text-center">Working Days</th>
+                  <th className="text-center">Present</th>
+                  <th className="text-center">Absent</th>
+                  <th className="text-center">Late</th>
                 </tr>
               )}
             </thead>
             <tbody>
               {(isFuture && view === 'daily') ? (
-                <tr><td colSpan="6" className="text-center p-10 text-gray-500">No records available for future dates. </td></tr>
+                <tr><td colSpan="6" className="empty-row-message">No records available for future dates.</td></tr>
               ) : filteredData.length === 0 ? (
-                <tr><td colSpan={view === 'daily' ? "6" : "5"} className="empty-row-message text-center p-4">No records found for this period. </td></tr>
+                <tr><td colSpan={view === 'daily' ? "6" : "5"} className="empty-row-message">No records found for this period.</td></tr>
               ) : (
                 filteredData.map((row, idx) => (
                   <tr key={idx}>
                     {view === 'daily' ? (
                       <>
-                        <td><div className="emp-name">{row.full_name}</div><div className="emp-id">{row.employee_id}</div></td>
-                        <td><span className={`status-badge ${row.status?.toLowerCase()}`}>{row.status}</span></td>
+                        <td>
+                          <div className="emp-name">{row.full_name}</div>
+                          <div className="emp-id">{row.employee_id}</div>
+                        </td>
+                        <td><span className={`status-badge ${row.status?.toLowerCase().replace(' ', '-')}`}>{row.status}</span></td>
                         <td>{formatTo12Hour(row.time_in)}</td>
                         <td>{formatTo12Hour(row.time_out)}</td>
                         <td>{row.total_hours} hrs</td>
-                        <td><button className="btn-view-details" onClick={() => handleViewDetails(row)}><Eye size={18} /></button></td>
+                        <td>
+                          <button className="btn-view-details" onClick={() => handleViewDetails(row)} title="View Details">
+                            <Eye size={16} />
+                          </button>
+                        </td>
                       </>
                     ) : (
                       <>
-                        <td><div className="emp-name">{row.full_name}</div><div className="emp-id">{row.employee_id}</div></td>
-                        <td className="text-center">{row.total_working}</td>
-                        <td className="text-center text-green-600 font-bold">{row.present_days}</td>
-                        <td className="text-center text-red-600">{row.absent_days}</td>
-                        <td className="text-center text-orange-600">{row.late_days}</td>
+                        <td>
+                          <div className="emp-name">{row.full_name}</div>
+                          <div className="emp-id">{row.employee_id}</div>
+                        </td>
+                        <td className="text-center font-medium">{row.total_working}</td>
+                        <td className="text-center text-emerald-600 font-semibold">{row.present_days}</td>
+                        <td className="text-center text-rose-600 font-semibold">{row.absent_days}</td>
+                        <td className="text-center text-amber-600 font-semibold">{row.late_days}</td>
                       </>
                     )}
                   </tr>
@@ -305,28 +323,54 @@ const Attendance = () => {
         </div>
       </div>
 
-      <FormalModal show={showDetailModal} onClose={() => setShowDetailModal(false)} title="Attendance Details" size="large" footer={<button className="btn-modal-submit" onClick={() => setShowDetailModal(false)}>Close</button>}>
+      <FormalModal show={showDetailModal} onClose={() => setShowDetailModal(false)} title="Attendance Details" footer={<button className="btn-modal-cancel" onClick={() => setShowDetailModal(false)}>Close</button>}>
         {selectedRecord && (
-          <div className="attendance-detail-formal">
-            <div className="detail-row">
-              <div className="detail-field"><span className="detail-label">Employee ID</span><span className="detail-value">{selectedRecord.employee_id}</span></div>
-              <div className="detail-field"><span className="detail-label">Full Name</span><span className="detail-value">{selectedRecord.full_name}</span></div>
+          <div className="attendance-detail-grid">
+            <div className="detail-field">
+              <span className="detail-label">Employee ID</span>
+              <span className="detail-value">{selectedRecord.employee_id}</span>
             </div>
-            <div className="detail-row">
-              <div className="detail-field"><span className="detail-label">Status</span><span className={`status-badge ${selectedRecord.status?.toLowerCase()}`}>{selectedRecord.status}</span></div>
-              <div className="detail-field"><span className="detail-label">Total Hours</span><span className="detail-value">{selectedRecord.total_hours} hrs</span></div>
+            <div className="detail-field">
+              <span className="detail-label">Full Name</span>
+              <span className="detail-value">{selectedRecord.full_name}</span>
             </div>
-            <div className="detail-row">
-              <div className="detail-field"><span className="detail-label">Time In</span><span className="detail-value">{formatTo12Hour(selectedRecord.time_in)}</span></div>
-              <div className="detail-field"><span className="detail-label">Time Out</span><span className="detail-value">{formatTo12Hour(selectedRecord.time_out)}</span></div>
+            <div className="detail-field">
+              <span className="detail-label">Status</span>
+              <span className={`status-badge inline-flex ${selectedRecord.status?.toLowerCase().replace(' ', '-')}`}>{selectedRecord.status}</span>
             </div>
-            <div className="detail-row">
-              <div className="detail-field"><span className="detail-label">Clock In Location</span><span className="detail-value">{selectedRecord.location ? selectedRecord.location.split('(')[0] : '—'}</span></div>
-              <div className="detail-field"><span className="detail-label">Clock Out Location</span><span className="detail-value">{selectedRecord.location && selectedRecord.time_out !== '--:--' ? selectedRecord.location.split('(')[0] : '—'}</span></div>
+            <div className="detail-field">
+              <span className="detail-label">Total Hours</span>
+              <span className="detail-value">{selectedRecord.total_hours} hrs</span>
             </div>
-            <div className="detail-row">
-              <div className="detail-field"><span className="detail-label">Clock In Selfie</span>{selectedRecord.clock_in_selfie ? <button className="selfie-view-btn" onClick={() => setExpandedSelfie(selectedRecord.clock_in_selfie)}><Eye size={14} /> View</button> : <span className="detail-value">—</span>}</div>
-              <div className="detail-field"><span className="detail-label">Clock Out Selfie</span>{selectedRecord.clock_out_selfie ? <button className="selfie-view-btn" onClick={() => setExpandedSelfie(selectedRecord.clock_out_selfie)}><Eye size={14} /> View</button> : <span className="detail-value">—</span>}</div>
+            <div className="detail-field">
+              <span className="detail-label">Time In</span>
+              <span className="detail-value">{formatTo12Hour(selectedRecord.time_in)}</span>
+            </div>
+            <div className="detail-field">
+              <span className="detail-label">Time Out</span>
+              <span className="detail-value">{formatTo12Hour(selectedRecord.time_out)}</span>
+            </div>
+            <div className="detail-field">
+              <span className="detail-label">Clock In Location</span>
+              <span className="detail-value">{selectedRecord.location ? selectedRecord.location.split('(')[0] : '—'}</span>
+            </div>
+            <div className="detail-field">
+              <span className="detail-label">Clock Out Location</span>
+              <span className="detail-value">{selectedRecord.location && selectedRecord.time_out !== '--:--' ? selectedRecord.location.split('(')[0] : '—'}</span>
+            </div>
+            <div className="detail-field">
+              <span className="detail-label">Clock In Selfie</span>
+              {selectedRecord.clock_in_selfie ? 
+                <button className="selfie-view-btn" onClick={() => setExpandedSelfie(selectedRecord.clock_in_selfie)}><Eye size={14} /> View Photo</button> 
+                : <span className="detail-value text-gray">—</span>
+              }
+            </div>
+            <div className="detail-field">
+              <span className="detail-label">Clock Out Selfie</span>
+              {selectedRecord.clock_out_selfie ? 
+                <button className="selfie-view-btn" onClick={() => setExpandedSelfie(selectedRecord.clock_out_selfie)}><Eye size={14} /> View Photo</button> 
+                : <span className="detail-value text-gray">—</span>
+              }
             </div>
           </div>
         )}
@@ -335,9 +379,9 @@ const Attendance = () => {
       {expandedSelfie && (
         <div className="selfie-overlay" onClick={() => setExpandedSelfie(null)}>
           <div className="selfie-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="selfie-close-btn" onClick={() => setExpandedSelfie(null)}><X size={24} /></button>
-            <img src={`${STATIC_BASE}${expandedSelfie}`} alt="Selfie" style={{ maxWidth: '100%', maxHeight: '80vh' }} />
-            <button className="selfie-fullscreen" onClick={() => window.open(`${STATIC_BASE}${expandedSelfie}`, '_blank')}><Maximize2 size={20} /> Fullscreen</button>
+            <button className="selfie-close-btn" onClick={() => setExpandedSelfie(null)}><X size={20} /></button>
+            <img src={`${STATIC_BASE}${expandedSelfie}`} alt="Selfie" className="selfie-img-large" />
+            <button className="selfie-fullscreen" onClick={() => window.open(`${STATIC_BASE}${expandedSelfie}`, '_blank')}><Maximize2 size={16} /> Open Fullscreen</button>
           </div>
         </div>
       )}

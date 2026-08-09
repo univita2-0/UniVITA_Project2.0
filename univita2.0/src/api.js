@@ -17,6 +17,37 @@ const handleWebResponse = async (res) => {
 };
 
 // ==========================================
+// PASSWORD RESET
+// ==========================================
+export const requestPasswordReset = async (email) => {
+    try {
+        const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        return await res.json();
+    } catch (error) {
+        console.error("Forgot Password Error:", error);
+        return { success: false, message: "Network error" };
+    }
+};
+
+export const resetPassword = async (data) => {
+    try {
+        const res = await fetch(`${API_BASE}/auth/reset-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data) // { email, otp, newPassword }
+        });
+        return await res.json();
+    } catch (error) {
+        console.error("Reset Password Error:", error);
+        return { success: false, message: "Network error" };
+    }
+};
+
+// ==========================================
 // AUTHENTICATION
 // ==========================================
 export const login = async (data) => {

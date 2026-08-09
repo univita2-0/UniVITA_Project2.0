@@ -63,50 +63,60 @@ const CompletedVisits = () => {
     a.download = `visitor_history_${startDate}_to_${endDate}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('CSV exported');
+    toast.success('CSV exported successfully');
   };
 
   return (
-    <div className="completed-visits-container">
+    <div className="cv-container">
       <div className="cv-header">
-        <h2>Completed Visits</h2>
-        <p>Visitors who checked in and returned their BLE tags</p>
+        <div>
+          <h2 className="cv-title">Completed Visits</h2>
+          <p className="cv-subtitle">View and export historical data for visitors who have checked out.</p>
+        </div>
       </div>
 
-      <div className="cv-filters">
-        <div className="date-range">
-          <div className="filter-group">
-            <label>From</label>
+      <div className="cv-filters-card">
+        <div className="cv-filters-wrapper">
+          <div className="cv-date-group">
+            <label>Start Date</label>
             <input
               type="date"
               value={startDate}
               onChange={e => setStartDate(e.target.value)}
-              className="date-input"
+              className="cv-modern-input"
             />
           </div>
-          <div className="filter-group">
-            <label>To</label>
+          
+          <div className="cv-date-separator">to</div>
+          
+          <div className="cv-date-group">
+            <label>End Date</label>
             <input
               type="date"
               value={endDate}
               onChange={e => setEndDate(e.target.value)}
-              className="date-input"
+              className="cv-modern-input"
             />
           </div>
-          <button className="btn-search" onClick={fetchHistory} disabled={loading}>
-            <Search size={16} /> {loading ? 'Loading...' : 'Search'}
-          </button>
-          <button className="btn-export" onClick={exportToCSV} disabled={visitors.length === 0}>
-            <Download size={16} /> Export CSV
-          </button>
+
+          <div className="cv-action-group">
+            <button className="btn-search-modern" onClick={fetchHistory} disabled={loading}>
+              <Search size={16} /> 
+              <span>{loading ? 'Searching...' : 'Search Records'}</span>
+            </button>
+            <button className="btn-export-modern" onClick={exportToCSV} disabled={visitors.length === 0}>
+              <Download size={16} /> 
+              <span>Export CSV</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="loading-state">Loading completed visits...</div>
+        <div className="cv-loading-state">Loading completed visits...</div>
       ) : visitors.length === 0 ? (
-        <div className="empty-state">
-          <Calendar size={48} />
+        <div className="cv-empty-state">
+          <Calendar size={40} className="empty-icon" />
           <p>No completed visits found for the selected date range.</p>
         </div>
       ) : (
@@ -114,7 +124,7 @@ const CompletedVisits = () => {
           <table className="cv-table">
             <thead>
               <tr>
-                <th>Name</th>
+                <th>Visitor Name</th>
                 <th>Visit Date</th>
                 <th>Checked In</th>
                 <th>Checked Out</th>
@@ -127,14 +137,19 @@ const CompletedVisits = () => {
               {visitors.map(v => (
                 <tr key={v.id}>
                   <td>
-                    <strong>{v.first_name} {v.last_name}</strong>
-                    <br /><span className="small-text">{v.email}</span>
+                    <div className="cv-name">{v.first_name} {v.last_name}</div>
+                    <div className="cv-email">{v.email}</div>
                   </td>
-                  <td>{v.visit_date} <br /><span className="small-text">{v.visit_time?.slice(0,5)}</span></td>
-                  <td>{v.arrived_time}</td>
-                  <td>{v.returned_time}</td>
-                  <td><span className="duration-badge">{v.duration}</span></td>
-                  <td>{v.destination || '—'}</td>
+                  <td>
+                    <div className="cv-date-text">{v.visit_date}</div>
+                    <div className="cv-time-text">{v.visit_time?.slice(0,5)}</div>
+                  </td>
+                  <td className="font-medium text-gray-900">{v.arrived_time}</td>
+                  <td className="font-medium text-gray-900">{v.returned_time}</td>
+                  <td>
+                    <span className="cv-duration-badge">{v.duration}</span>
+                  </td>
+                  <td className="cv-destination" title={v.destination}>{v.destination || '—'}</td>
                   <td>{v.ble_id || '—'}</td>
                 </tr>
               ))}

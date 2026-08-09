@@ -1,257 +1,258 @@
-.attendance-appeals-container {
+/* AttendanceAppeals.css - Modern Minimalist Redesign */
+
+.aa-container {
+  background: #FAFAFA;
   padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 
-.appeals-header {
+/* Header Section */
+.aa-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 2rem;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 1.5rem;
 }
 
-.appeals-header h1 {
-  font-size: 1.8rem;
-  font-weight: 600;
-  color: #1e293b;
+.aa-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 0.25rem;
+  letter-spacing: -0.02em;
+}
+
+.aa-subtitle {
+  color: #6B7280;
+  font-size: 0.95rem;
   margin: 0;
 }
 
-.btn-history {
-  background: #0d9488;
-  color: white;
-  border: none;
-  padding: 0.6rem 1.2rem;
-  border-radius: 40px;
+.aa-history-btn {
+  background-color: #FFFFFF;
+  color: #374151;
+  border: 1px solid #D1D5DB;
+  padding: 0.7rem 1.25rem;
+  border-radius: 8px;
   font-weight: 600;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: background 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
 }
 
-.btn-history:hover {
-  background: #0f766e;
+.aa-history-btn:hover {
+  background-color: #F9FAFB;
+  border-color: #9CA3AF;
+  color: #111827;
 }
 
-.no-appeals-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 20px;
-  padding: 3rem;
+.aa-empty-state {
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  padding: 4rem 2rem;
   text-align: center;
-  color: #64748b;
-  font-size: 1rem;
+  color: #6B7280;
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 
-/* ===== TABLE STYLES FOR PENDING APPEALS ===== */
-.appeals-table-wrapper {
+/* Table Styles */
+.aa-table-wrapper {
+  background: #FFFFFF;
+  border-radius: 12px;
+  border: 1px solid #E5E7EB;
   overflow-x: auto;
-  border-radius: 16px;
-  border: 1px solid #e2e8f0;
-  background: white;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 
-.appeals-table {
+.aa-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
-  min-width: 900px;
 }
 
-.appeals-table th,
-.appeals-table td {
-  padding: 0.75rem 1rem;
+.aa-table th {
   text-align: left;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 1rem 1.25rem;
+  background-color: #F9FAFB;
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: #4B5563;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #E5E7EB;
+  white-space: nowrap;
+}
+
+.aa-table td {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #F3F4F6;
+  font-size: 0.9rem;
+  color: #374151;
   vertical-align: middle;
 }
 
-.appeals-table th {
-  background: #f8fafc;
-  font-weight: 600;
-  color: #1e293b;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.aa-table tr:last-child td {
+  border-bottom: none;
 }
 
-.proof-cell a {
-  color: #0d9488;
-  text-decoration: none;
+.aa-table tr:hover td {
+  background-color: #F9FAFB;
+}
+
+.aa-emp-name { font-weight: 600; color: #111827; margin-bottom: 0.2rem; white-space: nowrap; }
+.aa-emp-id { font-size: 0.8rem; color: #6B7280; }
+
+.aa-reason-cell {
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #4B5563;
+}
+
+.aa-date-cell {
+  font-size: 0.8rem;
+  color: #6B7280;
+  white-space: nowrap;
+}
+
+/* Links & Buttons inside Table */
+.aa-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  color: #0D9488;
   font-weight: 500;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  text-decoration: none;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  transition: background 0.2s;
 }
 
-.proof-cell a:hover {
+.aa-link-btn:hover {
+  background: #F0FDFA;
   text-decoration: underline;
 }
 
-.submitted-cell {
-  white-space: nowrap;
-  font-size: 0.75rem;
-  color: #64748b;
+.aa-action-buttons {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
 }
 
-.actions-cell {
-  white-space: nowrap;
-}
-
-.actions-cell .btn-approve,
-.actions-cell .btn-reject {
-  padding: 0.25rem 0.75rem;
-  margin: 0 0.25rem;
-  font-size: 0.75rem;
-  border-radius: 20px;
-  font-weight: 600;
+.btn-approve, .btn-reject {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
   border: none;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
 }
 
-.actions-cell .btn-approve {
-  background: #059669;
-  color: white;
+.btn-approve {
+  background-color: #ECFDF5;
+  color: #059669;
+}
+.btn-approve:hover {
+  background-color: #D1FAE5;
+  color: #047857;
 }
 
-.actions-cell .btn-approve:hover {
-  background: #047857;
+.btn-reject {
+  background-color: #FEF2F2;
+  color: #DC2626;
+}
+.btn-reject:hover {
+  background-color: #FEE2E2;
+  color: #B91C1C;
 }
 
-.actions-cell .btn-reject {
-  background: #dc2626;
-  color: white;
-}
-
-.actions-cell .btn-reject:hover {
-  background: #b91c1c;
-}
-
-/* ===== MODAL & REMARKS ===== */
-.remarks-textarea {
-  width: 100%;
-  padding: 0.75rem;
-  border-radius: 12px;
-  border: 1px solid #cbd5e1;
-  font-family: inherit;
-  font-size: 0.9rem;
-  resize: vertical;
-  margin-top: 0.5rem;
-}
-
-/* ===== HISTORY MODAL – FULL WIDTH, NO HORIZONTAL SCROLL ===== */
-.formal-modal-content.modal-wide {
-  width: 100vw !important;
-  max-width: 100vw !important;
-  height: auto;
-  max-height: 90vh;
-  margin: 0;
-  border-radius: 0;
-}
-
-.formal-modal-overlay {
-  padding: 1rem;
-}
-
-.history-table-wrapper {
-  overflow-x: visible;
-  overflow-y: auto;
-  max-height: 75vh;
-}
-
-.history-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-  table-layout: auto;
-  white-space: nowrap;
-}
-
-.history-table th,
-.history-table td {
-  padding: 1rem 1.2rem;
-  border-bottom: 1px solid #e2e8f0;
-  text-align: left;
-  vertical-align: top;
-  white-space: nowrap;
-}
-
-/* Allow remarks cell to wrap if needed */
-.remarks-cell {
-  white-space: normal;
-  max-width: 300px;
-}
-
-.history-table th {
-  background: #f8fafc;
-  font-weight: 700;
-  color: #1e293b;
-  font-size: 0.85rem;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.status-badge {
-  display: inline-block;
-  padding: 0.3rem 0.8rem;
-  border-radius: 30px;
+/* Status Badges */
+.aa-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
   font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.aa-status-badge.approved { background: #ECFDF5; color: #059669; }
+.aa-status-badge.rejected { background: #FEF2F2; color: #DC2626; }
+.aa-status-badge.pending { background: #FFF7ED; color: #C2410C; }
+
+/* Modals */
+.aa-modal-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
 }
 
-.status-badge.approved {
-  background: #dcfce7;
-  color: #166534;
+.aa-modal-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
 }
 
-.status-badge.rejected {
-  background: #fee2e2;
-  color: #991b1b;
+.aa-textarea {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid #D1D5DB;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #111827;
+  background: #FFFFFF;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+  font-family: inherit;
+  resize: vertical;
 }
 
-.no-history {
-  text-align: center;
-  color: #64748b;
-  padding: 2rem;
+.aa-textarea:focus {
+  outline: none;
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13,148,136,0.1);
 }
 
-/* ===== RESPONSIVE ===== */
+.aa-history-wrapper {
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+}
+
+/* Formal Modal Danger Button Override */
+.btn-modal-submit.danger {
+  background: #DC2626;
+  color: #FFFFFF;
+}
+.btn-modal-submit.danger:hover {
+  background: #B91C1C;
+}
+
+/* Utilities */
+.text-center { text-align: center !important; }
+.font-medium { font-weight: 500; }
+.text-gray-900 { color: #111827 !important; }
+.text-gray-400 { color: #9CA3AF !important; }
+
+/* Responsive */
 @media (max-width: 768px) {
-  .attendance-appeals-container {
-    padding: 1rem;
-  }
-  .appeals-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .btn-history {
-    align-self: flex-start;
-  }
-  .appeals-table th,
-  .appeals-table td {
-    padding: 0.5rem;
-    font-size: 0.75rem;
-  }
-  .actions-cell .btn-approve,
-  .actions-cell .btn-reject {
-    padding: 0.2rem 0.5rem;
-    font-size: 0.7rem;
-  }
-  .formal-modal-content.modal-wide {
-    width: 100vw !important;
-  }
-  .history-table th,
-  .history-table td {
-    padding: 0.6rem;
-    font-size: 0.75rem;
-    white-space: normal;
-  }
+  .aa-container { padding: 1.5rem; }
+  .aa-header { flex-direction: column; align-items: stretch; }
+  .aa-history-btn { justify-content: center; }
 }

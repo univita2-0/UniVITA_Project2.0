@@ -138,21 +138,21 @@ const Reports = () => {
     }));
     return (
       <div className="screen-only">
-        <div className="report-stats-row">
-          <StatBox label="Total Regular Hrs" value={totalReg.toFixed(1)} icon={<Clock />} />
-          <StatBox label="Total Leave Days" value={totalLeave} icon={<FileText />} />
-          <StatBox label="Employees" value={attendanceData.length} icon={<Users />} />
+        <div className="rep-stats-row">
+          <StatBox label="Total Regular Hrs" value={totalReg.toFixed(1)} icon={<Clock size={20} />} />
+          <StatBox label="Total Leave Days" value={totalLeave} icon={<FileText size={20} />} />
+          <StatBox label="Employees" value={attendanceData.length} icon={<Users size={20} />} />
         </div>
-        <div className="chart-card">
-          <h3>Hours per Employee</h3>
-          {attendanceData.length === 0 ? <p className="empty-text">No data</p> : (
+        <div className="rep-chart-card">
+          <h3 className="rep-chart-title">Hours per Employee</h3>
+          {attendanceData.length === 0 ? <div className="rep-empty-state">No data available</div> : (
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={chart}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="Regular Hours" fill="#00897B" />
+              <BarChart data={chart} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#6B7280', fontSize: 12 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#6B7280', fontSize: 12 }} />
+                <Tooltip cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                <Bar dataKey="Regular Hours" fill="#0D9488" radius={[4, 4, 0, 0]} maxBarSize={50} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -171,24 +171,24 @@ const Reports = () => {
     }));
     return (
       <div className="screen-only">
-        <div className="report-stats-row">
-          <StatBox label="Employees Paid" value={payrollData.length} icon={<Users />} />
-          <StatBox label="Total Gross Pay" value={`₱${grossSum.toLocaleString()}`} icon={<DollarSign />} />
-          <StatBox label="Total Net Pay" value={`₱${netSum.toLocaleString()}`} icon={<DollarSign />} />
-          <StatBox label="Avg Net Pay" value={`₱${(payrollData.length ? netSum / payrollData.length : 0).toLocaleString()}`} icon={<TrendingUp />} />
+        <div className="rep-stats-row">
+          <StatBox label="Employees Paid" value={payrollData.length} icon={<Users size={20} />} />
+          <StatBox label="Total Gross Pay" value={`₱${grossSum.toLocaleString()}`} icon={<DollarSign size={20} />} />
+          <StatBox label="Total Net Pay" value={`₱${netSum.toLocaleString()}`} icon={<DollarSign size={20} />} />
+          <StatBox label="Avg Net Pay" value={`₱${(payrollData.length ? netSum / payrollData.length : 0).toLocaleString()}`} icon={<TrendingUp size={20} />} />
         </div>
-        <div className="chart-card">
-          <h3>Payroll Summary</h3>
-          {payrollData.length === 0 ? <p className="empty-text">No data</p> : (
+        <div className="rep-chart-card">
+          <h3 className="rep-chart-title">Payroll Summary (Top 10)</h3>
+          {payrollData.length === 0 ? <div className="rep-empty-state">No data available</div> : (
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={chart}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip formatter={(v) => `₱${Number(v).toLocaleString()}`} />
-                <Legend />
-                <Bar dataKey="Gross" fill="#F59E0B" />
-                <Bar dataKey="Net" fill="#10B981" />
+              <BarChart data={chart} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#6B7280', fontSize: 12 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#6B7280', fontSize: 12 }} />
+                <Tooltip formatter={(v) => `₱${Number(v).toLocaleString()}`} cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                <Legend iconType="circle" wrapperStyle={{ paddingTop: '15px' }} />
+                <Bar dataKey="Gross" fill="#94A3B8" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                <Bar dataKey="Net" fill="#0D9488" radius={[4, 4, 0, 0]} maxBarSize={40} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -206,22 +206,22 @@ const Reports = () => {
     ];
     return (
       <div className="screen-only">
-        <div className="report-stats-row">
-          <StatBox label="Approved" value={visitorStats.approved} icon={<Users />} />
-          <StatBox label="Rejected" value={visitorStats.rejected} icon={<Users />} />
-          <StatBox label="Pending" value={visitorStats.pending} icon={<Users />} />
-          <StatBox label="Total" value={total} icon={<PieChart />} />
+        <div className="rep-stats-row">
+          <StatBox label="Approved" value={visitorStats.approved} icon={<CheckCircle size={20} />} />
+          <StatBox label="Rejected" value={visitorStats.rejected} icon={<XCircle size={20} />} />
+          <StatBox label="Pending" value={visitorStats.pending} icon={<AlertCircle size={20} />} />
+          <StatBox label="Total Requests" value={total} icon={<PieChart size={20} />} />
         </div>
-        <div className="chart-card">
-          <h3>Visitor Request Status</h3>
-          {total === 0 ? <p className="empty-text">No data</p> : (
+        <div className="rep-chart-card">
+          <h3 className="rep-chart-title">Visitor Request Status Distribution</h3>
+          {total === 0 ? <div className="rep-empty-state">No data available</div> : (
             <ResponsiveContainer width="100%" height={300}>
               <RPieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
+                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={70} outerRadius={100} label>
                   {pieData.map((_, i) => <Cell key={i} fill={['#10B981','#EF4444','#F59E0B'][i]} />)}
                 </Pie>
-                <Tooltip />
-                <Legend />
+                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                <Legend iconType="circle" />
               </RPieChart>
             </ResponsiveContainer>
           )}
@@ -236,18 +236,18 @@ const Reports = () => {
     const upcoming = scheduleData.filter(s => new Date(s.schedule_date) >= new Date()).length;
     return (
       <div className="screen-only">
-        <div className="report-stats-row">
-          <StatBox label="Total Schedules" value={total} icon={<Calendar />} />
-          <StatBox label="Unique Employees" value={uniq} icon={<Users />} />
-          <StatBox label="Upcoming" value={upcoming} icon={<Clock />} />
+        <div className="rep-stats-row">
+          <StatBox label="Total Schedules" value={total} icon={<Calendar size={20} />} />
+          <StatBox label="Unique Employees" value={uniq} icon={<Users size={20} />} />
+          <StatBox label="Upcoming" value={upcoming} icon={<Clock size={20} />} />
         </div>
-        <div className="chart-card">
-          <h3>Schedule Overview</h3>
-          {scheduleData.length === 0 ? <p className="empty-text">No data</p> : (
-            <div className="simple-table">
-              <table className="custom-table">
+        <div className="rep-chart-card">
+          <h3 className="rep-chart-title">Schedule Overview Matrix</h3>
+          {scheduleData.length === 0 ? <div className="rep-empty-state">No data available</div> : (
+            <div className="rep-table-wrapper">
+              <table className="rep-table">
                 <thead><tr><th>Date</th><th>Employee</th><th>Course</th><th>Location</th></tr></thead>
-                <tbody>{scheduleData.slice(0,20).map((s,i)=> <tr key={i}><td>{s.schedule_date}</td><td>{s.full_name}</td><td>{s.course}</td><td>{s.place}</td></tr>)}</tbody>
+                <tbody>{scheduleData.slice(0,20).map((s,i)=> <tr key={i}><td>{s.schedule_date}</td><td className="font-medium">{s.full_name}</td><td>{s.course}</td><td>{s.place}</td></tr>)}</tbody>
               </table>
             </div>
           )}
@@ -268,42 +268,46 @@ const Reports = () => {
     ];
     return (
       <div className="screen-only">
-        <div className="report-stats-row">
-          <StatBox label="Pending Appeals" value={pendingCount} icon={<AlertCircle />} />
-          <StatBox label="Approved" value={approvedCount} icon={<CheckCircle />} />
-          <StatBox label="Rejected" value={rejectedCount} icon={<XCircle />} />
-          <StatBox label="Total Processed" value={totalProcessed} icon={<FileText />} />
+        <div className="rep-stats-row">
+          <StatBox label="Pending Appeals" value={pendingCount} icon={<AlertCircle size={20} />} />
+          <StatBox label="Approved" value={approvedCount} icon={<CheckCircle size={20} />} />
+          <StatBox label="Rejected" value={rejectedCount} icon={<XCircle size={20} />} />
+          <StatBox label="Total Processed" value={totalProcessed} icon={<FileText size={20} />} />
         </div>
-        <div className="chart-card">
-          <h3>Appeal Status Overview</h3>
-          {pendingCount + approvedCount + rejectedCount === 0 ? <p className="empty-text">No appeals data</p> : (
-            <ResponsiveContainer width="100%" height={300}>
-              <RPieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                  {pieData.map((_, i) => <Cell key={i} fill={['#F59E0B', '#10B981', '#EF4444'][i]} />)}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </RPieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-        <div className="chart-card">
-          <h3>Recent Pending Appeals</h3>
-          {pendingAppeals.length === 0 ? <p className="empty-text">No pending appeals</p> : (
-            <div className="simple-table">
-              <table className="custom-table">
-                <thead><tr><th>Date</th><th>Employee</th><th>Reason</th></tr></thead>
-                <tbody>{pendingAppeals.slice(0, 10).map(a => <tr key={a.id}><td>{a.date}</td><td>{a.full_name} ({a.employee_id})</td><td>{a.reason.substring(0, 60)}...</td></tr>)}</tbody>
-              </table>
-            </div>
-          )}
+        
+        <div className="rep-grid-2">
+          <div className="rep-chart-card">
+            <h3 className="rep-chart-title">Appeal Status Overview</h3>
+            {pendingCount + approvedCount + rejectedCount === 0 ? <div className="rep-empty-state">No appeals data</div> : (
+              <ResponsiveContainer width="100%" height={250}>
+                <RPieChart>
+                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={90} label>
+                    {pieData.map((_, i) => <Cell key={i} fill={['#F59E0B', '#10B981', '#EF4444'][i]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
+                  <Legend iconType="circle" />
+                </RPieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          
+          <div className="rep-chart-card">
+            <h3 className="rep-chart-title">Recent Pending Appeals</h3>
+            {pendingAppeals.length === 0 ? <div className="rep-empty-state">No pending appeals</div> : (
+              <div className="rep-table-wrapper" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                <table className="rep-table">
+                  <thead><tr><th>Date</th><th>Employee</th><th>Reason</th></tr></thead>
+                  <tbody>{pendingAppeals.slice(0, 10).map(a => <tr key={a.id}><td>{a.date}</td><td className="font-medium">{a.full_name}</td><td><span title={a.reason}>{a.reason.substring(0, 30)}...</span></td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
-  // ---------- Printable reports (unchanged but now working) ----------
+  // ---------- Printable reports (unchanged but integrated) ----------
   const PrintableHeader = () => (
     <div className="company-header">
       <h1>HCT ACADEMY</h1>
@@ -378,45 +382,54 @@ const Reports = () => {
   );
 
   return (
-    <div className="reports-container">
-      <div className="reports-control-bar">
-        <span className="report-title">Reports & Analytics</span>
-        <div className="report-actions">
-          <select className="report-date-select" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
-            {availableMonths.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-          <button className="btn-export-report" onClick={handleExport}><Download size={16} /> Export / Print</button>
+    <div className="rep-container">
+      <div className="rep-header-bar">
+        <h2 className="rep-main-title">Reports & Analytics</h2>
+        <div className="rep-header-actions">
+          <div className="rep-month-selector">
+            <Calendar size={16} className="rep-select-icon" />
+            <select className="rep-modern-select" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
+              {availableMonths.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+          <button className="btn-rep-export" onClick={handleExport}>
+            <Download size={16} /> 
+            <span>Export / Print</span>
+          </button>
         </div>
       </div>
 
-      <div className="reports-nav-grid">
+      <div className="rep-nav-grid">
         {[
-          { id:'attendance', title:'Attendance Report', desc:'Monthly attendance summary.' },
-          { id:'payroll', title:'Payroll Report', desc:'Gross pay, net pay, deductions.' },
-          { id:'visitor', title:'Visitor Report', desc:'Approved, rejected, pending requests.' },
-          { id:'scheduling', title:'Schedule Report', desc:'Upcoming schedules and distribution.' },
-          { id:'appeals', title:'Attendance Appeals', desc:'Pending, approved, rejected appeals.' }
+          { id:'attendance', title:'Attendance', desc:'Monthly summary & hours', icon: <Clock size={20} /> },
+          { id:'payroll', title:'Payroll', desc:'Pay cycles & deductions', icon: <DollarSign size={20} /> },
+          { id:'visitor', title:'Visitor Tracking', desc:'Approval distributions', icon: <Users size={20} /> },
+          { id:'scheduling', title:'Schedules', desc:'Upcoming distributions', icon: <Calendar size={20} /> },
+          { id:'appeals', title:'Appeals', desc:'Dispute resolutions', icon: <AlertCircle size={20} /> }
         ].map(r => (
-          <div key={r.id} className={`report-nav-card ${selectedReport===r.id?'active':''}`} onClick={()=>setSelectedReport(r.id)}>
-            <div className="r-card-title">{r.title}</div>
-            <div className="r-card-desc">{r.desc}</div>
+          <div key={r.id} className={`rep-nav-card ${selectedReport===r.id?'active':''}`} onClick={()=>setSelectedReport(r.id)}>
+            <div className="rep-nav-icon">{r.icon}</div>
+            <div>
+              <div className="rep-nav-title">{r.title}</div>
+              <div className="rep-nav-desc">{r.desc}</div>
+            </div>
           </div>
         ))}
       </div>
 
-      <div className="report-content-area screen-only">
-        {loading ? <div className="report-loader">Loading data...</div> :
-         error ? <div className="error-message">Error: {error}</div> :
+      <div className="rep-content-area screen-only">
+        {loading ? <div className="rep-loading-state">Gathering analytics data...</div> :
+         error ? <div className="rep-error-state">Error: {error}</div> :
          <>
-           <div className="current-report-header">
-             <h2 className="cr-title">
-               {selectedReport==='attendance'&&'Attendance Report'}
-               {selectedReport==='payroll'&&'Payroll Report'}
-               {selectedReport==='visitor'&&'Visitor Report'}
-               {selectedReport==='scheduling'&&'Schedule Report'}
-               {selectedReport==='appeals'&&'Attendance Appeals Report'}
-             </h2>
-             <p className="cr-subtitle">{availableMonths.find(m=>m.value===selectedMonth)?.label}</p>
+           <div className="rep-content-header">
+             <h3 className="rep-content-title">
+               {selectedReport==='attendance'&&'Attendance Analytics'}
+               {selectedReport==='payroll'&&'Payroll Analytics'}
+               {selectedReport==='visitor'&&'Visitor Tracking Analytics'}
+               {selectedReport==='scheduling'&&'Schedule Analytics'}
+               {selectedReport==='appeals'&&'Attendance Appeals Analytics'}
+             </h3>
+             <p className="rep-content-subtitle">Data for {availableMonths.find(m=>m.value===selectedMonth)?.label}</p>
            </div>
            {selectedReport==='attendance' && renderAttendanceReport()}
            {selectedReport==='payroll' && renderPayrollReport()}
@@ -427,7 +440,6 @@ const Reports = () => {
         }
       </div>
 
-      {/* Printable content – hidden on screen */}
       {selectedReport==='attendance' && renderPrintableAttendance()}
       {selectedReport==='payroll' && renderPrintablePayroll()}
       {selectedReport==='visitor' && renderPrintableVisitor()}
@@ -438,11 +450,11 @@ const Reports = () => {
 };
 
 const StatBox = ({ label, value, icon }) => (
-  <div className="r-stat-box">
-    <div className="stat-icon">{icon}</div>
-    <div className="stat-info">
-      <div className="r-stat-label">{label}</div>
-      <div className="r-stat-value">{value}</div>
+  <div className="rep-stat-box">
+    <div className="rep-stat-icon">{icon}</div>
+    <div className="rep-stat-info">
+      <div className="rep-stat-label">{label}</div>
+      <div className="rep-stat-value">{value}</div>
     </div>
   </div>
 );

@@ -1,79 +1,196 @@
-/* src/pages/RoleManagement.css */
-.role-container {
-  padding: 1.5rem;
-  background: #f8fafc;
-  min-height: 100%;
+/* src/pages/RoleManagement.css - Modern Minimalist */
+
+.rm-container {
+  padding: 2rem;
+  background: #FAFAFA;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, sans-serif;
 }
-.role-header {
+
+.rm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 2rem;
 }
-.role-header h1 {
-  font-size: 1.8rem;
+
+.rm-title {
+  font-size: 1.75rem;
   font-weight: 700;
-  color: #0f172a;
+  color: #111827;
   margin-bottom: 0.25rem;
+  letter-spacing: -0.02em;
 }
-.role-header p {
-  color: #64748b;
+
+.rm-subtitle {
+  color: #6B7280;
+  font-size: 0.95rem;
+  margin: 0;
 }
-.role-message {
+
+.rm-card {
+  background: #FFFFFF;
+  border-radius: 12px;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+
+/* Toolbar & Search */
+.rm-card-toolbar {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #E5E7EB;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
-  margin-bottom: 1.5rem;
 }
-.role-message.success {
-  background: #dcfce7;
-  color: #15803d;
+
+.rm-search-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
 }
-.role-message.error {
-  background: #fee2e2;
-  color: #b91c1c;
+
+.rm-search-icon {
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9CA3AF;
+  pointer-events: none;
 }
-.role-table-wrapper {
+
+.rm-input-search {
+  width: 100%;
+  padding: 0.65rem 1rem 0.65rem 2.5rem;
+  border: 1px solid #D1D5DB;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #111827;
+  background: #FFFFFF;
+  outline: none;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.rm-input-search:focus {
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
+}
+
+/* Table Styles */
+.rm-table-wrapper {
   overflow-x: auto;
-  background: white;
-  border-radius: 20px;
-  border: 1px solid #eef2f6;
+  border-radius: 0 0 12px 12px;
 }
-.role-table {
+
+.rm-table {
   width: 100%;
   border-collapse: collapse;
+  font-size: 0.9rem;
 }
-.role-table th,
-.role-table td {
-  padding: 0.75rem 1rem;
+
+.rm-table th {
   text-align: left;
-  border-bottom: 1px solid #f1f5f9;
-}
-.role-table th {
-  background: #f8fafc;
+  padding: 1rem 1.5rem;
+  background: #F9FAFB;
   font-weight: 600;
-  color: #475569;
+  color: #4B5563;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #E5E7EB;
 }
-.role-badge {
-  display: inline-block;
-  padding: 0.2rem 0.6rem;
-  border-radius: 30px;
-  font-size: 0.7rem;
+
+.rm-table td {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #F3F4F6;
+  vertical-align: middle;
+  color: #374151;
+}
+
+.rm-table tr:last-child td { border-bottom: none; }
+.rm-table tr:hover td { background: #F9FAFB; }
+
+.rm-empty-row td {
+  text-align: center;
+  padding: 4rem 2rem !important;
+  color: #6B7280;
+  font-weight: 500;
+}
+
+.rm-emp-id { font-weight: 500; color: #6B7280; font-family: monospace; font-size: 0.95rem; }
+.rm-emp-name { font-weight: 600; color: #111827; margin-bottom: 0.15rem; }
+.rm-emp-email { font-size: 0.8rem; color: #6B7280; }
+
+/* Badges */
+.rm-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
-.badge-admin { background: #dbeafe; color: #1e40af; }
-.badge-hr { background: #dcfce7; color: #15803d; }
-.badge-security { background: #fed7aa; color: #9a3412; }
-.badge-instructor { background: #e0e7ff; color: #3730a3; }
-.role-select {
-  padding: 0.4rem 0.8rem;
+
+.rm-badge-admin { background: #EFF6FF; color: #1D4ED8; }
+.rm-badge-hr { background: #ECFDF5; color: #047857; }
+.rm-badge-security { background: #FFFBEB; color: #B45309; }
+.rm-badge-instructor { background: #F3F4F6; color: #4B5563; }
+.rm-badge-default { background: #F9FAFB; color: #9CA3AF; }
+
+/* Select Dropdown */
+.rm-select-wrapper {
+  display: inline-block;
+  position: relative;
+}
+
+.rm-select {
+  padding: 0.5rem 2.25rem 0.5rem 1rem;
+  border: 1px solid #D1D5DB;
   border-radius: 8px;
-  border: 1px solid #cbd5e1;
-  background: white;
+  background: #FFFFFF;
   font-size: 0.85rem;
+  color: #111827;
+  font-weight: 500;
+  outline: none;
   cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 1.25em 1.25em;
+  transition: all 0.2s ease;
+  min-width: 140px;
 }
-.role-select:disabled {
+
+.rm-select:focus {
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
+}
+
+.rm-select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  background: #F9FAFB;
+}
+
+.rm-loading-state {
+  text-align: center;
+  padding: 4rem 2rem;
+  color: #6B7280;
+  font-weight: 500;
+  background: #FAFAFA;
+  min-height: 100vh;
+}
+
+.text-right { text-align: right !important; }
+
+/* Responsive */
+@media (max-width: 640px) {
+  .rm-container { padding: 1.5rem; }
+  .rm-header { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .rm-card-toolbar { padding: 1rem; }
+  .rm-search-wrapper { max-width: 100%; }
 }

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import './SharedCalendar.css';
 import {
   ChevronLeft, ChevronRight, Trash2, Edit3, Calendar as CalIcon,
-  MapPin, Clock, Plus, Check, X, History, Bell, CalendarDays, AlertCircle
+  MapPin, Clock, Plus, Check, X, History, Bell, CalendarDays
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -33,6 +33,10 @@ const SharedCalendar = () => {
   const [showUpcomingModal, setShowUpcomingModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showHolidaysModal, setShowHolidaysModal] = useState(false);
+  
+  // NEW: State for the specific date events modal
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [selectedDateStr, setSelectedDateStr] = useState(null);
 
   const [hoveredDateStr, setHoveredDateStr] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
@@ -131,6 +135,13 @@ const SharedCalendar = () => {
     try {
       await axios.delete(`${API_BASE}/events/${id}`, getAuthHeaders());
       toast.success('Event deleted');
+      
+      // If deleting from within the specific date modal, refresh or close it
+      if (showDateModal && selectedDateStr) {
+        const remainingForDate = events.filter(e => e.date === selectedDateStr && e.id !== id);
+        if (remainingForDate.length === 0) setShowDateModal(false);
+      }
+      
       loadAllData();
     } catch (err) {
       console.error(err);
@@ -157,11 +168,21 @@ const SharedCalendar = () => {
     setCurrentEventId(null);
   };
 
+  const handleDayClick = (day, dateStr, dayEvents) => {
+    setActiveDate(day);
+    if (dayEvents.length > 0) {
+      setHoveredDateStr(null); // Hide the tooltip immediately
+      setSelectedDateStr(dateStr);
+      setShowDateModal(true);
+    }
+  };
+
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const monthName = currentDate.toLocaleString('default', { month: 'long' });
   const days = Array.from({ length: new Date(year, month + 1, 0).getDate() }, (_, i) => i + 1);
   const startDay = new Date(year, month, 1).getDay();
+  // Adjust so Monday is the first day of the week (if preferred), here using Sunday as 0
   const emptySlots = Array(startDay === 0 ? 6 : startDay - 1).fill(null);
   const todayDateStr = new Date().toISOString().split('T')[0];
 
@@ -215,29 +236,36 @@ const SharedCalendar = () => {
           <span className="event-title">{event.title}</span>
           {!isReadOnly && !isLeave && !String(event.id).startsWith('ph-') && (
             <div className="event-actions">
-              <Edit3 size={16} onClick={() => handleEditClick(event)} style={{ marginRight: '10px', cursor: 'pointer', color: '#64748b' }} />
-              <Trash2 size={16} onClick={() => handleDeleteEvent(event.id)} style={{ cursor: 'pointer' }} />
+              <button className="icon-action-btn" onClick={() => handleEditClick(event)} title="Edit">
+                <Edit3 size={14} />
+              </button>
+              <button className="icon-action-btn danger" onClick={() => handleDeleteEvent(event.id)} title="Delete">
+                <Trash2 size={14} />
+              </button>
             </div>
           )}
         </div>
-        <div className="event-detail"><CalIcon size={14} /> {event.date}</div>
-        {event.start_time && (
-          <div className="event-detail"><Clock size={14} /> {event.start_time.substring(0,5)} - {event.end_time ? event.end_time.substring(0,5) : '?'}</div>
-        )}
-        {event.place && (
-          <div className="event-detail"><MapPin size={14} /> {event.place}</div>
-        )}
-        <div className={`event-type-tag ${legend?.className || 'school-event'}`}>{event.type}</div>
-        {event.description && (
-          <p className="event-description">{event.description}</p>
-        )}
+        <div className="event-details-grid">
+          <div className="event-detail"><CalIcon size={14} /> <span>{event.date}</span></div>
+          {event.start_time && (
+            <div className="event-detail"><Clock size={14} /> <span>{event.start_time.substring(0,5)} - {event.end_time ? event.end_time.substring(0,5) : '?'}</span></div>
+          )}
+          {event.place && (
+            <div className="event-detail"><MapPin size={14} /> <span>{event.place}</span></div>
+          )}
+        </div>
+        <div className="event-meta-footer">
+          <span className={`event-type-tag ${legend?.className || 'school-event'}`}>{event.type}</span>
+          {event.description && <span className="event-description-text">{event.description}</span>}
+        </div>
+        
         {isLeave && event.status === 'Pending' && !isReadOnly && (
-          <div className="leave-action-btns" style={{ marginTop: 10 }}>
+          <div className="leave-action-btns">
             <button className="btn-approve" onClick={() => handleUpdateStatus(event.id, 'Approved')}>
-              <Check size={16} /> Approve
+              <Check size={14} /> Approve
             </button>
             <button className="btn-reject" onClick={() => handleUpdateStatus(event.id, 'Rejected')}>
-              <X size={16} /> Reject
+              <X size={14} /> Reject
             </button>
           </div>
         )}
@@ -253,41 +281,45 @@ const SharedCalendar = () => {
             const prev = new Date(currentDate);
             prev.setMonth(prev.getMonth() - 1);
             setCurrentDate(prev);
-          }}><ChevronLeft size={24} /></button>
+          }}><ChevronLeft size={20} /></button>
           <span className="cal-title">{monthName} {year}</span>
           <button className="cal-nav-btn" onClick={() => {
             const next = new Date(currentDate);
             next.setMonth(next.getMonth() + 1);
             setCurrentDate(next);
-          }}><ChevronRight size={24} /></button>
+          }}><ChevronRight size={20} /></button>
         </div>
 
-        <div className="cal-grid">
-          {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map(d => <div key={d} className="cal-day-name">{d}</div>)}
-          {emptySlots.map((_, i) => <div key={`e-${i}`} className="cal-date empty"></div>)}
-          {days.map((day) => {
-            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const isToday = dateStr === todayDateStr;
-            const dayEvents = events.filter(e => e.date === dateStr);
-            return (
-              <div
-                key={day}
-                className={`cal-date ${day === activeDate ? 'active' : ''} ${isToday ? 'current-today' : ''}`}
-                onClick={() => setActiveDate(day)}
-                onMouseEnter={(e) => handleMouseEnter(dateStr, e)}
-                onMouseMove={handleMouseMove}
-                onMouseLeave={handleMouseLeave}
-              >
-                <span className="date-number">{day}</span>
-                <div className="dot-container">
-                  {dayEvents.map((e, i) => {
-                    const legend = legendItems.find(l => l.label === e.type || (leaveCategories.includes(e.type) && l.label === 'Leave'));
-                    return <div key={i} className={`dot ${legend?.className || 'event'}`}></div>;
-                  })}
+        <div className="cal-grid-wrapper">
+          <div className="cal-grid-header">
+            {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map(d => <div key={d} className="cal-day-name">{d}</div>)}
+          </div>
+          <div className="cal-grid-body">
+            {emptySlots.map((_, i) => <div key={`e-${i}`} className="cal-date empty"></div>)}
+            {days.map((day) => {
+              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const isToday = dateStr === todayDateStr;
+              const dayEvents = events.filter(e => e.date === dateStr);
+              return (
+                <div
+                  key={day}
+                  className={`cal-date ${day === activeDate ? 'active' : ''} ${isToday ? 'current-today' : ''}`}
+                  onClick={() => handleDayClick(day, dateStr, dayEvents)}
+                  onMouseEnter={(e) => handleMouseEnter(dateStr, e)}
+                  onMouseMove={handleMouseMove}
+                  onMouseLeave={handleMouseLeave}
+                >
+                  <span className="date-number">{day}</span>
+                  <div className="dot-container">
+                    {dayEvents.map((e, i) => {
+                      const legend = legendItems.find(l => l.label === e.type || (leaveCategories.includes(e.type) && l.label === 'Leave'));
+                      return <div key={i} className={`dot ${legend?.className || 'event'}`} title={e.title}></div>;
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
         <div className="cal-legend">
@@ -303,32 +335,34 @@ const SharedCalendar = () => {
       <div className="calendar-sidebar">
         {!isReadOnly && (
           <button className="sidebar-btn btn-add" onClick={() => { resetForm(); setShowModal(true); }}>
-            <Plus size={18} /> Add Event
+            <div className="sidebar-btn-content"><Plus size={16} /> Add New Event</div>
           </button>
         )}
 
         <button className="sidebar-btn btn-history" onClick={() => setShowHistoryModal(true)}>
-          <History size={18} /> View History
+          <div className="sidebar-btn-content"><History size={16} /> View History Log</div>
         </button>
 
+        <div className="sidebar-divider"></div>
+
         <button className="sidebar-btn btn-upcoming" onClick={() => setShowUpcomingModal(true)}>
-          <CalIcon size={18} /> Upcoming Events
+          <div className="sidebar-btn-content"><CalIcon size={16} /> Upcoming Events</div>
           <span className="badge">{schoolEvents.length}</span>
         </button>
 
         <button className="sidebar-btn btn-leave" onClick={() => setShowLeaveModal(true)}>
-          <Bell size={18} /> Leave Requests
+          <div className="sidebar-btn-content"><Bell size={16} /> Leave Requests</div>
           <span className="badge">{leaveRequests.length}</span>
         </button>
 
         <button className="sidebar-btn btn-holiday" onClick={() => setShowHolidaysModal(true)}>
-          <CalendarDays size={18} /> Philippine Holidays
+          <div className="sidebar-btn-content"><CalendarDays size={16} /> PH Holidays</div>
           <span className="badge">{phHolidaysList.length}</span>
         </button>
       </div>
 
-      {/* Hover Tooltip */}
-      {hoveredEvents.length > 0 && hoveredDateStr && (
+      {/* Hover Tooltip (Only shows if modal is NOT open) */}
+      {!showDateModal && hoveredEvents.length > 0 && hoveredDateStr && (
         <div className="calendar-tooltip" style={{ left: tooltipPos.x, top: tooltipPos.y, position: 'fixed' }}>
           {hoveredEvents.map((event, idx) => {
             const legend = legendItems.find(l => l.label === event.type);
@@ -339,61 +373,72 @@ const SharedCalendar = () => {
                   <div className="tooltip-time">{event.start_time?.substring(0,5)} - {event.end_time ? event.end_time.substring(0,5) : '?'}</div>
                 )}
                 {event.place && <div className="tooltip-place">{event.place}</div>}
-                {event.description && <div className="tooltip-desc">{event.description}</div>}
-                <span className={`event-type-tag ${legend?.className || 'school-event'}`}>{event.type}</span>
+                <span className={`event-type-tag inline ${legend?.className || 'school-event'}`}>{event.type}</span>
               </div>
             );
           })}
         </div>
       )}
 
+      {/* Specific Date Events Modal */}
+      <FormalModal 
+        show={showDateModal} 
+        onClose={() => setShowDateModal(false)} 
+        title={selectedDateStr ? `Events for ${new Date(selectedDateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}` : 'Events'} 
+        footer={<button className="btn-modal-cancel" onClick={() => setShowDateModal(false)}>Close Window</button>}
+      >
+        <div className="event-list-scroll">
+          {selectedDateStr && events.filter(e => e.date === selectedDateStr).map(renderEventItem)}
+        </div>
+      </FormalModal>
+
       {/* Add/Edit Event Modal */}
       {!isReadOnly && (
         <FormalModal
           show={showModal}
           onClose={() => { setShowModal(false); resetForm(); }}
-          title={isEditing ? 'Edit Event' : 'Add New Event'}
+          title={isEditing ? 'Edit Event Details' : 'Create New Event'}
           wide
           footer={
             <>
               <button className="btn-modal-cancel" onClick={() => { setShowModal(false); resetForm(); }}>Cancel</button>
               <button className="btn-modal-submit" onClick={handleSaveEvent}>
-                {isEditing ? 'Update Event' : 'Save Event'}
+                {isEditing ? 'Save Changes' : 'Create Event'}
               </button>
             </>
           }
         >
           <div className="modal-form-group">
-            <label className="modal-label">Event Title</label>
-            <input type="text" className="modal-input" placeholder="Title" value={newEvent.title}
+            <label className="modal-label">Event Title *</label>
+            <input type="text" className="modal-input" placeholder="e.g. Department Meeting" value={newEvent.title}
               onChange={(e) => setNewEvent({...newEvent, title: e.target.value})} />
           </div>
           <div className="form-row-grid">
             <div className="modal-form-group">
-              <label className="modal-label">Date</label>
+              <label className="modal-label">Date *</label>
               <input type="date" className="modal-input" min={todayDateStr} value={newEvent.date}
                 onChange={(e) => setNewEvent({...newEvent, date: e.target.value})} />
             </div>
             <div className="modal-form-group">
               <label className="modal-label">Location</label>
-              <input type="text" className="modal-input" placeholder="Place" value={newEvent.place}
+              <input type="text" className="modal-input" placeholder="e.g. Room 101" value={newEvent.place}
                 onChange={(e) => setNewEvent({...newEvent, place: e.target.value})} />
             </div>
           </div>
           <div className="form-row-grid">
             <div className="modal-form-group">
-              <label className="modal-label">Start Time (Optional)</label>
+              <label className="modal-label">Start Time</label>
               <input type="time" className="modal-input" value={newEvent.start_time}
                 onChange={(e) => setNewEvent({...newEvent, start_time: e.target.value})} />
             </div>
             <div className="modal-form-group">
-              <label className="modal-label">End Time (Optional)</label>
+              <label className="modal-label">End Time</label>
               <input type="time" className="modal-input" value={newEvent.end_time}
                 onChange={(e) => setNewEvent({...newEvent, end_time: e.target.value})} />
             </div>
           </div>
           <div className="modal-form-group">
-            <label className="modal-label">Type</label>
+            <label className="modal-label">Event Type</label>
             <select className="modal-select" value={newEvent.type}
               onChange={(e) => setNewEvent({...newEvent, type: e.target.value})}>
               {legendItems.filter(l => !leaveCategories.includes(l.label)).map(item => (
@@ -403,7 +448,7 @@ const SharedCalendar = () => {
           </div>
           <div className="modal-form-group">
             <label className="modal-label">Description (Optional)</label>
-            <textarea className="modal-input" rows={3} value={newEvent.description}
+            <textarea className="modal-input" rows={3} placeholder="Add any additional notes here..." value={newEvent.description}
               onChange={(e) => setNewEvent({...newEvent, description: e.target.value})} />
           </div>
         </FormalModal>
@@ -413,22 +458,25 @@ const SharedCalendar = () => {
       <FormalModal
         show={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
-        title="History Log"
+        title="Event History Log"
         wide
+        footer={<button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>Close Window</button>}
       >
         <div className="history-filters">
-          <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="modal-select">
-            <option value="">All Months</option>
-            {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
-              <option key={m} value={m}>{new Date(2000, i).toLocaleString('default', { month: 'long' })}</option>
-            ))}
-          </select>
-          <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="modal-select">
-            <option value="">All Years</option>
-            {Array.from({length:5}, (_,i) => new Date().getFullYear()-i).map(y => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
+          <div className="history-filter-group">
+            <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="modal-select">
+              <option value="">All Months</option>
+              {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m, i) => (
+                <option key={m} value={m}>{new Date(2000, i).toLocaleString('default', { month: 'long' })}</option>
+              ))}
+            </select>
+            <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="modal-select">
+              <option value="">All Years</option>
+              {Array.from({length:5}, (_,i) => new Date().getFullYear()-i).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
           <button className="btn-modal-cancel" onClick={() => { setFilterMonth(''); setFilterYear(''); }}>Clear Filters</button>
         </div>
         <div className="history-table-wrapper">
@@ -437,21 +485,21 @@ const SharedCalendar = () => {
               <tr>
                 <th>Date</th>
                 <th>Event Title</th>
-                <th>Type</th>
+                <th className="text-right">Type</th>
               </tr>
             </thead>
             <tbody>
               {filteredHistory.length === 0 ? (
-                <tr><td colSpan="3" className="no-history">No records found</td></tr>
+                <tr><td colSpan="3" className="no-history">No historical records found.</td></tr>
               ) : (
                 filteredHistory.map((item) => (
                   <tr key={item.id}>
                     <td className="history-date-cell">{item.date} </td>
                     <td className="history-title-cell">
-                      {item.title}
+                      <div className="font-medium text-gray-900">{item.title}</div>
                       {item.description && <div className="history-desc">{item.description}</div>}
                      </td>
-                    <td className="history-type-cell">
+                    <td className="history-type-cell text-right">
                       <span className={`event-type-tag ${getEventClass(item.type)}`}>
                         {item.type === 'Holiday' ? 'HOLIDAY' : item.type}
                       </span>
@@ -465,23 +513,23 @@ const SharedCalendar = () => {
       </FormalModal>
 
       {/* Upcoming Events Modal */}
-      <FormalModal show={showUpcomingModal} onClose={() => setShowUpcomingModal(false)} title="Upcoming Events" wide>
+      <FormalModal show={showUpcomingModal} onClose={() => setShowUpcomingModal(false)} title="Upcoming Events" footer={<button className="btn-modal-cancel" onClick={() => setShowUpcomingModal(false)}>Close</button>}>
         <div className="event-list-scroll">
-          {schoolEvents.length === 0 ? <p className="no-events">No upcoming events</p> : schoolEvents.map(renderEventItem)}
+          {schoolEvents.length === 0 ? <div className="no-history">No upcoming events scheduled.</div> : schoolEvents.map(renderEventItem)}
         </div>
       </FormalModal>
 
       {/* Leave Requests Modal */}
-      <FormalModal show={showLeaveModal} onClose={() => setShowLeaveModal(false)} title="Pending Leave Requests" wide>
+      <FormalModal show={showLeaveModal} onClose={() => setShowLeaveModal(false)} title="Pending Leave Requests" footer={<button className="btn-modal-cancel" onClick={() => setShowLeaveModal(false)}>Close</button>}>
         <div className="event-list-scroll">
-          {leaveRequests.length === 0 ? <p className="no-events">No pending requests</p> : leaveRequests.map(renderEventItem)}
+          {leaveRequests.length === 0 ? <div className="no-history">No pending leave requests.</div> : leaveRequests.map(renderEventItem)}
         </div>
       </FormalModal>
 
       {/* Holidays Modal */}
-      <FormalModal show={showHolidaysModal} onClose={() => setShowHolidaysModal(false)} title="Philippine Holidays" wide>
+      <FormalModal show={showHolidaysModal} onClose={() => setShowHolidaysModal(false)} title="Philippine Holidays" footer={<button className="btn-modal-cancel" onClick={() => setShowHolidaysModal(false)}>Close</button>}>
         <div className="event-list-scroll">
-          {phHolidaysList.length === 0 ? <p className="no-events">No upcoming holidays</p> : phHolidaysList.map(renderEventItem)}
+          {phHolidaysList.length === 0 ? <div className="no-history">No upcoming holidays recorded.</div> : phHolidaysList.map(renderEventItem)}
         </div>
       </FormalModal>
 
@@ -490,17 +538,18 @@ const SharedCalendar = () => {
         <FormalModal
           show={showConfirmModal}
           onClose={() => setShowConfirmModal(false)}
-          title="Confirm Action"
+          title="Confirm Leave Action"
+          small
           footer={
             <>
               <button className="btn-modal-cancel" onClick={() => setShowConfirmModal(false)}>Cancel</button>
-              <button className="btn-modal-submit" onClick={confirmUpdateStatus}>
-                Yes, {pendingAction.status === 'Approved' ? 'Approve' : 'Reject'}
+              <button className={`btn-modal-submit ${pendingAction.status === 'Rejected' ? 'danger' : ''}`} onClick={confirmUpdateStatus}>
+                Confirm {pendingAction.status === 'Approved' ? 'Approval' : 'Rejection'}
               </button>
             </>
           }
         >
-          <p>Are you sure you want to {pendingAction.status === 'Approved' ? 'approve' : 'reject'} this leave request?</p>
+          <p>Are you sure you want to <strong>{pendingAction.status === 'Approved' ? 'approve' : 'reject'}</strong> this leave request?</p>
         </FormalModal>
       )}
     </div>

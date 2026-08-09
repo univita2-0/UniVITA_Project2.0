@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import FormalModal from '../components/FormalModal';
+import { History, CheckCircle, XCircle, ExternalLink } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AttendanceAppeals.css';
 
@@ -10,14 +11,14 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Format date from ISO to YYYY-MM-DD
+// Format date from ISO to YYYY-MM-DD[cite: 3]
 const formatDate = (dateStr) => {
   if (!dateStr) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
   return dateStr.split('T')[0];
 };
 
-// Format time from HH:MM:SS to HH:MM
+// Format time from HH:MM:SS to HH:MM[cite: 3]
 const formatTime = (timeStr) => {
   if (!timeStr) return '';
   return timeStr.substring(0, 5);
@@ -90,58 +91,64 @@ const AttendanceAppeals = () => {
   };
 
   return (
-    <div className="attendance-appeals-container">
-      <div className="appeals-header">
-        <h1>Attendance Appeals</h1>
-        <button className="btn-history" onClick={openHistoryModal}>
-          View History
+    <div className="aa-container">
+      <div className="aa-header">
+        <div>
+          <h1 className="aa-title">Attendance Appeals</h1>
+          <p className="aa-subtitle">Review and manage employee attendance disputes.</p>
+        </div>
+        <button className="aa-history-btn" onClick={openHistoryModal}>
+          <History size={16} /> View History
         </button>
       </div>
 
       {pendingAppeals.length === 0 ? (
-        <div className="no-appeals-card">
-          <p>No pending appeals.</p>
+        <div className="aa-empty-state">
+          <p>No pending appeals at this time.</p>
         </div>
       ) : (
-        <div className="appeals-table-wrapper">
-          <table className="appeals-table">
+        <div className="aa-table-wrapper">
+          <table className="aa-table">
             <thead>
               <tr>
                 <th>Employee</th>
-                <th>Employee ID</th>
                 <th>Date</th>
-                <th>Requested Time In</th>
-                <th>Requested Time Out</th>
+                <th>Requested In</th>
+                <th>Requested Out</th>
                 <th>Reason</th>
-                <th>Proof</th>
+                <th className="text-center">Proof</th>
                 <th>Submitted</th>
-                <th>Actions</th>
+                <th className="text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
               {pendingAppeals.map((appeal) => (
                 <tr key={appeal.id}>
-                  <td>{appeal.full_name}</td>
-                  <td>{appeal.employee_id}</td>
-                  <td>{formatDate(appeal.date)}</td>
+                  <td>
+                    <div className="aa-emp-name">{appeal.full_name}</div>
+                    <div className="aa-emp-id">{appeal.employee_id}</div>
+                  </td>
+                  <td className="font-medium text-gray-900">{formatDate(appeal.date)}</td>
                   <td>{appeal.requested_time_in ? formatTime(appeal.requested_time_in) : '—'}</td>
                   <td>{appeal.requested_time_out ? formatTime(appeal.requested_time_out) : '—'}</td>
-                  <td>{appeal.reason}</td>
-                  <td className="proof-cell">
+                  <td className="aa-reason-cell" title={appeal.reason}>{appeal.reason}</td>
+                  <td className="text-center">
                     {appeal.image_url ? (
-                      <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer">
-                        View
+                      <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link-btn">
+                        <ExternalLink size={14} /> View
                       </a>
-                    ) : '—'}
+                    ) : <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="submitted-cell">{new Date(appeal.submitted_at).toLocaleString()}</td>
-                  <td className="actions-cell">
-                    <button className="btn-approve" onClick={() => openRemarkModal(appeal, 'approved')}>
-                      Approve
-                    </button>
-                    <button className="btn-reject" onClick={() => openRemarkModal(appeal, 'rejected')}>
-                      Reject
-                    </button>
+                  <td className="aa-date-cell">{new Date(appeal.submitted_at).toLocaleString()}</td>
+                  <td>
+                    <div className="aa-action-buttons">
+                      <button className="btn-approve" onClick={() => openRemarkModal(appeal, 'approved')} title="Approve">
+                        <CheckCircle size={16} />
+                      </button>
+                      <button className="btn-reject" onClick={() => openRemarkModal(appeal, 'rejected')} title="Reject">
+                        <XCircle size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -150,59 +157,61 @@ const AttendanceAppeals = () => {
         </div>
       )}
 
-      {/* Remarks Modal */}
+      {/* Remarks Modal[cite: 3] */}
       <FormalModal
         show={showRemarkModal}
         onClose={() => setShowRemarkModal(false)}
-        title="Add Remarks (Optional)"
+        title={`${actionType === 'approved' ? 'Approve' : 'Reject'} Appeal`}
         footer={
           <>
             <button className="btn-modal-cancel" onClick={() => setShowRemarkModal(false)} disabled={loading}>
               Cancel
             </button>
-            <button className="btn-modal-submit" onClick={updateAppealStatus} disabled={loading}>
-              {loading ? 'Processing...' : actionType === 'approved' ? 'Approve' : 'Reject'}
+            <button className={`btn-modal-submit ${actionType === 'rejected' ? 'danger' : ''}`} onClick={updateAppealStatus} disabled={loading}>
+              {loading ? 'Processing...' : actionType === 'approved' ? 'Confirm Approval' : 'Confirm Rejection'}
             </button>
           </>
         }
       >
-        <textarea
-          rows="4"
-          placeholder="Enter remarks for the employee (e.g., reason for approval/rejection)..."
-          value={adminRemarks}
-          onChange={(e) => setAdminRemarks(e.target.value)}
-          className="remarks-textarea"
-          disabled={loading}
-        />
+        <div className="aa-modal-group">
+          <label className="aa-modal-label">Admin Remarks (Optional)</label>
+          <textarea
+            rows="4"
+            placeholder="Enter remarks or reasoning..."
+            value={adminRemarks}
+            onChange={(e) => setAdminRemarks(e.target.value)}
+            className="aa-textarea"
+            disabled={loading}
+          />
+        </div>
       </FormalModal>
 
-      {/* History Modal */}
+      {/* History Modal[cite: 3] */}
       <FormalModal
         show={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
         title="Appeal History"
-        size="large"
+        wide
         footer={
-          <button className="btn-modal-submit" onClick={() => setShowHistoryModal(false)}>
-            Close
+          <button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>
+            Close Window
           </button>
         }
       >
         {historyAppeals.length === 0 ? (
-          <p className="no-history">No past appeals found.</p>
+          <div className="aa-empty-state">No past appeals found.</div>
         ) : (
-          <div className="history-table-wrapper">
-            <table className="history-table">
+          <div className="aa-history-wrapper">
+            <table className="aa-table">
               <thead>
                 <tr>
                   <th>Employee</th>
-                  <th>ID</th>
                   <th>Date</th>
                   <th>Requested In</th>
                   <th>Requested Out</th>
                   <th>Reason</th>
-                  <th>Proof</th>
-                  <th>Status</th>
+                  <th className="text-center">Proof</th>
+                  <th className="text-center">Status</th>
                   <th>Admin Remarks</th>
                   <th>Submitted</th>
                 </tr>
@@ -210,22 +219,28 @@ const AttendanceAppeals = () => {
               <tbody>
                 {historyAppeals.map((appeal) => (
                   <tr key={appeal.id}>
-                    <td>{appeal.full_name}</td>
-                    <td>{appeal.employee_id}</td>
-                    <td>{formatDate(appeal.date)}</td>
+                    <td>
+                      <div className="aa-emp-name">{appeal.full_name}</div>
+                      <div className="aa-emp-id">{appeal.employee_id}</div>
+                    </td>
+                    <td className="font-medium text-gray-900">{formatDate(appeal.date)}</td>
                     <td>{appeal.requested_time_in ? formatTime(appeal.requested_time_in) : '—'}</td>
                     <td>{appeal.requested_time_out ? formatTime(appeal.requested_time_out) : '—'}</td>
-                    <td>{appeal.reason}</td>
-                    <td className="proof-cell">
+                    <td className="aa-reason-cell" title={appeal.reason}>{appeal.reason}</td>
+                    <td className="text-center">
                       {appeal.image_url ? (
-                        <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer">
-                          View
+                        <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link-btn">
+                          <ExternalLink size={14} /> View
                         </a>
-                      ) : '—'}
+                      ) : <span className="text-gray-400">—</span>}
                     </td>
-                    <td><span className={`status-badge ${appeal.status}`}>{appeal.status.toUpperCase()}</span></td>
-                    <td className="remarks-cell">{appeal.admin_remarks || '—'}</td>
-                    <td className="submitted-cell">{new Date(appeal.submitted_at).toLocaleString()}</td>
+                    <td className="text-center">
+                      <span className={`aa-status-badge ${appeal.status}`}>
+                        {appeal.status}
+                      </span>
+                    </td>
+                    <td className="aa-reason-cell" title={appeal.admin_remarks}>{appeal.admin_remarks || '—'}</td>
+                    <td className="aa-date-cell">{new Date(appeal.submitted_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
               </tbody>

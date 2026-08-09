@@ -1,15 +1,16 @@
-/* FormalModal.css – Unified formal modal styles for the entire app */
+/* FormalModal.css – Strict Enterprise Sizing & Modern Styling */
 
 .formal-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: rgba(15, 23, 42, 0.55);
+  background-color: rgba(17, 24, 39, 0.6);
   backdrop-filter: blur(4px);
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 1000;
+  z-index: 9999; /* Ensure it sits on top of all other navigation/elements */
   animation: fadeInOverlay 0.2s ease-out;
+  padding: 1rem;
 }
 
 @keyframes fadeInOverlay {
@@ -19,42 +20,39 @@
 
 .formal-modal-content {
   background: #ffffff;
-  border-radius: 20px;
-  width: 90%;
-  max-width: 560px;
+  border-radius: 12px;
+  
+  /* Dynamic Height keeps it from breaking off the screen */
+  height: fit-content;
   max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  
+  /* Flex layout keeps header/footer locked while body scrolls */
+  display: flex;
+  flex-direction: column; 
+  
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.2);
   padding: 0;
   animation: slideUpModal 0.25s ease-out;
 }
 
 @keyframes slideUpModal {
-  from { transform: translateY(24px); opacity: 0; }
+  from { transform: translateY(20px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
-}
-
-.formal-modal-content.modal-wide {
-  max-width: 1100px;
-  width: 95%;   
-}
-
-.formal-modal-content.modal-small {
-  max-width: 420px;
 }
 
 .formal-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #E5E7EB;
+  flex-shrink: 0; 
 }
 
 .formal-modal-title {
   font-size: 1.15rem;
   font-weight: 700;
-  color: #0f172a;
+  color: #111827;
   margin: 0;
   letter-spacing: -0.01em;
 }
@@ -64,10 +62,10 @@
   border: none;
   font-size: 1.4rem;
   cursor: pointer;
-  color: #94a3b8;
-  padding: 4px 8px;
+  color: #9CA3AF;
+  padding: 6px;
   border-radius: 8px;
-  transition: background 0.2s, color 0.2s;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -75,62 +73,69 @@
 }
 
 .formal-close-btn:hover {
-  background: #f1f5f9;
-  color: #0f172a;
+  background: #F3F4F6;
+  color: #111827;
 }
 
+/* Body scrolls automatically if the content is too tall */
 .formal-modal-body {
-  padding: 24px;
+  padding: 1.5rem;
+  overflow-y: auto; 
 }
 
 .formal-modal-body p {
   margin: 0 0 16px 0;
-  color: #475569;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  color: #4B5563;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .formal-modal-footer {
-  padding: 16px 24px;
-  border-top: 1px solid #e2e8f0;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #E5E7EB;
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  flex-shrink: 0; 
 }
 
-/* Keep existing form styles so they don't need to be redefined */
+/* Base Form styles for usage inside the modal body */
 .formal-modal-body .modal-form-group { margin-bottom: 18px; }
-.formal-modal-body .modal-label { display: block; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 6px; }
+.formal-modal-body .modal-label { display: block; font-size: 0.85rem; font-weight: 600; color: #374151; margin-bottom: 6px; }
 .formal-modal-body .modal-input, .formal-modal-body .modal-select {
-  width: 100%; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 10px;
-  font-size: 0.9rem; color: #0f172a; background-color: #f8fafc; outline: none;
+  width: 100%; padding: 10px 14px; border: 1px solid #D1D5DB; border-radius: 8px;
+  font-size: 0.9rem; color: #111827; background-color: #FFFFFF; outline: none;
   transition: border-color 0.2s, box-shadow 0.2s; box-sizing: border-box;
 }
 .formal-modal-body .modal-input:focus, .formal-modal-body .modal-select:focus {
-  border-color: #00897B; background-color: #fff; box-shadow: 0 0 0 3px rgba(0, 137, 123, 0.1);
+  border-color: #0D9488; box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 .formal-modal-body .modal-select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
-  background-repeat: no-repeat; background-position: right 12px center; background-size: 20px; padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 1.25em; padding-right: 36px;
 }
 
-/* Button styles for footer usage */
+/* Footer Buttons */
 .formal-modal-footer .btn-modal-cancel,
 .formal-modal-footer .btn-modal-submit {
-  padding: 10px 24px; border-radius: 40px; font-weight: 600; font-size: 0.85rem;
-  border: none; cursor: pointer; transition: background 0.2s, transform 0.1s;
+  padding: 0.6rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem;
+  border: 1px solid transparent; cursor: pointer; transition: all 0.2s ease;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
 }
-.formal-modal-footer .btn-modal-cancel { background: #f1f5f9; color: #475569; }
-.formal-modal-footer .btn-modal-cancel:hover { background: #e2e8f0; }
-.formal-modal-footer .btn-modal-submit { background: #0f172a; color: #ffffff; }
-.formal-modal-footer .btn-modal-submit:hover { background: #1e293b; }
-.formal-modal-footer .btn-modal-submit:active { transform: scale(0.97); }
-.formal-modal-footer .btn-modal-submit:disabled { background: #94a3b8; cursor: not-allowed; }
+.formal-modal-footer .btn-modal-cancel { background: #FFFFFF; border-color: #D1D5DB; color: #374151; }
+.formal-modal-footer .btn-modal-cancel:hover { background: #F9FAFB; border-color: #9CA3AF; }
 
-/* Responsive */
-@media (max-width: 640px) {
-  .formal-modal-content { border-radius: 16px; width: 95%; }
-  .formal-modal-header, .formal-modal-body, .formal-modal-footer { padding-left: 16px; padding-right: 16px; }
+.formal-modal-footer .btn-modal-submit { background: #111827; color: #ffffff; }
+.formal-modal-footer .btn-modal-submit:hover { background: #374151; }
+
+.formal-modal-footer .btn-modal-submit.danger { background: #DC2626; }
+.formal-modal-footer .btn-modal-submit.danger:hover { background: #B91C1C; }
+
+.formal-modal-footer .btn-modal-submit:disabled { background: #9CA3AF; cursor: not-allowed; }
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .formal-modal-content { max-width: 100% !important; }
+  .formal-modal-header, .formal-modal-body, .formal-modal-footer { padding: 1.25rem; }
 }

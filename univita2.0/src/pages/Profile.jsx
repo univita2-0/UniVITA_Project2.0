@@ -1,8 +1,8 @@
-// src/pages/Profile.jsx – Modern, formal, with necessary details only
+// src/pages/Profile.jsx
 import React, { useState, useEffect } from 'react';
 import './Profile.css';
 import {
-  Mail, Shield, Clock, Key, User, Phone, Briefcase, Edit2, Save, X, AlertCircle, CheckCircle
+  Mail, Shield, Clock, Key, Phone, Briefcase, Edit2, X, AlertCircle, CheckCircle, UserCircle
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -54,7 +54,6 @@ const Profile = () => {
     try {
       const res = await authAxios.get(`/api/employees/${user.id}`);
       const data = res.data;
-      // Use a separate variable to avoid ESLint issues with 'prev'
       const updatedUser = {
         ...user,
         name: data.full_name || user.name,
@@ -143,72 +142,80 @@ const Profile = () => {
 
   const getRoleLabel = (role) => {
     const labels = {
-      admin: 'Administrator',
-      hr_admin: 'HR Personnel',
-      security: 'Security Officer',
+      admin: 'System Administrator',
+      hr_admin: 'HR Administrator',
+      security: 'Security Personnel',
       instructor: 'Instructor'
     };
     return labels[role] || role;
   };
 
   return (
-    <div className="profile-modern">
+    <div className="pro-container">
       {message.text && (
-        <div className={`profile-toast ${message.type}`}>
+        <div className={`pro-toast ${message.type}`}>
           {message.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
           <span>{message.text}</span>
         </div>
       )}
 
-      <div className="profile-header">
-        <div className="profile-avatar">
-          <span>{user.name.charAt(0).toUpperCase()}</span>
+      {/* Profile Header Card */}
+      <div className="pro-header-card">
+        <div className="pro-header-content">
+          <div className="pro-avatar">
+            <span>{user.name.charAt(0).toUpperCase()}</span>
+          </div>
+          <div className="pro-user-info">
+            <h1 className="pro-name">{user.name}</h1>
+            <div className="pro-role-badge">
+              <Shield size={14} />
+              <span>{getRoleLabel(user.role)}</span>
+            </div>
+          </div>
         </div>
-        <div className="profile-title">
-          <h1>{user.name}</h1>
-          <p className="profile-role">{getRoleLabel(user.role)}</p>
-        </div>
-        <button className="profile-edit-btn" onClick={() => setEditMode(true)}>
-          <Edit2 size={16} /> Edit Profile
+        <button className="btn-pro-outline" onClick={() => setEditMode(true)}>
+          <Edit2 size={16} /> <span>Edit Profile</span>
         </button>
       </div>
 
-      <div className="profile-grid">
+      <div className="pro-grid">
         {/* Account Information Card */}
-        <div className="profile-card">
-          <h3>Account Information</h3>
-          <div className="profile-info-list">
-            <div className="info-item">
-              <Mail size={18} />
-              <div>
+        <div className="pro-card">
+          <div className="pro-card-header">
+            <h3>Account Information</h3>
+          </div>
+          <div className="pro-info-list">
+            <div className="pro-info-row">
+              <div className="pro-info-icon"><Mail size={16} /></div>
+              <div className="pro-info-data">
                 <label>Email Address</label>
                 <p>{user.email}</p>
               </div>
             </div>
-            <div className="info-item">
-              <Phone size={18} />
-              <div>
+            <div className="pro-info-row">
+              <div className="pro-info-icon"><Phone size={16} /></div>
+              <div className="pro-info-data">
                 <label>Phone Number</label>
-                <p>{user.phone || '—'}</p>
+                <p>{user.phone || 'Not provided'}</p>
               </div>
             </div>
-            <div className="info-item">
-              <Briefcase size={18} />
-              <div>
-                <label>Position</label>
-                <p>{user.position || '—'}</p>
+            <div className="pro-info-row">
+              <div className="pro-info-icon"><Briefcase size={16} /></div>
+              <div className="pro-info-data">
+                <label>Position / Title</label>
+                <p>{user.position || 'Not assigned'}</p>
               </div>
             </div>
-            <div className="info-item">
-              <Shield size={18} />
-              <div>
+            <div className="pro-info-row">
+              <div className="pro-info-icon"><UserCircle size={16} /></div>
+              <div className="pro-info-data">
                 <label>Employee ID</label>
                 <p>{user.employeeId}</p>
               </div>
             </div>
-            <div className="info-item">
-              <Clock size={18} />
-              <div>
+            <div className="pro-info-row">
+              <div className="pro-info-icon"><Clock size={16} /></div>
+              <div className="pro-info-data">
                 <label>Last Login</label>
                 <p>{user.lastLogin}</p>
               </div>
@@ -217,22 +224,24 @@ const Profile = () => {
         </div>
 
         {/* Security Card */}
-        <div className="profile-card">
-          <h3>Security</h3>
-          <div className="security-section">
-            <div className="password-status">
-              <div className={`status-indicator ${isExpiringSoon ? 'warning' : 'safe'}`}></div>
-              <div>
-                <p className="status-title">Password Expiry</p>
-                <p className="status-text">
+        <div className="pro-card">
+          <div className="pro-card-header">
+            <h3>Authentication & Security</h3>
+          </div>
+          <div className="pro-security-section">
+            <div className="pro-password-status">
+              <div className="pro-status-text-area">
+                <p className="pro-status-title">Password Expiration</p>
+                <p className="pro-status-desc">
                   {isExpiringSoon
-                    ? `Your password will expire in ${daysRemaining} days.`
-                    : `Valid for ${daysRemaining} more days`}
+                    ? `Action required: Password expires in ${daysRemaining} days.`
+                    : `Your current password is valid for ${daysRemaining} more days.`}
                 </p>
               </div>
+              <div className={`pro-status-dot ${isExpiringSoon ? 'warning' : 'safe'}`}></div>
             </div>
-            <button className="btn-change-password" onClick={() => setShowPasswordModal(true)}>
-              <Key size={16} /> Change Password
+            <button className="btn-pro-primary w-100" onClick={() => setShowPasswordModal(true)}>
+              <Key size={16} /> <span>Change Password</span>
             </button>
           </div>
         </div>
@@ -240,46 +249,49 @@ const Profile = () => {
 
       {/* Edit Profile Modal */}
       {editMode && (
-        <div className="modal-overlay" onClick={() => setEditMode(false)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className="pro-modal-overlay" onClick={() => setEditMode(false)}>
+          <div className="pro-modal" onClick={e => e.stopPropagation()}>
+            <div className="pro-modal-header">
               <h2>Edit Profile</h2>
-              <button className="modal-close" onClick={() => setEditMode(false)}>
+              <button className="pro-close-btn" onClick={() => setEditMode(false)}>
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleEditSubmit}>
-              <div className="form-group">
+            <form className="pro-form" onSubmit={handleEditSubmit}>
+              <div className="pro-form-group">
                 <label>Full Name</label>
                 <input
                   type="text"
+                  className="pro-input"
                   value={editForm.full_name}
                   onChange={e => setEditForm({ ...editForm, full_name: e.target.value })}
                   required
                 />
               </div>
-              <div className="form-group">
+              <div className="pro-form-group">
                 <label>Email Address</label>
                 <input
                   type="email"
+                  className="pro-input"
                   value={editForm.email}
                   onChange={e => setEditForm({ ...editForm, email: e.target.value })}
                   required
                 />
               </div>
-              <div className="form-group">
+              <div className="pro-form-group">
                 <label>Phone Number</label>
                 <input
                   type="tel"
+                  className="pro-input"
                   value={editForm.phone}
                   onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
                 />
               </div>
-              <div className="modal-actions">
-                <button type="button" className="btn-cancel" onClick={() => setEditMode(false)}>
+              <div className="pro-modal-actions">
+                <button type="button" className="btn-pro-cancel" onClick={() => setEditMode(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-save" disabled={loading}>
+                <button type="submit" className="btn-pro-primary" disabled={loading}>
                   {loading ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
@@ -290,48 +302,56 @@ const Profile = () => {
 
       {/* Password Change Modal */}
       {showPasswordModal && (
-        <div className="modal-overlay" onClick={() => setShowPasswordModal(false)}>
-          <div className="modal-card" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className="pro-modal-overlay" onClick={() => setShowPasswordModal(false)}>
+          <div className="pro-modal" onClick={e => e.stopPropagation()}>
+            <div className="pro-modal-header">
               <h2>Change Password</h2>
-              <button className="modal-close" onClick={() => setShowPasswordModal(false)}>
+              <button className="pro-close-btn" onClick={() => setShowPasswordModal(false)}>
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleChangePassword}>
-              {passwordError && <div className="error-box">{passwordError}</div>}
-              <div className="form-group">
+            <form className="pro-form" onSubmit={handleChangePassword}>
+              {passwordError && (
+                <div className="pro-error-alert">
+                  <AlertCircle size={16} />
+                  <span>{passwordError}</span>
+                </div>
+              )}
+              <div className="pro-form-group">
                 <label>Current Password</label>
                 <input
                   type="password"
+                  className="pro-input"
                   value={passwordForm.currentPassword}
                   onChange={e => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
                   required
                 />
               </div>
-              <div className="form-group">
+              <div className="pro-form-group">
                 <label>New Password</label>
                 <input
                   type="password"
+                  className="pro-input"
                   value={passwordForm.newPassword}
                   onChange={e => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
                   required
                 />
               </div>
-              <div className="form-group">
+              <div className="pro-form-group">
                 <label>Confirm New Password</label>
                 <input
                   type="password"
+                  className="pro-input"
                   value={passwordForm.confirmPassword}
                   onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
                   required
                 />
               </div>
-              <div className="modal-actions">
-                <button type="button" className="btn-cancel" onClick={() => setShowPasswordModal(false)}>
+              <div className="pro-modal-actions">
+                <button type="button" className="btn-pro-cancel" onClick={() => setShowPasswordModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-save" disabled={changingPassword}>
+                <button type="submit" className="btn-pro-primary" disabled={changingPassword}>
                   {changingPassword ? 'Updating...' : 'Update Password'}
                 </button>
               </div>

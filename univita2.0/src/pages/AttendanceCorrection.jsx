@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import FormalModal from '../components/FormalModal';
-import { Search, Edit3, ClipboardList, CheckCircle, XCircle } from 'lucide-react';
+import { Search, Edit3, ClipboardList, CheckCircle, XCircle, ExternalLink } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AttendanceCorrection.css';
 
@@ -17,12 +17,12 @@ const AttendanceCorrection = () => {
   const [form, setForm] = useState({ time_in: '', time_out: '', status: '', location: '' });
   const [searchDone, setSearchDone] = useState(false);
 
-  // State for pending corrections modal
+  // State for pending corrections modal[cite: 2]
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingCorrections, setPendingCorrections] = useState([]);
   const [loadingPending, setLoadingPending] = useState(false);
 
-  // Fetch attendance records for a specific employee
+  // Fetch attendance records for a specific employee[cite: 2]
   const fetchRecords = async () => {
     if (!employeeId.trim()) return;
     try {
@@ -35,7 +35,7 @@ const AttendanceCorrection = () => {
     }
   };
 
-  // Open edit modal for an attendance record
+  // Open edit modal for an attendance record[cite: 2]
   const openEditor = (record) => {
     setEditing(record);
     setForm({
@@ -46,7 +46,7 @@ const AttendanceCorrection = () => {
     });
   };
 
-  // Save edited attendance record
+  // Save edited attendance record[cite: 2]
   const handleSave = async () => {
     try {
       await axios.put(`${API_BASE}/attendance/${editing.id}`, form, getAuthHeaders());
@@ -59,7 +59,7 @@ const AttendanceCorrection = () => {
     }
   };
 
-  // Fetch all pending correction requests
+  // Fetch all pending correction requests[cite: 2]
   const fetchPendingCorrections = async () => {
     setLoadingPending(true);
     try {
@@ -74,12 +74,12 @@ const AttendanceCorrection = () => {
     }
   };
 
-  // Approve or reject a correction request
+  // Approve or reject a correction request[cite: 2]
   const handleCorrectionAction = async (id, status) => {
     try {
       await axios.put(`${API_BASE}/attendance/corrections/${id}/review`, { status }, getAuthHeaders());
       toast.success(`Correction request ${status}`);
-      fetchPendingCorrections(); // refresh the list
+      fetchPendingCorrections(); // refresh the list[cite: 2]
     } catch (err) {
       console.error(err);
       toast.error(`Failed to ${status} correction`);
@@ -88,24 +88,33 @@ const AttendanceCorrection = () => {
 
   return (
     <div className="ac-container">
-      <h3 className="ac-title">Attendance Correction</h3>
-
-      <div className="ac-search-row">
-        <div className="ac-search-input-wrapper">
-          <input
-            type="text"
-            placeholder="Employee ID (e.g., E002)"
-            value={employeeId}
-            onChange={e => setEmployeeId(e.target.value)}
-            className="ac-input"
-          />
+      <div className="ac-header">
+        <div>
+          <h3 className="ac-title">Attendance Correction</h3>
+          <p className="ac-subtitle">Manually adjust records and review employee requests.</p>
         </div>
-        <button className="ac-search-btn" onClick={fetchRecords}>
-          <Search size={16} /> Search
-        </button>
         <button className="ac-pending-btn" onClick={fetchPendingCorrections}>
-          <ClipboardList size={16} /> Pending Corrections
+          <ClipboardList size={18} /> 
+          <span>Pending Requests</span>
         </button>
+      </div>
+
+      <div className="ac-search-card">
+        <div className="ac-search-row">
+          <div className="ac-search-input-wrapper">
+            <Search size={16} className="ac-search-icon" />
+            <input
+              type="text"
+              placeholder="Search Employee ID (e.g., E002)"
+              value={employeeId}
+              onChange={e => setEmployeeId(e.target.value)}
+              className="ac-input-search"
+            />
+          </div>
+          <button className="ac-search-btn" onClick={fetchRecords}>
+            Search Records
+          </button>
+        </div>
       </div>
 
       {searchDone && (
@@ -118,7 +127,7 @@ const AttendanceCorrection = () => {
                 <th>Time Out</th>
                 <th>Status</th>
                 <th>Location</th>
-                <th>Action</th>
+                <th className="text-center">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -129,15 +138,19 @@ const AttendanceCorrection = () => {
               ) : (
                 records.map(rec => (
                   <tr key={rec.id}>
-                    <td>{rec.date}</td>
+                    <td className="font-medium text-gray-900">{rec.date}</td>
                     <td>{rec.time_in || '--:--'}</td>
                     <td>{rec.time_out || '--:--'}</td>
-                    <td>{rec.status}</td>
+                    <td>
+                      <span className={`ac-status-badge ${rec.status?.toLowerCase() || 'default'}`}>
+                        {rec.status || 'Unknown'}
+                      </span>
+                    </td>
                     <td className="ac-location-cell" title={rec.location}>
                       {rec.location && rec.location.length > 30 ? rec.location.substring(0, 30) + '…' : rec.location || '—'}
                     </td>
-                    <td>
-                      <button onClick={() => openEditor(rec)} className="ac-edit-btn">
+                    <td className="text-center">
+                      <button onClick={() => openEditor(rec)} className="ac-edit-btn" title="Edit Record">
                         <Edit3 size={16} />
                       </button>
                     </td>
@@ -149,53 +162,55 @@ const AttendanceCorrection = () => {
         </div>
       )}
 
-      {/* Edit Attendance Modal */}
+      {/* Edit Attendance Modal[cite: 2] */}
       <FormalModal
         show={!!editing}
         onClose={() => setEditing(null)}
-        title="Edit Attendance"
+        title="Edit Attendance Record"
         footer={
           <>
             <button className="btn-modal-cancel" onClick={() => setEditing(null)}>Cancel</button>
-            <button className="btn-modal-submit" onClick={handleSave}>Save</button>
+            <button className="btn-modal-submit" onClick={handleSave}>Save Changes</button>
           </>
         }
       >
-        <div className="ac-modal-group">
-          <label className="ac-modal-label">Time In</label>
-          <input type="time" className="ac-input" value={form.time_in} onChange={e => setForm({...form, time_in: e.target.value})} />
-        </div>
-        <div className="ac-modal-group">
-          <label className="ac-modal-label">Time Out</label>
-          <input type="time" className="ac-input" value={form.time_out} onChange={e => setForm({...form, time_out: e.target.value})} />
-        </div>
-        <div className="ac-modal-group">
-          <label className="ac-modal-label">Status</label>
-          <select className="ac-select" value={form.status} onChange={e => setForm({...form, status: e.target.value})}>
-            <option value="">Select</option>
-            <option value="present">Present</option>
-            <option value="late">Late</option>
-            <option value="absent">Absent</option>
-          </select>
-        </div>
-        <div className="ac-modal-group">
-          <label className="ac-modal-label">Location</label>
-          <input type="text" className="ac-input" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
+        <div className="ac-form-grid">
+          <div className="ac-modal-group">
+            <label className="ac-modal-label">Time In</label>
+            <input type="time" className="ac-input" value={form.time_in} onChange={e => setForm({...form, time_in: e.target.value})} />
+          </div>
+          <div className="ac-modal-group">
+            <label className="ac-modal-label">Time Out</label>
+            <input type="time" className="ac-input" value={form.time_out} onChange={e => setForm({...form, time_out: e.target.value})} />
+          </div>
+          <div className="ac-modal-group">
+            <label className="ac-modal-label">Status</label>
+            <select className="ac-select" value={form.status} onChange={e => setForm({...form, status: e.target.value})}>
+              <option value="">Select Status...</option>
+              <option value="Present">Present</option>
+              <option value="Late">Late</option>
+              <option value="Absent">Absent</option>
+            </select>
+          </div>
+          <div className="ac-modal-group">
+            <label className="ac-modal-label">Location</label>
+            <input type="text" className="ac-input" placeholder="e.g. Main Campus" value={form.location} onChange={e => setForm({...form, location: e.target.value})} />
+          </div>
         </div>
       </FormalModal>
 
-      {/* Pending Corrections Modal */}
+      {/* Pending Corrections Modal[cite: 2] */}
       <FormalModal
         show={showPendingModal}
         onClose={() => setShowPendingModal(false)}
         title="Pending Correction Requests"
-        size="large"
-        footer={<button className="btn-modal-cancel" onClick={() => setShowPendingModal(false)}>Close</button>}
+        wide 
+        footer={<button className="btn-modal-cancel" onClick={() => setShowPendingModal(false)}>Close Window</button>}
       >
         {loadingPending ? (
-          <div className="text-center p-4">Loading...</div>
+          <div className="ac-loading-state">Loading requests...</div>
         ) : pendingCorrections.length === 0 ? (
-          <div className="text-center p-4 text-gray-500">No pending correction requests.</div>
+          <div className="ac-empty-state">No pending correction requests at this time.</div>
         ) : (
           <div className="pending-table-wrapper">
             <table className="pending-table">
@@ -203,35 +218,40 @@ const AttendanceCorrection = () => {
                 <tr>
                   <th>Employee</th>
                   <th>Date</th>
-                  <th>Type</th>
+                  <th>Request Type</th>
                   <th>Requested Time</th>
                   <th>Reason</th>
-                  <th>Selfie</th>
-                  <th>Action</th>
+                  <th className="text-center">Proof</th>
+                  <th className="text-center">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {pendingCorrections.map(c => (
                   <tr key={c.id}>
-                    <td>{c.full_name} ({c.employee_id})</td>
-                    <td>{c.attendance_date}</td>
-                    <td>{c.requested_clock_in ? 'Clock In' : 'Clock Out'}</td>
-                    <td>{c.requested_clock_in || c.requested_clock_out}</td>
-                    <td>{c.reason}</td>
                     <td>
-                      {c.selfie_url ? (
-                        <a href={`${API_BASE.replace('/api', '')}${c.selfie_url}`} target="_blank" rel="noopener noreferrer">
-                          View
-                        </a>
-                      ) : '—'}
+                      <div className="ac-emp-name">{c.full_name}</div>
+                      <div className="ac-emp-id">{c.employee_id}</div>
                     </td>
-                    <td className="action-buttons">
-                      <button className="approve-correction" onClick={() => handleCorrectionAction(c.id, 'approved')}>
-                        <CheckCircle size={16} /> Approve
-                      </button>
-                      <button className="reject-correction" onClick={() => handleCorrectionAction(c.id, 'rejected')}>
-                        <XCircle size={16} /> Reject
-                      </button>
+                    <td className="font-medium">{c.attendance_date}</td>
+                    <td>{c.requested_clock_in ? 'Clock In' : 'Clock Out'}</td>
+                    <td className="font-medium">{c.requested_clock_in || c.requested_clock_out}</td>
+                    <td className="ac-reason-cell" title={c.reason}>{c.reason}</td>
+                    <td className="text-center">
+                      {c.selfie_url ? (
+                        <a href={`${API_BASE.replace('/api', '')}${c.selfie_url}`} target="_blank" rel="noopener noreferrer" className="ac-link-btn">
+                          <ExternalLink size={14} /> View
+                        </a>
+                      ) : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td>
+                      <div className="action-buttons">
+                        <button className="approve-correction" onClick={() => handleCorrectionAction(c.id, 'approved')}>
+                          <CheckCircle size={14} /> Approve
+                        </button>
+                        <button className="reject-correction" onClick={() => handleCorrectionAction(c.id, 'rejected')}>
+                          <XCircle size={14} /> Reject
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

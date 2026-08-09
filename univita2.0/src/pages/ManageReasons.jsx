@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Edit2, Check, X, AlertCircle, List } from 'lucide-react';
+import { Plus, Trash2, Edit2, Check, X, AlertCircle, FileText } from 'lucide-react';
 import { API_BASE } from '../api';
 import FormalModal from '../components/FormalModal';
 import './ManageReasons.css';
@@ -97,104 +97,91 @@ const ManageReasons = () => {
   };
 
   return (
-    <div className="mgr-container">
-      <div className="mgr-card">
-        <div className="mgr-card-header">
-          <div>
-            <h2>Visit Reasons</h2>
-            <p className="mgr-subtitle">Manage appointment reasons that visitors can select when booking a visit.</p>
-          </div>
-          <div className="mgr-stats">
-            <List size={18} />
-            <span>{reasons.length} {reasons.length === 1 ? 'Reason' : 'Reasons'}</span>
+    <div className="mr-container">
+      <div className="mr-header">
+        <div>
+          <h2 className="mr-title">Visit Reasons</h2>
+          <p className="mr-subtitle">Manage appointment reasons available for visitors to select during booking.</p>
+        </div>
+        <div className="mr-header-icon">
+          <FileText size={24} color="#6B7280" />
+        </div>
+      </div>
+
+      <div className="mr-card">
+        {/* Toolbar / Add Form */}
+        <div className="mr-card-toolbar">
+          <form onSubmit={handleAdd} className="mr-add-form">
+            <div className="mr-input-wrapper">
+              <input
+                id="newReason"
+                type="text"
+                placeholder="Add new reason (e.g., Facility Tour, Interview)"
+                value={newReason}
+                onChange={(e) => setNewReason(e.target.value)}
+                className="mr-input"
+              />
+            </div>
+            <button type="submit" className="btn-mr-primary" disabled={loading}>
+              <Plus size={16} /> <span>{loading ? 'Adding...' : 'Add Reason'}</span>
+            </button>
+          </form>
+          <div className="mr-stats-badge">
+            Total Active: <strong>{reasons.length}</strong>
           </div>
         </div>
 
-        <form onSubmit={handleAdd} className="mgr-add-form">
-          <div className="mgr-input-group">
-            <label htmlFor="newReason">New Reason</label>
-            <input
-              id="newReason"
-              type="text"
-              placeholder="e.g., Facility Tour, Interview, Meeting"
-              value={newReason}
-              onChange={(e) => setNewReason(e.target.value)}
-              className="mgr-input"
-            />
-          </div>
-          <button type="submit" className="btn-primary" disabled={loading}>
-            <Plus size={16} /> {loading ? 'Adding...' : 'Add Reason'}
-          </button>
-        </form>
-
-        <div className="mgr-table-wrapper">
+        {/* Table Area */}
+        <div className="mr-table-wrapper">
           {fetchLoading ? (
-            <div className="loading-spinner">
-              <div className="spinner"></div>
-              <p>Loading reasons...</p>
-            </div>
+            <div className="mr-loading-state">Loading reasons...</div>
           ) : reasons.length === 0 ? (
-            <div className="empty-state">
-              <AlertCircle size={48} />
-              <p>No reasons configured yet</p>
-              <span>Add your first reason using the form above</span>
+            <div className="mr-empty-state">
+              <AlertCircle size={40} className="mr-empty-icon" />
+              <p>No reasons configured yet.</p>
+              <span>Use the form above to add options for your visitors.</span>
             </div>
           ) : (
-            <table className="mgr-table">
+            <table className="mr-table">
               <thead>
                 <tr>
-                  <th>Reason</th>
-                  <th className="mgr-actions-header">Actions</th>
+                  <th>Reason Title</th>
+                  <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {reasons.map((reason) => (
                   <tr key={reason.id}>
-                    <td className="mgr-reason-cell">
+                    <td className="mr-reason-cell">
                       {editingId === reason.id ? (
                         <input
                           type="text"
                           value={editValue}
                           onChange={(e) => setEditValue(e.target.value)}
-                          className="mgr-edit-input"
+                          className="mr-edit-input"
                           autoFocus
+                          onKeyDown={(e) => { if(e.key === 'Enter') saveEdit(reason.id); if(e.key === 'Escape') cancelEdit(); }}
                         />
                       ) : (
-                        <span>{reason.reason_text}</span>
+                        <span className="mr-reason-text">{reason.reason_text}</span>
                       )}
                     </td>
-                    <td className="mgr-actions-cell">
+                    <td className="text-right">
                       {editingId === reason.id ? (
-                        <div className="mgr-action-group">
-                          <button
-                            className="btn-icon btn-save"
-                            onClick={() => saveEdit(reason.id)}
-                            title="Save"
-                          >
+                        <div className="mr-action-group">
+                          <button className="btn-icon-success" onClick={() => saveEdit(reason.id)} title="Save">
                             <Check size={16} />
                           </button>
-                          <button
-                            className="btn-icon btn-cancel"
-                            onClick={cancelEdit}
-                            title="Cancel"
-                          >
+                          <button className="btn-icon-neutral" onClick={cancelEdit} title="Cancel">
                             <X size={16} />
                           </button>
                         </div>
                       ) : (
-                        <div className="mgr-action-group">
-                          <button
-                            className="btn-icon btn-edit"
-                            onClick={() => startEdit(reason.id, reason.reason_text)}
-                            title="Edit"
-                          >
+                        <div className="mr-action-group">
+                          <button className="btn-icon-primary" onClick={() => startEdit(reason.id, reason.reason_text)} title="Edit">
                             <Edit2 size={16} />
                           </button>
-                          <button
-                            className="btn-icon btn-delete"
-                            onClick={() => handleDelete(reason.id)}
-                            title="Delete"
-                          >
+                          <button className="btn-icon-danger" onClick={() => handleDelete(reason.id)} title="Delete">
                             <Trash2 size={16} />
                           </button>
                         </div>
@@ -212,20 +199,20 @@ const ManageReasons = () => {
       <FormalModal
         show={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
-        title="Delete Reason"
+        title="Delete Visit Reason"
         footer={
           <>
-            <button className="btn-modal-cancel" onClick={() => setShowDeleteConfirm(false)}>
+            <button className="btn-mr-cancel" onClick={() => setShowDeleteConfirm(false)}>
               Cancel
             </button>
-            <button className="btn-modal-submit btn-danger" onClick={confirmDelete}>
-              Yes, Delete
+            <button className="btn-mr-danger" onClick={confirmDelete}>
+              Yes, Delete Reason
             </button>
           </>
         }
       >
-        <p>Are you sure you want to permanently delete <strong>{reasons.find(r => r.id === deleteTargetId)?.reason_text}</strong>?</p>
-        <p className="mgr-modal-warning">This action cannot be undone. Visitors will no longer see this reason when booking appointments.</p>
+        <p className="mr-modal-text">Are you sure you want to permanently delete <strong>{reasons.find(r => r.id === deleteTargetId)?.reason_text}</strong>?</p>
+        <p className="mr-modal-warning">This action cannot be undone. Visitors will no longer see this reason when booking appointments.</p>
       </FormalModal>
     </div>
   );

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Download, Calendar, FileText, ShieldCheck, CheckCircle, TrendingUp } from 'lucide-react';
+import { Download, Calendar, FileText, ShieldCheck, CheckCircle, TrendingUp, ChevronDown } from 'lucide-react';
 import './ComplianceReports.css';
 import { API_BASE } from '../api';
 
@@ -62,90 +62,111 @@ const ComplianceReports = () => {
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
   return (
-    <div className="compliance-container">
-      <div className="compliance-header">
+    <div className="cr-container">
+      <div className="cr-header">
         <div>
-          
-          <p className="compliance-subtitle">Audit‑ready attendance compliance reports for accreditation</p>
+          <h2 className="cr-title">Compliance Reports</h2>
+          <p className="cr-subtitle">Audit-ready attendance compliance reports for accreditation.</p>
         </div>
-        <div className="compliance-badge">
-          <ShieldCheck size={18} />
-          
+        <div className="cr-badge">
+          <ShieldCheck size={16} />
+          <span>Accreditation Ready</span>
         </div>
       </div>
 
-      <div className="compliance-grid">
+      <div className="cr-grid">
         {/* Main Report Card */}
-        <div className="report-card main-card">
-          <div className="card-icon teal-bg">
-            <FileText size={24} />
+        <div className="cr-card main-card">
+          <div className="cr-card-icon teal">
+            <FileText size={20} />
           </div>
-          <h3>Attendance Compliance Report</h3>
-          <p className="card-desc">
-            Summarises instructor attendance, late arrivals, leave days, and compliance rate
-            for the selected month. Includes scheduled vs. actual presence.
+          <h3>Attendance Compliance</h3>
+          <p className="cr-card-desc">
+            Summarizes instructor attendance, late arrivals, leave days, and compliance rate
+            for the selected month. Includes scheduled vs. actual presence metrics.
           </p>
 
-          {/* 🔥 INLINE STYLES to force side‑by‑side */}
-          <div className="report-filters" style={{ display: 'flex', flexDirection: 'row', gap: '1rem', marginBottom: '1.5rem', alignItems: 'flex-end', flexWrap: 'nowrap' }}>
-            <div className="filter-group" style={{ flex: 1, minWidth: 0 }}>
-              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', color: '#64748b', marginBottom: '0.25rem' }}>Month</label>
-              <div className="filter-select-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0.5rem 0.75rem', width: '100%' }}>
-                <Calendar size={16} />
-                <select value={month} onChange={e => setMonth(parseInt(e.target.value))} style={{ background: 'transparent', border: 'none', flex: 1, fontSize: '0.9rem', fontWeight: 500, color: '#0f172a', outline: 'none', cursor: 'pointer', minWidth: 0 }}>
+          <div className="cr-filters-wrapper">
+            <div className="cr-filter-group">
+              <label>Target Month</label>
+              <div className="cr-select-container">
+                <Calendar size={16} className="cr-select-icon" />
+                <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="cr-select">
                   {monthNames.map((name, idx) => (
                     <option key={idx + 1} value={idx + 1}>{name}</option>
                   ))}
                 </select>
+                <ChevronDown size={16} className="cr-chevron-icon" />
               </div>
             </div>
-            <div className="filter-group" style={{ flex: 1, minWidth: 0 }}>
-              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', color: '#64748b', marginBottom: '0.25rem' }}>Year</label>
-              <div className="filter-select-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0.5rem 0.75rem', width: '100%' }}>
-                <Calendar size={16} />
-                <select value={year} onChange={e => setYear(parseInt(e.target.value))} style={{ background: 'transparent', border: 'none', flex: 1, fontSize: '0.9rem', fontWeight: 500, color: '#0f172a', outline: 'none', cursor: 'pointer', minWidth: 0 }}>
+            
+            <div className="cr-filter-group">
+              <label>Target Year</label>
+              <div className="cr-select-container">
+                <Calendar size={16} className="cr-select-icon" />
+                <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="cr-select">
                   {years.map(y => (
                     <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
+                <ChevronDown size={16} className="cr-chevron-icon" />
               </div>
             </div>
           </div>
 
-          {lastGenerated && (
-            <div className="last-generated">
-              <CheckCircle size={14} />
-              <span>Last generated: {lastGenerated.toLocaleString()}</span>
-            </div>
-          )}
-
-          <button className="btn-generate" onClick={generateReport} disabled={loading}>
-            {loading ? (
-              <>
-                <span className="spinner"></span>
-                Generating...
-              </>
+          <div className="cr-action-footer">
+            {lastGenerated ? (
+              <div className="cr-last-generated">
+                <CheckCircle size={14} />
+                <span>Last generated: {lastGenerated.toLocaleString()}</span>
+              </div>
             ) : (
-              <>
-                <Download size={18} />
-                Download PDF
-              </>
+              <div className="cr-last-generated empty">No previous generation found.</div>
             )}
-          </button>
+
+            <button className="btn-generate-report" onClick={generateReport} disabled={loading}>
+              {loading ? (
+                <>
+                  <span className="cr-spinner"></span>
+                  <span>Generating PDF...</span>
+                </>
+              ) : (
+                <>
+                  <Download size={16} />
+                  <span>Generate & Download</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* What's Inside Card */}
-        <div className="report-card info-card">
-          <div className="card-icon slate-bg">
-            <TrendingUp size={24} />
+        <div className="cr-card info-card">
+          <div className="cr-card-icon slate">
+            <TrendingUp size={20} />
           </div>
-          <h3>Report Contents</h3>
-          <ul className="report-features">
-            <li>✔️ Instructor attendance summary</li>
-            <li>✔️ Late arrivals & leave days</li>
-            <li>✔️ Compliance rate per instructor</li>
-            <li>✔️ Overall summary with target</li>
-            <li>✔️ Institution header & footer</li>
+          <h3>Report Contents Overview</h3>
+          <ul className="cr-features-list">
+            <li>
+              <CheckCircle size={14} className="feature-icon" />
+              <span>Instructor attendance summary and totals</span>
+            </li>
+            <li>
+              <CheckCircle size={14} className="feature-icon" />
+              <span>Detailed log of late arrivals & leave days</span>
+            </li>
+            <li>
+              <CheckCircle size={14} className="feature-icon" />
+              <span>Compliance rate calculations per instructor</span>
+            </li>
+            <li>
+              <CheckCircle size={14} className="feature-icon" />
+              <span>Overall department summary compared to targets</span>
+            </li>
+            <li>
+              <CheckCircle size={14} className="feature-icon" />
+              <span>Formal institution headers & signature lines</span>
+            </li>
           </ul>
         </div>
       </div>

@@ -1,10 +1,9 @@
 // src/pages/Settings.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { User, Lock, Bell, Eye, EyeOff, Shield, Key } from 'lucide-react';
+import { User, Lock, Bell, Eye, EyeOff, Shield, Key, Settings as SettingsIcon } from 'lucide-react';
 import './Settings.css';
-
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+import { API_BASE } from '../api';
 
 const Settings = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -84,7 +83,7 @@ const Settings = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      await authAxios.put(`/api/employees/${user.id}`, {
+      await authAxios.put(`/employees/${user.id}`, {
         full_name: profileData.full_name,
         email: profileData.email,
         phone: profileData.phone,
@@ -114,7 +113,7 @@ const Settings = () => {
     }
     setLoading(true);
     try {
-      await authAxios.put(`/api/users/${user.id}/update-password`, {
+      await authAxios.put(`/users/${user.id}/update-password`, {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword,
       });
@@ -141,7 +140,7 @@ const Settings = () => {
     }
     setLoading(true);
     try {
-      await authAxios.put('/api/users/update-pin', {
+      await authAxios.put('/users/update-pin', {
         email: user.email,
         currentPin: pinData.currentPin,
         newPin: pinData.newPin,
@@ -165,239 +164,274 @@ const Settings = () => {
   };
 
   return (
-    <div className="settings-container">
-      <div className="settings-header">
-        
-        <p>Manage your account, security, and preferences</p>
-      </div>
-
-      {message.text && (
-        <div className={`settings-message ${message.type}`}>
-          {message.text}
+    <div className="set-container">
+      <div className="set-wrapper">
+        <div className="set-header">
+          <div>
+            <h2 className="set-title">Account Settings</h2>
+            <p className="set-subtitle">Manage your profile, security credentials, and system preferences.</p>
+          </div>
+          <div className="set-header-icon">
+            <SettingsIcon size={24} color="#6B7280" />
+          </div>
         </div>
-      )}
 
-      <div className="settings-tabs">
-        <button className={`settings-tab ${activeTab === 'profile' ? 'active' : ''}`} onClick={() => setActiveTab('profile')}>
-          <User size={18} /> Profile
-        </button>
-        <button className={`settings-tab ${activeTab === 'security' ? 'active' : ''}`} onClick={() => setActiveTab('security')}>
-          <Lock size={18} /> Security
-        </button>
-        
-      </div>
-
-      <div className="settings-content">
-        {/* Profile Tab */}
-        {activeTab === 'profile' && (
-          <form onSubmit={handleProfileUpdate} className="settings-form">
-            <div className="form-group">
-              <label>Full Name</label>
-              <input
-                type="text"
-                value={profileData.full_name}
-                onChange={(e) => setProfileData({ ...profileData, full_name: e.target.value })}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Email Address</label>
-              <input
-                type="email"
-                value={profileData.email}
-                onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Phone Number</label>
-              <input
-                type="tel"
-                value={profileData.phone}
-                onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
-              />
-            </div>
-            <button type="submit" className="btn-save" disabled={loading}>
-              {loading ? 'Saving...' : 'Save Changes'}
-            </button>
-          </form>
+        {message.text && (
+          <div className={`set-message ${message.type}`}>
+            {message.text}
+          </div>
         )}
 
-        {/* Security Tab */}
-        {activeTab === 'security' && (
-          <div className="security-section">
-            <div className="security-card">
-              <h3><Lock size={18} /> Change Password</h3>
-              <form onSubmit={handlePasswordChange} className="settings-form">
-                <div className="form-group">
-                  <label>Current Password</label>
-                  <div className="password-input-wrapper">
-                    <input
-                      type={showCurrent ? 'text' : 'password'}
-                      value={passwordData.currentPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                      required
-                    />
-                    <button type="button" onClick={() => setShowCurrent(!showCurrent)}>
-                      {showCurrent ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
+        <div className="set-tabs">
+          <button className={`set-tab ${activeTab === 'profile' ? 'active' : ''}`} onClick={() => setActiveTab('profile')}>
+            <User size={16} /> <span>Profile</span>
+          </button>
+          <button className={`set-tab ${activeTab === 'security' ? 'active' : ''}`} onClick={() => setActiveTab('security')}>
+            <Lock size={16} /> <span>Security</span>
+          </button>
+          <button className={`set-tab ${activeTab === 'preferences' ? 'active' : ''}`} onClick={() => setActiveTab('preferences')}>
+            <Bell size={16} /> <span>Preferences</span>
+          </button>
+        </div>
+
+        <div className="set-content">
+          {/* Profile Tab */}
+          {activeTab === 'profile' && (
+            <div className="set-card">
+              <form onSubmit={handleProfileUpdate} className="set-form">
+                <div className="set-form-group">
+                  <label>Full Name</label>
+                  <input
+                    type="text"
+                    className="set-input"
+                    value={profileData.full_name}
+                    onChange={(e) => setProfileData({ ...profileData, full_name: e.target.value })}
+                    required
+                  />
                 </div>
-                <div className="form-group">
-                  <label>New Password</label>
-                  <div className="password-input-wrapper">
-                    <input
-                      type={showNew ? 'text' : 'password'}
-                      value={passwordData.newPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                      required
-                    />
-                    <button type="button" onClick={() => setShowNew(!showNew)}>
-                      {showNew ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
+                <div className="set-form-group">
+                  <label>Email Address</label>
+                  <input
+                    type="email"
+                    className="set-input"
+                    value={profileData.email}
+                    onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                    required
+                  />
                 </div>
-                <div className="form-group">
-                  <label>Confirm New Password</label>
-                  <div className="password-input-wrapper">
-                    <input
-                      type={showConfirm ? 'text' : 'password'}
-                      value={passwordData.confirmPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                      required
-                    />
-                    <button type="button" onClick={() => setShowConfirm(!showConfirm)}>
-                      {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
+                <div className="set-form-group">
+                  <label>Phone Number</label>
+                  <input
+                    type="tel"
+                    className="set-input"
+                    value={profileData.phone}
+                    onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                  />
                 </div>
-                {passwordError && <p className="error-text">{passwordError}</p>}
-                <button type="submit" className="btn-save" disabled={loading}>
-                  {loading ? 'Updating...' : 'Update Password'}
-                </button>
+                <div className="set-form-actions">
+                  <button type="submit" className="btn-set-save" disabled={loading}>
+                    {loading ? 'Saving...' : 'Save Profile Changes'}
+                  </button>
+                </div>
               </form>
             </div>
+          )}
 
-            {canChangePin && (
-              <div className="security-card">
-                <h3><Key size={18} /> Payroll PIN</h3>
-                {!showPinChange ? (
-                  <button className="btn-change-pin" onClick={() => setShowPinChange(true)}>
-                    Change PIN
-                  </button>
-                ) : (
-                  <form onSubmit={handlePinChange} className="settings-form">
-                    <div className="form-group">
-                      <label>Current PIN</label>
+          {/* Security Tab */}
+          {activeTab === 'security' && (
+            <div className="set-security-section">
+              <div className="set-card">
+                <div className="set-card-header">
+                  <Lock size={18} className="set-card-icon" />
+                  <h3>Change Password</h3>
+                </div>
+                <form onSubmit={handlePasswordChange} className="set-form">
+                  <div className="set-form-group">
+                    <label>Current Password</label>
+                    <div className="set-password-wrapper">
                       <input
-                        type="password"
-                        maxLength="6"
-                        pattern="\d*"
-                        value={pinData.currentPin}
-                        onChange={(e) => setPinData({ ...pinData, currentPin: e.target.value })}
+                        type={showCurrent ? 'text' : 'password'}
+                        className="set-input"
+                        value={passwordData.currentPassword}
+                        onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
                         required
                       />
-                    </div>
-                    <div className="form-group">
-                      <label>New PIN (4-6 digits)</label>
-                      <input
-                        type="password"
-                        maxLength="6"
-                        pattern="\d*"
-                        value={pinData.newPin}
-                        onChange={(e) => setPinData({ ...pinData, newPin: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Confirm New PIN</label>
-                      <input
-                        type="password"
-                        maxLength="6"
-                        pattern="\d*"
-                        value={pinData.confirmPin}
-                        onChange={(e) => setPinData({ ...pinData, confirmPin: e.target.value })}
-                        required
-                      />
-                    </div>
-                    {pinError && <p className="error-text">{pinError}</p>}
-                    <div className="pin-actions">
-                      <button type="submit" className="btn-save" disabled={loading}>
-                        {loading ? 'Saving...' : 'Save PIN'}
-                      </button>
-                      <button type="button" className="btn-cancel" onClick={() => { setShowPinChange(false); setPinError(''); setPinData({ currentPin: '', newPin: '', confirmPin: '' }); }}>
-                        Cancel
+                      <button type="button" className="set-eye-btn" onClick={() => setShowCurrent(!showCurrent)}>
+                        {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
                     </div>
-                  </form>
-                )}
+                  </div>
+                  <div className="set-form-group">
+                    <label>New Password</label>
+                    <div className="set-password-wrapper">
+                      <input
+                        type={showNew ? 'text' : 'password'}
+                        className="set-input"
+                        value={passwordData.newPassword}
+                        onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                        required
+                      />
+                      <button type="button" className="set-eye-btn" onClick={() => setShowNew(!showNew)}>
+                        {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="set-form-group">
+                    <label>Confirm New Password</label>
+                    <div className="set-password-wrapper">
+                      <input
+                        type={showConfirm ? 'text' : 'password'}
+                        className="set-input"
+                        value={passwordData.confirmPassword}
+                        onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                        required
+                      />
+                      <button type="button" className="set-eye-btn" onClick={() => setShowConfirm(!showConfirm)}>
+                        {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  {passwordError && <p className="set-error-text">{passwordError}</p>}
+                  <div className="set-form-actions">
+                    <button type="submit" className="btn-set-save" disabled={loading}>
+                      {loading ? 'Updating...' : 'Update Password'}
+                    </button>
+                  </div>
+                </form>
               </div>
-            )}
-          </div>
-        )}
 
-        {/* Preferences Tab */}
-        {activeTab === 'preferences' && (
-          <div className="preferences-section">
-            <div className="preference-item">
-              <div className="pref-info">
-                <h4>Email Notifications</h4>
-                <p>Receive email alerts for pending approvals and updates</p>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={preferences.emailAlerts}
-                  onChange={(e) => handlePreferenceChange('emailAlerts', e.target.checked)}
-                />
-                <span className="slider round"></span>
-              </label>
+              {canChangePin && (
+                <div className="set-card">
+                  <div className="set-card-header">
+                    <Key size={18} className="set-card-icon" />
+                    <h3>Payroll PIN</h3>
+                  </div>
+                  {!showPinChange ? (
+                    <button className="btn-set-outline" onClick={() => setShowPinChange(true)}>
+                      Change Security PIN
+                    </button>
+                  ) : (
+                    <form onSubmit={handlePinChange} className="set-form">
+                      <div className="set-form-group">
+                        <label>Current PIN</label>
+                        <input
+                          type="password"
+                          className="set-input"
+                          maxLength="6"
+                          pattern="\d*"
+                          value={pinData.currentPin}
+                          onChange={(e) => setPinData({ ...pinData, currentPin: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="set-form-group">
+                        <label>New PIN (4-6 digits)</label>
+                        <input
+                          type="password"
+                          className="set-input"
+                          maxLength="6"
+                          pattern="\d*"
+                          value={pinData.newPin}
+                          onChange={(e) => setPinData({ ...pinData, newPin: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="set-form-group">
+                        <label>Confirm New PIN</label>
+                        <input
+                          type="password"
+                          className="set-input"
+                          maxLength="6"
+                          pattern="\d*"
+                          value={pinData.confirmPin}
+                          onChange={(e) => setPinData({ ...pinData, confirmPin: e.target.value })}
+                          required
+                        />
+                      </div>
+                      {pinError && <p className="set-error-text">{pinError}</p>}
+                      <div className="set-form-actions pin-actions">
+                        <button type="button" className="btn-set-cancel" onClick={() => { setShowPinChange(false); setPinError(''); setPinData({ currentPin: '', newPin: '', confirmPin: '' }); }}>
+                          Cancel
+                        </button>
+                        <button type="submit" className="btn-set-save" disabled={loading}>
+                          {loading ? 'Saving...' : 'Save New PIN'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="preference-item">
-              <div className="pref-info">
-                <h4>Emergency Alerts</h4>
-                <p>Get real-time notifications for critical alerts</p>
+          )}
+
+          {/* Preferences Tab */}
+          {activeTab === 'preferences' && (
+            <div className="set-card">
+              <div className="set-preferences-section">
+                <div className="set-preference-item">
+                  <div className="set-pref-info">
+                    <h4>Email Notifications</h4>
+                    <p>Receive email alerts for pending approvals and system updates.</p>
+                  </div>
+                  <label className="set-toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={preferences.emailAlerts}
+                      onChange={(e) => handlePreferenceChange('emailAlerts', e.target.checked)}
+                    />
+                    <span className="set-toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <div className="set-preference-item">
+                  <div className="set-pref-info">
+                    <h4>Emergency Alerts</h4>
+                    <p>Get real-time notifications for critical and warning alerts.</p>
+                  </div>
+                  <label className="set-toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={preferences.emergencyAlerts}
+                      onChange={(e) => handlePreferenceChange('emergencyAlerts', e.target.checked)}
+                    />
+                    <span className="set-toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <div className="set-preference-item">
+                  <div className="set-pref-info">
+                    <h4>Leave Request Updates</h4>
+                    <p>Get notified when leave requests are submitted or processed.</p>
+                  </div>
+                  <label className="set-toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={preferences.leaveUpdates}
+                      onChange={(e) => handlePreferenceChange('leaveUpdates', e.target.checked)}
+                    />
+                    <span className="set-toggle-slider"></span>
+                  </label>
+                </div>
+                
+                <div className="set-preference-item">
+                  <div className="set-pref-info">
+                    <h4>Dark Mode</h4>
+                    <p>Switch the system interface to a dark theme (Coming Soon).</p>
+                  </div>
+                  <label className="set-toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={preferences.darkMode}
+                      onChange={(e) => handlePreferenceChange('darkMode', e.target.checked)}
+                      disabled
+                    />
+                    <span className="set-toggle-slider"></span>
+                  </label>
+                </div>
               </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={preferences.emergencyAlerts}
-                  onChange={(e) => handlePreferenceChange('emergencyAlerts', e.target.checked)}
-                />
-                <span className="slider round"></span>
-              </label>
             </div>
-            <div className="preference-item">
-              <div className="pref-info">
-                <h4>Leave Request Updates</h4>
-                <p>Get notified when leave requests are submitted or approved</p>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={preferences.leaveUpdates}
-                  onChange={(e) => handlePreferenceChange('leaveUpdates', e.target.checked)}
-                />
-                <span className="slider round"></span>
-              </label>
-            </div>
-            <div className="preference-item">
-              <div className="pref-info">
-                <h4>Dark Mode</h4>
-                <p>Switch to dark theme (coming soon)</p>
-              </div>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={preferences.darkMode}
-                  onChange={(e) => handlePreferenceChange('darkMode', e.target.checked)}
-                  disabled
-                />
-                <span className="slider round"></span>
-              </label>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

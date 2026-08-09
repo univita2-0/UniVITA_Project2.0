@@ -3,9 +3,7 @@ import './EmployeeManagement.css';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
-  Search, Edit2, Trash2, RefreshCw, UserCheck, UserX, Key, LockOpen,
-  CalendarDays, AlertCircle, ChevronLeft, ChevronRight, Filter, Users,
-  Info, Eye, EyeOff
+  Search, Edit2, Trash2, UserCheck, AlertCircle, ChevronLeft, ChevronRight, Users, Eye, EyeOff
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
@@ -61,17 +59,6 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     work_days_per_month: 22,
   });
 
-  const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipContent, setTooltipContent] = useState('');
-
-  const [showLeaveBalanceModal, setShowLeaveBalanceModal] = useState(false);
-  const [balanceEmployee, setBalanceEmployee] = useState(null);
-  const [leaveBalances, setLeaveBalances] = useState([]);
-  const [leaveTypes, setLeaveTypes] = useState([]);
-  const [editingBalance, setEditingBalance] = useState(null);
-  const [balanceYear, setBalanceYear] = useState(new Date().getFullYear());
-  const [balanceLoading, setBalanceLoading] = useState(false);
-
   const [showSoftDeleteModal, setShowSoftDeleteModal] = useState(false);
   const [softDeleteTarget, setSoftDeleteTarget] = useState(null);
 
@@ -124,18 +111,6 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     loadEmployees();
   }, [loadEmployees]);
 
-  useEffect(() => {
-    const fetchLeaveTypes = async () => {
-      try {
-        const res = await axios.get(`${API_BASE}/leave-types`, getAuthHeaders());
-        setLeaveTypes(res.data);
-      } catch (err) {
-        console.error('Failed to load leave types', err);
-      }
-    };
-    fetchLeaveTypes();
-  }, []);
-
   const generateNewEmployeeId = async () => {
     try {
       const res = await axios.get(`${API_BASE}/employees/last-id`, getAuthHeaders());
@@ -156,7 +131,6 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     }
   };
 
-  // Helper to ensure dates are sliced to YYYY-MM-DD so HTML5 inputs can read them
   const extractDate = (isoStr) => {
     if (!isoStr) return '';
     return isoStr.split('T')[0];
@@ -373,54 +347,6 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     }
   };
 
-  const openLeaveBalanceModal = async (emp) => {
-    setBalanceEmployee(emp);
-    setBalanceYear(new Date().getFullYear());
-    setBalanceLoading(true);
-    setShowLeaveBalanceModal(true);
-    try {
-      const res = await axios.get(`${API_BASE}/leave-balances/${emp.id}?year=${balanceYear}`, getAuthHeaders());
-      const balances = res.data;
-      const fullBalances = leaveTypes.map(lt => {
-        const existing = balances.find(b => b.leave_type === lt.name);
-        return {
-          leave_type_id: lt.id,
-          leave_type: lt.name,
-          remaining_days: existing ? existing.remaining_days : lt.annual_quota,
-          annual_quota: lt.annual_quota
-        };
-      });
-      setLeaveBalances(fullBalances);
-      setEditingBalance(null);
-    } catch (err) {
-      console.error('Failed to load balances', err);
-      toast.error('Could not load leave balances');
-    } finally {
-      setBalanceLoading(false);
-    }
-  };
-
-  const updateBalance = async (leaveTypeId, newValue) => {
-    if (newValue < 0) {
-      toast.warning('Remaining days cannot be negative');
-      return;
-    }
-    try {
-      await axios.put(`${API_BASE}/leave-balances/${balanceEmployee.id}`, {
-        leave_type_id: leaveTypeId,
-        remaining_days: newValue,
-        year: balanceYear
-      }, getAuthHeaders());
-      setLeaveBalances(prev => prev.map(b =>
-        b.leave_type_id === leaveTypeId ? { ...b, remaining_days: newValue } : b
-      ));
-      toast.success('Balance updated successfully');
-    } catch (err) {
-      console.error('Update failed', err);
-      toast.error('Failed to update balance');
-    }
-  };
-
   const getFilteredList = () => {
     let filtered = [];
     switch (activeTab) {
@@ -500,9 +426,18 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       </div>
 
       <div className="stats-cards">
-        <div className="stat-card"><div className="stat-icon"><Users size={24} /></div><div className="stat-info"><span className="stat-value">{activeEmployees.length}</span><span className="stat-label">Active Employees</span></div></div>
-        <div className="stat-card"><div className="stat-icon"><UserCheck size={24} /></div><div className="stat-info"><span className="stat-value">{instructorsCount}</span><span className="stat-label">Instructors</span></div></div>
-        <div className="stat-card"><div className="stat-icon"><AlertCircle size={24} /></div><div className="stat-info"><span className="stat-value">{staffCount}</span><span className="stat-label">Staff</span></div></div>
+        <div className="stat-card">
+          <div className="stat-icon"><Users size={20} /></div>
+          <div className="stat-info"><span className="stat-value">{activeEmployees.length}</span><span className="stat-label">Active Employees</span></div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon"><UserCheck size={20} /></div>
+          <div className="stat-info"><span className="stat-value">{instructorsCount}</span><span className="stat-label">Instructors</span></div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon"><AlertCircle size={20} /></div>
+          <div className="stat-info"><span className="stat-value">{staffCount}</span><span className="stat-label">Staff</span></div>
+        </div>
       </div>
 
       <div className="filter-tabs">
@@ -513,14 +448,22 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       </div>
 
       <div className="search-wrapper">
-        <Search size={18} className="search-icon" />
+        <Search size={16} className="search-icon" />
         <input type="text" placeholder="Search employees..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
       </div>
 
       <div className="table-wrapper">
         <table className="employee-table">
           <thead>
-            <tr><th>ID</th><th>Name</th><th>Email</th><th>Position</th><th>Contract</th><th>Status</th><th>Actions</th></tr>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Position</th>
+              <th>Contract</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
           </thead>
           <tbody>
             {paginatedEmployees.length === 0 ? <tr className="empty-row"><td colSpan="7">No employees found.</td></tr> :
@@ -549,23 +492,23 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       {renderPagination()}
       {renderTableInfo()}
 
-      <FormalModal show={showAddModal} onClose={() => setShowAddModal(false)} title="Add New Employee" wide>
+      <FormalModal show={showAddModal} onClose={() => setShowAddModal(false)} title="Add New Employee" wide >
         <div className="form-row-grid">
           <div className="modal-form-group"><label>First Name *</label><input value={newEmployeeData.first_name} onChange={e => handleAddEmployeeChange('first_name', e.target.value)} /></div>
           <div className="modal-form-group"><label>Middle Initial</label><input value={newEmployeeData.middle_initial} onChange={e => handleAddEmployeeChange('middle_initial', e.target.value)} maxLength={1} /></div>
           <div className="modal-form-group"><label>Last Name *</label><input value={newEmployeeData.last_name} onChange={e => handleAddEmployeeChange('last_name', e.target.value)} /></div>
         </div>
         <div className="form-row-grid">
-          <div className="modal-form-group"><label>Employee ID (auto)</label><input value={generatedEmpId} disabled style={{ backgroundColor: '#f5f5f5' }} /></div>
+          <div className="modal-form-group"><label>Employee ID (auto)</label><input value={generatedEmpId} disabled className="disabled-input" /></div>
           <div className="modal-form-group">
             <label>Default Password</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input value={generatedPassword} disabled style={{ backgroundColor: '#f5f5f5', flex: 1 }} />
-              <button type="button" onClick={() => { navigator.clipboard.writeText(generatedPassword); toast.info('Password copied'); }} style={{ padding: '6px 10px' }}>Copy</button>
+            <div className="copy-input-wrapper">
+              <input value={generatedPassword} disabled className="disabled-input" />
+              <button type="button" className="btn-copy" onClick={() => { navigator.clipboard.writeText(generatedPassword); toast.info('Password copied'); }}>Copy</button>
             </div>
           </div>
         </div>
-        <div className="modal-form-group"><label>Full Name (auto)</label><input value={newEmployeeData.full_name} disabled /></div>
+        <div className="modal-form-group"><label>Full Name (auto)</label><input value={newEmployeeData.full_name} disabled className="disabled-input" /></div>
         <div className="form-row-grid">
           <div className="modal-form-group"><label>Email *</label><input type="email" value={newEmployeeData.email} onChange={e => handleAddEmployeeChange('email', e.target.value)} /></div>
           <div className="modal-form-group"><label>Phone</label><input value={newEmployeeData.phone} onChange={e => handleAddEmployeeChange('phone', e.target.value)} /></div>
@@ -581,7 +524,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
         <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowAddModal(false)}>Cancel</button><button className="btn-save" onClick={handleAddEmployee}>Add Employee</button></div>
       </FormalModal>
 
-      <FormalModal show={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Employee" wide>
+      <FormalModal show={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Employee" wide >
         <div className="edit-employee-layout">
           <div className="edit-sidebar">
             <div className="edit-avatar">{getInitials(selectedEmployee?.full_name || '')}</div>
@@ -597,13 +540,13 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
           <div className="edit-content">
             {activeTabModal === 'general' && (
               <>
-                <div className="form-group"><label>Employee ID (read‑only)</label><input value={formData.employee_id} disabled /></div>
+                <div className="form-group"><label>Employee ID</label><input value={formData.employee_id} disabled className="disabled-input" /></div>
                 <div className="form-row">
                   <div className="form-group"><label>First Name *</label><input name="first_name" value={formData.first_name} onChange={handleEditInputChange} /></div>
                   <div className="form-group"><label>Last Name *</label><input name="last_name" value={formData.last_name} onChange={handleEditInputChange} /></div>
                   <div className="form-group"><label>Middle Initial</label><input name="middle_initial" value={formData.middle_initial} onChange={handleEditInputChange} maxLength={1} /></div>
                 </div>
-                <div className="form-group"><label>Full Name (auto)</label><input value={formData.full_name} disabled /></div>
+                <div className="form-group"><label>Full Name</label><input value={formData.full_name} disabled className="disabled-input" /></div>
                 <div className="form-row">
                   <div className="form-group"><label>Position</label><select name="position" value={formData.position} onChange={handleEditInputChange}><option>Entry Level Simulationist</option><option>Senior Simulationist</option></select></div>
                   <div className="form-group"><label>Contract Type</label><select name="employment_type" value={formData.employment_type} onChange={handleEditInputChange}><option>Regular</option><option>Part-time</option><option>Contract</option></select></div>
@@ -612,7 +555,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
                   <div className="form-group"><label>Date of Joining</label><input type="date" name="date_of_joining" value={formData.date_of_joining} onChange={handleEditInputChange} /></div>
                   <div className="form-group"><label>Account Expiration Date</label><input type="date" name="account_expiry" value={formData.account_expiry} onChange={handleEditInputChange} /></div>
                 </div>
-                <div className="form-group"><label>Status (Deactivate/Activate)</label><select name="status" value={formData.status} onChange={handleEditInputChange}><option value="active">Active</option><option value="inactive">Deactivated</option></select></div>
+                <div className="form-group"><label>Status</label><select name="status" value={formData.status} onChange={handleEditInputChange}><option value="active">Active</option><option value="inactive">Deactivated</option></select></div>
               </>
             )}
 
@@ -636,7 +579,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
             {activeTabModal === 'profile' && (
               <>
                 <div className="form-row"><div className="form-group"><label>Date of Birth</label><input type="date" name="date_of_birth" value={formData.date_of_birth} onChange={handleEditInputChange} /></div><div className="form-group"><label>Gender</label><select name="gender" value={formData.gender} onChange={handleEditInputChange}><option>Male</option><option>Female</option><option>Prefer not to say</option></select></div></div>
-                <div className="form-row"><div className="form-group"><label>Phone Number</label><input name="phone" value={formData.phone} onChange={handleEditInputChange} /></div><div className="form-group"><label>Salary (auto‑calculated)</label><input value={`₱${formData.salary.toLocaleString()}`} disabled /></div></div>
+                <div className="form-row"><div className="form-group"><label>Phone Number</label><input name="phone" value={formData.phone} onChange={handleEditInputChange} /></div><div className="form-group"><label>Salary</label><input value={`₱${formData.salary.toLocaleString()}`} disabled className="disabled-input" /></div></div>
                 <div className="form-row"><div className="form-group"><label>Emergency Contact Name</label><input name="emergency_contact_name" value={formData.emergency_contact_name} onChange={handleEditInputChange} /></div><div className="form-group"><label>Emergency Contact Phone</label><input name="emergency_contact_phone" value={formData.emergency_contact_phone} onChange={handleEditInputChange} /></div></div>
               </>
             )}
@@ -655,17 +598,15 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
         </div>
       </FormalModal>
 
-      <FormalModal show={showSoftDeleteModal} onClose={() => setShowSoftDeleteModal(false)} title="Move to Deleted">
-        <p>Are you sure you want to move <strong>{softDeleteTarget?.full_name}</strong> to <strong>Deleted Accounts</strong>?</p>
-        <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowSoftDeleteModal(false)}>Cancel</button><button className="btn-danger" onClick={confirmSoftDelete}>Yes, Move to Deleted</button></div>
+      <FormalModal show={showSoftDeleteModal} onClose={() => setShowSoftDeleteModal(false)} title="Move to Deleted" small>
+        <p style={{marginBottom: "1.5rem", color: "#475569"}}>Are you sure you want to move <strong>{softDeleteTarget?.full_name}</strong> to <strong>Deleted Accounts</strong>?</p>
+        <div className="modal-actions" style={{marginTop: 0}}><button className="btn-cancel" onClick={() => setShowSoftDeleteModal(false)}>Cancel</button><button className="btn-danger" onClick={confirmSoftDelete}>Move to Deleted</button></div>
       </FormalModal>
 
-      <FormalModal show={showPermanentDeleteModal} onClose={() => setShowPermanentDeleteModal(false)} title="Permanently Delete Employee">
-        <p>Are you sure you want to <strong>permanently delete</strong> {permanentDeleteTarget?.full_name}? This action <strong>cannot be undone</strong>.</p>
-        <div className="modal-actions"><button className="btn-cancel" onClick={() => setShowPermanentDeleteModal(false)}>Cancel</button><button className="btn-danger" onClick={confirmPermanentDelete}>Yes, Permanently Delete</button></div>
+      <FormalModal show={showPermanentDeleteModal} onClose={() => setShowPermanentDeleteModal(false)} title="Permanently Delete Employee" small>
+        <p style={{marginBottom: "1.5rem", color: "#475569"}}>Are you sure you want to <strong>permanently delete</strong> {permanentDeleteTarget?.full_name}? This action <strong>cannot be undone</strong>.</p>
+        <div className="modal-actions" style={{marginTop: 0}}><button className="btn-cancel" onClick={() => setShowPermanentDeleteModal(false)}>Cancel</button><button className="btn-danger" onClick={confirmPermanentDelete}>Permanently Delete</button></div>
       </FormalModal>
-
-      {showTooltip && <div className="global-tooltip">{tooltipContent}</div>}
     </div>
   );
 };

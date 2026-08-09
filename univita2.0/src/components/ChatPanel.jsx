@@ -1,7 +1,8 @@
+// src/components/ChatPanel.js
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './ChatPanel.css';
 import {
-  X, Send, Plus, ArrowLeft, MessageCircle, Search, Users, Trash2, LogOut
+  X, Send, Plus, ArrowLeft, MessageSquare, Search, Trash2, LogOut, Users
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:5000';
@@ -36,9 +37,6 @@ const ChatPanel = ({ token }) => {
   const [showLeaveRoomModal, setShowLeaveRoomModal] = useState(false);
   const [roomToLeave, setRoomToLeave] = useState(null);
 
-  // ------------------------------------------------------
-  // Fetch unread counts from the server (per room)
-  // ------------------------------------------------------
   const fetchUnreadCounts = useCallback(async () => {
     if (!token) return;
     try {
@@ -59,9 +57,6 @@ const ChatPanel = ({ token }) => {
     }
   }, [token]);
 
-  // ------------------------------------------------------
-  // WebSocket & Auth
-  // ------------------------------------------------------
   useEffect(() => {
     if (!token) return;
     try {
@@ -73,13 +68,12 @@ const ChatPanel = ({ token }) => {
 
     const ws = new WebSocket(`ws://localhost:5000?token=${token}`);
     wsRef.current = ws;
-    ws.onopen = () => console.log('Chat WS open');
+    
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'new_message') {
         setMessages((prev) => [...prev, data.message]);
         if (!open) {
-          // Increase unread for that room locally
           setUnreadMap(prev => ({
             ...prev,
             [data.message.room_id]: (prev[data.message.room_id] || 0) + 1
@@ -88,17 +82,14 @@ const ChatPanel = ({ token }) => {
         }
       }
     };
-    ws.onclose = () => console.log('Chat WS closed');
     return () => ws.close();
   }, [token, open, fetchUnreadCounts]);
 
-  // Periodic refresh of unread counts
   useEffect(() => {
     const interval = setInterval(fetchUnreadCounts, 10000);
     return () => clearInterval(interval);
   }, [fetchUnreadCounts]);
 
-  // Reset unread for rooms when panel opens (mark all as read)
   useEffect(() => {
     if (open) {
       rooms.forEach(room => {
@@ -112,9 +103,6 @@ const ChatPanel = ({ token }) => {
     }
   }, [open, rooms, token]);
 
-  // ------------------------------------------------------
-  // Fetch rooms & users
-  // ------------------------------------------------------
   const fetchRooms = useCallback(async () => {
     const res = await fetch(`${API_BASE}/api/chat/rooms`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -133,33 +121,30 @@ const ChatPanel = ({ token }) => {
       .catch(console.error);
   }, [token]);
 
-  // Search filtering
+  // Validation: Improved Search
   useEffect(() => {
-    if (searchTerm.trim().length === 0) {
+    const cleanSearch = searchTerm.trim().toLowerCase();
+    if (cleanSearch.length === 0) {
       setFilteredUsers([]);
       setShowSearchResults(false);
       return;
     }
-    const lower = searchTerm.toLowerCase();
     const filtered = allUsers.filter(u =>
-      u.full_name.toLowerCase().includes(lower) && u.id !== myUserId
+      u.full_name.toLowerCase().includes(cleanSearch) && u.id !== myUserId
     );
     setFilteredUsers(filtered);
     setShowSearchResults(true);
   }, [searchTerm, allUsers, myUserId]);
 
-  // Record read when entering a room
   useEffect(() => {
     if (!activeRoom) return;
     fetch(`${API_BASE}/api/chat/read/${activeRoom.id}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` }
     }).catch(console.error);
-    // Refresh unread counts to update badge/room list
     fetchUnreadCounts();
   }, [activeRoom, token, fetchUnreadCounts]);
 
-  // Fetch history when room changes
   useEffect(() => {
     if (!activeRoom) return;
     fetch(`${API_BASE}/api/chat/history/${activeRoom.id}`, {
@@ -174,11 +159,9 @@ const ChatPanel = ({ token }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ------------------------------------------------------
-  // Chat actions
-  // ------------------------------------------------------
+  // Validation: Prevent empty send & check WS state
   const handleSend = () => {
-    if (!newMsg.trim() || !wsRef.current) return;
+    if (!newMsg.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({
       type: 'message',
       roomId: activeRoom.id,
@@ -212,18 +195,17 @@ const ChatPanel = ({ token }) => {
     setShowSearchResults(false);
   };
 
+  // Validation: Enforce constraints before creating group
   const createGroup = async () => {
-    if (!groupName.trim() || selectedUsers.length < 1) {
-      alert('Group name and at least one other member are required.');
-      return;
-    }
+    if (!groupName.trim() || selectedUsers.length < 1) return;
+    
     const res = await fetch(`${API_BASE}/api/chat/group-room`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ name: groupName, memberIds: selectedUsers.map(u => u.id) })
+      body: JSON.stringify({ name: groupName.trim(), memberIds: selectedUsers.map(u => u.id) })
     });
     const data = await res.json();
     if (data.success) {
@@ -232,8 +214,6 @@ const ChatPanel = ({ token }) => {
       setGroupName('');
       setSelectedUsers([]);
       setGroupSearch('');
-    } else {
-      alert('Failed to create group');
     }
   };
 
@@ -260,55 +240,56 @@ const ChatPanel = ({ token }) => {
   };
 
   const togglePanel = () => setOpen(!open);
+  
+  const isSendDisabled = !newMsg.trim();
+  const isGroupCreateDisabled = !groupName.trim() || selectedUsers.length < 1;
 
-  // ------------------------------------------------------
-  // RENDER
-  // ------------------------------------------------------
   return (
     <>
       {!open && (
-        <button className="chat-toggle-btn" onClick={togglePanel}>
-          <MessageCircle size={20} /> Chat
-          {unreadTotal > 0 && <span className="unread-badge">{unreadTotal}</span>}
+        <button className="cp-toggle" onClick={togglePanel}>
+          <MessageSquare size={18} /> Chat
+          {unreadTotal > 0 && <span className="cp-badge-main">{unreadTotal}</span>}
         </button>
       )}
 
       {open && (
-        <div className="chat-panel">
+        <div className="cp-panel">
           {!activeRoom ? (
-            <div className="chat-room-list">
-              <div className="chat-header">
+            <div className="cp-view">
+              <div className="cp-header">
                 <h3>Messages</h3>
-                <button onClick={togglePanel}><X size={20} /></button>
+                <button className="cp-close-btn" onClick={togglePanel}><X size={18} /></button>
               </div>
 
-              {/* Search bar */}
-              <div className="chat-search">
-                <Search size={16} />
+              <div className="cp-search">
+                <Search size={14} className="cp-search-icon" />
                 <input
                   type="text"
-                  placeholder="Search for a user..."
+                  placeholder="Find a colleague..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  onFocus={() => searchTerm && setShowSearchResults(true)}
+                  onFocus={() => searchTerm.trim() && setShowSearchResults(true)}
                   onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
                 />
                 {showSearchResults && filteredUsers.length > 0 && (
-                  <div className="search-results">
+                  <div className="cp-search-results">
                     {filteredUsers.map(user => (
-                      <div key={user.id} className="search-result-item" onMouseDown={() => startDM(user)}>
-                        <span>{user.full_name}</span>
-                        <small>{user.role}</small>
+                      <div key={user.id} className="cp-search-item" onMouseDown={() => startDM(user)}>
+                        <span className="cp-search-name">{user.full_name}</span>
+                        <span className="cp-search-role">{user.role}</span>
                       </div>
                     ))}
                   </div>
                 )}
+                {showSearchResults && filteredUsers.length === 0 && (
+                  <div className="cp-search-results cp-search-empty">No users found.</div>
+                )}
               </div>
 
-              {/* Room list */}
-              <div className="room-groups">
+              <div className="cp-room-list">
                 {rooms.length === 0 && (
-                  <p className="empty-rooms">No conversations yet. Search for a user above.</p>
+                  <div className="cp-empty-state">No conversations yet.</div>
                 )}
                 {rooms.map(room => {
                   const isGroup = room.type === 'group';
@@ -317,126 +298,143 @@ const ChatPanel = ({ token }) => {
                   return (
                     <div
                       key={room.id}
-                      className={`room-item ${unread > 0 ? 'room-unread' : ''}`}
+                      className={`cp-room-item ${unread > 0 ? 'unread' : ''}`}
                       onClick={() => setActiveRoom(room)}
                     >
-                      <div className="room-info">
-                        <span className="room-name">{displayName}</span>
-                        <span className="room-type">{isGroup ? 'Group Chat' : 'Direct Message'}</span>
+                      <div className="cp-room-icon">
+                        {isGroup ? <Users size={16} /> : <MessageSquare size={16} />}
                       </div>
-                      {unread > 0 && <span className="room-unread-badge">{unread}</span>}
-                      <div className="room-actions">
+                      <div className="cp-room-info">
+                        <span className="cp-room-name">{displayName}</span>
+                        <span className="cp-room-type">{isGroup ? 'Group' : 'Direct'}</span>
+                      </div>
+                      {unread > 0 && <span className="cp-badge-room">{unread}</span>}
+                      <div className="cp-room-actions">
                         {isGroup && (
-                          <button title="Leave" onClick={(e) => { e.stopPropagation(); setRoomToLeave(room); setShowLeaveRoomModal(true); }}>
+                          <button title="Leave Group" onClick={(e) => { e.stopPropagation(); setRoomToLeave(room); setShowLeaveRoomModal(true); }}>
                             <LogOut size={14} />
                           </button>
                         )}
-                        {isGroup ? (
-                          <button title="Delete" onClick={(e) => { e.stopPropagation(); setRoomToDelete(room); setShowDeleteRoomModal(true); }}>
-                            <Trash2 size={14} />
-                          </button>
-                        ) : (
-                          <button title="Delete" onClick={(e) => { e.stopPropagation(); setRoomToDelete(room); setShowDeleteRoomModal(true); }}>
-                            <Trash2 size={14} />
-                          </button>
-                        )}
+                        <button title="Delete Thread" onClick={(e) => { e.stopPropagation(); setRoomToDelete(room); setShowDeleteRoomModal(true); }}>
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              <button className="new-group-btn" onClick={() => setShowGroupModal(true)}>
-                <Plus size={18} /> Create Group
-              </button>
+              <div className="cp-footer">
+                <button className="cp-btn-create" onClick={() => setShowGroupModal(true)}>
+                  <Plus size={16} /> Create Group
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="chat-room">
-              <div className="chat-room-header">
-                <button onClick={() => setActiveRoom(null)}><ArrowLeft size={20} /></button>
-                <span className="room-title">
-                  {activeRoom.type === 'group' ? activeRoom.name : (activeRoom.display_name || activeRoom.name)}
-                </span>
+            <div className="cp-view">
+              <div className="cp-header">
+                <button className="cp-back-btn" onClick={() => setActiveRoom(null)}><ArrowLeft size={18} /></button>
+                <div className="cp-active-info">
+                  <span className="cp-active-title">
+                    {activeRoom.type === 'group' ? activeRoom.name : (activeRoom.display_name || activeRoom.name)}
+                  </span>
+                </div>
               </div>
 
-              <div className="chat-messages">
+              <div className="cp-messages">
+                {messages.length === 0 && <div className="cp-empty-state">No messages yet. Say hi!</div>}
                 {messages.map(msg => {
                   const isSent = msg.user_id === myUserId;
                   return (
-                    <div key={msg.id} className={`message-bubble ${isSent ? 'sent' : 'received'}`}>
-                      <div className="msg-sender">{msg.full_name || msg.employee_id || 'You'}</div>
-                      <div className="msg-text">{msg.message}</div>
+                    <div key={msg.id} className={`cp-bubble-wrapper ${isSent ? 'sent' : 'received'}`}>
+                      {!isSent && <div className="cp-sender-name">{msg.full_name || msg.employee_id}</div>}
+                      <div className="cp-bubble">{msg.message}</div>
                     </div>
                   );
                 })}
                 <div ref={messagesEndRef} />
               </div>
 
-              <div className="chat-input-bar">
+              <div className="cp-input-area">
                 <input
                   type="text"
-                  placeholder="Type a message..."
+                  placeholder="Type your message..."
                   value={newMsg}
                   onChange={(e) => setNewMsg(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                 />
-                <button onClick={handleSend} className="send-btn"><Send size={18} /></button>
+                <button 
+                  onClick={handleSend} 
+                  className="cp-btn-send"
+                  disabled={isSendDisabled}
+                >
+                  <Send size={16} />
+                </button>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Group creation modal */}
+      {/* Modals */}
       {showGroupModal && (
-        <div className="modal-overlay">
-          <div className="dm-modal-content" style={{ maxWidth: '450px', width: '95%' }}>
-            <h3>Create Group Chat</h3>
-            <input placeholder="Group name" value={groupName} onChange={e => setGroupName(e.target.value)} />
-            <input placeholder="Search members..." value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />
-            <div className="member-list">
+        <div className="cp-modal-overlay">
+          <div className="cp-modal">
+            <h4>Create Group Chat</h4>
+            <div className="cp-form-group">
+              <label>Group Name</label>
+              <input placeholder="e.g. Project Alpha" value={groupName} onChange={e => setGroupName(e.target.value)} />
+            </div>
+            <div className="cp-form-group">
+              <label>Search Members</label>
+              <input placeholder="Search to add..." value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />
+            </div>
+            
+            <div className="cp-member-list">
               {allUsers
-                .filter(u => u.full_name.toLowerCase().includes(groupSearch.toLowerCase()) && u.id !== myUserId)
+                .filter(u => u.full_name.toLowerCase().includes(groupSearch.trim().toLowerCase()) && u.id !== myUserId)
                 .map(u => (
-                  <div key={u.id} className="member-item" onClick={() => {
+                  <div key={u.id} className="cp-member-item" onClick={() => {
                     setSelectedUsers(prev => prev.some(s => s.id === u.id) ? prev.filter(s => s.id !== u.id) : [...prev, u]);
                   }}>
                     <input type="checkbox" checked={selectedUsers.some(s => s.id === u.id)} readOnly />
-                    <span>{u.full_name} ({u.role})</span>
+                    <div className="cp-member-info">
+                      <span className="cp-member-name">{u.full_name}</span>
+                      <span className="cp-member-role">{u.role}</span>
+                    </div>
                   </div>
                 ))}
             </div>
-            <div className="modal-actions">
-              <button onClick={() => setShowGroupModal(false)}>Cancel</button>
-              <button onClick={createGroup}>Create</button>
+            
+            <div className="cp-modal-actions">
+              <button className="cp-btn-cancel" onClick={() => setShowGroupModal(false)}>Cancel</button>
+              <button className="cp-btn-confirm" onClick={createGroup} disabled={isGroupCreateDisabled}>Create</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete room modal */}
       {showDeleteRoomModal && (
-        <div className="modal-overlay">
-          <div className="dm-modal-content">
-            <h3>Delete {roomToDelete?.type === 'group' ? 'Group' : 'Conversation'}</h3>
-            <p>Do you want to permanently delete "{roomToDelete?.display_name || roomToDelete?.name}"?</p>
-            <div className="modal-actions">
-              <button onClick={() => setShowDeleteRoomModal(false)}>Cancel</button>
-              <button onClick={() => { deleteRoom(roomToDelete.id); setShowDeleteRoomModal(false); }} style={{ background: '#EF4444', color: 'white' }}>Delete</button>
+        <div className="cp-modal-overlay">
+          <div className="cp-modal">
+            <h4>Delete Conversation</h4>
+            <p>Delete "{roomToDelete?.display_name || roomToDelete?.name}" entirely? This cannot be undone.</p>
+            <div className="cp-modal-actions">
+              <button className="cp-btn-cancel" onClick={() => setShowDeleteRoomModal(false)}>Cancel</button>
+              <button className="cp-btn-danger" onClick={() => { deleteRoom(roomToDelete.id); setShowDeleteRoomModal(false); }}>Delete</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Leave room modal */}
       {showLeaveRoomModal && (
-        <div className="modal-overlay">
-          <div className="dm-modal-content">
-            <h3>Leave Group</h3>
-            <p>You will no longer receive messages from "{roomToLeave?.name}".</p>
-            <div className="modal-actions">
-              <button onClick={() => setShowLeaveRoomModal(false)}>Cancel</button>
-              <button onClick={() => { leaveRoom(roomToLeave.id); setShowLeaveRoomModal(false); }} style={{ background: '#F59E0B', color: 'white' }}>Leave</button>
+        <div className="cp-modal-overlay">
+          <div className="cp-modal">
+            <h4>Leave Group</h4>
+            <p>You will be removed from "{roomToLeave?.name}".</p>
+            <div className="cp-modal-actions">
+              <button className="cp-btn-cancel" onClick={() => setShowLeaveRoomModal(false)}>Cancel</button>
+              <button className="cp-btn-danger" onClick={() => { leaveRoom(roomToLeave.id); setShowLeaveRoomModal(false); }}>Leave</button>
             </div>
           </div>
         </div>

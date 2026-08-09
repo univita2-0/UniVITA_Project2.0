@@ -1,3 +1,4 @@
+// src/pages/AuditLogs.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Search, Download, Calendar, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -105,71 +106,78 @@ const AuditLogs = () => {
   };
 
   return (
-    <div className="audit-container">
-      <div className="audit-header">
+    <div className="al-container">
+      <div className="al-header">
         <div>
-          <h1>Audit Logs</h1>
-          <p className="audit-description">Complete history of system actions and data changes</p>
+          <h2 className="al-title">Audit Logs</h2>
+          <p className="al-subtitle">Complete history of system actions and data changes.</p>
         </div>
-        <button className="btn-export" onClick={exportCSV}>
-          <Download size={16} /> Export to CSV
+        <button className="btn-al-export" onClick={exportCSV}>
+          <Download size={16} /> 
+          <span>Export CSV</span>
         </button>
       </div>
 
-      {/* Filters Section */}
-      <div className="filters-bar">
-        <div className="filter-item search-filter">
-          <Search size={18} />
-          <input
-            type="text"
-            placeholder="Search user, action, resource or IP..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-          />
-        </div>
-
-        <div className="filter-item date-filter">
-          <Calendar size={18} />
-          <div className="date-input-group">
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)}
-              placeholder="From"
-            />
-            <span>–</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={e => setDateTo(e.target.value)}
-              placeholder="To"
-            />
+      {/* Modern Filter Card */}
+      <div className="al-filters-card">
+        <div className="al-filters-wrapper">
+          <div className="al-filter-group search">
+            <label>Search Logs</label>
+            <div className="al-input-wrapper">
+              <Search size={16} className="al-input-icon" />
+              <input
+                type="text"
+                placeholder="Search user, action, IP..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="al-input pl-icon"
+              />
+            </div>
           </div>
-          {(dateFrom || dateTo) && (
-            <button className="clear-dates" onClick={() => { setDateFrom(''); setDateTo(''); }}>
-              Clear
-            </button>
-          )}
-        </div>
 
-        <div className="filter-item action-filter">
-          <Filter size={18} />
-          <select value={actionFilter} onChange={e => setActionFilter(e.target.value)}>
-            <option value="">All Actions</option>
-            {uniqueActions.map(action => (
-              <option key={action} value={action}>{action}</option>
-            ))}
-          </select>
+          <div className="al-filter-group date">
+            <label>Date Range</label>
+            <div className="al-date-flex">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="al-input"
+              />
+              <span className="al-date-sep">to</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="al-input"
+              />
+              {(dateFrom || dateTo) && (
+                <button className="al-btn-clear" onClick={() => { setDateFrom(''); setDateTo(''); }}>
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="al-filter-group action">
+            <label>Action Type</label>
+            <select className="al-select" value={actionFilter} onChange={e => setActionFilter(e.target.value)}>
+              <option value="">All Actions</option>
+              {uniqueActions.map(action => (
+                <option key={action} value={action}>{action}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Table */}
+      {/* Table Area */}
       {loading ? (
-        <div className="loading-state">Loading audit logs...</div>
+        <div className="al-loading-state">Loading audit logs...</div>
       ) : (
-        <>
-          <div className="table-wrapper">
-            <table className="audit-table">
+        <div className="al-card">
+          <div className="al-table-wrapper">
+            <table className="al-table">
               <thead>
                 <tr>
                   <th>Timestamp</th>
@@ -182,20 +190,22 @@ const AuditLogs = () => {
               </thead>
               <tbody>
                 {paginatedLogs.length === 0 ? (
-                  <tr className="empty-row">
-                    <td colSpan="6">No audit records found. Try adjusting your filters.</td>
+                  <tr className="al-empty-row">
+                    <td colSpan="6">No audit records found matching your filters.</td>
                   </tr>
                 ) : (
                   paginatedLogs.map(log => (
                     <tr key={log.id}>
-                      <td className="timestamp">{new Date(log.created_at).toLocaleString()}</td>
-                      <td className="user">{log.user_email || 'System'}</td>
-                      <td><span className="action-tag">{log.action}</span></td>
-                      <td className="resource">{log.target_type || '—'}</td>
-                      <td className="changes" title={formatChanges(log.old_value, log.new_value)}>
+                      <td className="al-timestamp">{new Date(log.created_at).toLocaleString()}</td>
+                      <td className="al-user">{log.user_email || 'System'}</td>
+                      <td>
+                        <span className="al-action-tag">{log.action}</span>
+                      </td>
+                      <td className="al-resource">{log.target_type || '—'}</td>
+                      <td className="al-changes" title={formatChanges(log.old_value, log.new_value)}>
                         {formatChanges(log.old_value, log.new_value)}
                       </td>
-                      <td className="ip">{log.ip_address || '—'}</td>
+                      <td className="al-ip">{log.ip_address || '—'}</td>
                     </tr>
                   ))
                 )}
@@ -205,30 +215,39 @@ const AuditLogs = () => {
 
           {/* Pagination */}
           {totalLogs > 0 && (
-            <div className="pagination-bar">
-              <div className="rows-per-page">
+            <div className="al-pagination-bar">
+              <div className="al-rows-selector">
                 <span>Rows per page:</span>
-                <select value={rowsPerPage} onChange={e => setRowsPerPage(Number(e.target.value))}>
+                <select className="al-select-small" value={rowsPerPage} onChange={e => setRowsPerPage(Number(e.target.value))}>
                   <option value={10}>10</option>
                   <option value={20}>20</option>
                   <option value={50}>50</option>
                   <option value={100}>100</option>
                 </select>
               </div>
-              <div className="pagination-controls">
-                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                  <ChevronLeft size={18} />
+              
+              <div className="al-pagination-controls">
+                <button 
+                  className="al-page-btn" 
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft size={16} />
                 </button>
-                <span className="page-indicator">
+                <span className="al-page-indicator">
                   Page {currentPage} of {totalPages || 1}
                 </span>
-                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-                  <ChevronRight size={18} />
+                <button 
+                  className="al-page-btn" 
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
+                  disabled={currentPage === totalPages}
+                >
+                  <ChevronRight size={16} />
                 </button>
               </div>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
