@@ -8,7 +8,7 @@ const Login = ({ onBack }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [step, setStep] = useState('login'); 
+  const [step, setStep] = useState('login'); // 'login' | 'otp' | 'forgot-password' | 'reset-password'
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
@@ -27,10 +27,15 @@ const Login = ({ onBack }) => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      toast.error('Please enter both email and password.');
+      return;
+    }
+
     setOtpLoading(true);
 
     try {
-      const result = await login({ email, password });
+      const result = await login({ email: email.trim(), password });
 
       if (result.success) {
         if (result.requiresPasswordReset) {
@@ -42,7 +47,7 @@ const Login = ({ onBack }) => {
         const otpRes = await fetch(`${API_BASE}/auth/send-otp`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email: email.trim() }),
         });
         const otpData = await otpRes.json();
 
@@ -65,6 +70,10 @@ const Login = ({ onBack }) => {
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
+    if (!otp || otp.length < 6) {
+      toast.error('Please enter a valid 6-digit OTP code.');
+      return;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/auth/verify-otp`, {
@@ -110,6 +119,7 @@ const Login = ({ onBack }) => {
       const data = await res.json();
       if (data.success) {
         startResendTimer();
+        toast.success('A new verification code has been sent.');
       } else {
         toast.error(data.message || 'Failed to resend OTP.');
       }
@@ -122,15 +132,20 @@ const Login = ({ onBack }) => {
 
   const handleForgotPasswordSubmit = async (e) => {
     e.preventDefault();
+    if (!email.trim()) {
+      toast.error('Please enter your account email address.');
+      return;
+    }
+
     setOtpLoading(true);
     try {
-      const res = await requestPasswordReset(email);
+      const res = await requestPasswordReset(email.trim());
       if (res.success) {
         toast.success(res.message || 'Reset OTP sent to your email.');
         setStep('reset-password');
         startResendTimer();
       } else {
-        toast.error(res.message || 'Failed to request password reset.');
+        toast.error(res.message || 'Failed to request password reset. Invalid email.');
       }
     } catch (err) {
       toast.error('Connection error. Please try again.');
@@ -141,6 +156,11 @@ const Login = ({ onBack }) => {
 
   const handleResetPasswordSubmit = async (e) => {
     e.preventDefault();
+    if (!otp || otp.length < 6 || !newPassword || newPassword.length < 6) {
+      toast.error('Please provide a valid 6-digit code and a new password (min. 6 characters).');
+      return;
+    }
+
     setOtpLoading(true);
     try {
       const res = await resetPassword({ email, otp, newPassword });
@@ -174,14 +194,16 @@ const Login = ({ onBack }) => {
       </button>
 
       <div className="glass-login-card">
-        {/* Brand Header */}
-        <div className="gl-brand-header gl-stagger-1">
-          <div className="gl-brand-icon">
-            <ShieldCheck size={28} strokeWidth={2} />
+        {/* Brand Header: Only rendered on initial login step */}
+        {step === 'login' && (
+          <div className="gl-brand-header gl-stagger-1">
+            <div className="gl-brand-icon">
+              <ShieldCheck size={28} strokeWidth={2} />
+            </div>
+            <h1 className="gl-brand-title">Welcome back!</h1>
+            <p className="gl-brand-subtitle">Administrator</p>
           </div>
-          <h1 className="gl-brand-title">Welcome back!</h1>
-          <p className="gl-brand-subtitle">Administrator</p>
-        </div>
+        )}
 
         {/* Step: Login */}
         {step === 'login' && (

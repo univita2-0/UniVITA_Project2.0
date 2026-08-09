@@ -167,13 +167,14 @@
 }
 
 .gl-instruction h4 {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
+  font-weight: 700;
   color: #111827;
   margin: 0 0 0.5rem 0;
 }
 
 .gl-instruction p {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: #6B7280;
   line-height: 1.5;
   margin: 0;
