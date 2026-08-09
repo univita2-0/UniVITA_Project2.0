@@ -37,7 +37,7 @@ const Login = ({ onBack }) => {
     try {
       const result = await login({ email: email.trim(), password });
 
-      if (result.success) {
+      if (result && result.success) {
         if (result.requiresPasswordReset) {
           toast.error('Your password has expired. Please use the mobile app to reset it.');
           setOtpLoading(false);
@@ -51,18 +51,19 @@ const Login = ({ onBack }) => {
         });
         const otpData = await otpRes.json();
 
-        if (otpData.success) {
+        if (otpData && otpData.success) {
           setStep('otp');
           startResendTimer();
+          toast.success('Security verification code sent to your email.');
         } else {
-          toast.error(otpData.message || 'Failed to send OTP.');
+          toast.error(otpData?.message || 'Failed to send OTP verification code.');
         }
       } else {
-        toast.error(result.message || 'Invalid email or password. Please try again.');
+        toast.error(result?.message || 'Incorrect email or password. Please try again.');
       }
     } catch (err) {
       console.error(err);
-      toast.error('Connection error. Please ensure the backend server is running.');
+      toast.error('Connection error. Please check your network or server status.');
     } finally {
       setOtpLoading(false);
     }
@@ -83,7 +84,7 @@ const Login = ({ onBack }) => {
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (data && data.success) {
         if (data.user.role === 'instructor') {
           toast.error('Instructor accounts cannot log in to the web portal. Please use the UniVITA mobile app.');
           setStep('login');
@@ -98,13 +99,16 @@ const Login = ({ onBack }) => {
         localStorage.setItem('user_email', data.user.email);
         localStorage.setItem('employee_id', data.user.employee_id);
 
-        window.location.href = '/';
+        toast.success('Authentication successful. Redirecting...');
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 800);
       } else {
-        toast.error(data.message || 'Invalid OTP. Please try again.');
+        toast.error(data?.message || 'Invalid or expired OTP code.');
       }
     } catch (err) {
       console.error(err);
-      toast.error('Connection error. Please ensure the backend server is running.');
+      toast.error('Connection error during verification.');
     }
   };
 
@@ -117,14 +121,14 @@ const Login = ({ onBack }) => {
         body: JSON.stringify({ email }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data && data.success) {
         startResendTimer();
         toast.success('A new verification code has been sent.');
       } else {
-        toast.error(data.message || 'Failed to resend OTP.');
+        toast.error(data?.message || 'Failed to resend OTP.');
       }
     } catch (err) {
-      toast.error('Connection error.');
+      toast.error('Connection error while resending code.');
     } finally {
       setOtpLoading(false);
     }
@@ -140,12 +144,12 @@ const Login = ({ onBack }) => {
     setOtpLoading(true);
     try {
       const res = await requestPasswordReset(email.trim());
-      if (res.success) {
-        toast.success(res.message || 'Reset OTP sent to your email.');
+      if (res && res.success) {
+        toast.success(res.message || 'Reset code sent to your email.');
         setStep('reset-password');
         startResendTimer();
       } else {
-        toast.error(res.message || 'Failed to request password reset. Invalid email.');
+        toast.error(res?.message || 'No account found with this email address.');
       }
     } catch (err) {
       toast.error('Connection error. Please try again.');
@@ -164,17 +168,17 @@ const Login = ({ onBack }) => {
     setOtpLoading(true);
     try {
       const res = await resetPassword({ email, otp, newPassword });
-      if (res.success) {
+      if (res && res.success) {
         toast.success('Password reset successfully. You can now log in.');
         setStep('login');
         setOtp('');
         setNewPassword('');
         setPassword('');
       } else {
-        toast.error(res.message || 'Failed to reset password.');
+        toast.error(res?.message || 'Failed to reset password.');
       }
     } catch (err) {
-      toast.error('Connection error. Please try again.');
+      toast.error('Connection error during password reset.');
     } finally {
       setOtpLoading(false);
     }
@@ -194,7 +198,7 @@ const Login = ({ onBack }) => {
       </button>
 
       <div className="glass-login-card">
-        {/* Brand Header: Only rendered on initial login step */}
+        {/* Brand Header: Strictly rendered ONLY on initial login step */}
         {step === 'login' && (
           <div className="gl-brand-header gl-stagger-1">
             <div className="gl-brand-icon">
