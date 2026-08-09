@@ -1,8 +1,7 @@
-// src/pages/CompletedVisits.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Calendar, Search, Download, User, Clock, MapPin } from 'lucide-react';
+import { Calendar, Search, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_BASE } from '../api';
 import './CompletedVisits.css';
 
@@ -13,12 +12,18 @@ const getAuthHeaders = () => ({
 const CompletedVisits = () => {
   const [visitors, setVisitors] = useState([]);
   const [loading, setLoading] = useState(false);
+  
+  // Date Filters
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
     return d.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // Pagination State
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchHistory = useCallback(async () => {
     if (!startDate || !endDate) {
@@ -32,6 +37,7 @@ const CompletedVisits = () => {
         ...getAuthHeaders()
       });
       setVisitors(res.data);
+      setCurrentPage(1); // Reset to first page after a new search
     } catch (err) {
       console.error('Failed to fetch visitor history', err);
       toast.error(err.response?.data?.error || 'Failed to load history');
@@ -64,6 +70,16 @@ const CompletedVisits = () => {
     a.click();
     URL.revokeObjectURL(url);
     toast.success('CSV exported successfully');
+  };
+
+  // Pagination Logic
+  const totalPages = Math.ceil(visitors.length / rowsPerPage) || 1;
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const currentVisitors = visitors.slice(startIndex, startIndex + rowsPerPage);
+
+  const handleRowsChange = (e) => {
+    setRowsPerPage(Number(e.target.value));
+    setCurrentPage(1); // Reset to first page when changing row count
   };
 
   return (
@@ -121,40 +137,81 @@ const CompletedVisits = () => {
         </div>
       ) : (
         <div className="cv-table-wrapper">
-          <table className="cv-table">
-            <thead>
-              <tr>
-                <th>Visitor Name</th>
-                <th>Visit Date</th>
-                <th>Checked In</th>
-                <th>Checked Out</th>
-                <th>Duration</th>
-                <th>Destination</th>
-                <th>BLE Tag</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visitors.map(v => (
-                <tr key={v.id}>
-                  <td>
-                    <div className="cv-name">{v.first_name} {v.last_name}</div>
-                    <div className="cv-email">{v.email}</div>
-                  </td>
-                  <td>
-                    <div className="cv-date-text">{v.visit_date}</div>
-                    <div className="cv-time-text">{v.visit_time?.slice(0,5)}</div>
-                  </td>
-                  <td className="font-medium text-gray-900">{v.arrived_time}</td>
-                  <td className="font-medium text-gray-900">{v.returned_time}</td>
-                  <td>
-                    <span className="cv-duration-badge">{v.duration}</span>
-                  </td>
-                  <td className="cv-destination" title={v.destination}>{v.destination || '—'}</td>
-                  <td>{v.ble_id || '—'}</td>
+          <div className="cv-table-scroll">
+            <table className="cv-table">
+              <thead>
+                <tr>
+                  <th>Visitor Name</th>
+                  <th>Visit Date</th>
+                  <th>Checked In</th>
+                  <th>Checked Out</th>
+                  <th>Duration</th>
+                  <th>Destination</th>
+                  <th>BLE Tag</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {currentVisitors.map(v => (
+                  <tr key={v.id}>
+                    <td>
+                      <div className="cv-name">{v.first_name} {v.last_name}</div>
+                      <div className="cv-email">{v.email}</div>
+                    </td>
+                    <td>
+                      <div className="cv-date-text">{v.visit_date}</div>
+                      <div className="cv-time-text">{v.visit_time?.slice(0,5)}</div>
+                    </td>
+                    <td className="font-medium text-gray-900">{v.arrived_time}</td>
+                    <td className="font-medium text-gray-900">{v.returned_time}</td>
+                    <td>
+                      <span className="cv-duration-badge">{v.duration}</span>
+                    </td>
+                    <td className="cv-destination" title={v.destination}>{v.destination || '—'}</td>
+                    <td>{v.ble_id || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Footer */}
+          <div className="cv-pagination-footer">
+            <div className="cv-rows-selector">
+              <span>Rows per page:</span>
+              <select 
+                className="cv-select"
+                value={rowsPerPage} 
+                onChange={handleRowsChange}
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
+            <div className="cv-page-controls">
+              <button 
+                className="cv-page-btn" 
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              >
+                <ChevronLeft size={18} />
+              </button>
+              
+              <span className="cv-page-info">
+                Page {currentPage} of {totalPages}
+              </span>
+              
+              <button 
+                className="cv-page-btn" 
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

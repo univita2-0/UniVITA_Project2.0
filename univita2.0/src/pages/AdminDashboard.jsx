@@ -1,18 +1,17 @@
 // src/pages/AdminDashboard.jsx
 import React, { useState, useEffect } from 'react';
-import './Dashboard.css';
+import axios from 'axios';
 import {
   ShieldCheck, Users, Activity, FileText, Bell, Zap,
-  Clock, AlertCircle, ChevronRight, Calendar, CheckCircle, XCircle
+  Clock, AlertCircle, ChevronRight, Calendar, CheckCircle
 } from 'lucide-react';
-import axios from 'axios';
 import { API_BASE } from '../api';
+import './Dashboard.css';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Helper to format date as YYYY-MM-DD in local timezone
 const getTodayDate = () => {
   const today = new Date();
   return today.toISOString().split('T')[0];
@@ -37,24 +36,18 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
     setLoading(true);
     setError(null);
     try {
-      // 1. Fetch all employees (active only? adjust as needed)
       const employeesRes = await axios.get(`${API_BASE}/employees`, getAuthHeaders());
       const allEmployees = employeesRes.data || [];
-      // Count only active employees (status = 'active')
-      const activeEmployees = allEmployees.filter(emp => emp.status === 'active');
-      const totalActive = activeEmployees.length;
+      const totalActive = allEmployees.filter(emp => emp.status === 'active').length;
 
-      // 2. Fetch all leave requests
       const leaveRes = await axios.get(`${API_BASE}/leave-requests/all`, getAuthHeaders());
       const allLeaves = leaveRes.data || [];
       const pendingLeaves = allLeaves.filter(leave => leave.status === 'Pending');
       const pendingCount = pendingLeaves.length;
-      // Get last 5 pending leaves (most recent first)
       const recentPending = [...pendingLeaves]
         .sort((a, b) => new Date(b.request_date) - new Date(a.request_date))
         .slice(0, 5);
 
-      // 3. Fetch today's approved visitors (appointments)
       const today = getTodayDate();
       const appointmentsRes = await axios.get(`${API_BASE}/appointments/history`, getAuthHeaders());
       const allAppointments = appointmentsRes.data || [];
@@ -63,7 +56,6 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
       );
       const visitorCount = todaysApproved.length;
 
-      // 4. (Optional) Check backend health – simple ping to a public endpoint
       let systemStatus = 'Operational';
       try {
         await axios.get(`${API_BASE}/events`, { timeout: 3000 });
@@ -86,7 +78,6 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
     }
   };
 
-  // Format date nicely
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
     const d = new Date(dateStr);
@@ -95,98 +86,101 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
 
   if (loading) {
     return (
-      <div className="dashboard-loading">
-        <div className="spinner"></div>
-        <p>Loading dashboard...</p>
+      <div className="db-state-container">
+        <Clock size={32} className="db-icon-muted" />
+        <p>Loading System Dashboard Data...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="dashboard-error">
+      <div className="db-state-container error">
         <AlertCircle size={32} />
         <p>{error}</p>
-        <button onClick={loadDashboardData} className="btn-retry">Retry</button>
+        <button onClick={loadDashboardData} className="btn-db-outline">Retry Connection</button>
       </div>
     );
   }
 
   return (
-    <div className="dashboard-content">
+    <div className="db-container">
       {/* System Health Banner */}
-      <section className="system-health-banner">
-        <div className="health-item">
-          <ShieldCheck size={20} className="text-teal" />
+      <section className="db-banner">
+        <div className="db-banner-item">
+          <ShieldCheck size={18} className="text-teal" />
           <span>Security Protocol: <strong>Active</strong></span>
         </div>
-        <div className="health-item">
-          <Activity size={20} className="text-blue" />
+        <div className="db-banner-item">
+          <Activity size={18} className="text-blue" />
           <span>System Status: <strong>{stats.systemStatus}</strong></span>
         </div>
-        <div className="health-item">
-          <Clock size={20} className="text-amber" />
-          <span>Last Updated: <strong>{new Date().toLocaleTimeString()}</strong></span>
+        <div className="db-banner-item">
+          <Clock size={18} className="text-amber" />
+          <span>Last Updated: <strong>{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</strong></span>
         </div>
       </section>
 
       {/* Key Metrics Grid */}
-      <section className="stats-grid">
-        <div className="dash-stat-card border-teal" onClick={() => setView('employee-management')}>
-          <div className="ds-icon bg-teal-light text-teal"><Users size={22} /></div>
-          <div className="ds-value">{stats.totalEmployees}</div>
-          <div className="ds-label">Active Personnel</div>
+      <section className="db-stats-grid admin-grid">
+        <div className="db-stat-card border-teal" onClick={() => setView('employee-management')}>
+          <div className="db-stat-header">
+            <div className="db-stat-icon bg-teal-light text-teal"><Users size={20} /></div>
+            <span className="db-stat-label">Active Personnel</span>
+          </div>
+          <div className="db-stat-value">{stats.totalEmployees}</div>
         </div>
 
-        <div className="dash-stat-card border-blue" onClick={() => setView('manage-request')}>
-          <div className="ds-icon bg-blue-light text-blue"><Calendar size={22} /></div>
-          <div className="ds-value">{stats.todayVisitors}</div>
-          <div className="ds-label">Today's Visitors</div>
+        <div className="db-stat-card border-blue" onClick={() => setView('manage-request')}>
+          <div className="db-stat-header">
+            <div className="db-stat-icon bg-blue-light text-blue"><Calendar size={20} /></div>
+            <span className="db-stat-label">Today's Visitors</span>
+          </div>
+          <div className="db-stat-value">{stats.todayVisitors}</div>
         </div>
 
-        <div className="dash-stat-card border-amber" onClick={() => setView('leave-management')}>
-          <div className="ds-icon bg-amber-light text-amber"><Bell size={22} /></div>
-          <div className="ds-value">{stats.pendingLeaves}</div>
-          <div className="ds-label">Pending Leaves</div>
+        <div className="db-stat-card border-amber" onClick={() => setView('leave-management')}>
+          <div className="db-stat-header">
+            <div className="db-stat-icon bg-amber-light text-amber"><Bell size={20} /></div>
+            <span className="db-stat-label">Pending Leaves</span>
+          </div>
+          <div className="db-stat-value">{stats.pendingLeaves}</div>
         </div>
       </section>
 
       {/* Middle Section: Tasks & Quick Actions */}
-      <section className="middle-section">
-        <div className="overview-panel">
-          <div className="panel-header">
-            <div className="ph-title">
-              <Clock size={20} className="text-teal" />
+      <section className="db-middle-section">
+        <div className="db-panel flex-2">
+          <div className="db-panel-header">
+            <div className="db-ph-title">
+              <Clock size={18} className="text-teal" />
               <span>Recent Pending Requests</span>
             </div>
             {stats.pendingLeaves > 5 && (
-              <button className="view-all-btn" onClick={() => setView('leave-management')}>
+              <button className="btn-db-text" onClick={() => setView('leave-management')}>
                 View All <ChevronRight size={14} />
               </button>
             )}
           </div>
-          <div className="task-list">
+          <div className="db-task-list">
             {pendingTasks.length === 0 ? (
-              <div className="no-tasks">
-                <CheckCircle size={28} className="text-green" />
-                <p>No pending leave requests</p>
+              <div className="db-empty-state">
+                <CheckCircle size={24} className="text-teal" />
+                <p>No pending system requests.</p>
               </div>
             ) : (
               pendingTasks.map(task => (
-                <div key={task.id} className="task-item">
-                  <div className="task-info">
+                <div key={task.id} className="db-task-item">
+                  <div className="db-task-info">
                     <AlertCircle size={16} className="text-amber" />
                     <div>
-                      <p className="task-text">
+                      <p className="db-task-text">
                         <strong>{task.full_name || `ID: ${task.user_id}`}</strong> requested <strong>{task.type}</strong>
                       </p>
-                      <p className="task-date">{formatDate(task.request_date)}</p>
+                      <p className="db-task-subtext">{formatDate(task.request_date)}</p>
                     </div>
                   </div>
-                  <button
-                    className="view-task-btn"
-                    onClick={() => setView('leave-management')}
-                  >
+                  <button className="btn-db-small" onClick={() => setView('leave-management')}>
                     Review
                   </button>
                 </div>
@@ -195,31 +189,31 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
           </div>
         </div>
 
-        <div className="quick-actions-panel">
-          <div className="panel-header">
-            <div className="ph-title">
-              <Zap size={20} className="text-orange" />
-              <span>Quick Actions</span>
+        <div className="db-panel flex-1">
+          <div className="db-panel-header">
+            <div className="db-ph-title">
+              <Zap size={18} className="text-orange" />
+              <span>System Shortcuts</span>
             </div>
           </div>
-          <div className="action-list">
-            <button className="action-row" onClick={() => setView('manage-request')}>
+          <div className="db-action-list">
+            <button className="db-action-btn" onClick={() => setView('manage-request')}>
               <span>Approve Visitor Entries</span>
               <ChevronRight size={16} />
             </button>
-            <button className="action-row" onClick={() => setView('attendance-report')}>
+            <button className="db-action-btn" onClick={() => setView('attendance-report')}>
               <span>View Today's Attendance</span>
               <ChevronRight size={16} />
             </button>
-            <button className="action-row" onClick={() => setView('employee-management')}>
+            <button className="db-action-btn" onClick={() => setView('employee-management')}>
               <span>Add New Employee</span>
               <ChevronRight size={16} />
             </button>
-            <button className="action-row" onClick={onShowPayrollHistory}>
+            <button className="db-action-btn" onClick={onShowPayrollHistory}>
               <span>Payroll Access Logs</span>
               <ChevronRight size={16} />
             </button>
-            <button className="action-row" onClick={() => setView('reports')}>
+            <button className="db-action-btn" onClick={() => setView('reports')}>
               <span>Generate Compliance Report</span>
               <ChevronRight size={16} />
             </button>

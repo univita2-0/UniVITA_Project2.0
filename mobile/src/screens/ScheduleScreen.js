@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
-  ActivityIndicator, RefreshControl, Platform, StatusBar
+  ActivityIndicator, RefreshControl, StatusBar
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -18,7 +18,6 @@ export default function ScheduleScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // ---- Fetch schedule data ----
   const fetchSchedules = useCallback(async () => {
     try {
       const userData = await AsyncStorage.getItem('user');
@@ -37,7 +36,6 @@ export default function ScheduleScreen() {
 
   useEffect(() => { fetchSchedules(); }, [fetchSchedules]);
 
-  // ---- Week navigation ----
   const changeWeek = (daysOffset) => {
     const newDate = new Date(currentDate);
     newDate.setDate(newDate.getDate() + daysOffset);
@@ -68,21 +66,21 @@ export default function ScheduleScreen() {
   const getStatusBadge = (status) => {
     switch (status) {
       case 'IN PROGRESS':
-        return { label: 'IN PROGRESS', color: '#F59E0B', bg: '#FEF3C7', border: '#FDE68A' };
+        return { label: 'IN PROGRESS', color: '#B45309', bg: '#FFFBEB', border: '#FEF3C7' };
       case 'COMPLETED':
-        return { label: 'COMPLETED', color: '#10B981', bg: '#ECFDF5', border: '#D1FAE5' };
+        return { label: 'COMPLETED', color: '#047857', bg: '#ECFDF5', border: '#D1FAE5' };
       default:
-        return { label: 'SCHEDULED', color: '#00897B', bg: '#E0F2F1', border: '#B2DFDB' };
+        return { label: 'SCHEDULED', color: '#4B5563', bg: '#F9FAFB', border: '#E5E7EB' };
     }
   };
 
   if (loading) {
     return (
       <>
-        <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
         <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#00897B" />
+            <ActivityIndicator size="large" color="#0D9488" />
             <Text style={styles.loadingText}>Loading schedule...</Text>
           </View>
         </SafeAreaView>
@@ -92,36 +90,28 @@ export default function ScheduleScreen() {
 
   return (
     <>
-      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
         <ScrollView
           contentContainerStyle={styles.scroll}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#00897B"]} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#0D9488"]} />}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <CalIcon size={28} color="#00897B" />
+            <CalIcon size={24} color="#0D9488" />
             <Text style={styles.title}>My Schedule</Text>
           </View>
 
           {/* Week Navigator */}
           <View style={styles.weekNavigator}>
-            <TouchableOpacity
-              onPress={() => changeWeek(-7)}
-              style={styles.navButton}
-              activeOpacity={0.7}
-            >
-              <ChevronLeft size={22} color="#00897B" />
+            <TouchableOpacity onPress={() => changeWeek(-7)} style={styles.navButton} activeOpacity={1}>
+              <ChevronLeft size={20} color="#374151" />
             </TouchableOpacity>
             <View style={styles.weekRangeContainer}>
               <Text style={styles.weekRangeText}>{getWeekRange()}</Text>
             </View>
-            <TouchableOpacity
-              onPress={() => changeWeek(7)}
-              style={styles.navButton}
-              activeOpacity={0.7}
-            >
-              <ChevronRight size={22} color="#00897B" />
+            <TouchableOpacity onPress={() => changeWeek(7)} style={styles.navButton} activeOpacity={1}>
+              <ChevronRight size={20} color="#374151" />
             </TouchableOpacity>
           </View>
 
@@ -145,7 +135,7 @@ export default function ScheduleScreen() {
                   {daySchedule ? (
                     <View style={styles.scheduleItem}>
                       <View style={styles.courseHeader}>
-                        <BookOpen size={18} color="#00897B" />
+                        <BookOpen size={16} color="#0D9488" />
                         <Text style={styles.courseText}>{daySchedule.course}</Text>
                       </View>
                       <View style={styles.detailsGrid}>
@@ -161,7 +151,6 @@ export default function ScheduleScreen() {
                         </View>
                       </View>
                       <View style={[styles.statusBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-                        <View style={[styles.statusDot, { backgroundColor: badge.color }]} />
                         <Text style={[styles.statusText, { color: badge.color }]}>{badge.label}</Text>
                       </View>
                     </View>
@@ -178,83 +167,64 @@ export default function ScheduleScreen() {
   );
 }
 
-// ---------- MODERN STYLES ----------
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  container: { flex: 1, backgroundColor: '#FAFAFA' },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText: { fontSize: 14, color: '#64748B', fontWeight: '500' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  title: { fontSize: 24, fontWeight: '700', color: '#0F172A', letterSpacing: -0.3 },
+  loadingText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, marginBottom: 20 },
+  title: { fontSize: 22, fontWeight: '700', color: '#111827', letterSpacing: -0.5 },
   weekNavigator: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#FFFFFF',
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 40,
-    marginBottom: 24,
+    borderRadius: 8,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 2,
-    elevation: 1,
+    borderColor: '#E5E7EB',
   },
-  navButton: { padding: 8, borderRadius: 30 },
+  navButton: { padding: 4 },
   weekRangeContainer: { flex: 1, alignItems: 'center' },
-  weekRangeText: { fontSize: 14, fontWeight: '600', color: '#1E293B' },
+  weekRangeText: { fontSize: 14, fontWeight: '600', color: '#111827' },
   dayCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    borderRadius: 8,
     marginBottom: 16,
-    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: '#E5E7EB',
   },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#F8FAFC',
+    paddingVertical: 10,
+    backgroundColor: '#F9FAFB',
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: '#E5E7EB',
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
   },
-  dayName: { fontSize: 12, fontWeight: '700', color: '#64748B', letterSpacing: 0.5 },
-  dayDate: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  dayName: { fontSize: 12, fontWeight: '700', color: '#4B5563', letterSpacing: 0.5 },
+  dayDate: { fontSize: 14, fontWeight: '700', color: '#111827' },
   dayContent: { padding: 16 },
-  noSchedule: { color: '#94A3B8', fontSize: 13, textAlign: 'center', fontStyle: 'italic' },
+  noSchedule: { color: '#9CA3AF', fontSize: 13, textAlign: 'center' },
   scheduleItem: { gap: 12 },
-  courseHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  courseText: { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1 },
+  courseHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  courseText: { fontSize: 15, fontWeight: '700', color: '#111827', flex: 1 },
   detailsGrid: { gap: 6 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  infoText: { fontSize: 13, color: '#475569' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  infoText: { fontSize: 13, color: '#374151' },
   statusBadge: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
     borderWidth: 1,
+    marginTop: 4,
   },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
-  statusText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  statusText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
 });

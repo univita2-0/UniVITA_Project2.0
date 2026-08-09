@@ -4,7 +4,7 @@ import {
   Mail, Phone, MapPin, Clock, Calendar, User, MessageSquare,
   Award, Users, Plus, Trash2, ShieldCheck, X,
   Stethoscope, GraduationCap, Building2, Check, ArrowRight,
-  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu
+  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, AlertCircle
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AppointmentPage.css';
@@ -67,7 +67,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setActivePage('home');
     setTimeout(() => {
       const element = document.getElementById(id);
-      if (element) element.scrollIntoView({ behavior: 'smooth' });
+      if (element) {
+        const headerOffset = 72; // Header height
+        const elementPosition = element.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+        window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+      }
     }, 100);
     setMobileMenuOpen(false);
   };
@@ -82,10 +87,24 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.email || !formData.date || !formData.time || !formData.message) {
+    if (!formData.name.trim() || !formData.email.trim() || !formData.date || !formData.time || !formData.message) {
       showToast('Please fill in all required fields.', true);
       return;
     }
+
+    // Validation: Office Hours Check (8 AM to 5 PM)
+    const hour = parseInt(formData.time.split(':')[0], 10);
+    if (hour < 8 || hour > 17) {
+      showToast('Please select a time within office hours (8:00 AM - 5:00 PM).', true);
+      return;
+    }
+
+    // Validation: Companions Check
+    if (isMultipleVisitors && additionalVisitors.some(v => !v.name.trim())) {
+      showToast('Please provide names for all additional companions.', true);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const nameParts = formData.name.trim().split(' ');
@@ -94,10 +113,10 @@ const AppointmentPage = ({ onAdminLogin }) => {
       
       const payload = {
         firstName, lastName,
-        email: formData.email, phone: formData.phone,
+        email: formData.email.trim(), phone: formData.phone.trim(),
         date: formData.date, time: formData.time,
         reason: formData.message, 
-        additionalVisitors: isMultipleVisitors ? additionalVisitors : []
+        additionalVisitors: isMultipleVisitors ? additionalVisitors.filter(v => v.name.trim()) : []
       };
       
       await axios.post(`${API_BASE}/appointments/book`, payload);
@@ -125,12 +144,32 @@ const AppointmentPage = ({ onAdminLogin }) => {
   };
 
   const handleResumeChange = (e) => {
-    setApplicationForm({ ...applicationForm, resume: e.target.files[0] });
+    const file = e.target.files[0];
+    if (file) {
+      // Validation: 5MB size limit
+      if (file.size > 5 * 1024 * 1024) {
+        showToast('File size must be under 5MB.', true);
+        e.target.value = '';
+        return;
+      }
+      // Validation: Allowed types
+      const allowedTypes = [
+        'application/pdf', 
+        'application/msword', 
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ];
+      if (!allowedTypes.includes(file.type)) {
+        showToast('Only PDF, DOC, or DOCX files are allowed.', true);
+        e.target.value = '';
+        return;
+      }
+      setApplicationForm({ ...applicationForm, resume: file });
+    }
   };
 
   const submitApplication = async (e) => {
     e.preventDefault();
-    if (!applicationForm.full_name || !applicationForm.email || !applicationForm.resume) {
+    if (!applicationForm.full_name.trim() || !applicationForm.email.trim() || !applicationForm.resume) {
       showToast('Please fill all required fields and attach a resume.', true);
       return;
     }
@@ -138,10 +177,10 @@ const AppointmentPage = ({ onAdminLogin }) => {
     try {
       const fd = new FormData();
       fd.append('job_id', selectedJob.id);
-      fd.append('full_name', applicationForm.full_name);
-      fd.append('email', applicationForm.email);
-      fd.append('phone', applicationForm.phone);
-      fd.append('cover_letter', applicationForm.cover_letter);
+      fd.append('full_name', applicationForm.full_name.trim());
+      fd.append('email', applicationForm.email.trim());
+      fd.append('phone', applicationForm.phone.trim());
+      fd.append('cover_letter', applicationForm.cover_letter.trim());
       fd.append('resume', applicationForm.resume);
 
       const res = await axios.post(`${API_BASE}/jobs/apply`, fd);
@@ -151,11 +190,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
         setShowApplyModal(false);
         setApplicationForm({ full_name: '', email: '', phone: '', cover_letter: '', resume: null });
       } else {
-        console.error('Server error:', res.data);
         showToast(res.data.error || 'Failed to submit application.', true);
       }
     } catch (err) {
-      console.error('Submission error:', err);
       const msg = err.response?.data?.error || err.message || 'Network error';
       showToast(`Submission failed: ${msg}`, true);
     } finally {
@@ -163,37 +200,30 @@ const AppointmentPage = ({ onAdminLogin }) => {
     }
   };
 
-  // Updated Course Structure
   const courseCategories = [
     {
       title: "Enhancement Courses (E-Learning)",
       courses: [
-        "Nursing",
-        "Disease Epidemiology",
-        "Sexual and Reproductive Health Education",
-        "Statistics and Data Analysis Simplified",
-        "Emergency Preparedness and Response",
-        "Mental Health and Stress Management",
-        "Sports Medicine",
-        "Telemedicine",
-        "Mindfulness for well-being",
-        "Food as Medicine"
+        "Nursing", "Disease Epidemiology", "Sexual and Reproductive Health Education",
+        "Statistics and Data Analysis Simplified", "Emergency Preparedness and Response",
+        "Mental Health and Stress Management", "Sports Medicine", "Telemedicine",
+        "Mindfulness for well-being", "Food as Medicine"
       ]
     },
     {
       title: "AHA BLS & ACLS Training (Medical Professionals)",
       courses: [
-        "American Heart Association HeartCode Basic Life Support (BLS)",
-        "American Heart Association Traditional Advanced Cardiovascular Life Support (ACLS)",
-        "American Heart Association Combined HeartCode BLS & Traditional ACLS"
+        "AHA HeartCode Basic Life Support (BLS)",
+        "AHA Traditional Advanced Cardiovascular Life Support (ACLS)",
+        "AHA Combined HeartCode BLS & Traditional ACLS"
       ]
     },
     {
       title: "AHA Heartsaver | First Aid Training (Non-Medical)",
       courses: [
-        "American Heart Association Heartsaver First Aid & CPR with AED (HS-CPRFA)",
-        "American Heart Association Heartsaver Basic Life Support (HS-BLS)",
-        "American Heart Association Heartsaver First Aid (HS-FA)"
+        "AHA Heartsaver First Aid & CPR with AED (HS-CPRFA)",
+        "AHA Heartsaver Basic Life Support (HS-BLS)",
+        "AHA Heartsaver First Aid (HS-FA)"
       ]
     },
     {
@@ -207,41 +237,32 @@ const AppointmentPage = ({ onAdminLogin }) => {
   ];
 
   const facilities = [
-    { 
-      name: 'Simulation Lab', 
-      thumbnail: simulation1, 
-      images: [simulation1, simulation2, simulation3, simulation4] 
-    },
-    { 
-      name: 'Classrooms', 
-      thumbnail: classroom1, 
-      images: [classroom1] 
-    }
+    { name: 'Simulation Lab', thumbnail: simulation1, images: [simulation1, simulation2, simulation3, simulation4] },
+    { name: 'Classrooms', thumbnail: classroom1, images: [classroom1] }
   ];
 
   return (
-    <div className="app-landing">
+    <div className="ap-landing">
       {/* HEADER */}
-      <header className="main-header">
-        <div className="header-container">
-          <div className="brand">
-            <Stethoscope size={24} className="brand-icon" />
-            <div className="brand-text">
-              <span className="brand-name">HCT Academy</span>
+      <header className="ap-header">
+        <div className="ap-header-container">
+          <div className="ap-brand">
+            <div className="ap-brand-icon-wrapper">
+              <Stethoscope size={24} />
             </div>
+            <span className="ap-brand-name">HCT Academy</span>
           </div>
-          <nav className={`nav-menu ${mobileMenuOpen ? 'open' : ''}`}>
-            <button className="nav-close" onClick={() => setMobileMenuOpen(false)}><X size={24} /></button>
-            <a className="nav-item" onClick={() => { setActivePage('home'); setMobileMenuOpen(false); }}>Home</a>
-            <a className="nav-item" onClick={() => scrollToSection('about')}>About</a>
-            <a className="nav-item" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
-            <a className="nav-item" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
-            <a className="nav-item" onClick={() => setShowAppointmentModal(true)}>Appointment</a>
-            <a className="nav-item" onClick={() => setActivePage('careers')}>Careers</a>
-            <a className="nav-item" onClick={() => scrollToSection('contact')}>Contact</a>
-            <button className="btn-outline-light" onClick={onAdminLogin}>Admin Portal</button>
+          <nav className={`ap-nav ${mobileMenuOpen ? 'open' : ''}`}>
+            <button className="ap-nav-close" onClick={() => setMobileMenuOpen(false)}><X size={24} /></button>
+            <a className="ap-nav-link" onClick={() => { setActivePage('home'); setMobileMenuOpen(false); }}>Home</a>
+            <a className="ap-nav-link" onClick={() => scrollToSection('about')}>About</a>
+            <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
+            <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
+            <a className="ap-nav-link" onClick={() => setActivePage('careers')}>Careers</a>
+            <button className="btn-ap-nav-primary" onClick={() => setShowAppointmentModal(true)}>Book Visit</button>
+            <button className="btn-ap-nav-outline" onClick={onAdminLogin}>Admin Portal</button>
           </nav>
-          <button className="mobile-toggle" onClick={() => setMobileMenuOpen(true)}><Menu size={24} /></button>
+          <button className="ap-mobile-toggle" onClick={() => setMobileMenuOpen(true)}><Menu size={24} /></button>
         </div>
       </header>
 
@@ -249,33 +270,36 @@ const AppointmentPage = ({ onAdminLogin }) => {
       {activePage === 'home' && (
         <>
           {/* HERO */}
-          <section id="home" className="hero-section">
-            <div className="hero-grid">
-              <div className="hero-text">
-                <span className="hero-badge">Philippines' Premier Healthcare Academy</span>
-                <h1>Shaping Tomorrow's<br /><span className="text-accent">Healthcare Heroes</span></h1>
+          <section id="home" className="ap-hero-section">
+            <div className="ap-hero-grid">
+              <div className="ap-hero-text">
+                <span className="ap-hero-badge">Philippines' Premier Healthcare Academy</span>
+                <h1 className="ap-hero-title">
+                  <span className="text-white">Shaping Tomorrow's</span><br />
+                  <span className="text-accent">Healthcare Heroes</span>
+                </h1>
                 <p>Experience world-class simulation-based training, expert instructors, and a curriculum designed to produce compassionate, competent professionals.</p>
-                <div className="hero-actions">
-                  <button className="btn-primary" onClick={() => setShowAppointmentModal(true)}>
+                <div className="ap-hero-actions">
+                  <button className="btn-ap-primary" onClick={() => setShowAppointmentModal(true)}>
                     <Calendar size={18} /> Schedule a Visit
                   </button>
-                  <button className="btn-secondary" onClick={() => scrollToSection('about')}>
+                  <button className="btn-ap-secondary" onClick={() => scrollToSection('about')}>
                     Learn More <ArrowRight size={16} />
                   </button>
                 </div>
               </div>
-              <div className="hero-visual">
-                <div className="hero-floating-panel">
-                  <div className="floating-item">
-                    <ShieldCheck size={20} />
+              <div className="ap-hero-visual">
+                <div className="ap-floating-panel">
+                  <div className="ap-floating-item float-1">
+                    <div className="ap-float-icon"><ShieldCheck size={20} /></div>
                     <div><h4>Safe Campus</h4><p>BLE-powered visitor monitoring</p></div>
                   </div>
-                  <div className="floating-item">
-                    <Users size={20} />
+                  <div className="ap-floating-item float-2">
+                    <div className="ap-float-icon"><Users size={20} /></div>
                     <div><h4>Industry Experts</h4><p>Professional healthcare instructors</p></div>
                   </div>
-                  <div className="floating-item">
-                    <GraduationCap size={20} />
+                  <div className="ap-floating-item float-3">
+                    <div className="ap-float-icon"><GraduationCap size={20} /></div>
                     <div><h4>Career Ready</h4><p>Simulation-based healthcare training</p></div>
                   </div>
                 </div>
@@ -284,48 +308,50 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </section>
 
           {/* ABOUT */}
-          <section id="about" className="about-section">
-            <div className="section-header center">
-              <span className="tag">Why HCT Academy</span>
-              <h2>Building Careers in Healthcare</h2>
-              <p>Our approach combines cutting-edge simulation labs, experienced medical educators, and strong industry ties.</p>
-            </div>
-            <div className="features-grid">
-              <div className="feature-card">
-                <div className="feature-icon"><Award size={24} /></div>
-                <h4>Accredited Programs</h4>
-                <p>CHED-recognized curricula aligned with global healthcare standards.</p>
+          <section id="about" className="ap-section bg-white">
+            <div className="ap-container">
+              <div className="ap-section-header">
+                <span className="ap-tag">Why HCT Academy</span>
+                <h2>Building Careers in Healthcare</h2>
+                <p>Our approach combines cutting-edge simulation labs, experienced medical educators, and strong industry ties.</p>
               </div>
-              <div className="feature-card">
-                <div className="feature-icon"><Users size={24} /></div>
-                <h4>Expert Instructors</h4>
-                <p>Learn from practicing doctors and nurses with decades of experience.</p>
-              </div>
-              <div className="feature-card">
-                <div className="feature-icon"><Building2 size={24} /></div>
-                <h4>Modern Facilities</h4>
-                <p>State-of-the-art simulation labs and smart classrooms.</p>
+              <div className="ap-features-grid">
+                <div className="ap-feature-card stagger-1">
+                  <div className="ap-feature-icon"><Award size={24} /></div>
+                  <h4>Accredited Programs</h4>
+                  <p>CHED-recognized curricula aligned with global healthcare standards.</p>
+                </div>
+                <div className="ap-feature-card stagger-2">
+                  <div className="ap-feature-icon"><Users size={24} /></div>
+                  <h4>Expert Instructors</h4>
+                  <p>Learn from practicing doctors and nurses with decades of experience.</p>
+                </div>
+                <div className="ap-feature-card stagger-3">
+                  <div className="ap-feature-icon"><Building2 size={24} /></div>
+                  <h4>Modern Facilities</h4>
+                  <p>State-of-the-art simulation labs and smart classrooms.</p>
+                </div>
               </div>
             </div>
           </section>
 
           {/* COURSES */}
-          <section id="courses" className="courses-section">
-            <div className="container">
-              <div className="section-header center">
-                <span className="tag">Our Programs</span>
+          <section id="courses" className="ap-section bg-gray">
+            <div className="ap-container">
+              <div className="ap-section-header">
+                <span className="ap-tag">Our Programs</span>
                 <h2>Healthcare Courses</h2>
                 <p>We offer a wide range of accredited programs designed to prepare you for a successful career in the healthcare industry.</p>
               </div>
               
-              <div className="course-categories-wrapper">
+              <div className="ap-course-wrapper">
                 {courseCategories.map((category, idx) => (
-                  <div key={idx} className="course-category-group">
-                    <h3 className="category-title">{category.title}</h3>
-                    <div className="course-list">
+                  <div key={idx} className={`ap-course-group stagger-${(idx % 3) + 1}`}>
+                    <h3 className="ap-category-title">{category.title}</h3>
+                    <div className="ap-course-list">
                       {category.courses.map((course, cIdx) => (
-                        <div key={cIdx} className="course-item">
-                          <BookOpen size={18} className="course-icon" />
+                        <div key={cIdx} className="ap-course-item">
+                          <BookOpen size={16} className="ap-course-icon" />
                           <span>{course}</span>
                         </div>
                       ))}
@@ -333,24 +359,28 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   </div>
                 ))}
               </div>
-
             </div>
           </section>
 
           {/* FACILITIES */}
-          <section id="facilities" className="facilities-section">
-            <div className="container">
-              <div className="section-header center">
-                <span className="tag">Campus</span>
+          <section id="facilities" className="ap-section bg-white">
+            <div className="ap-container">
+              <div className="ap-section-header">
+                <span className="ap-tag">Campus</span>
                 <h2>Our Facilities</h2>
                 <p>Explore our modern learning environments designed for healthcare education.</p>
               </div>
-              <div className="facilities-grid">
+              <div className="ap-facilities-grid">
                 {facilities.map((fac, idx) => (
-                  <div key={idx} className="facility-card clickable" onClick={() => setSelectedFacility(fac)}>
-                    <img src={fac.thumbnail} alt={fac.name} className="facility-img" />
-                    <div className="facility-name">
-                      <Camera size={16} />
+                  <div key={idx} className={`ap-facility-card stagger-${idx + 1}`} onClick={() => setSelectedFacility(fac)}>
+                    <div className="ap-facility-img-wrapper">
+                      <img src={fac.thumbnail} alt={fac.name} className="ap-facility-img" />
+                      <div className="ap-facility-overlay">
+                        <Camera size={24} color="white" />
+                        <span>View Gallery</span>
+                      </div>
+                    </div>
+                    <div className="ap-facility-name">
                       <span>{fac.name}</span>
                     </div>
                   </div>
@@ -360,31 +390,31 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </section>
 
           {/* CONTACT */}
-          <section id="contact" className="contact-section-new">
-            <div className="container">
-              <div className="section-header center">
-                <span className="tag">Get In Touch</span>
+          <section id="contact" className="ap-section bg-gray">
+            <div className="ap-container">
+              <div className="ap-section-header">
+                <span className="ap-tag">Get In Touch</span>
                 <h2>Contact Us</h2>
                 <p>Have questions? Reach out to our team and we'll get back to you promptly.</p>
               </div>
-              <div className="contact-cards">
-                <div className="contact-card">
-                  <div className="contact-icon"><MapPin size={24} /></div>
+              <div className="ap-contact-grid">
+                <div className="ap-contact-card stagger-1">
+                  <div className="ap-contact-icon"><MapPin size={24} /></div>
                   <h3>Visit Our Campus</h3>
                   <p>123 Healthcare Avenue<br />Pasay City, Metro Manila</p>
                 </div>
-                <div className="contact-card">
-                  <div className="contact-icon"><Phone size={24} /></div>
+                <div className="ap-contact-card stagger-2">
+                  <div className="ap-contact-icon"><Phone size={24} /></div>
                   <h3>Call Us</h3>
                   <p>+63 (2) 1234 5678<br />+63 912 345 6789</p>
                 </div>
-                <div className="contact-card">
-                  <div className="contact-icon"><Mail size={24} /></div>
+                <div className="ap-contact-card stagger-3">
+                  <div className="ap-contact-icon"><Mail size={24} /></div>
                   <h3>Email Us</h3>
                   <p>admissions@hct.ph<br />info@hct.ph</p>
                 </div>
-                <div className="contact-card">
-                  <div className="contact-icon"><Clock size={24} /></div>
+                <div className="ap-contact-card stagger-4">
+                  <div className="ap-contact-icon"><Clock size={24} /></div>
                   <h3>Office Hours</h3>
                   <p>Mon - Fri: 8AM – 5PM<br />Saturday: 8AM – 12PM</p>
                 </div>
@@ -396,38 +426,44 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
       {/* CAREERS PAGE */}
       {activePage === 'careers' && (
-        <section id="careers" className="careers-section">
-          <div className="container">
-            <div className="section-header center">
-              <span className="tag">Join Our Team</span>
+        <section id="careers" className="ap-section bg-white min-h-screen pt-40">
+          <div className="ap-container">
+            <div className="ap-section-header">
+              <span className="ap-tag">Join Our Team</span>
               <h2>Careers at HCT Academy</h2>
               <p>Explore open positions and become part of a leading healthcare education institution.</p>
             </div>
-            <div className="job-listings">
+            <div className="ap-job-listings">
               {jobs.length === 0 ? (
-                <div className="no-jobs"><Briefcase size={48} className="no-jobs-icon" /><p>No open positions at the moment. Please check back later.</p></div>
+                <div className="ap-empty-state">
+                  <Briefcase size={48} className="ap-empty-icon" />
+                  <p>No open positions at the moment.</p>
+                  <span>Please check back later for new opportunities.</span>
+                </div>
               ) : (
-                <div className="job-cards-grid">
-                  {jobs.map(job => (
-                    <div key={job.id} className="job-card">
-                      <div className="job-card-icon"><Briefcase size={20} /></div>
+                <div className="ap-jobs-grid">
+                  {jobs.map((job, idx) => (
+                    <div key={job.id} className={`ap-job-card stagger-${(idx % 3) + 1}`}>
+                      <div className="ap-job-header">
+                        <div className="ap-job-icon"><Briefcase size={20} /></div>
+                        <h3>{job.title}</h3>
+                      </div>
                       
-                      <h3>{job.title}</h3>
-                      <div className="job-meta">
+                      <div className="ap-job-meta">
                         <span><Building2 size={14} /> {job.department || 'General'}</span>
                         <span><Clock size={14} /> {job.employment_type}</span>
                       </div>
                       
-                      <p className="job-description">
+                      <p className="ap-job-desc">
                         {job.description?.length > 120 ? `${job.description.substring(0, 120)}...` : job.description}
                       </p>
                       
-                      <div className="job-actions">
-                        <button className="btn-secondary small" onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}>
+                      <div className="ap-job-actions">
+                        <button className="btn-ap-outline-sm" onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}>
                           See Details
                         </button>
-                        <button className="btn-primary small" onClick={() => openApplyModal(job)}>
-                          <FileText size={16} /> Apply
+                        <button className="btn-ap-primary-sm" onClick={() => openApplyModal(job)}>
+                          Apply Now
                         </button>
                       </div>
                     </div>
@@ -440,120 +476,66 @@ const AppointmentPage = ({ onAdminLogin }) => {
       )}
 
       {/* FOOTER */}
-      <footer className="main-footer">
-        <div className="footer-grid">
-          <div className="footer-col brand-col">
-            <Stethoscope size={24} />
-            <h3>HCT Academy</h3>
+      <footer className="ap-footer">
+        <div className="ap-footer-grid">
+          <div className="ap-footer-brand">
+            <div className="ap-footer-logo">
+              <Stethoscope size={24} />
+              <h3>HCT Academy</h3>
+            </div>
             <p>Leading healthcare education provider committed to excellence and innovation.</p>
           </div>
-          <div className="footer-col">
+          <div className="ap-footer-links">
             <h4>Quick Links</h4>
             <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('home'), 100); }}>Home</a>
             <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('about'), 100); }}>About</a>
             <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('courses'), 100); }}>Courses</a>
             <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('facilities'), 100); }}>Facilities</a>
-            <a onClick={() => setShowAppointmentModal(true)}>Appointment</a>
-            <a onClick={() => setActivePage('careers')}>Careers</a>
           </div>
-          <div className="footer-col">
-            <h4>Legal</h4>
+          <div className="ap-footer-links">
+            <h4>Portal & Info</h4>
+            <a onClick={() => setShowAppointmentModal(true)}>Book Appointment</a>
+            <a onClick={() => setActivePage('careers')}>Careers</a>
             <a href="#">Privacy Policy</a>
             <a href="#">Terms of Service</a>
           </div>
-          <div className="footer-col">
+          <div className="ap-footer-contact">
             <h4>Connect</h4>
-            <p>info@hct.ph</p>
-            <p>+63 (2) 1234 5678</p>
+            <p><Mail size={14}/> info@hct.ph</p>
+            <p><Phone size={14}/> +63 (2) 1234 5678</p>
           </div>
         </div>
-        <div className="footer-bottom"><p>© 2026 HCT Academy. All rights reserved.</p></div>
+        <div className="ap-footer-bottom">
+          <p>© {new Date().getFullYear()} HCT Academy. All rights reserved.</p>
+        </div>
       </footer>
-
-      {/* FORMAL JOB DETAILS MODAL */}
-      {showJobDetailsModal && selectedJobDetails && (
-        <div className="modal-overlay" onClick={() => setShowJobDetailsModal(false)}>
-          <div className="job-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="job-modal-header">
-              <div>
-                <h2>{selectedJobDetails.title}</h2>
-                <div className="job-modal-meta">
-                  <span><Building2 size={16}/> {selectedJobDetails.department || 'General Department'}</span>
-                  <span><Clock size={16}/> {selectedJobDetails.employment_type}</span>
-                </div>
-              </div>
-              <button className="btn-close-modal" onClick={() => setShowJobDetailsModal(false)}>
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="job-modal-body">
-              <div className="job-stats-grid">
-                <div>
-                  <p className="stat-label">Location Type</p>
-                  <p className="stat-value"><MapPin size={16} /> {selectedJobDetails.location_type || 'On-site'}</p>
-                </div>
-                {selectedJobDetails.location && (
-                  <div>
-                    <p className="stat-label">Specific Location</p>
-                    <p className="stat-value"><Building2 size={16} /> {selectedJobDetails.location}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="stat-label">Monthly Salary</p>
-                  <p className="stat-value">
-                    <DollarSign size={16} /> 
-                    {(selectedJobDetails.salary_min || selectedJobDetails.salary_max) ? (
-                      <>
-                        {selectedJobDetails.salary_min ? `₱${Number(selectedJobDetails.salary_min).toLocaleString()}` : ''}
-                        {selectedJobDetails.salary_min && selectedJobDetails.salary_max ? ' - ' : ''}
-                        {selectedJobDetails.salary_max ? `₱${Number(selectedJobDetails.salary_max).toLocaleString()}` : ''}
-                      </>
-                    ) : 'Salary not specified'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="job-section-block">
-                <h4>Job Description</h4>
-                <p>{selectedJobDetails.description}</p>
-              </div>
-
-              {selectedJobDetails.requirements && (
-                <div className="job-section-block">
-                  <h4>Requirements & Qualifications</h4>
-                  <p>{selectedJobDetails.requirements}</p>
-                </div>
-              )}
-            </div>
-
-            <div className="job-modal-footer">
-              <button type="button" className="btn-cancel" onClick={() => setShowJobDetailsModal(false)}>Close</button>
-              <button type="button" className="btn-primary" onClick={() => { setShowJobDetailsModal(false); openApplyModal(selectedJobDetails); }}>
-                <FileText size={18} /> Apply for this Job
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* APPOINTMENT MODAL */}
       {showAppointmentModal && (
-        <div className="modal-overlay" onClick={() => setShowAppointmentModal(false)}>
-          <div className="appointment-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Book an Appointment</h2>
-              <button className="btn-close-modal" onClick={() => setShowAppointmentModal(false)}><X size={24} /></button>
+        <div className="ap-modal-overlay" onClick={() => setShowAppointmentModal(false)}>
+          <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
+            <div className="ap-modal-header">
+              <h2>Book a Campus Visit</h2>
+              <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)}><X size={20} /></button>
             </div>
-            <form onSubmit={handleSubmit}>
-              <div className="form-row">
-                <div className="form-group"><label>Full Name </label><input type="text" name="name" placeholder="Juan Dela Cruz" value={formData.name} onChange={handleChange} required /></div>
-                <div className="form-group"><label>Email </label><input type="email" name="email" placeholder="juan@example.com" value={formData.email} onChange={handleChange} required /></div>
+            <form className="ap-form" onSubmit={handleSubmit}>
+              <div className="ap-form-row">
+                <div className="ap-form-group">
+                  <label>Full Name <span className="text-danger">*</span></label>
+                  <input type="text" name="name" placeholder="Juan Dela Cruz" value={formData.name} onChange={handleChange} required />
+                </div>
+                <div className="ap-form-group">
+                  <label>Email Address <span className="text-danger">*</span></label>
+                  <input type="email" name="email" placeholder="juan@example.com" value={formData.email} onChange={handleChange} required />
+                </div>
               </div>
-              <div className="form-row">
-                <div className="form-group"><label>Phone</label><input type="tel" name="phone" placeholder="+63 912 345 6789" value={formData.phone} onChange={handleChange} /></div>
-                <div className="form-group">
-                  <label>Reason for Visit </label>
+              <div className="ap-form-row">
+                <div className="ap-form-group">
+                  <label>Phone Number</label>
+                  <input type="tel" name="phone" placeholder="+63 912 345 6789" value={formData.phone} onChange={handleChange} />
+                </div>
+                <div className="ap-form-group">
+                  <label>Reason for Visit <span className="text-danger">*</span></label>
                   <select name="message" value={formData.message} onChange={handleChange} required>
                     <option value="">Select a reason...</option>
                     {visitReasons.map(r => (
@@ -562,54 +544,180 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   </select>
                 </div>
               </div>
-              <div className="form-row">
-                <div className="form-group"><label>Preferred Date </label><input type="date" name="date" value={formData.date} onChange={handleChange} min={new Date().toISOString().split('T')[0]} required /></div>
-                <div className="form-group"><label>Preferred Time </label><input type="time" name="time" value={formData.time} onChange={handleChange} required /></div>
+              <div className="ap-form-row">
+                <div className="ap-form-group">
+                  <label>Preferred Date <span className="text-danger">*</span></label>
+                  <input type="date" name="date" value={formData.date} onChange={handleChange} min={new Date().toISOString().split('T')[0]} required />
+                </div>
+                <div className="ap-form-group">
+                  <label>Preferred Time <span className="text-danger">*</span></label>
+                  <input type="time" name="time" value={formData.time} onChange={handleChange} required />
+                  <span className="ap-input-hint">Office hours: 8:00 AM - 5:00 PM</span>
+                </div>
               </div>
-              <div className="checkbox-field">
-                <label><input type="checkbox" checked={isMultipleVisitors} onChange={e => setIsMultipleVisitors(e.target.checked)} /> I'm visiting with companions</label>
+              
+              <div className="ap-checkbox-field">
+                <label>
+                  <input type="checkbox" checked={isMultipleVisitors} onChange={e => setIsMultipleVisitors(e.target.checked)} /> 
+                  I will be accompanied by other visitors
+                </label>
               </div>
+              
               {isMultipleVisitors && (
-                <div className="companions-box">
-                  <div className="companions-info">Please list the names of your companions.</div>
+                <div className="ap-companions-box">
+                  <p className="ap-companions-info">Please register all accompanying visitors for campus security clearance.</p>
                   {additionalVisitors.map((v, idx) => (
-                    <div key={idx} className="companion-row">
+                    <div key={idx} className="ap-companion-row">
                       <input type="text" placeholder="Companion Full Name" value={v.name} onChange={e => updateVisitorField(idx, 'name', e.target.value)} required />
-                      <button type="button" onClick={() => removeVisitorRow(idx)}><Trash2 size={16} /></button>
+                      <button type="button" onClick={() => removeVisitorRow(idx)} title="Remove Companion"><Trash2 size={16} /></button>
                     </div>
                   ))}
-                  <button type="button" className="add-companion-btn" onClick={addVisitorRow}><Plus size={16} /> Add Companion</button>
+                  <button type="button" className="btn-ap-outline-sm" onClick={addVisitorRow}>
+                    <Plus size={14} /> Add Companion
+                  </button>
                 </div>
               )}
-              <button type="submit" className="btn-primary large" disabled={isSubmitting}>{isSubmitting ? 'Sending...' : 'Book Appointment'}</button>
+              
+              <div className="ap-modal-footer">
+                <button type="button" className="btn-ap-cancel" onClick={() => setShowAppointmentModal(false)}>Cancel</button>
+                <button type="submit" className="btn-ap-primary" disabled={isSubmitting}>
+                  {isSubmitting ? 'Submitting Request...' : 'Confirm Appointment'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* APPLICATION MODAL */}
-      {showApplyModal && selectedJob && (
-        <div className="modal-overlay" onClick={() => setShowApplyModal(false)}>
-          <div className="apply-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="apply-modal-header"><h3>Apply for {selectedJob.title}</h3><button className="btn-close-modal" onClick={() => setShowApplyModal(false)}><X size={20} /></button></div>
-            <form onSubmit={submitApplication} className="apply-form">
-              <div className="form-group"><label>Full Name *</label><input type="text" name="full_name" value={applicationForm.full_name} onChange={handleApplicationChange} required /></div>
-              <div className="form-row">
-                <div className="form-group"><label>Email *</label><input type="email" name="email" value={applicationForm.email} onChange={handleApplicationChange} required /></div>
-                <div className="form-group"><label>Phone</label><input type="tel" name="phone" value={applicationForm.phone} onChange={handleApplicationChange} /></div>
-              </div>
-              <div className="form-group"><label>Cover Letter</label><textarea name="cover_letter" rows="4" value={applicationForm.cover_letter} onChange={handleApplicationChange} /></div>
-              <div className="form-group">
-                <label>Resume * (PDF, DOC)</label>
-                <div className="file-upload-wrapper">
-                  <input type="file" id="resume-upload" accept=".pdf,.doc,.docx" onChange={handleResumeChange} required className="file-input" />
-                  <label htmlFor="resume-upload" className="file-upload-label"><Upload size={16} /> Choose File</label>
-                  {applicationForm.resume && <span className="file-name">{applicationForm.resume.name}</span>}
+      {/* JOB DETAILS MODAL (REDESIGNED FOOTER & LAYOUT) */}
+      {showJobDetailsModal && selectedJobDetails && (
+        <div className="ap-modal-overlay" onClick={() => setShowJobDetailsModal(false)}>
+          <div className="ap-job-modal-content" onClick={e => e.stopPropagation()}>
+            <div className="ap-job-modal-header">
+              <div className="ap-job-header-text">
+                <h2>{selectedJobDetails.title}</h2>
+                <div className="ap-job-meta-light">
+                  <span><Building2 size={14}/> {selectedJobDetails.department || 'General'}</span>
+                  <span><Clock size={14}/> {selectedJobDetails.employment_type}</span>
                 </div>
               </div>
-              <div className="apply-modal-footer">
-                <button type="button" className="btn-cancel" onClick={() => setShowApplyModal(false)}>Cancel</button>
-                <button type="submit" className="btn-primary" disabled={submittingApplication}>{submittingApplication ? 'Submitting...' : 'Submit Application'}</button>
+              <button className="ap-btn-close-light" onClick={() => setShowJobDetailsModal(false)}><X size={24} /></button>
+            </div>
+
+            <div className="ap-job-modal-body">
+              <div className="ap-job-stats-grid">
+                <div className="ap-stat-box">
+                  <span className="ap-stat-label">Location Type</span>
+                  <span className="ap-stat-val"><MapPin size={16} /> {selectedJobDetails.location_type || 'On-site'}</span>
+                </div>
+                {selectedJobDetails.location && (
+                  <div className="ap-stat-box">
+                    <span className="ap-stat-label">Specific Location</span>
+                    <span className="ap-stat-val"><Building2 size={16} /> {selectedJobDetails.location}</span>
+                  </div>
+                )}
+                <div className="ap-stat-box">
+                  <span className="ap-stat-label">Monthly Salary</span>
+                  <span className="ap-stat-val">
+                    <DollarSign size={16} /> 
+                    {(selectedJobDetails.salary_min || selectedJobDetails.salary_max) ? (
+                      <>
+                        {selectedJobDetails.salary_min ? `₱${Number(selectedJobDetails.salary_min).toLocaleString()}` : ''}
+                        {selectedJobDetails.salary_min && selectedJobDetails.salary_max ? ' - ' : ''}
+                        {selectedJobDetails.salary_max ? `₱${Number(selectedJobDetails.salary_max).toLocaleString()}` : ''}
+                      </>
+                    ) : 'Not specified'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="ap-job-section">
+                <h4>Role Description</h4>
+                <p>{selectedJobDetails.description}</p>
+              </div>
+
+              {selectedJobDetails.requirements && (
+                <div className="ap-job-section">
+                  <h4>Requirements & Qualifications</h4>
+                  <p>{selectedJobDetails.requirements}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Redesigned Job Details Footer with Proper Padding */}
+            <div className="ap-job-modal-footer">
+              <button type="button" className="btn-ap-cancel" onClick={() => setShowJobDetailsModal(false)}>Close</button>
+              <button type="button" className="btn-ap-primary" onClick={() => { setShowJobDetailsModal(false); openApplyModal(selectedJobDetails); }}>
+                <FileText size={16} /> Apply Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* APPLY MODAL (REDESIGNED SPACING & FILE UPLOAD) */}
+      {showApplyModal && selectedJob && (
+        <div className="ap-modal-overlay" onClick={() => setShowApplyModal(false)}>
+          <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
+            <div className="ap-modal-header">
+              <h2>Apply: {selectedJob.title}</h2>
+              <button className="ap-btn-close" onClick={() => setShowApplyModal(false)}><X size={20} /></button>
+            </div>
+            <form onSubmit={submitApplication} className="ap-form">
+              
+              <div className="ap-form-group">
+                <label>Full Name <span className="text-danger">*</span></label>
+                <input type="text" name="full_name" value={applicationForm.full_name} onChange={handleApplicationChange} placeholder="e.g. Maria Santos" required />
+              </div>
+
+              <div className="ap-form-row">
+                <div className="ap-form-group">
+                  <label>Email Address <span className="text-danger">*</span></label>
+                  <input type="email" name="email" value={applicationForm.email} onChange={handleApplicationChange} placeholder="e.g. maria@email.com" required />
+                </div>
+                <div className="ap-form-group">
+                  <label>Phone Number</label>
+                  {/* Pattern to allow standard mobile formats */}
+                  <input type="tel" name="phone" pattern="[0-9+\-\s()]+" value={applicationForm.phone} onChange={handleApplicationChange} placeholder="e.g. +63 912 345 6789" />
+                </div>
+              </div>
+
+              <div className="ap-form-group">
+                <label>Cover Letter (Optional)</label>
+                <textarea name="cover_letter" rows="4" value={applicationForm.cover_letter} onChange={handleApplicationChange} placeholder="Tell us why you're a great fit..." />
+              </div>
+
+              <div className="ap-form-group">
+                <label>Resume / CV <span className="text-danger">*</span></label>
+                
+                {/* Redesigned File Upload Box */}
+                <div className="ap-file-upload-box">
+                  <input type="file" id="resume-upload" accept=".pdf,.doc,.docx" onChange={handleResumeChange} required className="ap-file-input-hidden" />
+                  
+                  <div className="ap-file-upload-content">
+                    <div className="ap-file-icon">
+                      <Upload size={24} />
+                    </div>
+                    <div className="ap-file-text">
+                      {applicationForm.resume ? (
+                        <span className="ap-file-name-success"><Check size={16}/> {applicationForm.resume.name}</span>
+                      ) : (
+                        <span><label htmlFor="resume-upload" className="ap-file-browse-link">Click to upload</label> or drag and drop</span>
+                      )}
+                    </div>
+                    <span className="ap-input-hint">Max size: 5MB. Formats: PDF, DOC, DOCX.</span>
+                  </div>
+                  
+                  {/* Absolute label layer to make whole box clickable easily */}
+                  <label htmlFor="resume-upload" className="ap-file-upload-overlay"></label>
+                </div>
+              </div>
+
+              <div className="ap-modal-footer">
+                <button type="button" className="btn-ap-cancel" onClick={() => setShowApplyModal(false)}>Cancel</button>
+                <button type="submit" className="btn-ap-primary" disabled={submittingApplication}>
+                  {submittingApplication ? 'Submitting...' : 'Submit Application'}
+                </button>
               </div>
             </form>
           </div>
@@ -618,25 +726,28 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
       {/* FACILITY GALLERY MODAL */}
       {selectedFacility && (
-        <div className="modal-overlay" onClick={() => setSelectedFacility(null)}>
-          <div className="gallery-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className="ap-modal-overlay" onClick={() => setSelectedFacility(null)}>
+          <div className="ap-gallery-modal" onClick={e => e.stopPropagation()}>
+            <div className="ap-modal-header">
               <h2>{selectedFacility.name} Gallery</h2>
-              <button className="btn-close-modal" onClick={() => setSelectedFacility(null)}><X size={24} /></button>
+              <button className="ap-btn-close" onClick={() => setSelectedFacility(null)}><X size={24} /></button>
             </div>
-            <div className="gallery-grid">
+            <div className="ap-gallery-grid">
               {selectedFacility.images.map((img, idx) => (
-                <img key={idx} src={img} alt={`${selectedFacility.name} ${idx + 1}`} className="gallery-image-item" />
+                <div key={idx} className="ap-gallery-img-box">
+                  <img src={img} alt={`${selectedFacility.name} ${idx + 1}`} />
+                </div>
               ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* TOAST */}
+      {/* TOAST NOTIFICATION */}
       {toastMessage && (
-        <div className={`toast ${toastMessage.isError ? 'error' : 'success'}`}>
-          <Check size={18} /> {toastMessage.message}
+        <div className={`ap-toast fade-in-up ${toastMessage.isError ? 'error' : 'success'}`}>
+          {toastMessage.isError ? <AlertCircle size={18} /> : <Check size={18} />}
+          <span>{toastMessage.message}</span>
         </div>
       )}
     </div>

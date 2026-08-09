@@ -1,142 +1,332 @@
-/* src/pages/Login.css */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* src/pages/Login.css - Ultra-Modern Animated Glassmorphism Redesign */
 
-.login-page {
-  min-height: 100vh;
-  background-color: #F9FAFB; /* Clean, modern minimalist gray */
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ---------- GLOBAL CONTAINER & ANIMATED BACKGROUND ---------- */
+.modern-login-wrapper {
   position: relative;
-  padding: 2rem;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #0F172A; /* Deep Slate Base */
+  overflow: hidden;
 }
 
-/* Floating back button */
-.back-button {
+.login-ambient-bg {
   position: absolute;
-  top: 2rem;
-  left: 2rem;
-  background: transparent;
-  border: none;
+  top: 0; left: 0; right: 0; bottom: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* Glowing Orbs */
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.6;
+  animation: floatOrb 15s infinite ease-in-out alternate;
+}
+
+.orb-1 {
+  width: 500px; height: 500px;
+  background: #0D9488; /* Teal */
+  top: -10%; left: -10%;
+  animation-delay: 0s;
+}
+
+.orb-2 {
+  width: 400px; height: 400px;
+  background: #0284C7; /* Blue */
+  bottom: -10%; right: -5%;
+  animation-delay: -5s;
+}
+
+.orb-3 {
+  width: 600px; height: 600px;
+  background: #064E3B; /* Deep Emerald */
+  bottom: -20%; left: 20%;
+  animation-delay: -10s;
+  opacity: 0.4;
+}
+
+@keyframes floatOrb {
+  0% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+
+/* ---------- NAVIGATION ---------- */
+.btn-glass-back {
+  position: absolute;
+  top: 2rem; left: 2rem;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #FFFFFF;
+  padding: 0.6rem 1.25rem;
+  border-radius: 40px;
   font-size: 0.9rem;
-  color: #6B7280;
-  cursor: pointer;
   font-weight: 500;
-  transition: color 0.2s ease;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
 }
 
-.back-button:hover {
-  color: #111827; /* Darkens smoothly on hover */
+.btn-glass-back:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: translateX(-4px);
 }
 
-/* Login Card - Modern & Minimalist */
-.login-card {
-  background: #FFFFFF;
-  border: 1px solid #E5E7EB;
-  border-radius: 16px;
-  padding: 3rem;
+/* ---------- GLASSMORPHISM LOGIN CARD ---------- */
+.glass-login-card {
+  position: relative;
+  z-index: 10;
   width: 100%;
-  max-width: 420px;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05); /* Very soft shadow */
+  max-width: 440px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 24px;
+  padding: 3rem 2.5rem;
+  box-shadow: 
+    0 25px 50px -12px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+  animation: cardEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes cardEntrance {
+  from { opacity: 0; transform: scale(0.95) translateY(20px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ---------- ANIMATION STAGGERS (RENAMED TO PREVENT COLLISION) ---------- */
+.gl-fade-in-up { animation: glFadeInUp 0.5s ease-out forwards; }
+
+@keyframes glFadeInUp {
+  from { opacity: 0; transform: translateY(15px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.gl-stagger-1 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.1s; }
+.gl-stagger-2 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.2s; }
+.gl-stagger-3 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.3s; }
+.gl-stagger-4 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.4s; }
+.gl-stagger-5 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.5s; }
+.gl-stagger-6 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.6s; }
+
+/* ---------- BRAND HEADER ---------- */
+.gl-brand-header {
   text-align: center;
-}
-
-.welcome-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 0.5rem;
-  letter-spacing: -0.025em;
-}
-
-.login-instruction {
-  color: #6B7280;
   margin-bottom: 2.5rem;
-  font-size: 0.9rem;
 }
 
-/* Input fields */
-.input-group {
-  margin-bottom: 1.25rem;
-  text-align: left;
+.gl-brand-icon {
+  width: 56px; height: 56px;
+  background: #F0FDFA;
+  color: #0D9488;
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 1rem auto;
+  box-shadow: 0 8px 16px rgba(13, 148, 136, 0.15);
 }
 
-.input-group input {
-  width: 100%;
-  padding: 0.875rem 1rem;
-  border: 1px solid #D1D5DB;
-  border-radius: 8px; /* Slightly sharper, modern corners */
-  font-size: 0.95rem;
-  outline: none;
+.gl-brand-title {
+  font-size: 1.5rem;
+  font-weight: 800;
   color: #111827;
-  background: #F9FAFB;
-  transition: all 0.2s ease;
-  box-sizing: border-box;
+  margin: 0 0 0.25rem 0;
+  letter-spacing: -0.02em;
 }
 
-.input-group input::placeholder {
-  color: #9CA3AF;
+.gl-brand-subtitle {
+  font-size: 0.9rem;
+  color: #6B7280;
+  margin: 0;
+  font-weight: 500;
 }
 
-.input-group input:focus {
-  border-color: #0d9488; /* HCT Teal */
-  background: #FFFFFF;
-  box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.1);
+/* ---------- FORM ELEMENTS ---------- */
+.gl-auth-container {
+  display: flex;
+  flex-direction: column;
 }
 
-/* Forgot password link container */
-.forgot-link {
-  text-align: right;
+.gl-instruction {
+  text-align: center;
   margin-bottom: 1.5rem;
 }
 
-/* Login button */
-.login-btn {
+.gl-instruction h4 {
+  font-size: 1.1rem;
+  color: #111827;
+  margin: 0 0 0.5rem 0;
+}
+
+.gl-instruction p {
+  font-size: 0.85rem;
+  color: #6B7280;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.gl-input-group {
+  position: relative;
+  margin-bottom: 1.25rem;
+}
+
+.gl-input-icon {
+  position: absolute;
+  left: 1.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9CA3AF;
+  display: flex;
+  align-items: center;
+  transition: color 0.3s ease;
+}
+
+.gl-input {
   width: 100%;
-  padding: 0.875rem;
-  background: #0d9488;
-  color: white;
+  padding: 0.9rem 1.25rem 0.9rem 3rem;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  color: #111827;
+  background: #FAFAFA;
+  outline: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+}
+
+.gl-input:focus {
+  border-color: #0D9488;
+  background: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.1);
+  transform: translateY(-2px);
+}
+
+.gl-input:focus + .gl-input-icon,
+.gl-input:not(:placeholder-shown) ~ .gl-input-icon {
+  color: #0D9488;
+}
+
+.gl-input::placeholder {
+  color: #9CA3AF;
+  font-weight: 400;
+}
+
+/* OTP Input Specific */
+.otp-group .gl-input-icon { display: none; }
+.otp-group .gl-otp-input {
+  padding-left: 1rem;
+  text-align: center;
+  font-size: 1.5rem;
+  letter-spacing: 0.25em;
+  font-family: monospace;
+  font-weight: 600;
+  color: #0D9488;
+}
+
+.gl-options {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.gl-text-link {
+  background: transparent;
   border: none;
-  border-radius: 8px;
+  color: #0D9488;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.gl-text-link:hover {
+  color: #0F766E;
+  text-decoration: underline;
+}
+
+/* ---------- BUTTONS ---------- */
+.btn-gl-primary {
+  width: 100%;
+  padding: 0.9rem;
+  background: #0D9488;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 12px;
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s ease, transform 0.1s ease;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.2);
 }
 
-.login-btn:hover:not(:disabled) {
-  background: #0f766e;
+.btn-gl-primary:hover:not(:disabled) {
+  background: #0F766E;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(13, 148, 136, 0.3);
 }
 
-.login-btn:active:not(:disabled) {
-  transform: scale(0.98); /* Satisfying click effect */
+.btn-gl-primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
-.login-btn:disabled {
-  background: #9CA3AF;
+.btn-gl-primary:disabled {
+  background: #D1D5DB;
+  box-shadow: none;
   cursor: not-allowed;
-  opacity: 0.7;
+  color: #9CA3AF;
 }
 
-/* Responsive constraints for mobile */
-@media (max-width: 480px) {
-  .login-page {
-    padding: 1rem;
-  }
-  .login-card {
-    padding: 2.5rem 1.5rem;
-    border-radius: 12px;
-  }
-  .welcome-title {
-    font-size: 1.35rem;
-  }
-  .back-button {
-    top: 1rem;
-    left: 1rem;
-    font-size: 0.85rem;
-  }
+.btn-gl-secondary {
+  width: 100%;
+  padding: 0.9rem;
+  background: #FFFFFF;
+  color: #4B5563;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-gl-secondary:hover {
+  background: #F9FAFB;
+  color: #111827;
+  border-color: #D1D5DB;
+}
+
+.gl-resend-timer {
+  text-align: center;
+  margin-top: 1.25rem;
+  font-size: 0.85rem;
+  color: #6B7280;
+  font-weight: 500;
+}
+
+.mt-3 { margin-top: 1rem; }
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width: 600px) {
+  .modern-login-wrapper { padding: 1rem; }
+  .glass-login-card { padding: 2.5rem 1.5rem; border-radius: 16px; }
+  .btn-glass-back { top: 1rem; left: 1rem; padding: 0.5rem 1rem; font-size: 0.8rem;}
+  .gl-brand-icon { width: 48px; height: 48px; margin-bottom: 0.75rem; }
+  .gl-brand-title { font-size: 1.35rem; }
 }

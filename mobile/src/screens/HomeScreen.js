@@ -77,8 +77,6 @@ export default function HomeScreen({ navigation }) {
     return "Good Evening";
   };
 
-
-
   // ---------- INITIAL PERMISSIONS ----------
   useEffect(() => {
     let isMounted = true;
@@ -106,7 +104,6 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   // 🛡️ BULLETPROOF WATCHDOG
-  // Restarts tracking when shift starts, when app comes to foreground, or if task dies silently
   useEffect(() => {
     if (!todaySchedule) return;
 
@@ -142,7 +139,7 @@ export default function HomeScreen({ navigation }) {
                 foregroundService: {
                   notificationTitle: "UniVITA Tracking Active",
                   notificationBody: "Monitoring location for shift compliance.",
-                  notificationColor: "#059669",
+                  notificationColor: "#0D9488",
                 },
               });
               console.log("✅ Background tracking revived/started");
@@ -177,9 +174,6 @@ export default function HomeScreen({ navigation }) {
   }, [todaySchedule]);
 
   // 🚀 FOREGROUND PINGER
-  // Guarantees pings every 20s while the app is actively open on the screen
-  // 🚀 FOREGROUND PINGER
-  // Guarantees pings every 20s while the app is actively open on the screen
   useEffect(() => {
     if (!todaySchedule) return;
 
@@ -198,7 +192,6 @@ export default function HomeScreen({ navigation }) {
       if (now >= startTime && now <= endTime) {
         isPinging = true;
         try {
-          // Check permissions AND if device GPS is toggled on
           const { status } = await Location.getForegroundPermissionsAsync();
           const gpsOn = await Location.hasServicesEnabledAsync();
           
@@ -206,7 +199,6 @@ export default function HomeScreen({ navigation }) {
           let lon = 0;
           let isLocEnabled = false;
 
-          // Only attempt to get coordinates if we have permission
           if (status === 'granted' && gpsOn && AppState.currentState === 'active') {
             try {
               const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -214,7 +206,7 @@ export default function HomeScreen({ navigation }) {
               lon = loc.coords.longitude;
               isLocEnabled = true;
             } catch (e) {
-              isLocEnabled = false; // Failsafe if GPS is struggling to get a lock
+              isLocEnabled = false; 
             }
           }
 
@@ -223,11 +215,10 @@ export default function HomeScreen({ navigation }) {
             await axios.post(`${API_URL}/instructor/location`, {
               latitude: lat,
               longitude: lon,
-              location_enabled: isLocEnabled // This explicitly tells the backend if it's ON or OFF
+              location_enabled: isLocEnabled 
             }, {
               headers: { Authorization: `Bearer ${token}` }
             });
-            console.log(`📍 FOREGROUND Ping Sent: GPS is ${isLocEnabled ? 'ON' : 'OFF'}`);
           }
         } catch (err) {
           console.warn("Foreground ping error:", err.message);
@@ -258,7 +249,6 @@ export default function HomeScreen({ navigation }) {
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
           if (isRegistered) {
             await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-            console.log("📍 Background tracking stopped – shift ended");
           }
         } catch (err) {
           console.warn("Error stopping tracking:", err);
@@ -336,9 +326,9 @@ export default function HomeScreen({ navigation }) {
   };
 
   const handleClockIn = async () => {
-    if (!todaySchedule) return Alert.alert("Cannot Clock In", "No schedule for today.");
+    if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
     const selfieUri = await captureSelfie();
-    if (!selfieUri) return Alert.alert('Selfie Required', 'Please take a selfie.');
+    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for check-in.');
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     try {
       const formData = new FormData();
@@ -354,14 +344,14 @@ export default function HomeScreen({ navigation }) {
         Alert.alert('Success', result.message);
         await loadData();
       } else {
-        Alert.alert('Error', result.message);
+        Alert.alert('Check-In Error', result.message);
       }
-    } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
+    } catch (error) { Alert.alert('Network Error', 'Connection failed. Please check your internet.'); }
   };
 
   const handleClockOut = async () => {
     if (!todaySchedule) {
-      Alert.alert("Cannot Clock Out", "No schedule for today.");
+      Alert.alert("Notice", "No schedule available for today.");
       return;
     }
 
@@ -371,19 +361,19 @@ export default function HomeScreen({ navigation }) {
 
     if (currentTimeStr < scheduledEndTime.slice(0, 5)) {
       Alert.alert(
-        "Early Clock Out",
-        `Your shift ends at ${scheduledEndTime.slice(0,5)}. Do you want to request an early clock‑out correction?`,
+        "Early Check-Out",
+        `Your shift ends at ${scheduledEndTime.slice(0,5)}. Do you wish to request a correction for an early check-out?`,
         [
           { text: "Cancel", style: "cancel" },
           {
-            text: "Request Correction",
+            text: "Request",
             onPress: () => {
               navigation.navigate("Requests", {
                 prefillTab: "correction",
                 prefillDate: getTodayString(),
                 prefillType: "clock_out",
                 prefillTime: currentTimeStr,
-                prefillReason: "Early clock-out requested"
+                prefillReason: "Early departure requested"
               });
             }
           }
@@ -393,7 +383,7 @@ export default function HomeScreen({ navigation }) {
     }
 
     const selfieUri = await captureSelfie();
-    if (!selfieUri) return Alert.alert('Selfie Required', 'Please take a selfie.');
+    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for check-out.');
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     try {
       const formData = new FormData();
@@ -412,23 +402,22 @@ export default function HomeScreen({ navigation }) {
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
           if (isRegistered) {
             await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-            console.log("📍 Background tracking stopped manually via Clock Out");
           }
         } catch (e) {
-          console.warn("Error stopping tracking on clock out:", e);
+          console.warn("Error stopping tracking:", e);
         }
 
         await loadData();
       } else {
-        Alert.alert('Error', result.message);
+        Alert.alert('Check-Out Error', result.message);
       }
-    } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
+    } catch (error) { Alert.alert('Network Error', 'Connection failed. Please check your internet.'); }
   };
 
   const submitCorrection = async () => {
-    if (!correctionDate || !correctionTime || !correctionReason.trim()) return Alert.alert('Required', 'Please fill all fields.');
+    if (!correctionDate || !correctionTime || !correctionReason.trim()) return Alert.alert('Required', 'Please fill all mandatory fields.');
     const selfieUri = correctionSelfie || await captureSelfie();
-    if (!selfieUri) return Alert.alert('Selfie Required', 'Please take a selfie.');
+    if (!selfieUri) return Alert.alert('Selfie Required', 'A selfie is mandatory for this request.');
     setSubmittingCorrection(true);
     try {
       const formData = new FormData();
@@ -440,13 +429,13 @@ export default function HomeScreen({ navigation }) {
       formData.append('selfie', { uri: selfieUri, name: 'correction.jpg', type: 'image/jpeg' });
       const result = await requestAttendanceCorrection(formData);
       if (result.success) {
-        Alert.alert('Success', 'Request submitted.');
+        Alert.alert('Submitted', 'Your request has been forwarded to HR.');
         setShowCorrectionModal(false);
         setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionSelfie(null);
       } else {
-        Alert.alert('Error', result.message);
+        Alert.alert('Submission Error', result.message);
       }
-    } catch (err) { Alert.alert('Error', 'Network error.'); }
+    } catch (err) { Alert.alert('Network Error', 'Connection failed.'); }
     finally { setSubmittingCorrection(false); }
   };
 
@@ -518,18 +507,18 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => { loadData(); }, [loadData]);
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
-  const formattedDate = currentTime.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const formattedDate = currentTime.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
   const formattedTime = currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const finalCanClockIn = todaySchedule !== null && attendanceStatus.canClockIn;
   const finalCanClockOut = todaySchedule !== null && attendanceStatus.canClockOut;
 
   return (
     <>
-      <StatusBar barStyle="dark-content" backgroundColor="#F9FAFB" />
+      <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
       <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
         <ScrollView
           contentContainerStyle={styles.scroll}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#00897B"]} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#0D9488"]} />}
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
@@ -539,180 +528,207 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.userName}>{user.full_name || user.name}</Text>
             </View>
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.bellButton} onPress={() => Alert.alert("Notifications", "Coming soon")}>
-                <Bell size={22} color="#1E293B" />
+              <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert("Notifications", "System notifications are active.")}>
+                <Bell size={22} color="#4B5563" />
                 {unreadCount > 0 && <View style={styles.badge} />}
               </TouchableOpacity>
-              <TouchableOpacity style={styles.avatarButton}>
-                <User size={22} color="#00897B" />
-              </TouchableOpacity>
+              <View style={styles.avatarWrapper}>
+                <User size={20} color="#0D9488" />
+              </View>
             </View>
           </View>
 
-          {/* Date & Time */}
-          <View style={styles.dateCard}>
-            <CalendarDays size={24} color="#00897B" style={{ marginBottom: 8 }} />
-            <Text style={styles.dateText}>{formattedDate}</Text>
+          {/* Date & Time Widget */}
+          <View style={styles.dateWidget}>
+            <View style={styles.dateInfo}>
+              <CalendarDays size={18} color="#0D9488" />
+              <Text style={styles.dateText}>{formattedDate}</Text>
+            </View>
             <Text style={styles.timeText}>{formattedTime}</Text>
           </View>
 
           {/* Schedule Card */}
-          <View style={styles.scheduleCard}>
-            <Text style={styles.cardLabel}>Today's Schedule</Text>
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Current Shift</Text>
+            </View>
             {todaySchedule ? (
-              <>
-                <View style={styles.scheduleTimeRow}>
-                  <Clock size={18} color="#00897B" />
-                  <Text style={styles.scheduleTime}>
+              <View style={styles.scheduleBody}>
+                <View style={styles.scheduleRow}>
+                  <Clock size={16} color="#6B7280" />
+                  <Text style={styles.scheduleDataText}>
                     {todaySchedule.start_time?.substring(0,5)} – {todaySchedule.end_time?.substring(0,5)}
                   </Text>
                 </View>
-                <View style={styles.schedulePlaceRow}>
-                  <MapPin size={16} color="#00897B" />
-                  <Text style={styles.schedulePlace}>{todaySchedule.place}</Text>
+                <View style={styles.scheduleRow}>
+                  <MapPin size={16} color="#6B7280" />
+                  <Text style={styles.scheduleDataText}>{todaySchedule.place}</Text>
                 </View>
-                <Text style={styles.courseText}>{todaySchedule.course || "General Instruction"}</Text>
-              </>
+                <View style={styles.scheduleRow}>
+                  <FileText size={16} color="#6B7280" />
+                  <Text style={styles.scheduleDataText}>{todaySchedule.course || "General Assignment"}</Text>
+                </View>
+              </View>
             ) : (
-              <Text style={styles.noScheduleText}>No schedule assigned for today</Text>
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>No active schedule assigned for today.</Text>
+              </View>
             )}
           </View>
 
-          {/* Clock Buttons */}
-          <View style={styles.clockContainer}>
+          {/* Action Buttons */}
+          <View style={styles.actionContainer}>
             <TouchableOpacity
-              style={[styles.clockButton, styles.clockInButton, !finalCanClockIn && styles.clockDisabled]}
+              style={[styles.btnPrimary, !finalCanClockIn && styles.btnDisabled]}
               onPress={handleClockIn}
               disabled={!finalCanClockIn}
             >
-              <Clock size={20} color="white" />
-              <Text style={styles.clockButtonText}>Clock In</Text>
+              <Clock size={18} color="#FFFFFF" />
+              <Text style={styles.btnPrimaryText}>Check-In</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.clockButton, styles.clockOutButton, !finalCanClockOut && styles.clockDisabled]}
+              style={[styles.btnOutline, !finalCanClockOut && styles.btnDisabled]}
               onPress={handleClockOut}
               disabled={!finalCanClockOut}
             >
-              <Clock size={20} color="#00897B" />
-              <Text style={[styles.clockButtonText, { color: '#00897B' }]}>Clock Out</Text>
+              <Clock size={18} color="#0D9488" />
+              <Text style={styles.btnOutlineText}>Check-Out</Text>
             </TouchableOpacity>
           </View>
 
+          {/* Status Indicator */}
           {attendanceStatus.todayRecord && (
-            <View style={styles.clockedInChip}>
-              <CheckCircle size={14} color="#10B981" />
-              <Text style={styles.clockedInText}>
+            <View style={styles.statusIndicator}>
+              <CheckCircle size={16} color="#059669" />
+              <Text style={styles.statusText}>
                 {(!attendanceStatus.todayRecord.time_out || attendanceStatus.todayRecord.time_out === '--:--')
-                  ? `Clocked in at ${attendanceStatus.todayRecord.time_in} for ${todaySchedule?.course || 'your shift'}`
-                  : `Shift completed at ${attendanceStatus.todayRecord.time_out}`
+                  ? `Active session started at ${attendanceStatus.todayRecord.time_in}`
+                  : `Session finalized at ${attendanceStatus.todayRecord.time_out}`
                 }
               </Text>
             </View>
           )}
 
-          {/* Stats */}
-          <Text style={styles.statsHeader}>Monthly Overview</Text>
+          {/* Performance Overview */}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Performance Overview</Text>
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsScroll}>
-            <StatCard icon={<CheckCircle size={20} color="#10B981" />} label="Present" value={stats.present} />
-            <StatCard icon={<XCircle size={20} color="#EF4444" />} label="Absent" value={stats.absent} />
+            <StatCard icon={<CheckCircle size={20} color="#0D9488" />} label="Present" value={stats.present} />
+            <StatCard icon={<XCircle size={20} color="#DC2626" />} label="Absent" value={stats.absent} />
             <StatCard icon={<AlertCircle size={20} color="#F59E0B" />} label="Late" value={stats.late} />
-            <StatCard icon={<TrendingUp size={20} color="#3B82F6" />} label="Overtime" value={stats.overtime} />
+            <StatCard icon={<TrendingUp size={20} color="#2563EB" />} label="Overtime" value={stats.overtime} />
           </ScrollView>
 
-          {/* Quick Actions */}
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.actionItem} onPress={() => navigation.navigate('Requests')}>
-              <LinearGradient colors={['#E0F2F1', '#B2DFDB']} style={styles.actionIcon}>
-                <FileText size={24} color="#00897B" />
-              </LinearGradient>
-              <Text style={styles.actionTitle}>Requests</Text>
+          {/* Direct Modules */}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Modules</Text>
+          </View>
+          <View style={styles.modulesGrid}>
+            <TouchableOpacity style={styles.moduleCard} onPress={() => navigation.navigate('Requests')}>
+              <View style={styles.moduleIconWrapper}>
+                <FileText size={20} color="#0D9488" />
+              </View>
+              <Text style={styles.moduleText}>System Requests</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionItem} onPress={() => navigation.navigate('MyPayroll')}>
-              <LinearGradient colors={['#E0F2F1', '#B2DFDB']} style={styles.actionIcon}>
-                <TrendingUp size={24} color="#00897B" />
-              </LinearGradient>
-              <Text style={styles.actionTitle}>Payroll</Text>
+            <TouchableOpacity style={styles.moduleCard} onPress={() => navigation.navigate('MyPayroll')}>
+              <View style={styles.moduleIconWrapper}>
+                <TrendingUp size={20} color="#0D9488" />
+              </View>
+              <Text style={styles.moduleText}>Payroll Details</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
 
         {/* Floating Chat Button */}
-        <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
-          <MessageCircle size={24} color="white" />
+        <TouchableOpacity style={styles.fab} onPress={() => setShowChat(true)}>
+          <MessageCircle size={24} color="#FFFFFF" />
           {unreadCount > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadText}>{unreadCount}</Text>
+            <View style={styles.fabBadge}>
+              <Text style={styles.fabBadgeText}>{unreadCount}</Text>
             </View>
           )}
         </TouchableOpacity>
 
         {/* Emergency Alert Modal */}
         <Modal visible={showAlertModal} transparent animationType="fade">
-          <View style={styles.alertOverlay}>
-            <LinearGradient
-              colors={currentAlert?.severity === 'critical' ? ['#FFF5F5', '#FEE2E2'] : currentAlert?.severity === 'warning' ? ['#FFFBEB', '#FEF3C7'] : ['#FFFFFF', '#F8FAFC']}
-              style={styles.alertCard}
-            >
-              <View style={styles.alertHeader}>
-                <Text style={styles.alertTitle}>
-                  {currentAlert?.severity === 'critical' ? '🔴 CRITICAL' : currentAlert?.severity === 'warning' ? '🟠 WARNING' : '🔵 INFO'}
-                </Text>
-              </View>
-              <Text style={styles.alertHeading}>{currentAlert?.title}</Text>
-              <Text style={styles.alertMessage}>{currentAlert?.message}</Text>
-              <View style={styles.alertFooter}>
-                <Text style={styles.alertDate}>{currentAlert?.sent_at ? new Date(currentAlert.sent_at).toLocaleString() : ''}</Text>
-                <TouchableOpacity style={styles.alertButton} onPress={dismissAlert}>
-                  <Text style={styles.alertButtonText}>Dismiss</Text>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.alertModal, currentAlert?.severity === 'critical' ? styles.alertCritical : currentAlert?.severity === 'warning' ? styles.alertWarning : styles.alertInfo]}>
+              <Text style={styles.alertHeader}>
+                {currentAlert?.severity === 'critical' ? 'CRITICAL ALERT' : currentAlert?.severity === 'warning' ? 'WARNING' : 'SYSTEM INFO'}
+              </Text>
+              <Text style={styles.alertTitle}>{currentAlert?.title}</Text>
+              <Text style={styles.alertBody}>{currentAlert?.message}</Text>
+              <View style={styles.alertActions}>
+                <TouchableOpacity style={styles.btnAlertDismiss} onPress={dismissAlert}>
+                  <Text style={styles.btnAlertText}>Acknowledge</Text>
                 </TouchableOpacity>
               </View>
-            </LinearGradient>
+            </View>
           </View>
         </Modal>
 
         {/* Chat Modal */}
-        <Modal visible={showChat} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setShowChat(false)}>
-          <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
-            <View style={styles.chatHeader}>
-              <TouchableOpacity onPress={() => setShowChat(false)}><X size={24} color="#0f172a" /></TouchableOpacity>
-              <Text style={styles.chatTitle}>Messages</Text>
-              <View style={{ width: 24 }} />
+        <Modal visible={showChat} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowChat(false)}>
+          <SafeAreaView style={styles.chatContainer}>
+            <View style={styles.chatNavbar}>
+              <TouchableOpacity onPress={() => setShowChat(false)} style={styles.closeBtn}>
+                <X size={24} color="#111827" />
+              </TouchableOpacity>
+              <Text style={styles.chatNavbarTitle}>Communications</Text>
+              <View style={{ width: 40 }} />
             </View>
             <ChatScreen />
           </SafeAreaView>
         </Modal>
 
         {/* Correction Modal */}
-        <Modal visible={showCorrectionModal} transparent animationType="slide">
+        <Modal visible={showCorrectionModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Attendance Correction</Text>
-                <TouchableOpacity onPress={() => setShowCorrectionModal(false)}><X size={22} color="#64748B" /></TouchableOpacity>
+            <View style={styles.formalModal}>
+              <View style={styles.formalModalHeader}>
+                <Text style={styles.formalModalTitle}>Attendance Correction</Text>
+                <TouchableOpacity onPress={() => setShowCorrectionModal(false)}><X size={20} color="#6B7280" /></TouchableOpacity>
               </View>
-              <ScrollView>
-                <Text style={styles.inputLabel}>Date</Text>
-                <TextInput style={styles.input} value={correctionDate} editable={false} />
-                <Text style={styles.inputLabel}>What to correct?</Text>
-                <View style={styles.typeGroup}>
-                  <TouchableOpacity style={[styles.typeChip, correctionType === 'clock_in' && styles.typeChipActive]} onPress={() => setCorrectionType('clock_in')}>
-                    <Text style={[styles.typeChipText, correctionType === 'clock_in' && styles.typeChipTextActive]}>Clock In</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.typeChip, correctionType === 'clock_out' && styles.typeChipActive]} onPress={() => setCorrectionType('clock_out')}>
-                    <Text style={[styles.typeChipText, correctionType === 'clock_out' && styles.typeChipTextActive]}>Clock Out</Text>
-                  </TouchableOpacity>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Date</Text>
+                  <TextInput style={[styles.input, styles.inputDisabled]} value={correctionDate} editable={false} />
                 </View>
-                <Text style={styles.inputLabel}>Time (HH:MM)</Text>
-                <TextInput style={styles.input} placeholder="09:00" value={correctionTime} onChangeText={setCorrectionTime} />
-                <Text style={styles.inputLabel}>Reason</Text>
-                <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why?" value={correctionReason} onChangeText={setCorrectionReason} />
-                <Text style={styles.inputLabel}>Selfie</Text>
-                <TouchableOpacity style={styles.uploadBtn} onPress={async () => { const uri = await captureSelfie(); if (uri) setCorrectionSelfie(uri); }}>
-                  <Camera size={18} color="#0d9488" /><Text style={styles.uploadText}>{correctionSelfie ? 'Retake Selfie' : 'Take Selfie'}</Text>
-                </TouchableOpacity>
-                {correctionSelfie && <Image source={{ uri: correctionSelfie }} style={styles.previewImage} />}
-                <TouchableOpacity style={styles.submitBtn} onPress={submitCorrection} disabled={submittingCorrection}>
-                  <Text style={styles.submitBtnText}>{submittingCorrection ? 'Submitting...' : 'Submit Correction'}</Text>
+                
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Correction Type</Text>
+                  <View style={styles.chipRow}>
+                    <TouchableOpacity style={[styles.chip, correctionType === 'clock_in' && styles.chipActive]} onPress={() => setCorrectionType('clock_in')}>
+                      <Text style={[styles.chipText, correctionType === 'clock_in' && styles.chipTextActive]}>Check-In</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.chip, correctionType === 'clock_out' && styles.chipActive]} onPress={() => setCorrectionType('clock_out')}>
+                      <Text style={[styles.chipText, correctionType === 'clock_out' && styles.chipTextActive]}>Check-Out</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Time (HH:MM)</Text>
+                  <TextInput style={styles.input} placeholder="09:00" value={correctionTime} onChangeText={setCorrectionTime} keyboardType="numeric" />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Reason</Text>
+                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Provide details..." value={correctionReason} onChangeText={setCorrectionReason} />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Verification Image</Text>
+                  <TouchableOpacity style={styles.uploadBox} onPress={async () => { const uri = await captureSelfie(); if (uri) setCorrectionSelfie(uri); }}>
+                    <Camera size={20} color="#6B7280" />
+                    <Text style={styles.uploadText}>{correctionSelfie ? 'Tap to Retake' : 'Capture Selfie'}</Text>
+                  </TouchableOpacity>
+                  {correctionSelfie && <Image source={{ uri: correctionSelfie }} style={styles.previewImg} />}
+                </View>
+
+                <TouchableOpacity style={styles.btnPrimaryFull} onPress={submitCorrection} disabled={submittingCorrection}>
+                  <Text style={styles.btnPrimaryText}>{submittingCorrection ? 'Processing...' : 'Submit Request'}</Text>
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -723,85 +739,101 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
-// Stat Card Component
 const StatCard = ({ icon, label, value }) => (
-  <View style={styles.statCardScroll}>
-    <View style={styles.statIconBox}>{icon}</View>
-    <Text style={styles.statValueScroll}>{value}</Text>
-    <Text style={styles.statLabelScroll}>{label}</Text>
+  <View style={styles.statCard}>
+    <View style={styles.statIcon}>{icon}</View>
+    <Text style={styles.statValue}>{value}</Text>
+    <Text style={styles.statLabel}>{label}</Text>
   </View>
 );
 
-// Styles
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F9FAFB' },
-  scroll: { paddingHorizontal: 20, paddingBottom: 80, paddingTop: Platform.OS === 'android' ? 8 : 0 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  greeting: { fontSize: 14, fontWeight: '500', color: '#64748B' },
-  userName: { fontSize: 22, fontWeight: '700', color: '#0F172A', marginTop: 2 },
+  safeArea: { flex: 1, backgroundColor: '#FAFAFA' },
+  scroll: { paddingHorizontal: 20, paddingBottom: 100 },
+  
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 20 },
+  greeting: { fontSize: 13, fontWeight: '600', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5 },
+  userName: { fontSize: 20, fontWeight: '700', color: '#111827', marginTop: 2 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  bellButton: { padding: 8, position: 'relative' },
-  badge: { position: 'absolute', top: 6, right: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
-  avatarButton: { padding: 8, backgroundColor: '#E0F2F1', borderRadius: 30 },
-  dateCard: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 20, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 1 },
-  dateText: { fontSize: 15, color: '#64748B', fontWeight: '500', marginTop: 8 },
-  timeText: { fontSize: 32, fontWeight: '800', color: '#0F172A', marginTop: 4 },
-  scheduleCard: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 8, elevation: 1 },
-  cardLabel: { fontSize: 13, fontWeight: '600', color: '#64748B', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
-  scheduleTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  scheduleTime: { fontSize: 16, fontWeight: '600', color: '#0F172A' },
-  schedulePlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  schedulePlace: { fontSize: 15, color: '#334155' },
-  courseText: { fontSize: 14, fontWeight: '500', color: '#00897B', marginTop: 4 },
-  noScheduleText: { color: '#94A3B8', textAlign: 'center', paddingVertical: 12 },
-  clockContainer: { flexDirection: 'row', gap: 12, marginBottom: 12 },
-  clockButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 60 },
-  clockInButton: { backgroundColor: '#00897B', shadowColor: '#00897B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 3 },
-  clockOutButton: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#00897B' },
-  clockDisabled: { opacity: 0.6 },
-  clockButtonText: { fontWeight: '700', fontSize: 15, color: 'white' },
-  clockedInChip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#E0F2F1', paddingVertical: 8, borderRadius: 40, marginBottom: 16 },
-  clockedInText: { fontSize: 13, color: '#10B981', fontWeight: '500' },
-  statsHeader: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginBottom: 16 },
-  statsScroll: { flexDirection: 'row', marginBottom: 32 },
-  statCardScroll: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginRight: 12, width: 100, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' },
-  statIconBox: { marginBottom: 8 },
-  statValueScroll: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginTop: 4 },
-  statLabelScroll: { fontSize: 12, color: '#64748B', marginTop: 4 },
-  actionsRow: { flexDirection: 'row', gap: 20, marginBottom: 32, justifyContent: 'center' },
-  actionItem: { alignItems: 'center', gap: 8, flex: 0.4 },
-  actionIcon: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
-  actionTitle: { fontSize: 13, fontWeight: '600', color: '#1E293B' },
-  chatFab: { position: 'absolute', bottom: 30, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#00897B', justifyContent: 'center', alignItems: 'center', elevation: 6 },
-  unreadBadge: { position: 'absolute', top: -2, right: -2, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
-  unreadText: { color: 'white', fontSize: 11, fontWeight: '700' },
-  chatHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
-  chatTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
-  alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  alertCard: { borderRadius: 28, padding: 24, width: '90%', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8 },
-  alertHeader: { marginBottom: 8 },
-  alertTitle: { fontSize: 14, fontWeight: '800', color: '#0F172A' },
-  alertHeading: { fontSize: 20, fontWeight: '700', marginBottom: 8, color: '#0F172A' },
-  alertMessage: { fontSize: 16, color: '#1E293B', marginBottom: 20, lineHeight: 22 },
-  alertFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  alertDate: { fontSize: 11, color: '#64748B' },
-  alertButton: { backgroundColor: '#00897B', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 30 },
-  alertButtonText: { color: 'white', fontWeight: '600', fontSize: 14 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalContainer: { backgroundColor: 'white', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, maxHeight: '90%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: '#334155', marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 14, padding: 12, fontSize: 15, backgroundColor: '#F8FAFC' },
-  textArea: { height: 90, textAlignVertical: 'top' },
-  typeGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  typeChip: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 30, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: 'white' },
-  typeChipActive: { backgroundColor: '#00897B', borderColor: '#00897B' },
-  typeChipText: { fontSize: 13, color: '#1E293B' },
-  typeChipTextActive: { color: 'white' },
-  uploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F1F5F9', padding: 12, borderRadius: 14, marginTop: 8 },
-  uploadText: { color: '#0d9488', fontWeight: '500' },
-  previewImage: { width: '100%', height: 180, borderRadius: 14, marginTop: 12 },
-  submitBtn: { backgroundColor: '#00897B', padding: 14, borderRadius: 16, alignItems: 'center', marginTop: 24, marginBottom: 20 },
-  submitBtnText: { color: 'white', fontWeight: '700', fontSize: 16 },
+  iconButton: { padding: 8, position: 'relative' },
+  badge: { position: 'absolute', top: 6, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626' },
+  avatarWrapper: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#F0FDFA', justifyContent: 'center', alignItems: 'center' },
+
+  dateWidget: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, paddingHorizontal: 4 },
+  dateInfo: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  dateText: { fontSize: 14, fontWeight: '600', color: '#4B5563' },
+  timeText: { fontSize: 24, fontWeight: '800', color: '#111827' },
+
+  card: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 20, overflow: 'hidden' },
+  cardHeader: { backgroundColor: '#FAFAFA', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  cardTitle: { fontSize: 13, fontWeight: '700', color: '#111827', textTransform: 'uppercase', letterSpacing: 0.5 },
+  scheduleBody: { padding: 16, gap: 12 },
+  scheduleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  scheduleDataText: { fontSize: 15, fontWeight: '500', color: '#374151' },
+  emptyState: { padding: 24, alignItems: 'center' },
+  emptyStateText: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
+
+  actionContainer: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  btnPrimary: { flex: 1, flexDirection: 'row', backgroundColor: '#0D9488', paddingVertical: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  btnOutline: { flex: 1, flexDirection: 'row', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#0D9488', paddingVertical: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  btnPrimaryText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  btnOutlineText: { color: '#0D9488', fontSize: 15, fontWeight: '600' },
+  btnDisabled: { opacity: 0.5 },
+
+  statusIndicator: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#ECFDF5', paddingVertical: 10, borderRadius: 8, marginBottom: 24, borderWidth: 1, borderColor: '#D1FAE5' },
+  statusText: { fontSize: 13, color: '#047857', fontWeight: '600' },
+
+  sectionHeader: { marginBottom: 12, marginTop: 8 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  
+  statsScroll: { flexDirection: 'row', marginBottom: 24 },
+  statCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginRight: 12, width: 110, borderWidth: 1, borderColor: '#E5E7EB' },
+  statIcon: { marginBottom: 8 },
+  statValue: { fontSize: 22, fontWeight: '800', color: '#111827', marginBottom: 2 },
+  statLabel: { fontSize: 12, fontWeight: '500', color: '#6B7280', textTransform: 'uppercase' },
+
+  modulesGrid: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  moduleCard: { flex: 1, backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', gap: 10 },
+  moduleIconWrapper: { width: 44, height: 44, borderRadius: 8, backgroundColor: '#F0FDFA', justifyContent: 'center', alignItems: 'center' },
+  moduleText: { fontSize: 13, fontWeight: '600', color: '#374151' },
+
+  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: '#0D9488', justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 6 },
+  fabBadge: { position: 'absolute', top: 0, right: 0, backgroundColor: '#DC2626', borderRadius: 12, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: '#FAFAFA' },
+  fabBadgeText: { color: 'white', fontSize: 10, fontWeight: '800' },
+
+  chatContainer: { flex: 1, backgroundColor: '#FAFAFA' },
+  chatNavbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  closeBtn: { padding: 4 },
+  chatNavbarTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(17, 24, 39, 0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  
+  alertModal: { width: '100%', borderRadius: 12, padding: 20, backgroundColor: '#FFFFFF', borderWidth: 1 },
+  alertCritical: { borderColor: '#FECACA', backgroundColor: '#FEF2F2' },
+  alertWarning: { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' },
+  alertInfo: { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
+  alertHeader: { fontSize: 12, fontWeight: '800', marginBottom: 8, color: '#111827' },
+  alertTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 8 },
+  alertBody: { fontSize: 14, color: '#374151', lineHeight: 20, marginBottom: 20 },
+  alertActions: { alignItems: 'flex-end' },
+  btnAlertDismiss: { backgroundColor: '#111827', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6 },
+  btnAlertText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+
+  formalModal: { width: '100%', backgroundColor: '#FFFFFF', borderRadius: 12, maxHeight: '85%', padding: 20 },
+  formalModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  formalModalTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  formGroup: { marginBottom: 16 },
+  label: { fontSize: 12, fontWeight: '600', color: '#4B5563', textTransform: 'uppercase', marginBottom: 6 },
+  input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, padding: 12, fontSize: 14, color: '#111827', backgroundColor: '#FFFFFF' },
+  inputDisabled: { backgroundColor: '#F3F4F6', color: '#6B7280' },
+  textArea: { height: 80, textAlignVertical: 'top' },
+  chipRow: { flexDirection: 'row', gap: 10 },
+  chip: { flex: 1, paddingVertical: 10, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, alignItems: 'center' },
+  chipActive: { backgroundColor: '#0D9488', borderColor: '#0D9488' },
+  chipText: { fontSize: 13, fontWeight: '600', color: '#4B5563' },
+  chipTextActive: { color: '#FFFFFF' },
+  uploadBox: { borderWidth: 1, borderColor: '#D1D5DB', borderStyle: 'dashed', borderRadius: 8, padding: 20, alignItems: 'center', gap: 8, backgroundColor: '#F9FAFB' },
+  uploadText: { fontSize: 13, fontWeight: '500', color: '#6B7280' },
+  previewImg: { width: '100%', height: 160, borderRadius: 8, marginTop: 12 },
+  btnPrimaryFull: { backgroundColor: '#0D9488', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 10 },
 });

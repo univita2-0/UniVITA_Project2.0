@@ -1,11 +1,13 @@
 import { registerRootComponent } from 'expo';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, StyleSheet, Animated } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Calendar, Clock, User } from 'lucide-react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
+import * as SplashScreen from 'expo-splash-screen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import ErrorBoundary from './ErrorBoundary';
@@ -27,6 +29,9 @@ import ScheduleHistoryScreen from './src/screens/ScheduleHistoryScreen';
 import AppealHistoryScreen from './src/screens/AppealHistoryScreen';
 import OvertimeHistoryScreen from './src/screens/OvertimeHistoryScreen';
 
+// Keep the native splash screen visible while loading resources
+SplashScreen.preventAutoHideAsync();
+
 const LOCATION_TASK_NAME = 'background-location-task';
 
 // ---------- GLOBAL BACKGROUND LOCATION TASK ----------
@@ -41,27 +46,15 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   }
 
   const location = data.locations[0];
-  console.log("📍 Background location received:", location.coords.latitude, location.coords.longitude);
 
   try {
-    // Check internet connectivity
     const netState = await NetInfo.fetch();
-    if (!netState.isConnected) {
-      console.warn("No internet – skipping ping");
-      return;
-    }
+    if (!netState.isConnected) return;
 
-    // Grab auth token
     const token = await AsyncStorage.getItem('auth_token');
-    if (!token) {
-      console.warn("No auth token – skipping ping");
-      return;
-    }
+    if (!token) return;
 
-    // 🚀 REMOVED AsyncStorage schedule checks. 
-    // If this task is running, it's because HomeScreen started it. 
-    // We just send the ping and let the backend do the heavy lifting and verification.
-    const response = await fetch(`${API_URL}/instructor/location`, {
+    await fetch(`${API_URL}/instructor/location`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -73,12 +66,6 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         location_enabled: true
       }),
     });
-
-    if (response.ok) {
-      console.log("✅ Background ping successfully processed by backend");
-    } else {
-      console.error("⚠️ Background ping rejected by backend:", response.status);
-    }
   } catch (err) {
     console.error("Failed to send background ping:", err.message);
   }
@@ -92,9 +79,11 @@ function ProfileStack() {
     <Stack.Navigator
       screenOptions={{
         headerShown: true,
-        headerTintColor: '#00897B',
+        headerTintColor: '#0D9488',
         headerTitleAlign: 'center',
         headerBackTitleVisible: false,
+        headerStyle: { backgroundColor: '#FAFAFA' },
+        headerShadowVisible: false,
       }}
     >
       <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
@@ -109,33 +98,42 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#00897B',
+        tabBarActiveTintColor: '#0D9488',
         tabBarInactiveTintColor: '#6B7280',
-        tabBarStyle: { height: 70, paddingBottom: 10, paddingTop: 10 },
-        tabBarLabelStyle: { fontSize: 12 },
+        tabBarStyle: { 
+          height: 65, 
+          paddingBottom: 8, 
+          paddingTop: 8, 
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#E5E7EB',
+          elevation: 0,
+          shadowOpacity: 0
+        },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
       }}
     >
       <Tab.Screen
         name="Home"
         component={HomeScreen}
-        options={{ tabBarIcon: ({ color }) => <Home size={24} color={color} /> }}
+        options={{ tabBarIcon: ({ color }) => <Home size={22} color={color} /> }}
       />
       <Tab.Screen
         name="Calendar"
         component={CalendarScreen}
-        options={{ tabBarIcon: ({ color }) => <Calendar size={24} color={color} /> }}
+        options={{ tabBarIcon: ({ color }) => <Calendar size={22} color={color} /> }}
       />
       <Tab.Screen
         name="Schedule"
         component={ScheduleScreen}
-        options={{ tabBarIcon: ({ color }) => <Clock size={24} color={color} /> }}
+        options={{ tabBarIcon: ({ color }) => <Clock size={22} color={color} /> }}
       />
       <Tab.Screen
         name="ProfileTab"
         component={ProfileStack}
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <User size={24} color={color} />,
+          tabBarIcon: ({ color }) => <User size={22} color={color} />,
         }}
       />
     </Tab.Navigator>
@@ -143,32 +141,73 @@ function MainTabs() {
 }
 
 export default function App() {
-  // Request background permissions once at startup
+  const [appIsReady, setAppIsReady] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+
   useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestBackgroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.warn('Background location permission not granted');
+    async function prepare() {
+      try {
+        // Request background permissions at startup
+        const { status } = await Location.requestBackgroundPermissionsAsync();
+        if (status !== 'granted') {
+          console.warn('Background location permission not granted');
+        }
+        await new Promise(resolve => setTimeout(resolve, 800));
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        setAppIsReady(true);
       }
-    })();
+    }
+    prepare();
   }, []);
 
+  const onLayoutRootView = async () => {
+    if (appIsReady) {
+      await SplashScreen.hideAsync();
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  };
+
+  if (!appIsReady) {
+    return null;
+  }
+
   return (
-    <ErrorBoundary>
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Main" component={MainTabs} />
-          <Stack.Screen name="Requests" component={RequestsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="MyPayroll" component={MyPayrollScreen} options={{ headerShown: true, title: 'My Payroll' }} />
-          <Stack.Screen name="LeaveHistory" component={LeaveHistoryScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="ScheduleHistory" component={ScheduleHistoryScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="AppealHistory" component={AppealHistoryScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </ErrorBoundary>
+    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+      <ErrorBoundary>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#FAFAFA' } }}>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen name="Requests" component={RequestsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="MyPayroll" component={MyPayrollScreen} options={{ headerShown: true, title: 'My Payroll', headerTintColor: '#0D9488', headerStyle: { backgroundColor: '#FAFAFA' }, headerShadowVisible: false }} />
+            <Stack.Screen name="LeaveHistory" component={LeaveHistoryScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="ScheduleHistory" component={ScheduleHistoryScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="AppealHistory" component={AppealHistoryScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} options={{ headerTintColor: '#0D9488', headerStyle: { backgroundColor: '#FAFAFA' }, headerShadowVisible: false }} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </ErrorBoundary>
+
+      <Animated.View 
+        pointerEvents="none" 
+        style={[styles.splashOverlay, { opacity: fadeAnim }]} 
+      />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  splashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#0F172A',
+    zIndex: 99999,
+  },
+});
 
 registerRootComponent(App);

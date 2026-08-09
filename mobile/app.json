@@ -1,7 +1,6 @@
 {
   "expo": {
     "name": "UniVITA",
-    
     "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,10 +8,18 @@
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/hctlogo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "UIBackgroundModes": ["location", "fetch"],
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
         "NSLocationAlwaysAndWhenInUseUsageDescription": "UniVITA requires location access to verify attendance during your scheduled shifts.",
         "NSLocationAlwaysUsageDescription": "Allow UniVITA to track your location in the background to ensure shift compliance.",
         "NSLocationWhenInUseUsageDescription": "Allow UniVITA to use your location when the app is in use."
@@ -55,12 +62,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/hctlogo.png",
+          "imageWidth": 150,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#0F172A",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#0F172A"
           }
         }
       ],
