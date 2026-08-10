@@ -91,22 +91,61 @@ const LocationTracking = () => {
   }, [selectedDate]);
 
   useEffect(() => {
-    const ws = new WebSocket(`ws://${window.location.hostname}:5000?token=${localStorage.getItem('auth_token')}`);
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'instructor_status_update') {
-        if (selectedDate === new Date().toISOString().split('T')[0]) {
-          setInstructors(prev => prev.map(inst =>
-            inst.employee_id === data.instructor.employee_id ? { ...inst, ...data.instructor } : inst
-          ));
+    let ws;
+    
+    // Safely construct the WebSocket URL based on your backend API_BASE to prevent Mixed Content errors
+    const getWsUrl = () => {
+      try {
+        if (API_BASE.startsWith('http')) {
+          const url = new URL(API_BASE);
+          const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+          return `${wsProtocol}//${url.host}?token=${localStorage.getItem('auth_token')}`;
         }
-      } else if (data.type === 'new_alert') {
-        if (selectedDate === new Date().toISOString().split('T')[0]) {
-          fetchData(selectedDate);
-        }
+        // Fallback if API_BASE isn't an absolute URL
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.hostname === 'localhost' ? 'localhost:5000' : window.location.host;
+        return `${protocol}//${host}?token=${localStorage.getItem('auth_token')}`;
+      } catch (err) {
+        console.error("Failed to construct WebSocket URL:", err);
+        return null;
       }
     };
-    return () => ws.close();
+
+    const wsUrl = getWsUrl();
+
+    if (wsUrl) {
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === 'instructor_status_update') {
+            if (selectedDate === new Date().toISOString().split('T')[0]) {
+              setInstructors(prev => prev.map(inst =>
+                inst.employee_id === data.instructor.employee_id ? { ...inst, ...data.instructor } : inst
+              ));
+            }
+          } else if (data.type === 'new_alert') {
+            if (selectedDate === new Date().toISOString().split('T')[0]) {
+              fetchData(selectedDate);
+            }
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.warn("WebSocket encountered an error. Live updates may be delayed.", error);
+        };
+      } catch (error) {
+        console.error("Security/Connection Error establishing WebSocket:", error);
+      }
+    }
+
+    // Cleanup function
+    return () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
   }, [selectedDate]);
 
   useEffect(() => {
