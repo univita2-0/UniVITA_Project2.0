@@ -47,29 +47,42 @@ const AttendanceCorrection = () => {
   };
 
   // Save edited attendance record with sanitized data for MySQL strict mode
+  // Save edited attendance record with sanitized data for MySQL strict mode
   const handleSave = async () => {
     try {
-      // Force status to lowercase to match the MySQL ENUM exactly ('present', 'late', 'absent', 'on leave')
-      const safeStatus = form.status ? form.status.toLowerCase() : '';
+      // 1. Convert status to exact lowercase, or null if empty
+      const safeStatus = form.status ? form.status.toLowerCase() : null;
 
-      // Ensure times are in 24-hour format (HH:mm:ss) required by the SQL time column
-      const safeTimeIn = form.time_in && form.time_in.length === 5 ? `${form.time_in}:00` : form.time_in;
-      const safeTimeOut = form.time_out && form.time_out.length === 5 ? `${form.time_out}:00` : form.time_out;
+      // 2. Format times to HH:mm:ss, or set to null if empty
+      let safeTimeIn = form.time_in || null;
+      if (safeTimeIn && safeTimeIn.length === 5) {
+        safeTimeIn = `${safeTimeIn}:00`;
+      }
 
+      let safeTimeOut = form.time_out || null;
+      if (safeTimeOut && safeTimeOut.length === 5) {
+        safeTimeOut = `${safeTimeOut}:00`;
+      }
+
+      // 3. Only send the exact fields the database expects
       const payload = {
-        ...form,
-        status: safeStatus,
         time_in: safeTimeIn,
-        time_out: safeTimeOut
+        time_out: safeTimeOut,
+        status: safeStatus,
+        location: form.location || null
       };
 
-      await axios.put(`${API_BASE}/attendance/${editing.id}`, payload, getAuthHeaders());
+      await axios.put(`${API_BASE}/attendance/update/${editing.id}`, payload, getAuthHeaders());
       toast.success('Record updated successfully');
       setEditing(null);
       fetchRecords();
     } catch (err) {
-      console.error(err);
-      toast.error('Failed to update record. Please try again.');
+      // THIS IS THE CRITICAL PART: It will print the exact backend error to your browser console
+      console.error("Backend Error Details:", err.response?.data || err.message);
+      
+      // Show the actual backend error message in the toast if it exists
+      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to update record.';
+      toast.error(errorMessage);
     }
   };
 
