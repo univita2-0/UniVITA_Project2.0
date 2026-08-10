@@ -10,12 +10,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { submitLeaveRequest, requestAttendanceCorrection, API_URL, submitScheduleRequest } from './api';
 import { Upload, X, Calendar as CalendarIcon, Camera, Clock, FileText, AlertCircle } from 'lucide-react-native';
 
+// Helper to validate HH:MM format
+const isValidTimeFormat = (timeStr) => {
+  const regex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+  return regex.test(timeStr);
+};
+
+// Helper to format time for MySQL strict mode (HH:mm:ss)
+const formatTimeForDB = (timeStr) => {
+  if (!timeStr) return null;
+  return timeStr.length === 5 ? `${timeStr}:00` : timeStr;
+};
+
 const RequestsScreen = ({ navigation, route }) => {
   const prefill = route.params || {};
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState(prefill.prefillTab || 'leave');
 
-  // ---------- Leave (updated for range) ----------
+  // ---------- Leave ----------
   const [leaveDateFrom, setLeaveDateFrom] = useState('');
   const [leaveDateTo, setLeaveDateTo] = useState('');
   const [isRange, setIsRange] = useState(false);
@@ -43,6 +55,8 @@ const RequestsScreen = ({ navigation, route }) => {
   const [appealImage, setAppealImage] = useState(null);
   const [submittingAppeal, setSubmittingAppeal] = useState(false);
   const [showAppealCalendar, setShowAppealCalendar] = useState(false);
+  const [appealTimeIn, setAppealTimeIn] = useState('');
+  const [appealTimeOut, setAppealTimeOut] = useState('');
 
   // ---------- Correction ----------
   const [correctionDate, setCorrectionDate] = useState(prefill.prefillDate || '');
@@ -62,8 +76,6 @@ const RequestsScreen = ({ navigation, route }) => {
   const [submittingOvertime, setSubmittingOvertime] = useState(false);
   const [showOvertimeCalendar, setShowOvertimeCalendar] = useState(false);
   const [overtimeScenario, setOvertimeScenario] = useState('future');
-  const [appealTimeIn, setAppealTimeIn] = useState('');
-  const [appealTimeOut, setAppealTimeOut] = useState('');
 
   const getTodayString = () => new Date().toISOString().split('T')[0];
   const todayStr = getTodayString();
@@ -104,13 +116,11 @@ const RequestsScreen = ({ navigation, route }) => {
     }
   };
 
-  // ----- Leave Submission (with range + balance check) -----
   const handleSubmitLeave = async () => {
     if (!leaveDateFrom) { Alert.alert('Required', 'Select a start date.'); return; }
     if (isRange && !leaveDateTo) { Alert.alert('Required', 'Select an end date.'); return; }
     if (!leaveReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
 
-    // Calculate days requested
     let daysRequested = 1;
     if (isRange) {
       const start = new Date(leaveDateFrom);
@@ -119,7 +129,6 @@ const RequestsScreen = ({ navigation, route }) => {
       daysRequested = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     }
 
-    // Fetch current balance
     const userId = await AsyncStorage.getItem('user_id');
     const year = new Date(leaveDateFrom).getFullYear();
     let remainingDays = 0;
@@ -141,7 +150,6 @@ const RequestsScreen = ({ navigation, route }) => {
 
     setSubmittingLeave(true);
     try {
-      // Prepare base FormData (common for all days)
       const formDataBase = new FormData();
       formDataBase.append('user_id', userId);
       formDataBase.append('type', leaveType);
@@ -161,7 +169,6 @@ const RequestsScreen = ({ navigation, route }) => {
         return await submitLeaveRequest(formData);
       };
 
-      // Generate all dates
       const start = new Date(leaveDateFrom);
       const end = isRange ? new Date(leaveDateTo) : start;
       const dateList = [];
@@ -194,10 +201,17 @@ const RequestsScreen = ({ navigation, route }) => {
     }
   };
 
-  // ----- Schedule Submission (unchanged) -----
+  // ----- Schedule Submission -----
   const handleSubmitSchedule = async () => {
     if (!scheduleDate) { Alert.alert('Required', 'Select a date.'); return; }
     if (!scheduleStart || !scheduleEnd) { Alert.alert('Required', 'Enter times.'); return; }
+    
+    // Strict time validation for backend
+    if (!isValidTimeFormat(scheduleStart) || !isValidTimeFormat(scheduleEnd)) {
+      Alert.alert('Invalid Format', 'Please enter time in HH:MM format (e.g., 09:00 or 17:00).');
+      return;
+    }
+
     setSubmittingSchedule(true);
     try {
       const result = await submitScheduleRequest({
@@ -205,8 +219,8 @@ const RequestsScreen = ({ navigation, route }) => {
         date: scheduleDate,
         place: 'Main Campus',
         course: scheduleReason || 'General',
-        start_time: scheduleStart,
-        end_time: scheduleEnd,
+        start_time: formatTimeForDB(scheduleStart),
+        end_time: formatTimeForDB(scheduleEnd),
         reason: scheduleReason
       });
       if (result.success) {
@@ -225,7 +239,6 @@ const RequestsScreen = ({ navigation, route }) => {
     }
   };
 
-  // ----- Appeal Submission (unchanged) -----
   const pickImage = async (setFn) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Permission needed', 'Allow access to photos.'); return; }
@@ -237,48 +250,62 @@ const RequestsScreen = ({ navigation, route }) => {
     if (!result.canceled) setFn(result.assets[0].uri);
   };
 
+  // ----- Appeal Submission -----
   const submitAppeal = async () => {
-  if (!appealDate) { Alert.alert('Required', 'Select a date.'); return; }
-  if (!appealReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
-  setSubmittingAppeal(true);
-  try {
-    const userId = await AsyncStorage.getItem('user_id');
-    const formData = new FormData();
-    formData.append('user_id', userId);
-    formData.append('date', appealDate);
-    formData.append('reason', appealReason.trim());
-    if (appealTimeIn) formData.append('time_in', appealTimeIn);
-    if (appealTimeOut) formData.append('time_out', appealTimeOut);
-    if (appealImage) {
-      const filename = appealImage.split('/').pop();
-      const fileType = filename.split('.').pop();
-      formData.append('image', { uri: appealImage, name: filename, type: `image/${fileType}` });
-    }
-    const token = await AsyncStorage.getItem('auth_token');
-    const response = await fetch(`${API_URL}/attendance-appeals`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token || ''}` },
-      body: formData,
-    });
-    const result = await response.json();
-    if (result.success) {
-      Alert.alert('Appeal Submitted', 'Your appeal has been sent.');
-      setAppealDate('');
-      setAppealTimeIn('');
-      setAppealTimeOut('');
-      setAppealReason('');
-      setAppealImage(null);
-    } else {
-      Alert.alert('Error', result.error || result.message || 'Failed.');
-    }
-  } catch (error) {
-    Alert.alert('Error', 'Network error.');
-  } finally {
-    setSubmittingAppeal(false);
-  }
-};
+    if (!appealDate) { Alert.alert('Required', 'Select a date.'); return; }
+    if (!appealReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
 
-  // ----- Correction (with prefill) -----
+    if (appealTimeIn && !isValidTimeFormat(appealTimeIn)) {
+      Alert.alert('Invalid Format', 'Time In must be in HH:MM format.');
+      return;
+    }
+    if (appealTimeOut && !isValidTimeFormat(appealTimeOut)) {
+      Alert.alert('Invalid Format', 'Time Out must be in HH:MM format.');
+      return;
+    }
+
+    setSubmittingAppeal(true);
+    try {
+      const userId = await AsyncStorage.getItem('user_id');
+      const formData = new FormData();
+      formData.append('user_id', userId);
+      formData.append('date', appealDate);
+      formData.append('reason', appealReason.trim());
+      
+      if (appealTimeIn) formData.append('time_in', formatTimeForDB(appealTimeIn));
+      if (appealTimeOut) formData.append('time_out', formatTimeForDB(appealTimeOut));
+      
+      if (appealImage) {
+        const filename = appealImage.split('/').pop();
+        const fileType = filename.split('.').pop();
+        formData.append('image', { uri: appealImage, name: filename, type: `image/${fileType}` });
+      }
+      
+      const token = await AsyncStorage.getItem('auth_token');
+      const response = await fetch(`${API_URL}/attendance-appeals`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token || ''}` },
+        body: formData,
+      });
+      const result = await response.json();
+      if (result.success) {
+        Alert.alert('Appeal Submitted', 'Your appeal has been sent.');
+        setAppealDate('');
+        setAppealTimeIn('');
+        setAppealTimeOut('');
+        setAppealReason('');
+        setAppealImage(null);
+      } else {
+        Alert.alert('Error', result.error || result.message || 'Failed.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Network error.');
+    } finally {
+      setSubmittingAppeal(false);
+    }
+  };
+
+  // ----- Correction Submission -----
   const takeSelfie = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Camera permission needed'); return null; }
@@ -291,6 +318,12 @@ const RequestsScreen = ({ navigation, route }) => {
     if (!correctionDate) { Alert.alert('Required', 'Select a date.'); return; }
     if (!correctionTime) { Alert.alert('Required', 'Enter the time.'); return; }
     if (!correctionReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
+    
+    if (!isValidTimeFormat(correctionTime)) {
+      Alert.alert('Invalid Format', 'Time must be in HH:MM format (e.g. 08:30).');
+      return;
+    }
+
     let selfieUri = correctionSelfie;
     if (!selfieUri) {
       const taken = await takeSelfie();
@@ -298,6 +331,7 @@ const RequestsScreen = ({ navigation, route }) => {
       selfieUri = taken;
       setCorrectionSelfie(taken);
     }
+    
     setSubmittingCorrection(true);
     try {
       const employeeId = await AsyncStorage.getItem('employee_id');
@@ -305,11 +339,13 @@ const RequestsScreen = ({ navigation, route }) => {
       formData.append('employee_id', employeeId);
       formData.append('date', correctionDate);
       formData.append('type', correctionType);
-      formData.append('time', correctionTime);
+      formData.append('time', formatTimeForDB(correctionTime)); // Formats to HH:mm:ss
       formData.append('reason', correctionReason.trim());
+      
       const filename = selfieUri.split('/').pop();
       const fileType = filename.split('.').pop();
       formData.append('selfie', { uri: selfieUri, name: filename, type: `image/${fileType}` });
+      
       const res = await requestAttendanceCorrection(formData);
       if (res.success) {
         Alert.alert('Request Sent', 'Correction request submitted for approval.');
@@ -317,17 +353,16 @@ const RequestsScreen = ({ navigation, route }) => {
         setCorrectionTime('');
         setCorrectionReason('');
         setCorrectionSelfie(null);
-        navigation.setParams({
-          prefillTab: undefined,
-          prefillDate: undefined,
-          prefillType: undefined,
-          prefillTime: undefined,
-          prefillReason: undefined
-        });
+        navigation.setParams({ prefillTab: undefined, prefillDate: undefined, prefillType: undefined, prefillTime: undefined, prefillReason: undefined });
         setActiveTab('leave');
-      } else Alert.alert('Error', res.message || 'Failed.');
-    } catch (err) { Alert.alert('Error', 'Network error.'); }
-    finally { setSubmittingCorrection(false); }
+      } else {
+        Alert.alert('Error', res.message || 'Failed.');
+      }
+    } catch (err) { 
+      Alert.alert('Error', 'Network error.'); 
+    } finally { 
+      setSubmittingCorrection(false); 
+    }
   };
 
   // ----- Overtime Submission -----
@@ -335,13 +370,19 @@ const RequestsScreen = ({ navigation, route }) => {
     if (!overtimeDate) { Alert.alert('Required', 'Select a date.'); return; }
     if (!overtimeStart || !overtimeEnd) { Alert.alert('Required', 'Enter start and end time.'); return; }
     if (!overtimeReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
+    
+    if (!isValidTimeFormat(overtimeStart) || !isValidTimeFormat(overtimeEnd)) {
+      Alert.alert('Invalid Format', 'Start and End times must be in HH:MM format.');
+      return;
+    }
+
     setSubmittingOvertime(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
       const formData = new FormData();
       formData.append('date', overtimeDate);
-      formData.append('start_time', overtimeStart);
-      formData.append('end_time', overtimeEnd);
+      formData.append('start_time', formatTimeForDB(overtimeStart));
+      formData.append('end_time', formatTimeForDB(overtimeEnd));
       formData.append('reason', overtimeReason.trim());
       formData.append('scenario_type', overtimeScenario);
       if (overtimeImage) {
@@ -401,21 +442,23 @@ const RequestsScreen = ({ navigation, route }) => {
 
         {/* Tab Bar */}
         <View style={styles.tabBar}>
-          {['leave', 'schedule', 'appeal', 'correction', 'overtime'].map((tab) => (
-            <TouchableOpacity
-              key={tab}
-              style={[styles.tab, activeTab === tab && styles.activeTab]}
-              onPress={() => setActiveTab(tab)}
-            >
-              <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-                {tab === 'leave' ? 'Leave' : tab === 'schedule' ? 'Schedule' : tab === 'appeal' ? 'Appeal' : tab === 'correction' ? 'Correction' : 'Overtime'}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            {['leave', 'schedule', 'appeal', 'correction', 'overtime'].map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                style={[styles.tab, activeTab === tab && styles.activeTab]}
+                onPress={() => setActiveTab(tab)}
+              >
+                <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
+                  {tab === 'leave' ? 'Leave' : tab === 'schedule' ? 'Schedule' : tab === 'appeal' ? 'Appeal' : tab === 'correction' ? 'Correction' : 'Overtime'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
 
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          {/* Leave Tab (updated) */}
+          {/* Leave Tab */}
           {activeTab === 'leave' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('LeaveHistory')}>
@@ -482,7 +525,7 @@ const RequestsScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Schedule Tab (unchanged) */}
+          {/* Schedule Tab */}
           {activeTab === 'schedule' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('ScheduleHistory')}>
@@ -496,11 +539,11 @@ const RequestsScreen = ({ navigation, route }) => {
               </TouchableOpacity>
               {renderCalendar(showScheduleCalendar, setShowScheduleCalendar, scheduleDate, setScheduleDate)}
 
-              <Text style={styles.label}>Start Time</Text>
-              <TextInput style={styles.input} placeholder="09:00" value={scheduleStart} onChangeText={setScheduleStart} />
+              <Text style={styles.label}>Start Time (HH:MM)</Text>
+              <TextInput style={styles.input} placeholder="09:00" keyboardType="numbers-and-punctuation" maxLength={5} value={scheduleStart} onChangeText={setScheduleStart} />
 
-              <Text style={styles.label}>End Time</Text>
-              <TextInput style={styles.input} placeholder="17:00" value={scheduleEnd} onChangeText={setScheduleEnd} />
+              <Text style={styles.label}>End Time (HH:MM)</Text>
+              <TextInput style={styles.input} placeholder="17:00" keyboardType="numbers-and-punctuation" maxLength={5} value={scheduleEnd} onChangeText={setScheduleEnd} />
 
               <Text style={styles.label}>Reason / Course</Text>
               <TextInput style={[styles.input, styles.textArea]} multiline placeholder="e.g., Need to reschedule class..." value={scheduleReason} onChangeText={setScheduleReason} />
@@ -511,58 +554,62 @@ const RequestsScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Appeal Tab (unchanged) */}
+          {/* Appeal Tab */}
           {activeTab === 'appeal' && (
-  <View>
-    <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('AppealHistory')}>
-      <Text style={styles.historyButtonText}>View Appeal History</Text>
-    </TouchableOpacity>
+            <View>
+              <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('AppealHistory')}>
+                <Text style={styles.historyButtonText}>View Appeal History</Text>
+              </TouchableOpacity>
 
-    <Text style={styles.label}>Date</Text>
-    <TouchableOpacity style={styles.datePicker} onPress={() => setShowAppealCalendar(true)}>
-      <CalendarIcon size={20} color="#00897B" />
-      <Text style={styles.dateText}>{appealDate || 'Select date'}</Text>
-    </TouchableOpacity>
-    {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, todayStr, todayStr)}
+              <Text style={styles.label}>Date</Text>
+              <TouchableOpacity style={styles.datePicker} onPress={() => setShowAppealCalendar(true)}>
+                <CalendarIcon size={20} color="#00897B" />
+                <Text style={styles.dateText}>{appealDate || 'Select date'}</Text>
+              </TouchableOpacity>
+              {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, todayStr, todayStr)}
 
-    <Text style={styles.label}>Time In (optional)</Text>
-    <TextInput
-      style={styles.input}
-      placeholder="HH:MM (e.g., 09:00)"
-      value={appealTimeIn}
-      onChangeText={setAppealTimeIn}
-    />
+              <Text style={styles.label}>Time In (optional, HH:MM)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="09:00"
+                keyboardType="numbers-and-punctuation"
+                maxLength={5}
+                value={appealTimeIn}
+                onChangeText={setAppealTimeIn}
+              />
 
-    <Text style={styles.label}>Time Out (optional)</Text>
-    <TextInput
-      style={styles.input}
-      placeholder="HH:MM (e.g., 17:00)"
-      value={appealTimeOut}
-      onChangeText={setAppealTimeOut}
-    />
+              <Text style={styles.label}>Time Out (optional, HH:MM)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="17:00"
+                keyboardType="numbers-and-punctuation"
+                maxLength={5}
+                value={appealTimeOut}
+                onChangeText={setAppealTimeOut}
+              />
 
-    <Text style={styles.label}>Reason</Text>
-    <TextInput
-      style={[styles.input, styles.textArea]}
-      multiline
-      placeholder="Explain why you couldn't clock in/out..."
-      value={appealReason}
-      onChangeText={setAppealReason}
-    />
+              <Text style={styles.label}>Reason</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                multiline
+                placeholder="Explain why you couldn't clock in/out..."
+                value={appealReason}
+                onChangeText={setAppealReason}
+              />
 
-    <Text style={styles.label}>Proof (optional)</Text>
-    <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setAppealImage)}>
-      <Upload size={18} color="#0d9488" /><Text style={styles.uploadText}>{appealImage ? 'Change Image' : 'Upload'}</Text>
-    </TouchableOpacity>
-    {appealImage && <Image source={{ uri: appealImage }} style={styles.previewImage} />}
+              <Text style={styles.label}>Proof (optional)</Text>
+              <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setAppealImage)}>
+                <Upload size={18} color="#0d9488" /><Text style={styles.uploadText}>{appealImage ? 'Change Image' : 'Upload'}</Text>
+              </TouchableOpacity>
+              {appealImage && <Image source={{ uri: appealImage }} style={styles.previewImage} />}
 
-    <TouchableOpacity style={styles.submitBtn} onPress={submitAppeal} disabled={submittingAppeal}>
-      <Text style={styles.submitBtnText}>{submittingAppeal ? 'Submitting...' : 'Submit Appeal'}</Text>
-    </TouchableOpacity>
-  </View>
-)}
+              <TouchableOpacity style={styles.submitBtn} onPress={submitAppeal} disabled={submittingAppeal}>
+                <Text style={styles.submitBtnText}>{submittingAppeal ? 'Submitting...' : 'Submit Appeal'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-          {/* Correction Tab (unchanged) */}
+          {/* Correction Tab */}
           {activeTab === 'correction' && (
             <View>
               <Text style={styles.label}>Date</Text>
@@ -583,7 +630,7 @@ const RequestsScreen = ({ navigation, route }) => {
               </View>
 
               <Text style={styles.label}>Time (HH:MM)</Text>
-              <TextInput style={styles.input} placeholder="09:00" value={correctionTime} onChangeText={setCorrectionTime} />
+              <TextInput style={styles.input} placeholder="09:00" keyboardType="numbers-and-punctuation" maxLength={5} value={correctionTime} onChangeText={setCorrectionTime} />
 
               <Text style={styles.label}>Reason</Text>
               <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why did you forget to clock?" value={correctionReason} onChangeText={setCorrectionReason} />
@@ -600,7 +647,7 @@ const RequestsScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Overtime Tab (unchanged) */}
+          {/* Overtime Tab */}
           {activeTab === 'overtime' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('OvertimeHistory')}>
@@ -618,8 +665,8 @@ const RequestsScreen = ({ navigation, route }) => {
               <View style={styles.typeGroup}>
                 {[
                   { value: 'future', label: 'Future Date' },
-                  { value: 'ongoing', label: 'Ongoing Shift (extend)' },
-                  { value: 'after_shift', label: 'After Shift (extra hours)' }
+                  { value: 'ongoing', label: 'Ongoing Shift' },
+                  { value: 'after_shift', label: 'After Shift' }
                 ].map(opt => (
                   <TouchableOpacity
                     key={opt.value}
@@ -634,10 +681,10 @@ const RequestsScreen = ({ navigation, route }) => {
               </View>
 
               <Text style={styles.label}>Start Time (HH:MM)</Text>
-              <TextInput style={styles.input} placeholder="18:00" value={overtimeStart} onChangeText={setOvertimeStart} />
+              <TextInput style={styles.input} placeholder="18:00" keyboardType="numbers-and-punctuation" maxLength={5} value={overtimeStart} onChangeText={setOvertimeStart} />
 
               <Text style={styles.label}>End Time (HH:MM)</Text>
-              <TextInput style={styles.input} placeholder="20:00" value={overtimeEnd} onChangeText={setOvertimeEnd} />
+              <TextInput style={styles.input} placeholder="20:00" keyboardType="numbers-and-punctuation" maxLength={5} value={overtimeEnd} onChangeText={setOvertimeEnd} />
 
               <Text style={styles.label}>Reason / Task</Text>
               <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why is overtime needed?" value={overtimeReason} onChangeText={setOvertimeReason} />
@@ -676,7 +723,7 @@ const RequestsScreen = ({ navigation, route }) => {
                 ))
               )}
               <TouchableOpacity style={styles.closeBalancesBtn} onPress={() => setShowBalancesModal(false)}>
-                <Text>Close</Text>
+                <Text style={{ fontWeight: '600', color: '#0F172A' }}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -686,14 +733,14 @@ const RequestsScreen = ({ navigation, route }) => {
   );
 };
 
-// Styles (add new ones)
+// Styles
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#fff' },
   backButton: { padding: 4 },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
-  tabBar: { flexDirection: 'row', backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 20 },
+  tabBar: { backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  tab: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
   activeTab: { backgroundColor: '#E0F2F1' },
   tabText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
   activeTabText: { color: '#00897B' },
@@ -729,8 +776,6 @@ const styles = StyleSheet.create({
   balanceDays: { fontWeight: '500', color: '#00897B' },
   closeBalancesBtn: { marginTop: 20, alignItems: 'center', paddingVertical: 10 },
   emptyText: { textAlign: 'center', color: '#94A3B8', marginTop: 20 },
-
-  // New styles for leave range toggle
   rangeToggle: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   rangeButton: { flex: 1, paddingVertical: 8, borderRadius: 30, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center' },
   rangeButtonActive: { backgroundColor: '#00897B', borderColor: '#00897B' },

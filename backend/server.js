@@ -591,6 +591,52 @@ if (diffMinutes < -15) {
   }
 });
 
+// ============================================
+// MANUALLY UPDATE ATTENDANCE (Admin/HR Only)
+// ============================================
+app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
+  // Only allow admins and HR to manually edit records
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+
+  const recordId = req.params.id;
+  const { time_in, time_out, status, location } = req.body;
+
+  try {
+    // Validate ENUM status (present, late, absent, on leave)
+    const validStatuses = ['present', 'late', 'absent', 'on leave'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status value.' });
+    }
+
+    const sql = `
+      UPDATE attendance 
+      SET time_in = ?, time_out = ?, status = ?, location = ?
+      WHERE id = ?
+    `;
+    
+    // Execute update
+    db.query(sql, [time_in || null, time_out || null, status || null, location || null, recordId], (err, results) => {
+      if (err) {
+        console.error("Database error during attendance update:", err);
+        return res.status(500).json({ success: false, message: "Database error" });
+      }
+      if (results.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: "Record not found" });
+      }
+      
+      // Log the action for auditing
+      logAction(req.user.id, 'MANUAL_UPDATE_ATTENDANCE', 'attendance', recordId, req);
+      
+      res.json({ success: true, message: "Attendance updated successfully" });
+    });
+  } catch (error) {
+    console.error("Update error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
   // Now expecting schedule_id from the mobile request body
   const { employee_id, latitude, longitude, schedule_id } = req.body;
