@@ -17,12 +17,12 @@ const AttendanceCorrection = () => {
   const [form, setForm] = useState({ time_in: '', time_out: '', status: '', location: '' });
   const [searchDone, setSearchDone] = useState(false);
 
-  // State for pending corrections modal[cite: 2]
+  // State for pending corrections modal
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingCorrections, setPendingCorrections] = useState([]);
   const [loadingPending, setLoadingPending] = useState(false);
 
-  // Fetch attendance records for a specific employee[cite: 2]
+  // Fetch attendance records for a specific employee
   const fetchRecords = async () => {
     if (!employeeId.trim()) return;
     try {
@@ -35,7 +35,7 @@ const AttendanceCorrection = () => {
     }
   };
 
-  // Open edit modal for an attendance record[cite: 2]
+  // Open edit modal for an attendance record
   const openEditor = (record) => {
     setEditing(record);
     setForm({
@@ -46,10 +46,24 @@ const AttendanceCorrection = () => {
     });
   };
 
-  // Save edited attendance record[cite: 2]
+  // Save edited attendance record with sanitized data for MySQL strict mode
   const handleSave = async () => {
     try {
-      await axios.put(`${API_BASE}/attendance/${editing.id}`, form, getAuthHeaders());
+      // Force status to lowercase to match the MySQL ENUM exactly ('present', 'late', 'absent', 'on leave')
+      const safeStatus = form.status ? form.status.toLowerCase() : '';
+
+      // Ensure times are in 24-hour format (HH:mm:ss) required by the SQL time column
+      const safeTimeIn = form.time_in && form.time_in.length === 5 ? `${form.time_in}:00` : form.time_in;
+      const safeTimeOut = form.time_out && form.time_out.length === 5 ? `${form.time_out}:00` : form.time_out;
+
+      const payload = {
+        ...form,
+        status: safeStatus,
+        time_in: safeTimeIn,
+        time_out: safeTimeOut
+      };
+
+      await axios.put(`${API_BASE}/attendance/${editing.id}`, payload, getAuthHeaders());
       toast.success('Record updated successfully');
       setEditing(null);
       fetchRecords();
@@ -59,7 +73,7 @@ const AttendanceCorrection = () => {
     }
   };
 
-  // Fetch all pending correction requests[cite: 2]
+  // Fetch all pending correction requests
   const fetchPendingCorrections = async () => {
     setLoadingPending(true);
     try {
@@ -74,12 +88,12 @@ const AttendanceCorrection = () => {
     }
   };
 
-  // Approve or reject a correction request[cite: 2]
+  // Approve or reject a correction request
   const handleCorrectionAction = async (id, status) => {
     try {
       await axios.put(`${API_BASE}/attendance/corrections/${id}/review`, { status }, getAuthHeaders());
       toast.success(`Correction request ${status}`);
-      fetchPendingCorrections(); // refresh the list[cite: 2]
+      fetchPendingCorrections(); // refresh the list
     } catch (err) {
       console.error(err);
       toast.error(`Failed to ${status} correction`);
@@ -162,7 +176,7 @@ const AttendanceCorrection = () => {
         </div>
       )}
 
-      {/* Edit Attendance Modal[cite: 2] */}
+      {/* Edit Attendance Modal */}
       <FormalModal
         show={!!editing}
         onClose={() => setEditing(null)}
@@ -190,6 +204,7 @@ const AttendanceCorrection = () => {
               <option value="Present">Present</option>
               <option value="Late">Late</option>
               <option value="Absent">Absent</option>
+              <option value="On Leave">On Leave</option>
             </select>
           </div>
           <div className="ac-modal-group">
@@ -199,7 +214,7 @@ const AttendanceCorrection = () => {
         </div>
       </FormalModal>
 
-      {/* Pending Corrections Modal[cite: 2] */}
+      {/* Pending Corrections Modal */}
       <FormalModal
         show={showPendingModal}
         onClose={() => setShowPendingModal(false)}
