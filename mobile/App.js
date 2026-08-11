@@ -161,7 +161,8 @@ export default function App() {
         const rawUser = await AsyncStorage.getItem('user');
         if (rawUser) {
           const parsed = JSON.parse(rawUser);
-          setUserId(parsed.employee_id || parsed.id);
+          const resolvedId = parsed.id || parsed.employee_id || parsed.user_id;
+          setUserId(resolvedId);
         } else {
           setUserId(null);
         }
@@ -172,24 +173,35 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 2. Fetch Push Token
   useEffect(() => {
     const registerPushToken = async () => {
-      if (!userId) return;
+      if (!userId) {
+        console.log("Push Token: No userId found yet.");
+        return;
+      }
       try {
         const { status } = await Notifications.requestPermissionsAsync();
+        console.log("Push Token Permission Status:", status);
         if (status !== 'granted') return;
 
         const projectId = Constants?.expoConfig?.extra?.eas?.projectId || Constants?.easConfig?.projectId;
+        console.log("Using Project ID:", projectId);
+
         const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
+        console.log("Generated Expo Push Token:", tokenData.data);
         
         if (tokenData && tokenData.data) {
           const authToken = await AsyncStorage.getItem('auth_token');
-          await axios.put(`${API_URL}/users/save-push-token`, { token: tokenData.data }, {
+          console.log("Sending token to backend API:", `${API_URL}/users/save-push-token`);
+          
+          const res = await axios.put(`${API_URL}/users/save-push-token`, { token: tokenData.data }, {
             headers: { Authorization: `Bearer ${authToken}` }
           });
+          console.log("Backend response for token save:", res.data);
         }
-      } catch (error) { console.log("Push token error:", error); }
+      } catch (error) { 
+        console.error("DETAILED Push token error:", error); 
+      }
     };
     registerPushToken();
   }, [userId]);
@@ -266,6 +278,19 @@ export default function App() {
       activeAlertId.current = null;
     }
   };
+
+  // Handle user tapping the push notification while app is closed or backgrounded
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      if (data && data.alertId) {
+        // You can trigger your alert modal or navigate here if needed
+        console.log("Notification tapped with alert ID:", data.alertId);
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     async function prepare() {

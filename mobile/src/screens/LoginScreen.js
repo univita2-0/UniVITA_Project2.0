@@ -6,7 +6,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loginUser, sendOtp, verifyOtp, forgotPassword, resetPassword } from './api';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
+import axios from 'axios';
+import { loginUser, sendOtp, verifyOtp, forgotPassword, resetPassword, API_URL } from './api';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
@@ -44,8 +47,30 @@ export default function LoginScreen({ navigation }) {
     }, 1000);
   };
 
+  const registerDeviceForPushNotifications = async (authToken) => {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') return;
+
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId || Constants?.easConfig?.projectId;
+      const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
+      
+      if (tokenData && tokenData.data) {
+        await axios.put(`${API_URL}/users/save-push-token`, { token: tokenData.data }, {
+          headers: { Authorization: `Bearer ${authToken}` }
+        });
+      }
+    } catch (error) {
+      console.log("Push token registration error after login:", error);
+    }
+  };
+
   const saveSession = async (user, token) => {
-    if (token) await AsyncStorage.setItem('auth_token', token);
+    if (token) {
+      await AsyncStorage.setItem('auth_token', token);
+      // Automatically register and update push token upon session creation
+      await registerDeviceForPushNotifications(token);
+    }
     await AsyncStorage.setItem('user', JSON.stringify({
       id: user.id,
       employee_id: user.employee_id,
