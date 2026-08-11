@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import FormalModal from '../components/FormalModal';
-import { Search, Edit3, ClipboardList, CheckCircle, XCircle, ExternalLink } from 'lucide-react';
+import { Search, Edit3, ClipboardList, CheckCircle, XCircle, Eye, X, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AttendanceCorrection.css';
 
@@ -10,61 +10,79 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+const formatTo12Hour = (timeStr) => {
+  if (!timeStr || timeStr === '--:--' || timeStr.includes('--')) return '--:--';
+  const parts = timeStr.substring(0, 5).split(':');
+  let hours = parseInt(parts[0], 10);
+  const minutes = parts[1] || '00';
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${minutes} ${ampm}`;
+};
+
+// Helper: Remove coordinates from location string
+const cleanLocation = (locStr) => {
+  if (!locStr) return '—';
+  return locStr.split('(')[0].trim();
+};
+
 const AttendanceCorrection = () => {
   const [employeeId, setEmployeeId] = useState('');
+  const [searchDate, setSearchDate] = useState('');
   const [records, setRecords] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ time_in: '', time_out: '', status: '', location: '' });
   const [searchDone, setSearchDone] = useState(false);
 
-  // State for pending corrections modal
+  // Pagination states (10 items per page)
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingCorrections, setPendingCorrections] = useState([]);
   const [loadingPending, setLoadingPending] = useState(false);
+  
+  // States for Modals
+  const [previewImage, setPreviewImage] = useState(null);
+  const [viewingRecord, setViewingRecord] = useState(null);
 
-  // Fetch attendance records for a specific employee
+  const formatDate = (dateString) => {
+    if (!dateString) return '--';
+    return dateString.split('T')[0];
+  };
+
   const fetchRecords = async () => {
     if (!employeeId.trim()) return;
     try {
       const res = await axios.get(`${API_BASE}/attendance-report-user/${employeeId.trim()}`, getAuthHeaders());
       setRecords(res.data || []);
       setSearchDone(true);
+      setCurrentPage(1);
     } catch (err) {
       console.error(err);
       toast.error('Failed to fetch attendance records');
     }
   };
 
-  // Open edit modal for an attendance record
   const openEditor = (record) => {
     setEditing(record);
     setForm({
-      time_in: record.time_in || '',
-      time_out: record.time_out || '',
+      time_in: record.time_in ? record.time_in.substring(0, 5) : '',
+      time_out: record.time_out ? record.time_out.substring(0, 5) : '',
       status: record.status || '',
-      location: record.location || ''
+      location: cleanLocation(record.location)
     });
   };
 
-  // Save edited attendance record with sanitized data for MySQL strict mode
-  // Save edited attendance record with sanitized data for MySQL strict mode
   const handleSave = async () => {
     try {
-      // 1. Convert status to exact lowercase, or null if empty
       const safeStatus = form.status ? form.status.toLowerCase() : null;
-
-      // 2. Format times to HH:mm:ss, or set to null if empty
       let safeTimeIn = form.time_in || null;
-      if (safeTimeIn && safeTimeIn.length === 5) {
-        safeTimeIn = `${safeTimeIn}:00`;
-      }
-
+      if (safeTimeIn && safeTimeIn.length === 5) safeTimeIn = `${safeTimeIn}:00`;
       let safeTimeOut = form.time_out || null;
-      if (safeTimeOut && safeTimeOut.length === 5) {
-        safeTimeOut = `${safeTimeOut}:00`;
-      }
+      if (safeTimeOut && safeTimeOut.length === 5) safeTimeOut = `${safeTimeOut}:00`;
 
-      // 3. Only send the exact fields the database expects
       const payload = {
         time_in: safeTimeIn,
         time_out: safeTimeOut,
@@ -77,16 +95,12 @@ const AttendanceCorrection = () => {
       setEditing(null);
       fetchRecords();
     } catch (err) {
-      // THIS IS THE CRITICAL PART: It will print the exact backend error to your browser console
       console.error("Backend Error Details:", err.response?.data || err.message);
-      
-      // Show the actual backend error message in the toast if it exists
       const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to update record.';
       toast.error(errorMessage);
     }
   };
 
-  // Fetch all pending correction requests
   const fetchPendingCorrections = async () => {
     setLoadingPending(true);
     try {
@@ -101,17 +115,28 @@ const AttendanceCorrection = () => {
     }
   };
 
-  // Approve or reject a correction request
   const handleCorrectionAction = async (id, status) => {
     try {
       await axios.put(`${API_BASE}/attendance/corrections/${id}/review`, { status }, getAuthHeaders());
       toast.success(`Correction request ${status}`);
-      fetchPendingCorrections(); // refresh the list
+      fetchPendingCorrections(); 
     } catch (err) {
       console.error(err);
       toast.error(`Failed to ${status} correction`);
     }
   };
+
+  // Filter records by date before pagination
+  const filteredRecords = records.filter(rec => {
+    if (!searchDate) return true;
+    return formatDate(rec.date) === searchDate;
+  });
+
+  // Pagination Calculations
+  const totalPages = Math.ceil(filteredRecords.length / itemsPerPage);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentRecords = filteredRecords.slice(indexOfFirstItem, indexOfLastItem);
 
   return (
     <div className="ac-container">
@@ -138,6 +163,19 @@ const AttendanceCorrection = () => {
               className="ac-input-search"
             />
           </div>
+          <div className="ac-search-input-wrapper" style={{ flex: '0 0 200px' }}>
+            <Calendar size={16} className="ac-search-icon" />
+            <input
+              type="date"
+              value={searchDate}
+              onChange={e => {
+                setSearchDate(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="ac-input-search"
+              style={{ color: searchDate ? '#0F172A' : '#94A3B8' }}
+            />
+          </div>
           <button className="ac-search-btn" onClick={fetchRecords}>
             Search Records
           </button>
@@ -153,41 +191,122 @@ const AttendanceCorrection = () => {
                 <th>Time In</th>
                 <th>Time Out</th>
                 <th>Status</th>
+                <th>Audit Status</th>
+                <th>Approval Timestamp</th>
                 <th>Location</th>
                 <th className="text-center">Action</th>
               </tr>
             </thead>
             <tbody>
-              {records.length === 0 ? (
+              {currentRecords.length === 0 ? (
                 <tr className="ac-empty-row">
-                  <td colSpan="6">No records found for this employee.</td>
+                  <td colSpan="8">No records found matching your search.</td>
                 </tr>
               ) : (
-                records.map(rec => (
-                  <tr key={rec.id}>
-                    <td className="font-medium text-gray-900">{rec.date}</td>
-                    <td>{rec.time_in || '--:--'}</td>
-                    <td>{rec.time_out || '--:--'}</td>
-                    <td>
-                      <span className={`ac-status-badge ${rec.status?.toLowerCase() || 'default'}`}>
-                        {rec.status || 'Unknown'}
-                      </span>
-                    </td>
-                    <td className="ac-location-cell" title={rec.location}>
-                      {rec.location && rec.location.length > 30 ? rec.location.substring(0, 30) + '…' : rec.location || '—'}
-                    </td>
-                    <td className="text-center">
-                      <button onClick={() => openEditor(rec)} className="ac-edit-btn" title="Edit Record">
-                        <Edit3 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                currentRecords.map(rec => {
+                  // A record is only corrected if correction_requested is 1 and updated_at exists
+                  const isCorrected = rec.correction_requested === 1 && rec.updated_at != null;
+                  const displayLocation = cleanLocation(rec.location);
+
+                  return (
+                    <tr key={rec.id}>
+                      <td className="font-medium text-gray-900">{formatDate(rec.date)}</td>
+                      <td>{formatTo12Hour(rec.time_in)}</td>
+                      <td>{formatTo12Hour(rec.time_out)}</td>
+                      <td>
+                        <span className={`ac-status-badge ${rec.status?.toLowerCase() || 'default'}`}>
+                          {rec.status || 'Unknown'}
+                        </span>
+                      </td>
+                      <td>
+                        {isCorrected ? (
+                          <div>
+                            <span style={{ color: '#D97706', fontWeight: '600', fontSize: '12px' }}>
+                              Corrected
+                            </span>
+                            
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94A3B8', fontSize: '12px' }}>Original</span>
+                        )}
+                      </td>
+                      <td>
+                        {rec.reviewed_at ? (
+                          <div style={{ fontSize: '12px', color: '#0F172A', fontWeight: '500' }}>
+                            {new Date(rec.reviewed_at).toLocaleString()}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94A3B8', fontSize: '12px' }}>—</span>
+                        )}
+                      </td>
+                      <td className="ac-location-cell" title={displayLocation}>
+                        {displayLocation.length > 25 ? displayLocation.substring(0, 25) + '…' : displayLocation}
+                      </td>
+                      <td className="text-center" style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center', paddingTop: '16px' }}>
+                        <button onClick={() => setViewingRecord(rec)} className="ac-edit-btn" title="View Full Details" style={{ backgroundColor: '#E0F2F1', color: '#00897B' }}>
+                          <Eye size={16} />
+                        </button>
+                        <button onClick={() => openEditor(rec)} className="ac-edit-btn" title="Edit Record">
+                          <Edit3 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderTop: '1px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
+              <span style={{ fontSize: '13px', color: '#64748B' }}>
+                Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, filteredRecords.length)} of {filteredRecords.length} records
+              </span>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: currentPage === 1 ? '#F1F5F9' : '#FFFFFF', color: currentPage === 1 ? '#94A3B8' : '#0F172A', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontWeight: '500', fontSize: '13px' }}
+                >
+                  <ChevronLeft size={16} /> Previous
+                </button>
+                <span style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A', padding: '0 8px' }}>
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '8px', border: '1px solid #CBD5E1', backgroundColor: currentPage === totalPages ? '#F1F5F9' : '#FFFFFF', color: currentPage === totalPages ? '#94A3B8' : '#0F172A', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontWeight: '500', fontSize: '13px' }}
+                >
+                  Next <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* View Full Details Modal (Expanded via Eye Icon) */}
+      <FormalModal
+        show={!!viewingRecord}
+        onClose={() => setViewingRecord(null)}
+        title="Attendance Record Details"
+        footer={<button className="btn-modal-cancel" onClick={() => setViewingRecord(null)}>Close</button>}
+      >
+        {viewingRecord && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '14px', color: '#334155' }}>
+            <p><strong>Date:</strong> {formatDate(viewingRecord.date)}</p>
+            <p><strong>Time In:</strong> {formatTo12Hour(viewingRecord.time_in)}</p>
+            <p><strong>Time Out:</strong> {formatTo12Hour(viewingRecord.time_out)}</p>
+            <p><strong>Status:</strong> {viewingRecord.status || '—'}</p>
+            <p><strong>Campus Location:</strong> {cleanLocation(viewingRecord.location)}</p>
+            <p><strong>Audit Status:</strong> {(viewingRecord.correction_requested === 1 && viewingRecord.updated_at != null) ? 'Corrected' : 'Original'}</p>
+            <p><strong>Last Edited At:</strong> {viewingRecord.updated_at ? new Date(viewingRecord.updated_at).toLocaleString() : '—'}</p>
+           
+          </div>
+        )}
+      </FormalModal>
 
       {/* Edit Attendance Modal */}
       <FormalModal
@@ -203,12 +322,14 @@ const AttendanceCorrection = () => {
       >
         <div className="ac-form-grid">
           <div className="ac-modal-group">
-            <label className="ac-modal-label">Time In</label>
+            <label className="ac-modal-label">Time In (AM/PM format)</label>
             <input type="time" className="ac-input" value={form.time_in} onChange={e => setForm({...form, time_in: e.target.value})} />
+            <span style={{ fontSize: '12px', color: '#64748B', marginTop: '4px', display: 'block' }}>Reflects as: <strong>{formatTo12Hour(form.time_in)}</strong></span>
           </div>
           <div className="ac-modal-group">
-            <label className="ac-modal-label">Time Out</label>
+            <label className="ac-modal-label">Time Out (AM/PM format)</label>
             <input type="time" className="ac-input" value={form.time_out} onChange={e => setForm({...form, time_out: e.target.value})} />
+            <span style={{ fontSize: '12px', color: '#64748B', marginTop: '4px', display: 'block' }}>Reflects as: <strong>{formatTo12Hour(form.time_out)}</strong></span>
           </div>
           <div className="ac-modal-group">
             <label className="ac-modal-label">Status</label>
@@ -260,15 +381,20 @@ const AttendanceCorrection = () => {
                       <div className="ac-emp-name">{c.full_name}</div>
                       <div className="ac-emp-id">{c.employee_id}</div>
                     </td>
-                    <td className="font-medium">{c.attendance_date}</td>
+                    <td className="font-medium">{formatDate(c.attendance_date)}</td>
                     <td>{c.requested_clock_in ? 'Clock In' : 'Clock Out'}</td>
-                    <td className="font-medium">{c.requested_clock_in || c.requested_clock_out}</td>
-                    <td className="ac-reason-cell" title={c.reason}>{c.reason}</td>
+                    <td className="font-medium">{formatTo12Hour(c.requested_clock_in || c.requested_clock_out)}</td>
+                    <td style={{ whiteSpace: 'normal', wordBreak: 'break-word', minWidth: '150px' }}>
+                      {c.reason}
+                    </td>
                     <td className="text-center">
                       {c.selfie_url ? (
-                        <a href={`${API_BASE.replace('/api', '')}${c.selfie_url}`} target="_blank" rel="noopener noreferrer" className="ac-link-btn">
-                          <ExternalLink size={14} /> View
-                        </a>
+                        <button 
+                          onClick={() => setPreviewImage(`${API_BASE.replace('/api', '')}${c.selfie_url}`)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#00897B', background: 'none', border: 'none', cursor: 'pointer', margin: '0 auto', fontWeight: '500' }}
+                        >
+                          <Eye size={16} /> View
+                        </button>
                       ) : <span className="text-gray-400">—</span>}
                     </td>
                     <td>
@@ -288,6 +414,26 @@ const AttendanceCorrection = () => {
           </div>
         )}
       </FormalModal>
+
+      {/* Full-Screen Image Preview Modal */}
+      {previewImage && (
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} 
+          onClick={() => setPreviewImage(null)}
+        >
+          <img 
+            src={previewImage} 
+            alt="Proof Preview" 
+            style={{ maxWidth: '90%', maxHeight: '90%', borderRadius: '12px', objectFit: 'contain' }} 
+          />
+          <button 
+            style={{ position: 'absolute', top: '25px', right: '30px', background: 'none', border: 'none', color: 'white', cursor: 'pointer' }} 
+            onClick={() => setPreviewImage(null)}
+          >
+            <X size={36} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

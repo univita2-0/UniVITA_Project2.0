@@ -16,6 +16,7 @@
     "dotenv": "^17.4.2",
     "expo-location": "^55.1.10",
     "expo-sensors": "^55.0.15",
+    "expo-server-sdk": "^7.1.0",
     "expo-task-manager": "^55.0.16",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.1",

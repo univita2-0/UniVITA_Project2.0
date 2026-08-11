@@ -1,6 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 
+const { Expo } = require('expo-server-sdk');
+let expo = new Expo();
+
 //const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -604,7 +607,6 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
   const { time_in, time_out, status, location } = req.body;
 
   try {
-    // Validate ENUM status (present, late, absent, on leave)
     const validStatuses = ['present', 'late', 'absent', 'on leave'];
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status value.' });
@@ -612,11 +614,17 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
 
     const sql = `
       UPDATE attendance 
-      SET time_in = ?, time_out = ?, status = ?, location = ?
+      SET time_in = ?, 
+          time_out = ?, 
+          status = ?, 
+          location = ?,
+          correction_requested = 1,
+          correction_status = 'approved',
+          reviewed_at = NOW(),
+          updated_at = NOW()
       WHERE id = ?
     `;
     
-    // Execute update
     db.query(sql, [time_in || null, time_out || null, status || null, location || null, recordId], (err, results) => {
       if (err) {
         console.error("Database error during attendance update:", err);
@@ -626,7 +634,6 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
         return res.status(404).json({ success: false, message: "Record not found" });
       }
       
-      // Log the action for auditing
       logAction(req.user.id, 'MANUAL_UPDATE_ATTENDANCE', 'attendance', recordId, req);
       
       res.json({ success: true, message: "Attendance updated successfully" });
@@ -728,13 +735,9 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
 
-  // 1. Date validation
-  const today = new Date().toISOString().split('T')[0];
+  const { date: today } = getPHTime();
   if (date > today) {
     return res.status(400).json({ success: false, message: "Cannot request correction for future dates." });
-  }
-  if (!isDateWithinAllowedRange(date)) {
-    return res.status(400).json({ success: false, message: "Corrections are only allowed for the last 30 days." });
   }
 
   try {
@@ -744,45 +747,43 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
     );
     if (userRows.length === 0) return res.status(403).json({ success: false, message: 'Invalid user' });
 
-    // 2. Schedule existence
     const schedule = await scheduleExistsForDate(employee_id, date);
     if (!schedule) {
       return res.status(400).json({ success: false, message: "No schedule found for this date. Correction not allowed." });
     }
 
-    // 3. Duplicate check
-    if (await hasExistingRequest(employee_id, date, 'correction')) {
-      return res.status(409).json({ success: false, message: "You already have a pending or approved request for this date." });
+    // FIXED LOGIC: Prevent duplicate requests for the SAME type (e.g., only one clock_out request per day)
+    const [existingCorr] = await db.promise().query(
+      `SELECT id FROM attendance_corrections 
+       WHERE user_id = ? AND attendance_date = ? AND status IN ('pending', 'approved') 
+       AND ${type === 'clock_in' ? 'requested_clock_in IS NOT NULL' : 'requested_clock_out IS NOT NULL'}`,
+      [userId, date]
+    );
+
+    if (existingCorr.length > 0) {
+      return res.status(409).json({ success: false, message: `You already have a pending or approved ${type.replace('_', ' ')} request for this date.` });
     }
 
-    // 4. Time bounds validation
-    const requestedTime = time;
-    if (type === 'clock_in') {
-      if (requestedTime < schedule.start_time || requestedTime > schedule.end_time) {
-        return res.status(400).json({ success: false, message: `Clock-in time must be between ${schedule.start_time} and ${schedule.end_time}.` });
-      }
-    } else if (type === 'clock_out') {
-      // For clock-out, we need the existing clock-in time (if any)
-      const [attRecord] = await db.promise().query(
-        "SELECT time_in FROM attendance WHERE user_id = ? AND schedule_id = ?",
-        [employee_id, schedule.id]
-      );
-      if (attRecord.length > 0 && attRecord[0].time_in) {
-        if (requestedTime <= attRecord[0].time_in) {
-          return res.status(400).json({ success: false, message: "Clock-out time must be after clock-in time." });
-        }
-      }
-      if (requestedTime > schedule.end_time) {
-        return res.status(400).json({ success: false, message: `Clock-out time cannot exceed shift end (${schedule.end_time}).` });
-      }
-    }
-
+    // Insert the correction request
     await db.promise().query(
       `INSERT INTO attendance_corrections 
         (user_id, attendance_date, requested_clock_in, requested_clock_out, reason, selfie_url, status)
        VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [employee_id, date, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason, selfiePath]
+      [userId, date, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason, selfiePath]
     );
+
+    // FIXED LOGIC: Automatically clock the user out if they requested Early Departure/Clock Out
+    if (type === 'clock_out') {
+      await db.promise().query(
+        "UPDATE attendance SET time_out = ?, status = 'early departure' WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
+        [time, employee_id, schedule.id]
+      );
+      // Disable GPS tracking immediately
+      await db.promise().query(
+        "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
+        [employee_id]
+      );
+    }
 
     res.json({ success: true, message: 'Correction request submitted. HR will review.' });
   } catch (err) {
@@ -793,14 +794,20 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
 
 app.get('/api/attendance/corrections/user/:employeeId', authenticateToken, async (req, res) => {
   const { employeeId } = req.params;
-  if (req.user.employee_id !== employeeId && req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+  
   db.query(
-    "SELECT id, attendance_date, requested_clock_in, requested_clock_out, reason, selfie_url, status, reviewed_at FROM attendance_corrections WHERE user_id = ? ORDER BY id DESC",
+    // Added DATE_FORMAT to force the exact YYYY-MM-DD string
+    `SELECT c.id, DATE_FORMAT(c.attendance_date, '%Y-%m-%d') AS attendance_date, c.requested_clock_in, c.requested_clock_out, c.reason, c.selfie_url, c.status, c.reviewed_at 
+     FROM attendance_corrections c 
+     JOIN users u ON c.user_id = u.id 
+     WHERE u.employee_id = ? 
+     ORDER BY c.id DESC`,
     [employeeId],
     (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) {
+        console.error("User history fetch error:", err);
+        return res.status(500).json({ error: err.message });
+      }
       res.json(results);
     }
   );
@@ -817,7 +824,10 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
   }
 
   try {
-    const [corr] = await db.promise().query("SELECT * FROM attendance_corrections WHERE id = ?", [id]);
+    const [corr] = await db.promise().query(
+      "SELECT c.*, u.employee_id FROM attendance_corrections c JOIN users u ON c.user_id = u.id WHERE c.id = ?", 
+      [id]
+    );
     if (corr.length === 0) return res.status(404).json({ error: 'Request not found' });
 
     await db.promise().query(
@@ -827,15 +837,17 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
 
     if (status === 'approved') {
       const record = corr[0];
+      const empIdString = record.employee_id; 
+
       const [existing] = await db.promise().query(
         "SELECT id FROM attendance WHERE user_id = ? AND date = ?",
-        [record.user_id, record.attendance_date]
+        [empIdString, record.attendance_date]
       );
       if (existing.length === 0) {
         await db.promise().query(
           `INSERT INTO attendance (user_id, date, time_in, time_out, status, correction_requested, correction_status)
            VALUES (?, ?, ?, ?, 'present', 1, 'approved')`,
-          [record.user_id, record.attendance_date, record.requested_clock_in, record.requested_clock_out]
+          [empIdString, record.attendance_date, record.requested_clock_in, record.requested_clock_out]
         );
       } else {
         const updates = [];
@@ -846,8 +858,12 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
         values.push(existing[0].id);
         await db.promise().query(`UPDATE attendance SET ${updates.join(', ')} WHERE id = ?`, values);
       }
-      logAction(req.user.id, 'APPROVE_CORRECTION', 'attendance_correction', id, req);
     }
+    
+    // FIXED LOGIC: Audit log now triggers for BOTH approved and rejected statuses
+    const actionName = status === 'approved' ? 'APPROVE_CORRECTION' : 'REJECT_CORRECTION';
+    logAction(req.user.id, actionName, 'attendance_correction', id, req);
+    
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -875,7 +891,7 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
   const userId = req.user.id;
 
   // 1. Date validation
-  const today = new Date().toISOString().split('T')[0];
+  const { date: today } = getPHTime();
   if (date > today) {
     return res.status(400).json({ success: false, error: "Cannot appeal for future dates." });
   }
@@ -1776,7 +1792,16 @@ app.get('/api/attendance-report', (req, res) => {
 });
 
 app.get('/api/attendance-report-user/:employeeId', (req, res) => {
-    const sql = "SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date, ROUND(TIMESTAMPDIFF(MINUTE, time_in, time_out) / 60, 2) as total_hours FROM attendance WHERE user_id = ? ORDER BY date DESC";
+    const sql = `
+      SELECT *, 
+             DATE_FORMAT(date, '%Y-%m-%d') as date, 
+             ROUND(TIMESTAMPDIFF(MINUTE, time_in, time_out) / 60, 2) as total_hours,
+             reviewed_at,
+             updated_at
+      FROM attendance 
+      WHERE user_id = ? 
+      ORDER BY date DESC
+    `;
     db.query(sql, [req.params.employeeId], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(result || []);
@@ -2314,23 +2339,83 @@ app.delete('/api/visit-reasons/:id', authenticateToken, (req, res) => {
 // ============================================
 // 10. EMERGENCY ALERTS, JOBS, POLICIES, ETC.
 // ============================================
-app.post('/api/emergency-alerts', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
   const { title, message, severity, target_roles } = req.body;
-  const targetRolesJson = JSON.stringify(target_roles || ['instructor', 'admin', 'security', 'hr_admin']);
-  db.query("INSERT INTO emergency_alerts (title, message, severity, target_roles) VALUES (?, ?, ?, ?)", [title.trim(), message.trim(), severity, targetRolesJson], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+  const safeRoles = target_roles || ['instructor', 'admin', 'security', 'hr_admin'];
+  const targetRolesJson = JSON.stringify(safeRoles);
+  
+  try {
+    // Save alert to database
+    const [result] = await db.promise().query(
+      "INSERT INTO emergency_alerts (title, message, severity, target_roles) VALUES (?, ?, ?, ?)", 
+      [title.trim(), message.trim(), severity, targetRolesJson]
+    );
     const alertId = result.insertId;
-    const rolePlaceholders = target_roles.map(() => '?').join(',');
-    db.query(`SELECT id FROM users WHERE role IN (${rolePlaceholders}) AND status = 'active'`, target_roles, (err, users) => {
-      if (!err && users.length) {
-        const receipts = users.map(u => [alertId, u.id]);
-        db.query('INSERT INTO alert_receipts (alert_id, user_id) VALUES ?', [receipts]);
+
+    // Fetch users in target roles who have push tokens
+    const rolePlaceholders = safeRoles.map(() => '?').join(',');
+    const [users] = await db.promise().query(
+      `SELECT id, expo_push_token FROM users WHERE role IN (${rolePlaceholders}) AND status = 'active'`, 
+      safeRoles
+    );
+
+    if (users.length > 0) {
+      // Log alert receipts for DB history
+      const receipts = users.map(u => [alertId, u.id]);
+      await db.promise().query('INSERT INTO alert_receipts (alert_id, user_id) VALUES ?', [receipts]);
+
+      // Construct Expo Push Notifications
+      let messages = [];
+      for (let user of users) {
+        if (user.expo_push_token && Expo.isExpoPushToken(user.expo_push_token)) {
+          messages.push({
+            to: user.expo_push_token,
+            sound: 'default',
+            title: title.trim(),
+            body: message.trim(),
+            data: { alertId: alertId, severity: severity },
+          });
+        }
       }
-    });
+
+      // Chunk messages and send to Expo to avoid rate limits
+      let chunks = expo.chunkPushNotifications(messages);
+      for (let chunk of chunks) {
+        try {
+          await expo.sendPushNotificationsAsync(chunk);
+        } catch (error) {
+          console.error("Error sending push chunk:", error);
+        }
+      }
+    }
+
     logAction(req.user.id, 'CREATE_ALERT', 'emergency_alert', alertId, req);
     res.json({ success: true, alertId });
-  });
+
+  } catch (err) {
+    console.error("Alert creation error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. New Route to Save the Device Push Token
+app.put('/api/users/save-push-token', authenticateToken, async (req, res) => {
+  const { token } = req.body;
+  const userId = req.user.id;
+  
+  if (!token) return res.status(400).json({ error: 'Token is required' });
+
+  try {
+    await db.promise().query("UPDATE users SET expo_push_token = ? WHERE id = ?", [token, userId]);
+    res.json({ success: true, message: 'Push token saved successfully' });
+  } catch (err) {
+    console.error("Failed to save push token:", err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 app.get('/api/emergency-alerts/active', (req, res) => {
@@ -4042,15 +4127,15 @@ app.get('/api/overtime-requests/all', authenticateToken, (req, res) => {
   });
 });
 
-// GET pending correction requests (from attendance_corrections table)
 app.get('/api/attendance/corrections/pending', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
   db.query(
-    `SELECT c.*, u.full_name, u.employee_id
+    // Added DATE_FORMAT to overwrite the default date object
+    `SELECT c.*, DATE_FORMAT(c.attendance_date, '%Y-%m-%d') AS attendance_date, u.full_name, u.employee_id
      FROM attendance_corrections c
-     JOIN users u ON c.user_id = u.employee_id
+     JOIN users u ON c.user_id = u.id  
      WHERE c.status = 'pending'
      ORDER BY c.id DESC`,
     (err, rows) => {
@@ -4059,6 +4144,22 @@ app.get('/api/attendance/corrections/pending', authenticateToken, (req, res) => 
         return res.status(500).json({ error: err.message });
       }
       res.json(rows);
+    }
+  );
+});
+
+// Get schedule requests for a user
+app.get('/api/schedule-requests/user/:employeeId', authenticateToken, async (req, res) => {
+  const { employeeId } = req.params;
+  db.query(
+    `SELECT * FROM schedule_change_requests WHERE user_id = ? ORDER BY id DESC`,
+    [employeeId],
+    (err, results) => {
+      if (err) {
+        console.error("Schedule requests fetch error:", err);
+        return res.status(500).json({ error: err.message });
+      }
+      res.json(results);
     }
   );
 });

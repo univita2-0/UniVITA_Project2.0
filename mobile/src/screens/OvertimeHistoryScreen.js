@@ -9,6 +9,17 @@ import { X, Calendar, Clock, FileText, AlertCircle } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from './api';
 
+const formatTo12Hour = (timeStr) => {
+  if (!timeStr) return '';
+  const parts = timeStr.substring(0, 5).split(':');
+  let hours = parseInt(parts[0], 10);
+  const minutes = parts[1] || '00';
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${minutes} ${ampm}`;
+};
+
 export default function OvertimeHistoryScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [history, setHistory] = useState([]);
@@ -19,15 +30,15 @@ export default function OvertimeHistoryScreen({ navigation }) {
   }, []);
 
   const loadHistory = async () => {
-    const token = await AsyncStorage.getItem('auth_token');
     try {
+      const token = await AsyncStorage.getItem('auth_token');
       const res = await fetch(`${API_URL}/overtime-requests`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token || ''}` }
       });
       const data = await res.json();
       setHistory(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error(err);
+      console.error("Overtime History Error:", err);
       setHistory([]);
     } finally {
       setLoading(false);
@@ -76,48 +87,53 @@ export default function OvertimeHistoryScreen({ navigation }) {
 
         <FlatList
           data={history}
-          keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+          keyExtractor={(item, index) => item.id?.toString() || index.toString()}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <View style={styles.historyCard}>
-              <View style={styles.cardHeader}>
-                <Calendar size={16} color="#00897B" />
-                <Text style={styles.date}>{item.date}</Text>
-              </View>
+          renderItem={({ item }) => {
+            const displayDate = item.date || item.request_date || '';
+            return (
+              <View style={styles.historyCard}>
+                <View style={styles.cardHeader}>
+                  <Calendar size={16} color="#00897B" />
+                  <Text style={styles.date}>{displayDate.split('T')[0]}</Text>
+                </View>
 
-              <View style={styles.cardRow}>
-                <Clock size={14} color="#64748B" />
-                <Text style={styles.time}>{item.start_time} – {item.end_time}</Text>
-              </View>
-
-              <View style={styles.cardRow}>
-                <AlertCircle size={14} color="#64748B" />
-                <Text style={styles.scenario}>{getScenarioLabel(item.scenario_type)}</Text>
-              </View>
-
-              <Text style={styles.reason}>{item.reason}</Text>
-
-              <View style={styles.statusRow}>
-                <View style={[styles.statusBadge, { backgroundColor: `${getStatusColor(item.status)}15` }]}>
-                  <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-                    {item.status?.toUpperCase() || 'PENDING'}
+                <View style={styles.cardRow}>
+                  <Clock size={14} color="#64748B" />
+                  <Text style={styles.time}>
+                    {formatTo12Hour(item.start_time)} – {formatTo12Hour(item.end_time)}
                   </Text>
                 </View>
-                {item.processed === 1 && (
-                  <View style={styles.processedBadge}>
-                    <Text style={styles.processedText}>✓ Processed</Text>
+
+                <View style={styles.cardRow}>
+                  <AlertCircle size={14} color="#64748B" />
+                  <Text style={styles.scenario}>{getScenarioLabel(item.scenario_type)}</Text>
+                </View>
+
+                {item.reason ? <Text style={styles.reason}>{item.reason}</Text> : null}
+
+                <View style={styles.statusRow}>
+                  <View style={[styles.statusBadge, { backgroundColor: `${getStatusColor(item.status)}15` }]}>
+                    <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                      {item.status?.toUpperCase() || 'PENDING'}
+                    </Text>
                   </View>
+                  {item.processed === 1 && (
+                    <View style={styles.processedBadge}>
+                      <Text style={styles.processedText}>✓ Processed</Text>
+                    </View>
+                  )}
+                </View>
+
+                {item.attachment && (
+                  <TouchableOpacity style={styles.attachmentButton} onPress={() => openAttachment(`${API_URL.replace('/api', '')}${item.attachment}`)}>
+                    <FileText size={12} color="#00897B" />
+                    <Text style={styles.attachmentText}>View Attachment</Text>
+                  </TouchableOpacity>
                 )}
               </View>
-
-              {item.attachment && (
-                <TouchableOpacity style={styles.attachmentButton} onPress={() => openAttachment(`${API_URL.replace('/api', '')}${item.attachment}`)}>
-                  <FileText size={12} color="#00897B" />
-                  <Text style={styles.attachmentText}>View Attachment</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+            );
+          }}
           ListEmptyComponent={<Text style={styles.emptyText}>No overtime requests found.</Text>}
         />
       </SafeAreaView>

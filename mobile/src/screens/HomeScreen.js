@@ -7,6 +7,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { Audio } from 'expo-av'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as ImagePicker from 'expo-image-picker';
@@ -68,7 +69,10 @@ export default function HomeScreen({ navigation }) {
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [currentAlert, setCurrentAlert] = useState(null);
   const [alertQueue, setAlertQueue] = useState([]);
+  
   const hasSynced = useRef(false);
+  const alertSound = useRef(null); 
+  const activeAlertId = useRef(null); // Prevents the interval from endlessly triggering the same alert
 
   const getGreeting = () => {
     const hour = currentTime.getHours();
@@ -76,6 +80,15 @@ export default function HomeScreen({ navigation }) {
     if (hour < 18) return "Good Afternoon";
     return "Good Evening";
   };
+
+  // Cleanup sound if component unmounts
+  useEffect(() => {
+    return () => {
+      if (alertSound.current) {
+        alertSound.current.unloadAsync();
+      }
+    };
+  }, []);
 
   // ---------- INITIAL PERMISSIONS ----------
   useEffect(() => {
@@ -142,7 +155,6 @@ export default function HomeScreen({ navigation }) {
                   notificationColor: "#0D9488",
                 },
               });
-              console.log("✅ Background tracking revived/started");
             }
           }
         } catch (e) {
@@ -158,7 +170,6 @@ export default function HomeScreen({ navigation }) {
 
     const subscription = AppState.addEventListener('change', nextAppState => {
       if (nextAppState === 'active') {
-        console.log("📱 App resumed: Reviving GPS task");
         checkAndEnableTracking(true);
       }
     });
@@ -439,37 +450,97 @@ export default function HomeScreen({ navigation }) {
     finally { setSubmittingCorrection(false); }
   };
 
+  // --- IMPROVED ALERT POLLING --- //
   useEffect(() => {
     const loadAlerts = async () => {
       if (!user.id) return;
       try {
         const alerts = await fetchEmergencyAlerts(user.id);
         const unreadAlerts = alerts.filter(a => !a.read_at);
+        
         if (unreadAlerts.length > 0) {
-          setAlertQueue(unreadAlerts);
-          showNextAlert(unreadAlerts[0]);
+          // Check if we are already displaying this exact alert to prevent infinite loops
+          if (activeAlertId.current !== unreadAlerts[0].id) {
+            setAlertQueue(unreadAlerts);
+            showNextAlert(unreadAlerts[0]);
+          }
         }
       } catch (err) { console.error('Failed to fetch alerts', err); }
     };
-    loadAlerts();
+
+    loadAlerts(); // Load immediately on mount
+
+    // Poll for new alerts every 10 seconds while the app is active
+    const intervalId = setInterval(loadAlerts, 10000);
+    
+    return () => clearInterval(intervalId);
   }, [user.id]);
 
-  const showNextAlert = (alert) => {
+  const showNextAlert = async (alert) => {
+    activeAlertId.current = alert.id; // Lock this alert ID
     setCurrentAlert(alert);
     setShowAlertModal(true);
+
+    // Provide Haptic Feedback
     if (alert.severity === 'critical') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     else if (alert.severity === 'warning') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // Play Continuous Alert Sound Based on Severity
+    try {
+      if (alertSound.current) {
+        await alertSound.current.stopAsync();
+        await alertSound.current.unloadAsync();
+        alertSound.current = null;
+      }
+
+      let soundSource;
+      if (alert.severity === 'critical') {
+        soundSource = require('../../assets/critical.mp3'); 
+      } else if (alert.severity === 'warning') {
+        soundSource = require('../../assets/warning.mp3'); 
+      } else {
+        soundSource = require('../../assets/info.mp3'); 
+      }
+      
+      const { sound } = await Audio.Sound.createAsync(soundSource);
+      alertSound.current = sound;
+      
+      await sound.setIsLoopingAsync(true);
+      await sound.playAsync();
+
+    } catch (error) {
+      console.log("Error playing alert sound:", error);
+    }
   };
 
   const dismissAlert = async () => {
+    // Stop the continuous sound immediately
+    if (alertSound.current) {
+      try {
+        await alertSound.current.stopAsync();
+        await alertSound.current.unloadAsync();
+        alertSound.current = null;
+      } catch (error) {
+        console.log("Error stopping alert sound:", error);
+      }
+    }
+
     if (currentAlert) {
       await markAlertAsRead(currentAlert.id, user.id);
       const newQueue = alertQueue.filter(a => a.id !== currentAlert.id);
       setAlertQueue(newQueue);
       setShowAlertModal(false);
-      if (newQueue.length > 0) showNextAlert(newQueue[0]);
-    } else setShowAlertModal(false);
+      
+      if (newQueue.length > 0) {
+        showNextAlert(newQueue[0]);
+      } else {
+        activeAlertId.current = null; // Release the lock
+      }
+    } else {
+      setShowAlertModal(false);
+      activeAlertId.current = null;
+    }
   };
 
   useEffect(() => {
@@ -526,15 +597,6 @@ export default function HomeScreen({ navigation }) {
             <View>
               <Text style={styles.greeting}>{getGreeting()}</Text>
               <Text style={styles.userName}>{user.full_name || user.name}</Text>
-            </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.iconButton} onPress={() => Alert.alert("Notifications", "System notifications are active.")}>
-                <Bell size={22} color="#4B5563" />
-                {unreadCount > 0 && <View style={styles.badge} />}
-              </TouchableOpacity>
-              <View style={styles.avatarWrapper}>
-                <User size={20} color="#0D9488" />
-              </View>
             </View>
           </View>
 
@@ -650,20 +712,31 @@ export default function HomeScreen({ navigation }) {
           )}
         </TouchableOpacity>
 
-        {/* Emergency Alert Modal */}
+        {/* --- IMPROVED EMERGENCY ALERT MODAL --- */}
         <Modal visible={showAlertModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={[styles.alertModal, currentAlert?.severity === 'critical' ? styles.alertCritical : currentAlert?.severity === 'warning' ? styles.alertWarning : styles.alertInfo]}>
-              <Text style={styles.alertHeader}>
+              
+              <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                <AlertCircle size={48} color={currentAlert?.severity === 'critical' ? '#DC2626' : currentAlert?.severity === 'warning' ? '#F59E0B' : '#3B82F6'} />
+              </View>
+
+              <Text style={[styles.alertHeader, { textAlign: 'center', fontSize: 14 }]}>
                 {currentAlert?.severity === 'critical' ? 'CRITICAL ALERT' : currentAlert?.severity === 'warning' ? 'WARNING' : 'SYSTEM INFO'}
               </Text>
-              <Text style={styles.alertTitle}>{currentAlert?.title}</Text>
-              <Text style={styles.alertBody}>{currentAlert?.message}</Text>
-              <View style={styles.alertActions}>
-                <TouchableOpacity style={styles.btnAlertDismiss} onPress={dismissAlert}>
-                  <Text style={styles.btnAlertText}>Acknowledge</Text>
+              
+              <Text style={[styles.alertTitle, { textAlign: 'center', fontSize: 20 }]}>{currentAlert?.title}</Text>
+              <Text style={[styles.alertBody, { textAlign: 'center', marginTop: 8 }]}>{currentAlert?.message}</Text>
+              
+              <View style={[styles.alertActions, { marginTop: 24, alignItems: 'stretch' }]}>
+                <TouchableOpacity 
+                  style={[styles.btnAlertDismiss, { alignItems: 'center', paddingVertical: 12 }]} 
+                  onPress={dismissAlert}
+                >
+                  <Text style={[styles.btnAlertText, { fontSize: 15 }]}>Acknowledge</Text>
                 </TouchableOpacity>
               </View>
+
             </View>
           </View>
         </Modal>
@@ -754,10 +827,6 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 20 },
   greeting: { fontSize: 13, fontWeight: '600', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5 },
   userName: { fontSize: 20, fontWeight: '700', color: '#111827', marginTop: 2 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  iconButton: { padding: 8, position: 'relative' },
-  badge: { position: 'absolute', top: 6, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626' },
-  avatarWrapper: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#F0FDFA', justifyContent: 'center', alignItems: 'center' },
 
   dateWidget: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 24, paddingHorizontal: 4 },
   dateInfo: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -773,7 +842,7 @@ const styles = StyleSheet.create({
   emptyState: { padding: 24, alignItems: 'center' },
   emptyStateText: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
 
-  actionContainer: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  actionContainer: { flexDirection: 'row', gap: 12, marginBottom: 16, paddingHorizontal: 16, paddingBottom: 16 },
   btnPrimary: { flex: 1, flexDirection: 'row', backgroundColor: '#0D9488', paddingVertical: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
   btnOutline: { flex: 1, flexDirection: 'row', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#0D9488', paddingVertical: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 8 },
   btnPrimaryText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
@@ -806,18 +875,18 @@ const styles = StyleSheet.create({
   closeBtn: { padding: 4 },
   chatNavbarTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(17, 24, 39, 0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(17, 24, 39, 0.75)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   
-  alertModal: { width: '100%', borderRadius: 12, padding: 20, backgroundColor: '#FFFFFF', borderWidth: 1 },
+  alertModal: { width: '100%', borderRadius: 16, padding: 24, backgroundColor: '#FFFFFF', borderWidth: 2 },
   alertCritical: { borderColor: '#FECACA', backgroundColor: '#FEF2F2' },
   alertWarning: { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' },
   alertInfo: { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
-  alertHeader: { fontSize: 12, fontWeight: '800', marginBottom: 8, color: '#111827' },
-  alertTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 8 },
-  alertBody: { fontSize: 14, color: '#374151', lineHeight: 20, marginBottom: 20 },
-  alertActions: { alignItems: 'flex-end' },
-  btnAlertDismiss: { backgroundColor: '#111827', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6 },
-  btnAlertText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  alertHeader: { fontWeight: '800', marginBottom: 12, color: '#111827', letterSpacing: 1 },
+  alertTitle: { fontWeight: '800', color: '#111827', marginBottom: 12 },
+  alertBody: { color: '#374151', lineHeight: 22, marginBottom: 20 },
+  alertActions: { width: '100%', marginTop: 10 },
+  btnAlertDismiss: { backgroundColor: '#111827', borderRadius: 10, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  btnAlertText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 
   formalModal: { width: '100%', backgroundColor: '#FFFFFF', borderRadius: 12, maxHeight: '85%', padding: 20 },
   formalModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },

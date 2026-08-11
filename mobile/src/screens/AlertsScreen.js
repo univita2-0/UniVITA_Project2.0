@@ -1,4 +1,3 @@
-// src/screens/AlertsScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -13,18 +12,7 @@ import {
 } from 'react-native';
 import { AlertCircle, Clock, RefreshCw } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// Try to import API_URL, but provide a hardcoded fallback if missing
-let API_URL;
-try {
-  const apiModule = require('./api');
-  API_URL = apiModule.API_URL;
-} catch (e) {
-  console.warn('Could not import API_URL from api.js, using default');
-}
-// Fallback – change to your computer's actual IP
-if (!API_URL) {
-  API_URL = 'http://192.168.86.3:5000/api';  // ← UPDATE THIS IP to match your backend
-}
+import { API_URL } from './api'; 
 
 export default function AlertsScreen() {
   const [alerts, setAlerts] = useState([]);
@@ -61,7 +49,7 @@ export default function AlertsScreen() {
       setError(err.message);
       Alert.alert(
         'Connection Error',
-        `Cannot reach server at ${API_URL}\n\nCheck:\n• Backend is running (node server.js)\n• Phone and PC on same Wi‑Fi\n• IP address in api.js is correct (currently ${API_URL})\n• Firewall allows port 5000`,
+        `Cannot reach server at ${API_URL}. Please check your connection.`,
         [{ text: 'OK' }]
       );
       setAlerts([]);

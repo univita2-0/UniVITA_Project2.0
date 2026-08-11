@@ -19,6 +19,7 @@ const menuConfig = [
       { id: 'daily-attendance', label: 'Daily Attendance', path: 'attendance', roles: ['admin', 'hr_admin'] },
       { id: 'attendance-correction', label: 'Attendance Correction', path: 'attendance-correction', roles: ['admin', 'hr_admin'] },
       { id: 'attendance-appeals', label: 'Attendance Appeals', path: 'attendance-appeals', roles: ['admin', 'hr_admin'] },
+      { id: 'overtime-requests', label: 'Overtime Requests', path: 'overtime-requests', roles: ['admin', 'hr_admin'] },
       { id: 'location-tracking', label: 'Location Tracking', path: 'location-tracking', roles: ['admin', 'hr_admin'] }
     ],
     roles: ['admin', 'hr_admin']

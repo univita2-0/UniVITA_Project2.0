@@ -4,7 +4,20 @@ import {
   View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, StatusBar
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, Calendar, Clock } from 'lucide-react-native';
+import { X, Calendar, Clock, MapPin, BookOpen } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from './api';
+
+const formatTo12Hour = (timeStr) => {
+  if (!timeStr) return '';
+  const parts = timeStr.substring(0, 5).split(':');
+  let hours = parseInt(parts[0], 10);
+  const minutes = parts[1] || '00';
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${minutes} ${ampm}`;
+};
 
 export default function ScheduleHistoryScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -16,18 +29,36 @@ export default function ScheduleHistoryScreen({ navigation }) {
   }, []);
 
   const loadHistory = async () => {
-    // In a real app, fetch from backend
-    const mockData = [
-      { id: 1, date: '2025-03-20', start: '09:00', end: '12:00', status: 'Pending' },
-      { id: 2, date: '2025-03-15', start: '13:00', end: '17:00', status: 'Approved' },
-    ];
-    setScheduleHistory(mockData);
-    setLoading(false);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const employeeId = await AsyncStorage.getItem('employee_id');
+      if (!employeeId) {
+        setLoading(false);
+        return;
+      }
+      const res = await fetch(`${API_URL}/schedule-requests/user/${employeeId}`, {
+        headers: { Authorization: `Bearer ${token || ''}` }
+      });
+      
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
+        const data = await res.json();
+        setScheduleHistory(Array.isArray(data) ? data : []);
+      } else {
+        setScheduleHistory([]);
+      }
+    } catch (err) {
+      console.error("Schedule History Error:", err);
+      setScheduleHistory([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getStatusColor = (status) => {
-    if (status === 'Approved') return '#10B981';
-    if (status === 'Rejected') return '#EF4444';
+    const s = status?.toLowerCase();
+    if (s === 'approved') return '#10B981';
+    if (s === 'rejected') return '#EF4444';
     return '#F59E0B';
   };
 
@@ -53,25 +84,48 @@ export default function ScheduleHistoryScreen({ navigation }) {
 
         <FlatList
           data={scheduleHistory}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item, index) => item.id?.toString() || index.toString()}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <View style={styles.historyCard}>
-              <View style={styles.cardHeader}>
-                <Calendar size={16} color="#00897B" />
-                <Text style={styles.date}>{item.date}</Text>
+          renderItem={({ item }) => {
+            const displayDate = item.date || item.request_date || '';
+            return (
+              <View style={styles.historyCard}>
+                <View style={styles.cardHeader}>
+                  <Calendar size={16} color="#00897B" />
+                  <Text style={styles.date}>{displayDate ? displayDate.split('T')[0] : '—'}</Text>
+                </View>
+
+                <View style={styles.cardBody}>
+                  <Clock size={14} color="#64748B" />
+                  <Text style={styles.time}>
+                    {formatTo12Hour(item.start_time)} – {formatTo12Hour(item.end_time)}
+                  </Text>
+                </View>
+
+                {item.course ? (
+                  <View style={styles.cardBody}>
+                    <BookOpen size={14} color="#64748B" />
+                    <Text style={styles.detailText}>{item.course}</Text>
+                  </View>
+                ) : null}
+
+                {item.place ? (
+                  <View style={styles.cardBody}>
+                    <MapPin size={14} color="#64748B" />
+                    <Text style={styles.detailText}>{item.place}</Text>
+                  </View>
+                ) : null}
+
+                {item.reason ? <Text style={styles.reason}>{item.reason}</Text> : null}
+
+                <View style={[styles.statusBadge, { backgroundColor: `${getStatusColor(item.status)}15` }]}>
+                  <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                    {item.status?.toUpperCase() || 'PENDING'}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.cardBody}>
-                <Clock size={14} color="#64748B" />
-                <Text style={styles.time}>{item.start} – {item.end}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: `${getStatusColor(item.status)}15` }]}>
-                <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-                  {item.status.toUpperCase()}
-                </Text>
-              </View>
-            </View>
-          )}
+            );
+          }}
           ListEmptyComponent={<Text style={styles.emptyText}>No schedule requests found.</Text>}
         />
       </SafeAreaView>
@@ -105,8 +159,10 @@ const styles = StyleSheet.create({
   },
   cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   date: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
-  cardBody: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  time: { fontSize: 13, color: '#475569' },
+  cardBody: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  time: { fontSize: 13, color: '#475569', fontWeight: '500' },
+  detailText: { fontSize: 13, color: '#475569' },
+  reason: { fontSize: 13, color: '#475569', marginBottom: 10, marginTop: 4 },
   statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   statusText: { fontSize: 11, fontWeight: '700' },
   emptyText: { textAlign: 'center', color: '#94A3B8', marginTop: 50 },

@@ -12,6 +12,28 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+// Helper: Convert 24-hour time (e.g., "14:30:00" or "14:30") to 12-hour AM/PM format (e.g., "2:30 PM")
+const formatTo12Hour = (timeStr) => {
+  if (!timeStr) return '';
+  const parts = timeStr.substring(0, 5).split(':');
+  let hours = parseInt(parts[0], 10);
+  const minutes = parts[1] || '00';
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  return `${hours}:${minutes} ${ampm}`;
+};
+
+// Helper: Clean raw ISO date strings into readable formats (e.g., "August 11, 2026")
+const formatDisplayDate = (dateString) => {
+  if (!dateString) return '';
+  const cleanDate = dateString.split('T')[0];
+  const [year, month, day] = cleanDate.split('-');
+  if (!year || !month || !day) return cleanDate;
+  const dateObj = new Date(year, month - 1, day);
+  return dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+};
+
 const Schedule = () => {
   const userRole = localStorage.getItem('user_role') || 'instructor';
   const canEdit = userRole === 'admin' || userRole === 'hr_admin';
@@ -418,7 +440,7 @@ const Schedule = () => {
                             
                             <div className="sch-session-header">
                               <span className="sch-session-time">
-                                {displaySession.start_time?.substring(0,5)} - {displaySession.end_time?.substring(0,5)}
+                                {formatTo12Hour(displaySession.start_time)} – {formatTo12Hour(displaySession.end_time)}
                               </span>
                               {canEdit && (
                                 <div className="sch-session-actions">
@@ -498,12 +520,14 @@ const Schedule = () => {
 
             <div className="sch-form-row">
               <div className="sch-form-group">
-                <label>Start Time</label>
+                <label>Start Time (AM/PM format)</label>
                 <input type="time" name="start_time" className="sch-input" value={formData.start_time} onChange={handleInputChange} required step="60" />
+                <span className="sch-time-preview">Reflects as: <strong>{formatTo12Hour(formData.start_time)}</strong></span>
               </div>
               <div className="sch-form-group">
-                <label>End Time</label>
+                <label>End Time (AM/PM format)</label>
                 <input type="time" name="end_time" className="sch-input" value={formData.end_time} onChange={handleInputChange} required step="60" />
+                <span className="sch-time-preview">Reflects as: <strong>{formatTo12Hour(formData.end_time)}</strong></span>
               </div>
             </div>
 
@@ -530,14 +554,11 @@ const Schedule = () => {
             detailSession.map((s, idx) => {
               const now = new Date();
               
-              // 1. Safely parse the exact date of this specific schedule
               const scheduleDateStr = s.schedule_date ? s.schedule_date.split('T')[0] : '';
               
-              // 2. Create accurate Date objects combining the schedule's date and times
               const startTime = new Date(`${scheduleDateStr}T${s.start_time}`);
               const endTime = new Date(`${scheduleDateStr}T${s.end_time}`);
               
-              // 3. Evaluate the dynamic status
               let finalStatus = s.attendance_status || 'SCHEDULED';
               
               if (finalStatus.toUpperCase() === 'IN PROGRESS' && now > endTime) {
@@ -548,7 +569,6 @@ const Schedule = () => {
                 finalStatus = 'LATE / PENDING';
               }
 
-              // Map statuses to UI-friendly CSS classes
               const statusClass = 
                 finalStatus === 'COMPLETED' ? 'status-completed' : 
                 finalStatus === 'IN PROGRESS' ? 'status-inprogress' : 
@@ -567,7 +587,7 @@ const Schedule = () => {
                   <div className="sch-detail-body">
                     <div className="sch-detail-item">
                       <Clock size={14} />
-                      <span>{s.start_time?.substring(0,5)} – {s.end_time?.substring(0,5)}</span>
+                      <span>{formatTo12Hour(s.start_time)} – {formatTo12Hour(s.end_time)}</span>
                     </div>
                     <div className="sch-detail-item">
                       <MapPin size={14} />
@@ -602,11 +622,11 @@ const Schedule = () => {
                     <span className="sch-req-name">{req.full_name}</span>
                     <span className="sch-req-type">{req.request_type === 'new' ? 'New Schedule' : 'Schedule Change'}</span>
                   </div>
-                  <span className="sch-req-date">{req.date}</span>
+                  <span className="sch-req-date">{formatDisplayDate(req.date)}</span>
                 </div>
                 <div className="sch-req-body">
                   <p><strong>Course:</strong> {req.course} at {req.place}</p>
-                  <p><strong>Time:</strong> {req.start_time} – {req.end_time}</p>
+                  <p><strong>Time:</strong> {formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</p>
                   {req.reason && <p className="sch-req-reason"><strong>Reason:</strong> {req.reason}</p>}
                 </div>
                 <div className="sch-req-actions">

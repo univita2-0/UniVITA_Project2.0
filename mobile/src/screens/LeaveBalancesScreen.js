@@ -17,18 +17,17 @@ export default function LeaveBalancesScreen() {
   const [userId, setUserId] = useState(null);
   const currentYear = new Date().getFullYear();
 
-  const loadBalances = async () => {
-    if (!userId) return;
-    setLoading(true);
+  const loadBalances = async (currentUserId) => {
     try {
-      const res = await fetch(`${API_URL}/leave-balances/${userId}?year=${currentYear}`);
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${API_URL}/leave-balances/${currentUserId}?year=${currentYear}`, {
+        headers: { Authorization: `Bearer ${token || ''}` }
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      // If backend returns data, use it; otherwise fallback to standard mock
       if (Array.isArray(data) && data.length > 0) {
         setBalances(data);
       } else {
-        // Standard fallback (Sick 15, Vacation 15, Emergency 5)
         setBalances([
           { leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 },
           { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 },
@@ -37,34 +36,35 @@ export default function LeaveBalancesScreen() {
       }
     } catch (error) {
       console.error('Failed to load leave balances:', error);
-      // Use standard mock on error
       setBalances([
         { leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 },
         { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 },
         { leave_type: 'Emergency Leave', remaining_days: 5, annual_quota: 5 },
       ]);
-      Alert.alert('Connection Error', 'Cannot reach the server. Showing default leave balances.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    const getUserId = async () => {
+    const init = async () => {
       const id = await AsyncStorage.getItem('user_id');
-      if (id) setUserId(id);
-      else setLoading(false);
+      if (id) {
+        setUserId(id);
+        loadBalances(id);
+      } else {
+        setLoading(false);
+      }
     };
-    getUserId();
+    init();
   }, []);
 
-  useEffect(() => {
-    if (userId) loadBalances();
-  }, [userId]);
-
   const onRefresh = () => {
-    setRefreshing(true);
-    loadBalances();
+    if (userId) {
+      setRefreshing(true);
+      loadBalances(userId);
+    }
   };
 
   if (loading) {

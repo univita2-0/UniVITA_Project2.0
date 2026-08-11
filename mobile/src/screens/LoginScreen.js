@@ -245,64 +245,67 @@ export default function LoginScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
-        <View style={styles.header}>
-          <Text style={styles.title}>UniVITA</Text>
-          <Text style={styles.subtitle}></Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.welcome}>Personnel Login</Text>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Email Address</Text>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="employee@hct.edu.ph"
-                placeholderTextColor="#9CA3AF"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-            </View>
+        <View style={styles.containerInner}>
+          <View style={styles.header}>
+            <Text style={styles.title}>UniVITA</Text>
+            <Text style={styles.subtitle}>Secure Access Portal</Text>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Password</Text>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor="#9CA3AF"
-                value={password}
-                onChangeText={setPassword}
-              />
+          <View style={styles.card}>
+            <Text style={styles.welcome}>Welcome Back</Text>
+            <Text style={styles.welcomeSub}>Sign in to manage your schedule and attendance</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email Address</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="employee@hct.edu.ph"
+                  placeholderTextColor="#9CA3AF"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+              </View>
             </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  secureTextEntry
+                  placeholder="••••••••"
+                  placeholderTextColor="#9CA3AF"
+                  value={password}
+                  onChangeText={setPassword}
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.forgotLink} onPress={() => setShowForgotModal(true)} activeOpacity={0.8}>
+              <Text style={styles.forgotText}>Forgot password?</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.signInButton, loading && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              {loading ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.signInText}>Sign In</Text>}
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity style={styles.forgotLink} onPress={() => setShowForgotModal(true)} activeOpacity={1}>
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.signInButton, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-            activeOpacity={1}
-          >
-            {loading ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.signInText}>Sign In</Text>}
-          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 
       {/* Login OTP Modal */}
-      <Modal visible={showOtpModal} transparent animationType="none">
+      <Modal visible={showOtpModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Authentication Required</Text>
-            <Text style={styles.modalSubtitle}>We sent a 6‑digit code to {email}</Text>
+            <Text style={styles.modalTitle}>Verification Required</Text>
+            <Text style={styles.modalSubtitle}>Enter the 6-digit security code sent to your email.</Text>
             <TextInput
               style={styles.otpInput}
               placeholder="000000"
@@ -318,20 +321,20 @@ export default function LoginScreen({ navigation }) {
               style={[styles.modalButton, verifyingOtp && styles.buttonDisabled]}
               onPress={handleVerifyOtp}
               disabled={verifyingOtp}
-              activeOpacity={1}
+              activeOpacity={0.8}
             >
-              <Text style={styles.modalButtonText}>{verifyingOtp ? 'Verifying...' : 'Verify Identity'}</Text>
+              <Text style={styles.modalButtonText}>{verifyingOtp ? 'Verifying...' : 'Verify Code'}</Text>
             </TouchableOpacity>
             
             <View style={styles.modalFooterActions}>
               {resendTimer > 0 ? (
                 <Text style={styles.timerText}>Resend code in {resendTimer}s</Text>
               ) : (
-                <TouchableOpacity onPress={handleResendOtp} disabled={sendingOtpResend} activeOpacity={1}>
+                <TouchableOpacity onPress={handleResendOtp} disabled={sendingOtpResend} activeOpacity={0.8}>
                   <Text style={styles.resendLink}>{sendingOtpResend ? 'Sending...' : 'Resend code'}</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity onPress={() => setShowOtpModal(false)} activeOpacity={1}>
+              <TouchableOpacity onPress={() => setShowOtpModal(false)} activeOpacity={0.8}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -340,14 +343,14 @@ export default function LoginScreen({ navigation }) {
       </Modal>
 
       {/* Forgot Password Modal */}
-      <Modal visible={showForgotModal} transparent animationType="none">
+      <Modal visible={showForgotModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Password Recovery</Text>
 
             {resetStep === 'email' && (
               <>
-                <Text style={styles.modalSubtitle}>Enter your registered email address.</Text>
+                <Text style={styles.modalSubtitle}>Enter your registered email address to receive a recovery code.</Text>
                 <TextInput
                   style={styles.resetInput}
                   placeholder="employee@hct.edu.ph"
@@ -358,8 +361,8 @@ export default function LoginScreen({ navigation }) {
                   keyboardType="email-address"
                 />
                 {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
-                <TouchableOpacity style={styles.modalButton} onPress={handleForgotPassword} disabled={resetLoading} activeOpacity={1}>
-                  <Text style={styles.modalButtonText}>{resetLoading ? 'Processing...' : 'Request Reset'}</Text>
+                <TouchableOpacity style={styles.modalButton} onPress={handleForgotPassword} disabled={resetLoading} activeOpacity={0.8}>
+                  <Text style={styles.modalButtonText}>{resetLoading ? 'Sending...' : 'Send Code'}</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -378,14 +381,14 @@ export default function LoginScreen({ navigation }) {
                   textAlign="center"
                 />
                 {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
-                <TouchableOpacity style={styles.modalButton} onPress={handleVerifyResetOtp} disabled={resetLoading} activeOpacity={1}>
+                <TouchableOpacity style={styles.modalButton} onPress={handleVerifyResetOtp} disabled={resetLoading} activeOpacity={0.8}>
                   <Text style={styles.modalButtonText}>{resetLoading ? 'Verifying...' : 'Verify Code'}</Text>
                 </TouchableOpacity>
                 <View style={styles.modalFooterActions}>
                   {resetTimer > 0 ? (
-                    <Text style={styles.timerText}>Resend code in {resetTimer}s</Text>
+                    <Text style={styles.timerText}>Resend in {resetTimer}s</Text>
                   ) : (
-                    <TouchableOpacity onPress={resendResetOtp} activeOpacity={1}>
+                    <TouchableOpacity onPress={resendResetOtp} activeOpacity={0.8}>
                       <Text style={styles.resendLink}>Resend code</Text>
                     </TouchableOpacity>
                   )}
@@ -395,7 +398,7 @@ export default function LoginScreen({ navigation }) {
 
             {resetStep === 'password' && (
               <>
-                <Text style={styles.modalSubtitle}>Create a new, secure password.</Text>
+                <Text style={styles.modalSubtitle}>Create a new secure password.</Text>
                 <TextInput
                   style={styles.resetInput}
                   secureTextEntry
@@ -413,13 +416,13 @@ export default function LoginScreen({ navigation }) {
                   onChangeText={setResetConfirmPassword}
                 />
                 {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
-                <TouchableOpacity style={styles.modalButton} onPress={handleResetPassword} disabled={resetLoading} activeOpacity={1}>
-                  <Text style={styles.modalButtonText}>{resetLoading ? 'Resetting...' : 'Save Password'}</Text>
+                <TouchableOpacity style={styles.modalButton} onPress={handleResetPassword} disabled={resetLoading} activeOpacity={0.8}>
+                  <Text style={styles.modalButtonText}>{resetLoading ? 'Updating...' : 'Update Password'}</Text>
                 </TouchableOpacity>
               </>
             )}
 
-            <TouchableOpacity onPress={closeForgotModal} style={{ marginTop: 20 }} activeOpacity={1}>
+            <TouchableOpacity onPress={closeForgotModal} style={{ marginTop: 16 }} activeOpacity={0.8}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -431,40 +434,43 @@ export default function LoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#0F172A' },
-  keyboardView: { flex: 1, justifyContent: 'center', paddingHorizontal: 20 },
-  header: { alignItems: 'center', marginBottom: 40 },
-  title: { fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
-  subtitle: { fontSize: 13, color: '#94A3B8', marginTop: 4, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: '600' },
+  keyboardView: { flex: 1, justifyContent: 'center' },
+  containerInner: { width: '100%', maxWidth: 380, alignSelf: 'center', paddingHorizontal: 20 },
   
-  card: { backgroundColor: '#FFFFFF', borderRadius: 12, paddingVertical: 30, paddingHorizontal: 20 },
-  welcome: { fontSize: 20, fontWeight: '700', color: '#111827', marginBottom: 24, textAlign: 'center' },
+  header: { alignItems: 'center', marginBottom: 30 },
+  title: { fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
+  subtitle: { fontSize: 12, color: '#94A3B8', marginTop: 4, letterSpacing: 1, textTransform: 'uppercase', fontWeight: '600' },
+  
+  card: { backgroundColor: '#FFFFFF', borderRadius: 20, paddingVertical: 28, paddingHorizontal: 22, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 8 },
+  welcome: { fontSize: 20, fontWeight: '700', color: '#0F172A', marginBottom: 4, textAlign: 'center' },
+  welcomeSub: { fontSize: 13, color: '#64748B', marginBottom: 24, textAlign: 'center', lineHeight: 18 },
   
   inputGroup: { marginBottom: 16 },
-  inputLabel: { fontSize: 12, fontWeight: '600', color: '#4B5563', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
-  inputWrapper: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, backgroundColor: '#FFFFFF' },
-  input: { height: 46, paddingHorizontal: 14, fontSize: 15, color: '#111827' },
+  inputLabel: { fontSize: 12, fontWeight: '600', color: '#334155', marginBottom: 6, letterSpacing: 0.3 },
+  inputWrapper: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, backgroundColor: '#F8FAFC' },
+  input: { height: 48, paddingHorizontal: 16, fontSize: 15, color: '#0F172A' },
   
-  forgotLink: { alignSelf: 'flex-end', marginTop: 4, marginBottom: 24 },
+  forgotLink: { alignSelf: 'flex-end', marginTop: 4, marginBottom: 20 },
   forgotText: { color: '#0D9488', fontSize: 13, fontWeight: '600' },
   
-  signInButton: { backgroundColor: '#0D9488', height: 46, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  signInButton: { backgroundColor: '#0D9488', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: '#0D9488', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
   signInText: { color: 'white', fontSize: 15, fontWeight: '700' },
-  buttonDisabled: { backgroundColor: '#9CA3AF' },
+  buttonDisabled: { backgroundColor: '#94A3B8', shadowOpacity: 0 },
   
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(17, 24, 39, 0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 24, width: '100%', maxWidth: 360, borderWidth: 1, borderColor: '#E5E7EB' },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 6, textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: '#6B7280', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.75)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 24, width: '100%', maxWidth: 340, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 15, elevation: 10 },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginBottom: 8, textAlign: 'center' },
+  modalSubtitle: { fontSize: 13, color: '#64748B', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
   
-  otpInput: { width: '100%', height: 50, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', letterSpacing: 8, backgroundColor: '#F9FAFB', marginBottom: 20, color: '#111827' },
-  resetInput: { width: '100%', height: 46, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, paddingHorizontal: 14, fontSize: 14, backgroundColor: '#F9FAFB', color: '#111827', marginBottom: 16 },
+  otpInput: { width: '100%', height: 52, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, fontSize: 24, fontWeight: '700', letterSpacing: 8, backgroundColor: '#F8FAFC', marginBottom: 20, color: '#0F172A' },
+  resetInput: { width: '100%', height: 48, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, fontSize: 14, backgroundColor: '#F8FAFC', color: '#0F172A', marginBottom: 16 },
   
-  modalButton: { backgroundColor: '#0D9488', width: '100%', height: 46, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  modalButton: { backgroundColor: '#0D9488', width: '100%', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   modalButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   
-  modalFooterActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, width: '100%' },
-  timerText: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
+  modalFooterActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, width: '100%' },
+  timerText: { fontSize: 13, color: '#64748B', fontWeight: '500' },
   resendLink: { color: '#0D9488', fontSize: 13, fontWeight: '600' },
-  cancelText: { color: '#6B7280', fontSize: 13, fontWeight: '600', textAlign: 'center' },
-  errorText: { color: '#DC2626', fontSize: 12, marginBottom: 12, textAlign: 'center', fontWeight: '500' },
+  cancelText: { color: '#64748B', fontSize: 13, fontWeight: '600', textAlign: 'center', width: '100%' },
+  errorText: { color: '#EF4444', fontSize: 12, marginBottom: 12, textAlign: 'center', fontWeight: '500' },
 });

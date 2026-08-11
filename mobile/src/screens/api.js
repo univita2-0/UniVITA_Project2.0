@@ -6,7 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Set this to true to use the ngrok tunnel
 const USE_REMOTE = true;
-const REMOTE_URL = "https://univitaproject20-production.up.railway.app/api"; 
+const REMOTE_URL = "https://fit-satirical-attire.ngrok-free.dev"; 
 
 export const API_URL = USE_REMOTE ? `${REMOTE_URL}/api` : `http://${LOCAL_IP}:5000/api`;
 
@@ -87,6 +87,27 @@ export const syncOfflineQueue = async () => {
   } catch (e) {
     console.error("Sync error:", e);
     return 0;
+  }
+};
+
+// Fetch correction history for the logged-in user
+export const fetchCorrectionHistory = async () => {
+  try {
+    const headers = await getAuthHeaders();
+    const employeeId = await AsyncStorage.getItem('employee_id');
+    
+    if (!employeeId) return [];
+
+    const response = await fetch(`${API_URL}/attendance/corrections/user/${employeeId}`, { 
+      method: 'GET',
+      headers 
+    });
+    
+    const data = await handleResponse(response);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("Fetch Correction History Error:", error.message);
+    return [];
   }
 };
 
