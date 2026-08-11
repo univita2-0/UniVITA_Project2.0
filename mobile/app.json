@@ -3,13 +3,11 @@
     "name": "UniVITA",
     "slug": "mobile",
     "version": "1.0.0",
-    
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
-    
     "splash": {
       "image": "./assets/images/hctlogo.png",
       "resizeMode": "contain",
@@ -83,7 +81,8 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-av"
+      "expo-av",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
