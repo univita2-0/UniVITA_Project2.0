@@ -3,11 +3,12 @@
     "name": "UniVITA",
     "slug": "mobile",
     "version": "1.0.0",
+    "newArchEnabled": true,
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    
     "splash": {
       "image": "./assets/images/hctlogo.png",
       "resizeMode": "contain",
