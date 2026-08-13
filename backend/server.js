@@ -645,14 +645,13 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
-  // Now expecting schedule_id from the mobile request body
   const { employee_id, latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
   const selfiePath = req.file ? `/uploads/selfies/${req.file.filename}` : null;
   const { date: todayDate, time: currentTime } = getPHTime();
 
   if (!employee_id || !latitude || !longitude || !schedule_id) {
-    return res.status(400).json({ success: false, message: 'Missing required fields (including schedule_id)' });
+    return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
 
   try {
@@ -690,27 +689,49 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     );
     if (existing.length === 0) return res.status(400).json({ success: false, message: 'No active clock-in found for this schedule' });
 
-    // 5. Shift Completion Check
+    // 5. Shift Completion & Payroll Protection Validation
     if (currentTime < scheduledEndTime) {
       return res.status(403).json({ success: false, message: `Shift incomplete. You must stay until ${scheduledEndTime} to clock out.` });
     }
 
-    const timeIn = existing[0].time_in;
-    const totalHours = (new Date(`1970-01-01T${currentTime}`) - new Date(`1970-01-01T${timeIn}`)) / 3600000;
+    let finalTimeOut = currentTime;
+    let isLateClockOut = false;
 
-    // 6. Update attendance record
+    // VALIDATION: Cap the recorded time to protect payroll if they clock out late
+    if (currentTime > scheduledEndTime) {
+      finalTimeOut = scheduledEndTime; // Cap at shift end time
+      isLateClockOut = true;
+    }
+
+    // 6. Update attendance record with the CAPPED time
     await db.promise().query(
-  `UPDATE attendance SET 
-    time_out = ?, 
-    clock_out_selfie = ?, 
-    clock_out_latitude = ?, 
-    clock_out_longitude = ?, 
-    location = ? 
-   WHERE id = ?`,
-  [currentTime, selfiePath, latitude, longitude, schedulePlace, existing[0].id]
-);
+      `UPDATE attendance SET 
+        time_out = ?, 
+        clock_out_selfie = ?, 
+        clock_out_latitude = ?, 
+        clock_out_longitude = ?, 
+        location = ? 
+       WHERE id = ?`,
+      [finalTimeOut, selfiePath, latitude, longitude, schedulePlace, existing[0].id]
+    );
 
-    // 7. Reset global tracking flag
+    // 7. Auto-generate Overtime Request if they clocked out late
+    if (isLateClockOut) {
+      const excessMinutes = (new Date(`1970-01-01T${currentTime}`) - new Date(`1970-01-01T${scheduledEndTime}`)) / 60000;
+      
+      // Only log overtime if it's significant (e.g., more than 10 minutes late)
+      if (excessMinutes > 10) {
+        const reason = "System Auto-Logged: Instructor clocked out late. Awaiting review.";
+        await db.promise().query(
+          `INSERT INTO overtime_requests 
+           (user_id, date, start_time, end_time, reason, scenario_type, attendance_id, status)
+           VALUES (?, ?, ?, ?, ?, 'after_shift', ?, 'pending')`,
+          [userId, todayDate, scheduledEndTime, currentTime, reason, existing[0].id]
+        );
+      }
+    }
+
+    // 8. Reset global tracking flag
     await db.promise().query(
       "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
       [employee_id]
@@ -719,7 +740,7 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     await broadcastInstructorStatus(employee_id);
     logAction(req.user.id, 'CLOCK_OUT', 'attendance', existing[0].id, req);
 
-    res.json({ success: true, message: `Clocked out successfully for ${schedulePlace}` });
+    res.json({ success: true, message: `Clocked out successfully. Excess time sent to Overtime Requests.` });
   } catch (err) {
     console.error("Clock-out error:", err);
     res.status(500).json({ success: false, error: err.message });
@@ -4257,6 +4278,50 @@ app.put('/api/leave-requests/batch-status', authenticateToken, (req, res) => {
     res.json({ success: true });
   });
 });
+
+
+// ============================================
+// SYSTEM MAINTENANCE: AUTO-SWEEP FORGOTTEN CLOCK-OUTS
+// ============================================
+setInterval(async () => {
+  try {
+    const { date: todayDate, time: currentTime } = getPHTime();
+    
+    // Find active attendances where the schedule ended more than 3 hours ago
+    const sql = `
+      SELECT a.id, a.user_id, s.end_time 
+      FROM attendance a
+      JOIN schedules s ON a.schedule_id = s.id
+      WHERE a.time_out IS NULL 
+        AND a.date <= ? 
+        AND TIMESTAMPDIFF(HOUR, STR_TO_DATE(CONCAT(a.date, ' ', s.end_time), '%Y-%m-%d %H:%i:%s'), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) >= 3
+    `;
+    
+    const [forgottenRecords] = await db.promise().query(sql, [todayDate]);
+    
+    for (const record of forgottenRecords) {
+      // Force clock out at the exact scheduled end time, flag for correction
+      await db.promise().query(
+        `UPDATE attendance SET 
+          time_out = ?, 
+          status = 'System Auto-Clock Out',
+          correction_requested = 1
+         WHERE id = ?`,
+        [record.end_time, record.id]
+      );
+
+      // Disable GPS tracking for the user to prevent battery drain
+      await db.promise().query(
+        "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
+        [record.user_id]
+      );
+      
+      console.log(`🧹 Auto-Sweep: Force closed forgotten shift for user ${record.user_id}`);
+    }
+  } catch (err) {
+    console.error("Auto-Sweep Error:", err);
+  }
+}, 1000 * 60 * 60); // Runs once every hour
 // ============================================
 // 12. WEBSOCKET SERVER
 // ============================================

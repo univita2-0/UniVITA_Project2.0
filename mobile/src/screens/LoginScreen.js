@@ -285,7 +285,7 @@ export default function LoginScreen({ navigation }) {
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.input}
-                  placeholder="employee@hct.edu.ph"
+                  placeholder="employee@gmail.com"
                   placeholderTextColor="#9CA3AF"
                   value={email}
                   onChangeText={setEmail}

@@ -637,7 +637,7 @@ const RequestsScreen = ({ navigation, route }) => {
                   <Text style={[styles.typeChipText, correctionType === 'clock_out' && styles.typeChipTextActive]}>Clock Out</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.typeChip, correctionType === 'early_out' && styles.typeChipActive]} onPress={() => setCorrectionType('early_out')}>
-                  <Text style={[styles.typeChipText, correctionType === 'early_out' && styles.typeChipTextActive]}>Early Departure</Text>
+                  <Text style={[styles.typeChipText, correctionType === 'early_out' && styles.typeChipTextActive]}>Early Out</Text>
                 </TouchableOpacity>
               </View>
 
