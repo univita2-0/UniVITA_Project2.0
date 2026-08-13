@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './Schedule.css';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -64,6 +64,12 @@ const Schedule = () => {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
+
+  // --- Bulk Upload States ---
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkData, setBulkData] = useState([]);
+  const [isUploadingBulk, setIsUploadingBulk] = useState(false);
+  const fileInputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     user_id: '', date: '', place: '', course: '',
@@ -325,6 +331,86 @@ const Schedule = () => {
     }
   };
 
+  // --- Bulk Upload Functions ---
+  const downloadTemplate = () => {
+    const headers = "employee_id,date,place,course,start_time,end_time\n";
+    const sampleRow = "E001,2026-09-01,HCT Academy Pasig,Web Development,08:00,12:00\n";
+    const blob = new Blob([headers + sampleRow], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "Bulk_Schedule_Template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const lines = text.split('\n').filter(line => line.trim() !== '');
+      
+      if (lines.length < 2) {
+        toast.error("File is empty or missing data rows.");
+        return;
+      }
+
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const expectedHeaders = ['employee_id', 'date', 'place', 'course', 'start_time', 'end_time'];
+      
+      const isValid = expectedHeaders.every(h => headers.includes(h));
+      if (!isValid) {
+        toast.error("Invalid CSV format. Please download and use the official template.");
+        return;
+      }
+
+      const schedules = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        if (values.length === headers.length) {
+          const rowObj = {};
+          headers.forEach((h, index) => { rowObj[h] = values[index]; });
+          schedules.push(rowObj);
+        }
+      }
+      setBulkData(schedules);
+    };
+    reader.readAsText(file);
+  };
+
+  const submitBulkUpload = async () => {
+    if (bulkData.length === 0) return toast.warning("No valid schedule data found in the file.");
+    
+    setIsUploadingBulk(true);
+    try {
+      const res = await axios.post(`${API_BASE}/schedules/bulk`, { schedules: bulkData }, getAuthHeaders());
+      
+      if (res.data.successCount > 0) {
+        toast.success(`Successfully assigned ${res.data.successCount} schedules.`);
+      }
+      
+      if (res.data.errors && res.data.errors.length > 0) {
+        // Show errors in a readable way (first 3 errors to prevent huge toasts)
+        const errorSummary = res.data.errors.slice(0, 3).join('\n');
+        toast.error(`Skipped ${res.data.errors.length} rows with errors:\n${errorSummary}`);
+      }
+
+      setShowBulkModal(false);
+      setBulkData([]);
+      if (fileInputRef.current) fileInputRef.current.value = ""; // Reset file input
+      await loadData(); // Refresh calendar
+
+    } catch (error) {
+      toast.error(error.response?.data?.error || "Error processing bulk upload.");
+    } finally {
+      setIsUploadingBulk(false);
+    }
+  };
+
   return (
     <div className="sch-container">
       <div className="sch-header">
@@ -344,6 +430,12 @@ const Schedule = () => {
                 <span>Requests</span>
                 {pendingCount > 0 && <span className="sch-badge-count">{pendingCount}</span>}
               </button>
+              
+              <button className="btn-sch-outline" onClick={() => setShowBulkModal(true)}>
+                <Calendar size={16} /> 
+                <span>Bulk Upload</span>
+              </button>
+
               <button className="btn-sch-primary" onClick={() => { resetForm(); setShowModal(true); }}>
                 <Plus size={16} /> 
                 <span>Add Schedule</span>
@@ -538,6 +630,70 @@ const Schedule = () => {
               </div>
             )}
           </form>
+        </FormalModal>
+      )}
+
+      {/* Bulk Upload Modal */}
+      {canEdit && (
+        <FormalModal
+          show={showBulkModal}
+          onClose={() => {
+            setShowBulkModal(false);
+            setBulkData([]);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+          }}
+          title="Bulk Assign Schedules"
+          footer={
+            <>
+              <button className="btn-sch-cancel" onClick={() => setShowBulkModal(false)}>Cancel</button>
+              <button 
+                className="btn-sch-primary" 
+                onClick={submitBulkUpload} 
+                disabled={bulkData.length === 0 || isUploadingBulk}
+              >
+                {isUploadingBulk ? 'Processing...' : `Upload ${bulkData.length} Records`}
+              </button>
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <p style={{ fontSize: '14px', color: '#4B5563' }}>
+              Upload a CSV file to assign multiple schedules at once. The file must strictly follow the required headers.
+            </p>
+            
+            <button 
+              className="btn-sch-outline" 
+              onClick={downloadTemplate}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              Download CSV Template
+            </button>
+
+            <div style={{ marginTop: '12px' }}>
+              <label style={{ fontSize: '14px', fontWeight: '600', color: '#111827', display: 'block', marginBottom: '8px' }}>
+                Upload Filled Template
+              </label>
+              <input 
+                type="file" 
+                accept=".csv" 
+                onChange={handleFileUpload} 
+                ref={fileInputRef}
+                style={{
+                  display: 'block', width: '100%', padding: '10px', 
+                  border: '1px dashed #D1D5DB', borderRadius: '8px',
+                  backgroundColor: '#F9FAFB'
+                }}
+              />
+            </div>
+            
+            {bulkData.length > 0 && (
+              <div style={{ padding: '12px', backgroundColor: '#ECFDF5', borderRadius: '8px', border: '1px solid #D1FAE5' }}>
+                <span style={{ color: '#065F46', fontSize: '14px', fontWeight: '500' }}>
+                  ✓ Successfully read {bulkData.length} schedules from file. Ready to process.
+                </span>
+              </div>
+            )}
+          </div>
         </FormalModal>
       )}
 

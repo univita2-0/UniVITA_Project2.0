@@ -1443,9 +1443,91 @@ app.delete('/api/schedules/:id', authenticateToken, async (req, res) => {
   });
 });
 
-// ============================================
-// SCHEDULE REQUESTS (with case-insensitive status)
-// ============================================
+
+// POST /api/schedules/bulk – Bulk Upload Schedules
+app.post('/api/schedules/bulk', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
+
+  const { schedules } = req.body;
+  if (!schedules || !Array.isArray(schedules) || schedules.length === 0) {
+    return res.status(400).json({ success: false, error: 'No schedule data provided.' });
+  }
+
+  const results = { successCount: 0, errors: [] };
+  const { date: today } = getPHTime();
+
+  // Helper function to check conflicts
+  const checkConflict = async (userId, date, start, end) => {
+    const [rows] = await db.promise().query(
+      "SELECT id FROM schedules WHERE user_id = ? AND date = ? AND NOT (end_time <= ? OR start_time >= ?)",
+      [userId, date, start, end]
+    );
+    return rows.length > 0;
+  };
+
+  // Process rows sequentially to ensure accurate validation
+  for (let i = 0; i < schedules.length; i++) {
+    const row = schedules[i];
+    const { employee_id, date, place, course, start_time, end_time } = row;
+    const rowNum = i + 2; // Assuming row 1 is the header
+
+    try {
+      if (!employee_id || !date || !place || !course || !start_time || !end_time) {
+        results.errors.push(`Row ${rowNum}: Missing required fields.`);
+        continue;
+      }
+
+      if (date < today) {
+        results.errors.push(`Row ${rowNum}: Cannot schedule for a past date (${date}).`);
+        continue;
+      }
+
+      if (start_time >= end_time) {
+        results.errors.push(`Row ${rowNum}: End time must be after start time.`);
+        continue;
+      }
+
+      // 1. Validate Instructor
+      const [userRows] = await db.promise().query(
+        "SELECT employee_id FROM users WHERE employee_id = ? AND LOWER(role) = 'instructor' AND status = 'active'",
+        [employee_id]
+      );
+      if (userRows.length === 0) {
+        results.errors.push(`Row ${rowNum}: Invalid or inactive Instructor ID (${employee_id}).`);
+        continue;
+      }
+
+      // 2. Validate Location
+      const [locRows] = await db.promise().query("SELECT id FROM school_locations WHERE name = ?", [place]);
+      if (locRows.length === 0) {
+        results.errors.push(`Row ${rowNum}: Unknown school location (${place}).`);
+        continue;
+      }
+
+      // 3. Check Time Conflicts
+      if (await checkConflict(employee_id, date, start_time, end_time)) {
+        results.errors.push(`Row ${rowNum}: Time conflict for ${employee_id} on ${date}.`);
+        continue;
+      }
+
+      // 4. Insert Schedule
+      await db.promise().query(
+        "INSERT INTO schedules (user_id, date, place, course, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
+        [employee_id, date, place, course, start_time, end_time]
+      );
+      results.successCount++;
+
+    } catch (err) {
+      results.errors.push(`Row ${rowNum}: Database error - ${err.message}`);
+    }
+  }
+
+  logAction(req.user.id, 'BULK_CREATE_SCHEDULES', 'schedule', null, req);
+  res.json({ success: true, ...results });
+});
+
 
 // ============================================
 // SCHEDULE REQUESTS (case‑insensitive)
