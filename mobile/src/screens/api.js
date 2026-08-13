@@ -6,7 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Set this to true to use the ngrok tunnel
 const USE_REMOTE = true;
-const REMOTE_URL = "https://fit-satirical-attire.ngrok-free.dev"; 
+const REMOTE_URL = "https://univitaproject20-production.up.railway.app/api"; 
 
 export const API_URL = USE_REMOTE ? `${REMOTE_URL}/api` : `http://${LOCAL_IP}:5000/api`;
 
