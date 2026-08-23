@@ -221,7 +221,7 @@ const LocationTracking = () => {
     <div className="lt-container">
       <div className="lt-header-row">
         <div>
-          <h2 className="lt-page-title">Location Tracking</h2>
+         
           <p className="lt-page-subtitle">Real-time geofencing and campus compliance monitoring.</p>
         </div>
         <div className="lt-header-actions">

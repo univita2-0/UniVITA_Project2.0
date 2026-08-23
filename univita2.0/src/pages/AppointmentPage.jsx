@@ -1,3 +1,4 @@
+// src/pages/AppointmentPage.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
@@ -20,10 +21,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
   // ---- Appointment booking state ----
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
+  const [showTimeModal, setShowTimeModal] = useState(false); // Time selection modal
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', date: '', time: '', message: '' });
   const [isMultipleVisitors, setIsMultipleVisitors] = useState(false);
   const [additionalVisitors, setAdditionalVisitors] = useState([]);
   const [visitReasons, setVisitReasons] = useState([]);
+  const [bookedSlots, setBookedSlots] = useState([]); // Track approved booked times per date
   const [toastMessage, setToastMessage] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -40,10 +43,17 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const [applicationForm, setApplicationForm] = useState({ full_name: '', email: '', phone: '', cover_letter: '', resume: null });
   const [submittingApplication, setSubmittingApplication] = useState(false);
 
-  // ---- Fetch Fixed Visit Reasons (public) ----
+  // ---- Fetch Fixed Visit Reasons & Approved Appointments (public) ----
   useEffect(() => {
     axios.get(`${API_BASE}/visit-reasons`)
       .then(res => setVisitReasons(res.data))
+      .catch(console.error);
+
+    axios.get(`${API_BASE}/appointments/history`)
+      .then(res => {
+        const approved = (res.data || []).filter(item => item.status === 'APPROVED');
+        setBookedSlots(approved);
+      })
       .catch(console.error);
   }, []);
 
@@ -68,7 +78,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setTimeout(() => {
       const element = document.getElementById(id);
       if (element) {
-        const headerOffset = 72; // Header height
+        const headerOffset = 80; 
         const elementPosition = element.getBoundingClientRect().top;
         const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
         window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
@@ -85,6 +95,24 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setAdditionalVisitors(updated);
   };
 
+  // Available Time Slots Grid (8:00 AM to 5:00 PM)
+  const availableTimeSlots = [
+    { label: '8:00 AM', value: '08:00' },
+    { label: '9:00 AM', value: '09:00' },
+    { label: '10:00 AM', value: '10:00' },
+    { label: '11:00 AM', value: '11:00' },
+    { label: '1:00 PM', value: '13:00' },
+    { label: '2:00 PM', value: '14:00' },
+    { label: '3:00 PM', value: '15:00' },
+    { label: '4:00 PM', value: '16:00' },
+    { label: '5:00 PM', value: '17:00' }
+  ];
+
+  const handleSelectTimeSlot = (timeVal) => {
+    setFormData({ ...formData, time: timeVal });
+    setShowTimeModal(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.email.trim() || !formData.date || !formData.time || !formData.message) {
@@ -95,6 +123,19 @@ const AppointmentPage = ({ onAdminLogin }) => {
     const hour = parseInt(formData.time.split(':')[0], 10);
     if (hour < 8 || hour > 17) {
       showToast('Please select a time within office hours (8:00 AM - 5:00 PM).', true);
+      return;
+    }
+
+    // Check if the selected date and time slot is already booked and approved
+    const isConflict = bookedSlots.some(slot => {
+      const slotDate = slot.visit_date ? slot.visit_date.split('T')[0] : '';
+      const slotTime = slot.visit_time ? slot.visit_time.substring(0, 5) : '';
+      const formTime = formData.time.substring(0, 5);
+      return slotDate === formData.date && slotTime === formTime;
+    });
+
+    if (isConflict) {
+      showToast('This date and time slot is already booked and unavailable. Please choose another time.', true);
       return;
     }
 
@@ -207,7 +248,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       ]
     },
     {
-      title: "AHA BLS & ACLS Training (Medical Professionals)",
+      title: "AHA BLS & ACLS Training",
       courses: [
         "AHA HeartCode Basic Life Support (BLS)",
         "AHA Traditional Advanced Cardiovascular Life Support (ACLS)",
@@ -215,7 +256,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       ]
     },
     {
-      title: "AHA Heartsaver | First Aid Training (Non-Medical)",
+      title: "AHA Heartsaver | First Aid Training",
       courses: [
         "AHA Heartsaver First Aid & CPR with AED (HS-CPRFA)",
         "AHA Heartsaver Basic Life Support (HS-BLS)",
@@ -244,7 +285,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         <div className="ap-header-container">
           <div className="ap-brand" onClick={() => setActivePage('home')}>
             <div className="ap-brand-icon-wrapper">
-              <Stethoscope size={24} />
+              <Stethoscope size={28} />
             </div>
             <span className="ap-brand-name">HCT Academy</span>
           </div>
@@ -254,9 +295,14 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <a className="ap-nav-link" onClick={() => scrollToSection('about')}>About</a>
             <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
             <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
-            <a className="ap-nav-link" onClick={() => setActivePage('careers')}>Careers</a>
-            <button className="btn-ap-nav-primary" onClick={() => setShowAppointmentModal(true)}>Book Visit</button>
-            <button className="btn-ap-nav-outline" onClick={onAdminLogin}>Admin Portal</button>
+            <a className="ap-nav-link" onClick={() => { setActivePage('careers'); setMobileMenuOpen(false); }}>Careers</a>
+            
+            <div className="ap-nav-actions">
+              <button className="btn-ap-nav-primary" onClick={() => { setShowAppointmentModal(true); setMobileMenuOpen(false); }}>Book Visit</button>
+              <button className="btn-ap-nav-icon" onClick={onAdminLogin} title="Admin Portal">
+                <User size={18} />
+              </button>
+            </div>
           </nav>
           <button className="ap-mobile-toggle" onClick={() => setMobileMenuOpen(true)}><Menu size={24} /></button>
         </div>
@@ -274,29 +320,29 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <span className="text-white">Shaping Tomorrow's</span><br />
                   <span className="text-accent">Healthcare Heroes</span>
                 </h1>
-                <p>Experience world-class simulation-based training, expert instructors, and a curriculum designed to produce compassionate, competent professionals.</p>
+                <p className="ap-hero-subtitle">Experience world-class simulation-based training, expert instructors, and a curriculum designed to produce compassionate, competent professionals.</p>
                 <div className="ap-hero-actions">
-                  <button className="btn-ap-primary" onClick={() => setShowAppointmentModal(true)}>
-                    <Calendar size={18} /> Schedule a Visit
+                  <button className="btn-ap-primary-large" onClick={() => setShowAppointmentModal(true)}>
+                    <Calendar size={20} /> Schedule a Visit
                   </button>
-                  <button className="btn-ap-secondary" onClick={() => scrollToSection('about')}>
-                    Learn More <ArrowRight size={16} />
+                  <button className="btn-ap-secondary-large" onClick={() => scrollToSection('about')}>
+                    Learn More <ArrowRight size={20} />
                   </button>
                 </div>
               </div>
               <div className="ap-hero-visual">
                 <div className="ap-floating-panel">
                   <div className="ap-floating-item float-1">
-                    <div className="ap-float-icon"><ShieldCheck size={20} /></div>
+                    <div className="ap-float-icon"><ShieldCheck size={24} /></div>
                     <div><h4>Safe Campus</h4><p>BLE-powered visitor monitoring</p></div>
                   </div>
                   <div className="ap-floating-item float-2">
-                    <div className="ap-float-icon"><Users size={20} /></div>
+                    <div className="ap-float-icon"><Users size={24} /></div>
                     <div><h4>Industry Experts</h4><p>Professional healthcare instructors</p></div>
                   </div>
                   <div className="ap-floating-item float-3">
-                    <div className="ap-float-icon"><GraduationCap size={20} /></div>
-                    <div><h4>Career Ready</h4><p>Simulation-based healthcare training</p></div>
+                    <div className="ap-float-icon"><GraduationCap size={24} /></div>
+                    <div><h4>Career Ready</h4><p>Simulation-based medical training</p></div>
                   </div>
                 </div>
               </div>
@@ -313,45 +359,45 @@ const AppointmentPage = ({ onAdminLogin }) => {
               </div>
               <div className="ap-features-grid">
                 <div className="ap-feature-card stagger-1">
-                  <div className="ap-feature-icon"><Award size={24} /></div>
+                  <div className="ap-feature-icon"><Award size={28} /></div>
                   <h4>Accredited Programs</h4>
-                  <p>CHED-recognized curricula aligned with global healthcare standards.</p>
+                  <p>CHED-recognized curricula meticulously aligned with global healthcare standards and best practices.</p>
                 </div>
                 <div className="ap-feature-card stagger-2">
-                  <div className="ap-feature-icon"><Users size={24} /></div>
+                  <div className="ap-feature-icon"><Users size={28} /></div>
                   <h4>Expert Instructors</h4>
-                  <p>Learn from practicing doctors and nurses with decades of experience.</p>
+                  <p>Learn directly from actively practicing doctors and nurses bringing decades of real-world experience.</p>
                 </div>
                 <div className="ap-feature-card stagger-3">
-                  <div className="ap-feature-icon"><Building2 size={24} /></div>
+                  <div className="ap-feature-icon"><Building2 size={28} /></div>
                   <h4>Modern Facilities</h4>
-                  <p>State-of-the-art simulation labs and smart classrooms.</p>
+                  <p>Immersive learning through state-of-the-art simulation labs, smart classrooms, and clinical equipment.</p>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* COURSES (Fixed background class) */}
+          {/* COURSES */}
           <section id="courses" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Our Programs</span>
-                <h2>Healthcare Courses</h2>
-                <p>We offer a wide range of accredited programs designed to prepare you for a successful career in the healthcare industry.</p>
+                <h2>Comprehensive Healthcare Courses</h2>
+                <p>We offer a wide range of accredited programs designed to prepare you for a successful and impactful career in the healthcare industry.</p>
               </div>
               
-              <div className="ap-course-wrapper">
+              <div className="ap-course-grid">
                 {courseCategories.map((category, idx) => (
-                  <div key={idx} className={`ap-course-group stagger-${(idx % 3) + 1}`}>
+                  <div key={idx} className={`ap-course-group stagger-${(idx % 4) + 1}`}>
                     <h3 className="ap-category-title">{category.title}</h3>
-                    <div className="ap-course-list">
+                    <ul className="ap-course-list">
                       {category.courses.map((course, cIdx) => (
-                        <div key={cIdx} className="ap-course-item">
-                          <BookOpen size={16} className="ap-course-icon" />
+                        <li key={cIdx} className="ap-course-item">
+                          <BookOpen size={18} className="ap-course-icon" />
                           <span>{course}</span>
-                        </div>
+                        </li>
                       ))}
-                    </div>
+                    </ul>
                   </div>
                 ))}
               </div>
@@ -363,8 +409,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Campus</span>
-                <h2>Our Facilities</h2>
-                <p>Explore our modern learning environments designed for healthcare education.</p>
+                <h2>World-Class Facilities</h2>
+                <p>Explore our modern learning environments specifically designed for hands-on healthcare education.</p>
               </div>
               <div className="ap-facilities-grid">
                 {facilities.map((fac, idx) => (
@@ -372,7 +418,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     <div className="ap-facility-img-wrapper">
                       <img src={fac.thumbnail} alt={fac.name} className="ap-facility-img" />
                       <div className="ap-facility-overlay">
-                        <Camera size={24} color="white" />
+                        <Camera size={28} color="white" />
                         <span>View Gallery</span>
                       </div>
                     </div>
@@ -390,29 +436,29 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Get In Touch</span>
-                <h2>Contact Us</h2>
-                <p>Have questions? Reach out to our team and we'll get back to you promptly.</p>
+                <h2>Contact Our Team</h2>
+                <p>Have questions about our programs or admissions? Reach out to our team and we'll get back to you promptly.</p>
               </div>
               <div className="ap-contact-grid">
                 <div className="ap-contact-card stagger-1">
-                  <div className="ap-contact-icon"><MapPin size={24} /></div>
+                  <div className="ap-contact-icon"><MapPin size={28} /></div>
                   <h3>Visit Our Campus</h3>
                   <p>123 Healthcare Avenue<br />Pasay City, Metro Manila</p>
                 </div>
                 <div className="ap-contact-card stagger-2">
-                  <div className="ap-contact-icon"><Phone size={24} /></div>
+                  <div className="ap-contact-icon"><Phone size={28} /></div>
                   <h3>Call Us</h3>
                   <p>+63 (2) 1234 5678<br />+63 912 345 6789</p>
                 </div>
                 <div className="ap-contact-card stagger-3">
-                  <div className="ap-contact-icon"><Mail size={24} /></div>
+                  <div className="ap-contact-icon"><Mail size={28} /></div>
                   <h3>Email Us</h3>
                   <p>admissions@hct.ph<br />info@hct.ph</p>
                 </div>
                 <div className="ap-contact-card stagger-4">
-                  <div className="ap-contact-icon"><Clock size={24} /></div>
+                  <div className="ap-contact-icon"><Clock size={28} /></div>
                   <h3>Office Hours</h3>
-                  <p>Mon - Fri: 8AM – 5PM<br />Saturday: 8AM – 12PM</p>
+                  <p>Mon - Fri: 8:00 AM – 5:00 PM<br />Saturday: 8:00 AM – 12:00 PM</p>
                 </div>
               </div>
             </div>
@@ -422,17 +468,17 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
       {/* CAREERS PAGE */}
       {activePage === 'careers' && (
-        <section id="careers" className="ap-section ap-bg-white min-h-screen pt-40">
+        <section id="careers" className="ap-section ap-bg-gray min-h-screen pt-40">
           <div className="ap-container">
             <div className="ap-section-header">
               <span className="ap-tag">Join Our Team</span>
               <h2>Careers at HCT Academy</h2>
-              <p>Explore open positions and become part of a leading healthcare education institution.</p>
+              <p>Explore open positions and become part of a leading, innovative healthcare education institution.</p>
             </div>
             <div className="ap-job-listings">
               {jobs.length === 0 ? (
                 <div className="ap-empty-state">
-                  <Briefcase size={48} className="ap-empty-icon" />
+                  <Briefcase size={56} className="ap-empty-icon" />
                   <p>No open positions at the moment.</p>
                   <span>Please check back later for new opportunities.</span>
                 </div>
@@ -441,17 +487,17 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   {jobs.map((job, idx) => (
                     <div key={job.id} className={`ap-job-card stagger-${(idx % 3) + 1}`}>
                       <div className="ap-job-header">
-                        <div className="ap-job-icon"><Briefcase size={20} /></div>
+                        <div className="ap-job-icon"><Briefcase size={24} /></div>
                         <h3>{job.title}</h3>
                       </div>
                       
                       <div className="ap-job-meta">
-                        <span><Building2 size={14} /> {job.department || 'General'}</span>
-                        <span><Clock size={14} /> {job.employment_type}</span>
+                        <span><Building2 size={16} /> {job.department || 'General'}</span>
+                        <span><Clock size={16} /> {job.employment_type}</span>
                       </div>
                       
                       <p className="ap-job-desc">
-                        {job.description?.length > 120 ? `${job.description.substring(0, 120)}...` : job.description}
+                        {job.description?.length > 140 ? `${job.description.substring(0, 140)}...` : job.description}
                       </p>
                       
                       <div className="ap-job-actions">
@@ -476,10 +522,10 @@ const AppointmentPage = ({ onAdminLogin }) => {
         <div className="ap-footer-grid">
           <div className="ap-footer-brand">
             <div className="ap-footer-logo">
-              <Stethoscope size={24} />
+              <Stethoscope size={32} />
               <h3>HCT Academy</h3>
             </div>
-            <p>Leading healthcare education provider committed to excellence and innovation.</p>
+            <p>Leading healthcare education provider committed to excellence, compassion, and continuous innovation.</p>
           </div>
           <div className="ap-footer-links">
             <h4>Quick Links</h4>
@@ -491,14 +537,14 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-footer-links">
             <h4>Portal & Info</h4>
             <a onClick={() => setShowAppointmentModal(true)}>Book Appointment</a>
-            <a onClick={() => setActivePage('careers')}>Careers</a>
+            <a onClick={() => { setActivePage('careers'); window.scrollTo(0,0); }}>Careers</a>
             <a href="#">Privacy Policy</a>
             <a href="#">Terms of Service</a>
           </div>
           <div className="ap-footer-contact">
-            <h4>Connect</h4>
-            <p><Mail size={14}/> info@hct.ph</p>
-            <p><Phone size={14}/> +63 (2) 1234 5678</p>
+            <h4>Connect With Us</h4>
+            <p><Mail size={16}/> info@hct.ph</p>
+            <p><Phone size={16}/> +63 (2) 1234 5678</p>
           </div>
         </div>
         <div className="ap-footer-bottom">
@@ -512,23 +558,23 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>Book a Campus Visit</h2>
-              <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)}><X size={20} /></button>
+              <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)}><X size={24} /></button>
             </div>
             <form className="ap-form" onSubmit={handleSubmit}>
               <div className="ap-form-row">
                 <div className="ap-form-group">
                   <label>Full Name <span className="text-danger">*</span></label>
-                  <input type="text" name="name" placeholder="Juan Dela Cruz" value={formData.name} onChange={handleChange} required />
+                  <input type="text" name="name" placeholder="e.g. Juan Dela Cruz" value={formData.name} onChange={handleChange} required />
                 </div>
                 <div className="ap-form-group">
                   <label>Email Address <span className="text-danger">*</span></label>
-                  <input type="email" name="email" placeholder="juan@example.com" value={formData.email} onChange={handleChange} required />
+                  <input type="email" name="email" placeholder="e.g. juan@example.com" value={formData.email} onChange={handleChange} required />
                 </div>
               </div>
               <div className="ap-form-row">
                 <div className="ap-form-group">
                   <label>Phone Number</label>
-                  <input type="tel" name="phone" placeholder="+63 912 345 6789" value={formData.phone} onChange={handleChange} />
+                  <input type="tel" name="phone" placeholder="e.g. +63 912 345 6789" value={formData.phone} onChange={handleChange} />
                 </div>
                 <div className="ap-form-group">
                   <label>Reason for Visit <span className="text-danger">*</span></label>
@@ -543,12 +589,36 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <div className="ap-form-row">
                 <div className="ap-form-group">
                   <label>Preferred Date <span className="text-danger">*</span></label>
-                  <input type="date" name="date" value={formData.date} onChange={handleChange} min={new Date().toISOString().split('T')[0]} required />
+                  <input 
+                    type="date" 
+                    name="date" 
+                    value={formData.date} 
+                    onChange={e => { handleChange(e); setFormData(prev => ({ ...prev, time: '' })); }} 
+                    min={new Date().toISOString().split('T')[0]} 
+                    required 
+                  />
                 </div>
                 <div className="ap-form-group">
                   <label>Preferred Time <span className="text-danger">*</span></label>
-                  <input type="time" name="time" value={formData.time} onChange={handleChange} required />
-                  <span className="ap-input-hint">Office hours: 8:00 AM - 5:00 PM</span>
+                  <div className="ap-time-input-wrapper">
+                    <input 
+                      type="text" 
+                      name="time" 
+                      placeholder="Click 'Choose Time'" 
+                      value={formData.time} 
+                      readOnly 
+                      required 
+                    />
+                    <button 
+                      type="button" 
+                      className="btn-ap-choose-time" 
+                      disabled={!formData.date}
+                      onClick={() => setShowTimeModal(true)}
+                    >
+                      Choose Time
+                    </button>
+                  </div>
+                  {!formData.date && <span className="ap-input-hint">Please select a date first.</span>}
                 </div>
               </div>
               
@@ -565,11 +635,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   {additionalVisitors.map((v, idx) => (
                     <div key={idx} className="ap-companion-row">
                       <input type="text" placeholder="Companion Full Name" value={v.name} onChange={e => updateVisitorField(idx, 'name', e.target.value)} required />
-                      <button type="button" onClick={() => removeVisitorRow(idx)} title="Remove Companion"><Trash2 size={16} /></button>
+                      <button type="button" onClick={() => removeVisitorRow(idx)} title="Remove Companion"><Trash2 size={18} /></button>
                     </div>
                   ))}
                   <button type="button" className="btn-ap-outline-sm" onClick={addVisitorRow}>
-                    <Plus size={14} /> Add Companion
+                    <Plus size={16} /> Add Companion
                   </button>
                 </div>
               )}
@@ -585,6 +655,48 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
+      {/* CHOOSE TIME SELECTOR MODAL */}
+      {showTimeModal && (
+        <div className="ap-modal-overlay" onClick={() => setShowTimeModal(false)}>
+          <div className="ap-modal-content ap-time-picker-modal" onClick={e => e.stopPropagation()}>
+            <div className="ap-modal-header">
+              <h2>Select Available Time Slot</h2>
+              <button className="ap-btn-close" onClick={() => setShowTimeModal(false)}><X size={24} /></button>
+            </div>
+            <p className="ap-time-modal-subtitle">Date selected: <strong>{formData.date}</strong></p>
+            
+            <div className="ap-time-slots-grid">
+              {availableTimeSlots.map((slot) => {
+                // Check if this slot is already booked and approved on this date
+                const isBooked = bookedSlots.some(s => {
+                  const sDate = s.visit_date ? s.visit_date.split('T')[0] : '';
+                  const sTime = s.visit_time ? s.visit_time.substring(0, 5) : '';
+                  return sDate === formData.date && sTime === slot.value;
+                });
+
+                return (
+                  <button
+                    key={slot.value}
+                    type="button"
+                    className={`ap-time-slot-box ${isBooked ? 'booked' : ''}`}
+                    disabled={isBooked}
+                    onClick={() => handleSelectTimeSlot(slot.value)}
+                  >
+                    <Clock size={16} />
+                    <span>{slot.label}</span>
+                    <span className="ap-slot-status">{isBooked ? 'Unavailable' : 'Available'}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="ap-modal-footer" style={{ marginTop: '2rem' }}>
+              <button type="button" className="btn-ap-cancel" onClick={() => setShowTimeModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* JOB DETAILS MODAL */}
       {showJobDetailsModal && selectedJobDetails && (
         <div className="ap-modal-overlay" onClick={() => setShowJobDetailsModal(false)}>
@@ -593,29 +705,29 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <div className="ap-job-header-text">
                 <h2>{selectedJobDetails.title}</h2>
                 <div className="ap-job-meta-light">
-                  <span><Building2 size={14}/> {selectedJobDetails.department || 'General'}</span>
-                  <span><Clock size={14}/> {selectedJobDetails.employment_type}</span>
+                  <span><Building2 size={16}/> {selectedJobDetails.department || 'General'}</span>
+                  <span><Clock size={16}/> {selectedJobDetails.employment_type}</span>
                 </div>
               </div>
-              <button className="ap-btn-close-light" onClick={() => setShowJobDetailsModal(false)}><X size={24} /></button>
+              <button className="ap-btn-close-light" onClick={() => setShowJobDetailsModal(false)}><X size={28} /></button>
             </div>
 
             <div className="ap-job-modal-body">
               <div className="ap-job-stats-grid">
                 <div className="ap-stat-box">
                   <span className="ap-stat-label">Location Type</span>
-                  <span className="ap-stat-val"><MapPin size={16} /> {selectedJobDetails.location_type || 'On-site'}</span>
+                  <span className="ap-stat-val"><MapPin size={18} /> {selectedJobDetails.location_type || 'On-site'}</span>
                 </div>
                 {selectedJobDetails.location && (
                   <div className="ap-stat-box">
                     <span className="ap-stat-label">Specific Location</span>
-                    <span className="ap-stat-val"><Building2 size={16} /> {selectedJobDetails.location}</span>
+                    <span className="ap-stat-val"><Building2 size={18} /> {selectedJobDetails.location}</span>
                   </div>
                 )}
                 <div className="ap-stat-box">
                   <span className="ap-stat-label">Monthly Salary</span>
                   <span className="ap-stat-val">
-                    <DollarSign size={16} /> 
+                    <DollarSign size={18} /> 
                     {(selectedJobDetails.salary_min || selectedJobDetails.salary_max) ? (
                       <>
                         {selectedJobDetails.salary_min ? `₱${Number(selectedJobDetails.salary_min).toLocaleString()}` : ''}
@@ -643,7 +755,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <div className="ap-job-modal-footer">
               <button type="button" className="btn-ap-cancel" onClick={() => setShowJobDetailsModal(false)}>Close</button>
               <button type="button" className="btn-ap-primary" onClick={() => { setShowJobDetailsModal(false); openApplyModal(selectedJobDetails); }}>
-                <FileText size={16} /> Apply Now
+                <FileText size={18} /> Apply Now
               </button>
             </div>
           </div>
@@ -656,7 +768,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>Apply: {selectedJob.title}</h2>
-              <button className="ap-btn-close" onClick={() => setShowApplyModal(false)}><X size={20} /></button>
+              <button className="ap-btn-close" onClick={() => setShowApplyModal(false)}><X size={24} /></button>
             </div>
             <form onSubmit={submitApplication} className="ap-form">
               
@@ -678,27 +790,26 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
               <div className="ap-form-group">
                 <label>Cover Letter (Optional)</label>
-                <textarea name="cover_letter" rows="4" value={applicationForm.cover_letter} onChange={handleApplicationChange} placeholder="Tell us why you're a great fit..." />
+                <textarea name="cover_letter" rows="5" value={applicationForm.cover_letter} onChange={handleApplicationChange} placeholder="Tell us why you're a great fit for this role..." />
               </div>
 
               <div className="ap-form-group">
                 <label>Resume / CV <span className="text-danger">*</span></label>
                 <div className="ap-file-upload-box">
                   <input type="file" id="resume-upload" accept=".pdf,.doc,.docx" onChange={handleResumeChange} required className="ap-file-input-hidden" />
-                  <div className="ap-file-upload-content">
+                  <label htmlFor="resume-upload" className="ap-file-upload-label">
                     <div className="ap-file-icon">
-                      <Upload size={24} />
+                      <Upload size={32} />
                     </div>
                     <div className="ap-file-text">
                       {applicationForm.resume ? (
-                        <span className="ap-file-name-success"><Check size={16}/> {applicationForm.resume.name}</span>
+                        <span className="ap-file-name-success"><Check size={18}/> {applicationForm.resume.name}</span>
                       ) : (
-                        <span><label htmlFor="resume-upload" className="ap-file-browse-link">Click to upload</label> or drag and drop</span>
+                        <span><span className="text-accent font-semibold">Click to upload</span> or drag and drop</span>
                       )}
                     </div>
                     <span className="ap-input-hint">Max size: 5MB. Formats: PDF, DOC, DOCX.</span>
-                  </div>
-                  <label htmlFor="resume-upload" className="ap-file-upload-overlay"></label>
+                  </label>
                 </div>
               </div>
 
@@ -719,7 +830,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-gallery-modal" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>{selectedFacility.name} Gallery</h2>
-              <button className="ap-btn-close" onClick={() => setSelectedFacility(null)}><X size={24} /></button>
+              <button className="ap-btn-close" onClick={() => setSelectedFacility(null)}><X size={28} /></button>
             </div>
             <div className="ap-gallery-grid">
               {selectedFacility.images.map((img, idx) => (
@@ -735,7 +846,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       {/* TOAST NOTIFICATION */}
       {toastMessage && (
         <div className={`ap-toast fade-in-up ${toastMessage.isError ? 'error' : 'success'}`}>
-          {toastMessage.isError ? <AlertCircle size={18} /> : <Check size={18} />}
+          {toastMessage.isError ? <AlertCircle size={20} /> : <Check size={20} />}
           <span>{toastMessage.message}</span>
         </div>
       )}

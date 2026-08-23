@@ -231,7 +231,7 @@ const JobPostings = () => {
       {/* Header */}
       <div className="jp-header">
         <div className="jp-title-area">
-          <h2 className="jp-title">Recruitment & Job Postings</h2>
+          
           <p className="jp-subtitle">Manage open requisitions and track candidate applications.</p>
         </div>
         <div className="jp-header-actions">

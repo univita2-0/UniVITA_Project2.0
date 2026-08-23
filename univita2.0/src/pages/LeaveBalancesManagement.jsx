@@ -1,8 +1,7 @@
-// src/pages/LeaveBalancesManagement.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { RefreshCw, Edit2, Save, X, AlertCircle, Search } from 'lucide-react';
+import { RefreshCw, Edit3, Save, X, AlertCircle, Search, ChevronLeft, ChevronRight, UserCog } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 import './LeaveBalancesManagement.css';
@@ -15,8 +14,12 @@ const LeaveBalancesManagement = () => {
   const [employees, setEmployees] = useState([]);
   const [leaveTypes, setLeaveTypes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Modal state
   const [showBalanceModal, setShowBalanceModal] = useState(false);
@@ -27,6 +30,9 @@ const LeaveBalancesManagement = () => {
   const [saving, setSaving] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const modalYearRef = useRef(selectedYear);
+
+  // Reset page on search or year change
+  useEffect(() => { setCurrentPage(1); }, [searchQuery, selectedYear]);
 
   const loadEmployees = useCallback(async () => {
     setLoading(true);
@@ -135,80 +141,116 @@ const LeaveBalancesManagement = () => {
     setTempValue('');
   };
 
+  // Client-side filtering
   const filteredEmployees = employees.filter(emp =>
-    emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    emp.employee_id.toLowerCase().includes(searchTerm.toLowerCase())
+    !searchQuery || 
+    emp.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    emp.employee_id.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage);
+  const currentEmployees = filteredEmployees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
-    <div className="lbm-container">
-      <div className="lbm-header">
-        <div>
-          <h2 className="lbm-title">Leave Balances</h2>
-          <p className="lbm-subtitle">Monitor and manually adjust employee leave quotas.</p>
+    <div className="expert-container">
+      {/* Header Section */}
+      <div className="expert-header">
+        <div className="expert-title-group">
+          
+          <div>
+            
+            <p className="expert-subtitle">Monitor and manually adjust employee leave quotas.</p>
+          </div>
         </div>
         <div className="lbm-controls">
           <div className="lbm-year-selector">
-            <label>Year</label>
+            <label>Fiscal Year</label>
             <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))}>
               {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
           </div>
-          <button onClick={loadEmployees} className="btn-refresh" title="Refresh Data">
-            <RefreshCw size={16} />
-            <span>Refresh</span>
+          <button className="expert-btn-secondary" onClick={loadEmployees} disabled={loading}>
+            <RefreshCw size={16} className={loading ? "spin-icon" : ""} /> Refresh
           </button>
         </div>
       </div>
 
-      <div className="lbm-card">
-        <div className="lbm-search-row">
-          <div className="lbm-search">
-            <Search size={16} className="search-icon" />
-            <input
-              type="text"
-              placeholder="Search by employee name or ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+      {/* Search Bar */}
+      <div className="expert-search-card" style={{ padding: '12px 20px' }}>
+        <div className="expert-search-row">
+          <div className="expert-search-input-group" style={{ maxWidth: '500px' }}>
+            <Search size={18} className="text-muted" />
+            <input 
+              type="text" 
+              placeholder="Search by employee name or ID..." 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)} 
+              className="expert-clean-input" 
             />
+            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+          </div>
+          <div className="expert-stats-badge">
+            Active Instructors: <strong>{employees.length}</strong>
           </div>
         </div>
+      </div>
 
+      {/* Main Table Card */}
+      <div className="expert-card">
         {loading ? (
-          <div className="loading-state">Loading employees...</div>
+          <div className="expert-loading">Loading employees...</div>
+        ) : filteredEmployees.length === 0 ? (
+          <div className="expert-empty">
+            <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
+            <p>No active employees found.</p>
+            {searchQuery && <span>Try adjusting your search criteria.</span>}
+          </div>
         ) : (
-          <div className="lbm-table-wrapper">
-            <table className="lbm-table">
-              <thead>
-                <tr>
-                  <th>Employee ID</th>
-                  <th>Full Name</th>
-                  <th>Email</th>
-                  <th className="text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEmployees.length === 0 ? (
-                  <tr><td colSpan="4" className="empty-row">No active instructors found matching your search.</td></tr>
-                ) : (
-                  filteredEmployees.map(emp => (
+          <>
+            <div className="expert-table-wrapper">
+              <table className="expert-table">
+                <thead>
+                  <tr>
+                    <th>Employee ID</th>
+                    <th>Full Name</th>
+                    <th>Email Address</th>
+                    <th className="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentEmployees.map(emp => (
                     <tr key={emp.id}>
-                      <td className="emp-id">{emp.employee_id}</td>
-                      <td className="emp-name">{emp.full_name}</td>
-                      <td className="emp-email">{emp.email}</td>
-                      <td className="text-center">
-                        <button className="btn-view-balances" onClick={() => openBalanceModal(emp)}>
-                          View Balances
-                        </button>
+                      <td className="font-mono text-muted">{emp.employee_id}</td>
+                      <td><span className="font-semibold text-dark">{emp.full_name}</span></td>
+                      <td className="text-muted">{emp.email}</td>
+                      <td>
+                        <div className="expert-action-group right">
+                          <button className="lbm-btn-view" onClick={() => openBalanceModal(emp)}>
+                            View Balances
+                          </button>
+                        </div>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="expert-pagination">
+                <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredEmployees.length)} of {filteredEmployees.length} entries</span>
+                <div className="expert-page-controls">
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
+                  <span className="expert-page-current">{currentPage} / {totalPages}</span>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -223,65 +265,72 @@ const LeaveBalancesManagement = () => {
         title={`Leave Balances: ${selectedEmployee?.full_name}`}
         wide
         footer={
-          <button className="btn-modal-cancel" onClick={() => setShowBalanceModal(false)}>
+          <button className="expert-btn-secondary" onClick={() => setShowBalanceModal(false)}>
             Close Window
           </button>
         }
       >
         {modalLoading ? (
-          <div className="loading-state">Loading balances...</div>
+          <div className="expert-loading">Loading balances...</div>
         ) : (
           <>
-            <div className="lbm-modal-info">
-              Displaying balances for the year <strong>{selectedYear}</strong>. You may manually adjust remaining days if necessary.
+            <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '8px', border: '1px solid #E2E8F0', marginBottom: '16px' }}>
+              <p style={{ fontSize: '0.9rem', color: '#334155', margin: 0 }}>
+                Displaying balances for the year <strong>{selectedYear}</strong>. You may manually adjust remaining days if necessary.
+              </p>
             </div>
             
-            <div className="lbm-balances-table-wrapper">
-              <table className="lbm-balances-table">
+            <div className="expert-table-wrapper" style={{ marginBottom: '16px', border: '1px solid #E2E8F0' }}>
+              <table className="expert-table">
                 <thead>
                   <tr>
                     <th>Leave Type</th>
-                    <th>Annual Quota</th>
-                    <th>Remaining Days</th>
+                    <th className="text-center">Annual Quota</th>
+                    <th className="text-center">Remaining Days</th>
                     <th className="text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {balances.length === 0 ? (
-                    <tr><td colSpan="4" className="empty-row">No leave types configured in the system.</td></tr>
+                    <tr>
+                      <td colSpan="4" className="expert-empty" style={{ padding: '2rem' }}>No leave types configured in the system.</td>
+                    </tr>
                   ) : (
                     balances.map(balance => (
                       <tr key={balance.leave_type_id}>
-                        <td className="font-medium text-gray-900">{balance.leave_type}</td>
-                        <td className="text-gray-500">{balance.annual_quota} days</td>
-                        <td>
+                        <td className="font-medium text-dark">{balance.leave_type}</td>
+                        <td className="text-center text-muted">{balance.annual_quota} days</td>
+                        <td className="text-center">
                           {editingBalance === balance.leave_type_id ? (
                             <input
                               type="number"
                               step="0.5"
                               value={tempValue}
                               onChange={(e) => setTempValue(e.target.value)}
-                              className="balance-input"
+                              className="expert-clean-input border text-center"
+                              style={{ width: '80px', padding: '0.4rem', height: '32px' }}
                               autoFocus
                             />
                           ) : (
-                            <span className="font-semibold text-gray-900">{balance.remaining_days} days</span>
+                            <span className="expert-chip success">{balance.remaining_days} days</span>
                           )}
                         </td>
-                        <td className="text-right">
+                        <td>
                           {editingBalance === balance.leave_type_id ? (
-                            <div className="balance-actions">
-                              <button onClick={cancelEdit} className="btn-cancel-edit" title="Cancel">
-                                <X size={14} />
+                            <div className="expert-action-group right">
+                              <button onClick={cancelEdit} className="expert-btn-icon" title="Cancel">
+                                <X size={16} />
                               </button>
-                              <button onClick={() => handleSaveBalance(balance)} disabled={saving} className="btn-save" title="Save">
-                                <Save size={14} />
+                              <button onClick={() => handleSaveBalance(balance)} disabled={saving} className="expert-btn-icon success" title="Save">
+                                <Save size={16} />
                               </button>
                             </div>
                           ) : (
-                            <button onClick={() => handleEditBalance(balance)} className="btn-edit-balance">
-                              <Edit2 size={14} /> Edit
-                            </button>
+                            <div className="expert-action-group right">
+                              <button onClick={() => handleEditBalance(balance)} className="expert-btn-icon" title="Edit">
+                                <Edit3 size={16} color="#0D9488" />
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -291,9 +340,9 @@ const LeaveBalancesManagement = () => {
               </table>
             </div>
 
-            <div className="lbm-note">
-              <AlertCircle size={14} /> 
-              <span>Approved leave requests will automatically deduct 1 day from the corresponding remaining balance.</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FEF2F2', padding: '12px 16px', borderRadius: '8px', border: '1px solid #FECACA', color: '#DC2626' }}>
+              <AlertCircle size={16} /> 
+              <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>Approved leave requests will automatically deduct 1 day from the corresponding remaining balance.</span>
             </div>
           </>
         )}

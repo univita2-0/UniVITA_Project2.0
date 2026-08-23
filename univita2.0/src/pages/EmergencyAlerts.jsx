@@ -156,7 +156,7 @@ const EmergencyAlerts = () => {
     <div className="ea-container">
       <div className="ea-header">
         <div>
-          <h2 className="ea-title">Emergency Alerts</h2>
+         
           <p className="ea-subtitle">Broadcast critical information across the organization.</p>
         </div>
         <button className="btn-view-history" onClick={openHistoryModal}>
@@ -168,7 +168,7 @@ const EmergencyAlerts = () => {
       {/* New alert form */}
       <div className="ea-card">
         <div className="ea-card-header">
-          <ShieldAlert size={20} className="ea-card-icon" />
+          
           <h3>Create New Alert</h3>
         </div>
         

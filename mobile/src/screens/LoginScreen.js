@@ -272,8 +272,7 @@ export default function LoginScreen({ navigation }) {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
         <View style={styles.containerInner}>
           <View style={styles.header}>
-            <Text style={styles.title}>UniVITA</Text>
-            <Text style={styles.subtitle}>Secure Access Portal</Text>
+           
           </View>
 
           <View style={styles.card}>

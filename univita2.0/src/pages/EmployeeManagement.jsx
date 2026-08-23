@@ -466,7 +466,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     <div className="em-container">
       <div className="em-header">
         <div>
-          <h2>Employee Management</h2>
+         
           <p>Oversee directory, manage system roles, and configure employee profiles.</p>
         </div>
         <button className="btn-add" onClick={() => { generateNewEmployeeId(); setShowAddModal(true); }}>

@@ -34,7 +34,6 @@ const SharedCalendar = () => {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showHolidaysModal, setShowHolidaysModal] = useState(false);
   
-  // NEW: State for the specific date events modal
   const [showDateModal, setShowDateModal] = useState(false);
   const [selectedDateStr, setSelectedDateStr] = useState(null);
 
@@ -106,17 +105,32 @@ const SharedCalendar = () => {
 
   const handleSaveEvent = async () => {
     if (isReadOnly) return;
-    if (!newEvent.title || !newEvent.date) {
-      toast.warning("Required fields missing");
+    
+    // STRICT VALIDATION FOR ALL REQUIRED FIELDS
+    if (
+      !newEvent.title.trim() || 
+      !newEvent.date || 
+      !newEvent.place.trim() || 
+      !newEvent.start_time || 
+      !newEvent.end_time || 
+      !newEvent.type
+    ) {
+      toast.warning("Please fill in all required fields (Title, Date, Location, Start Time, End Time, Type).");
       return;
     }
+
+    if (newEvent.start_time >= newEvent.end_time) {
+      toast.warning("End time must be after the start time.");
+      return;
+    }
+
     try {
       if (isEditing) {
         await axios.put(`${API_BASE}/events/${currentEventId}`, newEvent, getAuthHeaders());
       } else {
         await axios.post(`${API_BASE}/events`, newEvent, getAuthHeaders());
       }
-      toast.success(isEditing ? 'Event updated' : 'Event created');
+      toast.success(isEditing ? 'Event updated successfully' : 'Event created successfully');
       setShowModal(false);
       resetForm();
       loadAllData();
@@ -136,7 +150,6 @@ const SharedCalendar = () => {
       await axios.delete(`${API_BASE}/events/${id}`, getAuthHeaders());
       toast.success('Event deleted');
       
-      // If deleting from within the specific date modal, refresh or close it
       if (showDateModal && selectedDateStr) {
         const remainingForDate = events.filter(e => e.date === selectedDateStr && e.id !== id);
         if (remainingForDate.length === 0) setShowDateModal(false);
@@ -171,7 +184,7 @@ const SharedCalendar = () => {
   const handleDayClick = (day, dateStr, dayEvents) => {
     setActiveDate(day);
     if (dayEvents.length > 0) {
-      setHoveredDateStr(null); // Hide the tooltip immediately
+      setHoveredDateStr(null); 
       setSelectedDateStr(dateStr);
       setShowDateModal(true);
     }
@@ -182,17 +195,32 @@ const SharedCalendar = () => {
   const monthName = currentDate.toLocaleString('default', { month: 'long' });
   const days = Array.from({ length: new Date(year, month + 1, 0).getDate() }, (_, i) => i + 1);
   const startDay = new Date(year, month, 1).getDay();
-  // Adjust so Monday is the first day of the week (if preferred), here using Sunday as 0
   const emptySlots = Array(startDay === 0 ? 6 : startDay - 1).fill(null);
-  const todayDateStr = new Date().toISOString().split('T')[0];
 
-  const upcomingData = events.filter(e => e.date >= todayDateStr);
-  const passedData = events.filter(e => e.date < todayDateStr).sort((a, b) => new Date(b.date) - new Date(a.date));
+  // --- IMPROVED DATE & TIME FILTERING LOGIC ---
+  const now = new Date();
+  const currentTodayStr = now.toISOString().split('T')[0];
+  const currentTimeStr = now.toTimeString().substring(0, 5);
+
+  const passedData = events.filter(e => {
+    // If the event is from a past date OR it's today but the end time has already passed
+    if (e.date < currentTodayStr) return true;
+    if (e.date === currentTodayStr && e.end_time && e.end_time < currentTimeStr) return true;
+    return false;
+  }).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const upcomingData = events.filter(e => {
+    // If the event is in the future OR it's today and the end time hasn't passed yet
+    if (e.date > currentTodayStr) return true;
+    if (e.date === currentTodayStr && (!e.end_time || e.end_time >= currentTimeStr)) return true;
+    return false;
+  });
 
   const filteredHistory = passedData.filter(item => {
+    if (!item.date) return false;
     const [itemYear, itemMonth] = item.date.split('-');
     const matchMonth = filterMonth === '' || itemMonth === filterMonth;
-    const matchYear = filterYear === '' || itemYear === filterYear;
+    const matchYear = filterYear === '' || itemYear === String(filterYear);
     return matchMonth && matchYear;
   });
 
@@ -230,22 +258,34 @@ const SharedCalendar = () => {
   const renderEventItem = (event) => {
     const legend = legendItems.find(l => l.label === event.type);
     const isLeave = leaveCategories.includes(event.type);
+    
+    // Determine if the event is in the past to apply completed styling
+    let isPast = false;
+    if (event.date < currentTodayStr) isPast = true;
+    else if (event.date === currentTodayStr && event.end_time && event.end_time < currentTimeStr) isPast = true;
+
     return (
-      <div className={`upcoming-event-item ${isLeave ? 'leave-request-item' : ''}`} key={event.id}>
+      <div className={`upcoming-event-item ${isLeave ? 'leave-request-item' : ''} ${isPast ? 'past-event' : ''}`} key={event.id}>
         <div className="event-header">
-          <span className="event-title">{event.title}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span className="event-title" style={{ color: isPast ? '#6B7280' : '#111827' }}>{event.title}</span>
+            {isPast && <span className="event-status-tag completed">Completed</span>}
+          </div>
           {!isReadOnly && !isLeave && !String(event.id).startsWith('ph-') && (
             <div className="event-actions">
-              <button className="icon-action-btn" onClick={() => handleEditClick(event)} title="Edit">
-                <Edit3 size={14} />
-              </button>
+              {/* Hide the Edit button if the event is completed to prevent modifications */}
+              {!isPast && (
+                <button className="icon-action-btn" onClick={() => handleEditClick(event)} title="Edit">
+                  <Edit3 size={14} />
+                </button>
+              )}
               <button className="icon-action-btn danger" onClick={() => handleDeleteEvent(event.id)} title="Delete">
                 <Trash2 size={14} />
               </button>
             </div>
           )}
         </div>
-        <div className="event-details-grid">
+        <div className="event-details-grid" style={{ opacity: isPast ? 0.7 : 1 }}>
           <div className="event-detail"><CalIcon size={14} /> <span>{event.date}</span></div>
           {event.start_time && (
             <div className="event-detail"><Clock size={14} /> <span>{event.start_time.substring(0,5)} - {event.end_time ? event.end_time.substring(0,5) : '?'}</span></div>
@@ -254,12 +294,12 @@ const SharedCalendar = () => {
             <div className="event-detail"><MapPin size={14} /> <span>{event.place}</span></div>
           )}
         </div>
-        <div className="event-meta-footer">
+        <div className="event-meta-footer" style={{ opacity: isPast ? 0.7 : 1 }}>
           <span className={`event-type-tag ${legend?.className || 'school-event'}`}>{event.type}</span>
           {event.description && <span className="event-description-text">{event.description}</span>}
         </div>
         
-        {isLeave && event.status === 'Pending' && !isReadOnly && (
+        {isLeave && event.status === 'Pending' && !isReadOnly && !isPast && (
           <div className="leave-action-btns">
             <button className="btn-approve" onClick={() => handleUpdateStatus(event.id, 'Approved')}>
               <Check size={14} /> Approve
@@ -298,7 +338,7 @@ const SharedCalendar = () => {
             {emptySlots.map((_, i) => <div key={`e-${i}`} className="cal-date empty"></div>)}
             {days.map((day) => {
               const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const isToday = dateStr === todayDateStr;
+              const isToday = dateStr === currentTodayStr;
               const dayEvents = events.filter(e => e.date === dateStr);
               return (
                 <div
@@ -409,36 +449,36 @@ const SharedCalendar = () => {
           }
         >
           <div className="modal-form-group">
-            <label className="modal-label">Event Title *</label>
+            <label className="modal-label">Event Title <span className="text-red-500">*</span></label>
             <input type="text" className="modal-input" placeholder="e.g. Department Meeting" value={newEvent.title}
               onChange={(e) => setNewEvent({...newEvent, title: e.target.value})} />
           </div>
           <div className="form-row-grid">
             <div className="modal-form-group">
-              <label className="modal-label">Date *</label>
-              <input type="date" className="modal-input" min={todayDateStr} value={newEvent.date}
+              <label className="modal-label">Date <span className="text-red-500">*</span></label>
+              <input type="date" className="modal-input" min={currentTodayStr} value={newEvent.date}
                 onChange={(e) => setNewEvent({...newEvent, date: e.target.value})} />
             </div>
             <div className="modal-form-group">
-              <label className="modal-label">Location</label>
+              <label className="modal-label">Location <span className="text-red-500">*</span></label>
               <input type="text" className="modal-input" placeholder="e.g. Room 101" value={newEvent.place}
                 onChange={(e) => setNewEvent({...newEvent, place: e.target.value})} />
             </div>
           </div>
           <div className="form-row-grid">
             <div className="modal-form-group">
-              <label className="modal-label">Start Time</label>
+              <label className="modal-label">Start Time <span className="text-red-500">*</span></label>
               <input type="time" className="modal-input" value={newEvent.start_time}
                 onChange={(e) => setNewEvent({...newEvent, start_time: e.target.value})} />
             </div>
             <div className="modal-form-group">
-              <label className="modal-label">End Time</label>
+              <label className="modal-label">End Time <span className="text-red-500">*</span></label>
               <input type="time" className="modal-input" value={newEvent.end_time}
                 onChange={(e) => setNewEvent({...newEvent, end_time: e.target.value})} />
             </div>
           </div>
           <div className="modal-form-group">
-            <label className="modal-label">Event Type</label>
+            <label className="modal-label">Event Type <span className="text-red-500">*</span></label>
             <select className="modal-select" value={newEvent.type}
               onChange={(e) => setNewEvent({...newEvent, type: e.target.value})}>
               {legendItems.filter(l => !leaveCategories.includes(l.label)).map(item => (
@@ -473,7 +513,7 @@ const SharedCalendar = () => {
             <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} className="modal-select">
               <option value="">All Years</option>
               {Array.from({length:5}, (_,i) => new Date().getFullYear()-i).map(y => (
-                <option key={y} value={y}>{y}</option>
+                <option key={y} value={String(y)}>{y}</option>
               ))}
             </select>
           </div>

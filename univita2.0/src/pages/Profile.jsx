@@ -20,6 +20,7 @@ const Profile = () => {
     daysSinceChange: 0,
     lastLogin: localStorage.getItem('last_login') || 'Today'
   });
+  
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -27,6 +28,7 @@ const Profile = () => {
     email: '',
     phone: ''
   });
+  const [editError, setEditError] = useState('');
 
   // Password change modal
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -78,28 +80,47 @@ const Profile = () => {
   const daysRemaining = Math.max(0, 365 - user.daysSinceChange);
   const isExpiringSoon = daysRemaining <= 30;
 
+  // Validation Helpers
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const isValidPhone = (phone) => phone === '' || /^[\d\s\-\+\(\)]*$/.test(phone);
+
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    setEditError('');
+
+    if (!editForm.full_name.trim() || !editForm.email.trim()) {
+      setEditError('Full Name and Email Address are required fields.');
+      return;
+    }
+    if (!isValidEmail(editForm.email)) {
+      setEditError('Please enter a valid email address.');
+      return;
+    }
+    if (!isValidPhone(editForm.phone)) {
+      setEditError('Please enter a valid phone number format.');
+      return;
+    }
+
     setLoading(true);
     try {
       await authAxios.put(`/api/employees/${user.id}`, {
-        full_name: editForm.full_name,
-        email: editForm.email,
-        phone: editForm.phone
+        full_name: editForm.full_name.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim()
       });
-      localStorage.setItem('user_name', editForm.full_name);
-      localStorage.setItem('user_email', editForm.email);
+      localStorage.setItem('user_name', editForm.full_name.trim());
+      localStorage.setItem('user_email', editForm.email.trim());
       setUser(prev => ({
         ...prev,
-        name: editForm.full_name,
-        email: editForm.email,
-        phone: editForm.phone
+        name: editForm.full_name.trim(),
+        email: editForm.email.trim(),
+        phone: editForm.phone.trim()
       }));
       setMessage({ type: 'success', text: 'Profile updated successfully' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
       setEditMode(false);
     } catch (err) {
-      setMessage({ type: 'error', text: err.response?.data?.message || 'Update failed' });
+      setEditError(err.response?.data?.message || err.response?.data?.error || 'Profile update failed');
     } finally {
       setLoading(false);
     }
@@ -109,17 +130,18 @@ const Profile = () => {
     e.preventDefault();
     setPasswordError('');
     if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-      setPasswordError('All fields are required.');
+      setPasswordError('All password fields are required.');
+      return;
+    }
+    if (passwordForm.newPassword.trim().length < 6) {
+      setPasswordError('New password must be at least 6 characters.');
       return;
     }
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordError('New passwords do not match.');
       return;
     }
-    if (passwordForm.newPassword.trim().length < 6) {
-      setPasswordError('Password must be at least 6 characters.');
-      return;
-    }
+
     setChangingPassword(true);
     try {
       await authAxios.put(`/api/users/${user.id}/update-password`, {
@@ -134,7 +156,7 @@ const Profile = () => {
         window.location.href = '/';
       }, 2000);
     } catch (err) {
-      setPasswordError(err.response?.data?.message || 'Failed to update password.');
+      setPasswordError(err.response?.data?.message || 'Invalid current password.');
     } finally {
       setChangingPassword(false);
     }
@@ -151,7 +173,7 @@ const Profile = () => {
   };
 
   return (
-    <div className="pro-container">
+    <div className="expert-container">
       {message.text && (
         <div className={`pro-toast ${message.type}`}>
           {message.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
@@ -159,8 +181,11 @@ const Profile = () => {
         </div>
       )}
 
+      {/* Header Section */}
+      
+
       {/* Profile Header Card */}
-      <div className="pro-header-card">
+      <div className="pro-header-card expert-card">
         <div className="pro-header-content">
           <div className="pro-avatar">
             <span>{user.name.charAt(0).toUpperCase()}</span>
@@ -173,14 +198,14 @@ const Profile = () => {
             </div>
           </div>
         </div>
-        <button className="btn-pro-outline" onClick={() => setEditMode(true)}>
+        <button className="expert-btn-secondary" onClick={() => { setEditError(''); setEditMode(true); }}>
           <Edit2 size={16} /> <span>Edit Profile</span>
         </button>
       </div>
 
       <div className="pro-grid">
         {/* Account Information Card */}
-        <div className="pro-card">
+        <div className="expert-card">
           <div className="pro-card-header">
             <h3>Account Information</h3>
           </div>
@@ -224,7 +249,7 @@ const Profile = () => {
         </div>
 
         {/* Security Card */}
-        <div className="pro-card">
+        <div className="expert-card">
           <div className="pro-card-header">
             <h3>Authentication & Security</h3>
           </div>
@@ -240,7 +265,7 @@ const Profile = () => {
               </div>
               <div className={`pro-status-dot ${isExpiringSoon ? 'warning' : 'safe'}`}></div>
             </div>
-            <button className="btn-pro-primary w-100" onClick={() => setShowPasswordModal(true)}>
+            <button className="expert-btn-primary w-100" onClick={() => { setPasswordError(''); setShowPasswordModal(true); }}>
               <Key size={16} /> <span>Change Password</span>
             </button>
           </div>
@@ -258,21 +283,27 @@ const Profile = () => {
               </button>
             </div>
             <form className="pro-form" onSubmit={handleEditSubmit}>
+              {editError && (
+                <div className="pro-error-alert">
+                  <AlertCircle size={16} />
+                  <span>{editError}</span>
+                </div>
+              )}
               <div className="pro-form-group">
-                <label>Full Name</label>
+                <label>Full Name <span className="pro-required">*</span></label>
                 <input
                   type="text"
-                  className="pro-input"
+                  className="expert-clean-input border"
                   value={editForm.full_name}
                   onChange={e => setEditForm({ ...editForm, full_name: e.target.value })}
                   required
                 />
               </div>
               <div className="pro-form-group">
-                <label>Email Address</label>
+                <label>Email Address <span className="pro-required">*</span></label>
                 <input
                   type="email"
-                  className="pro-input"
+                  className="expert-clean-input border"
                   value={editForm.email}
                   onChange={e => setEditForm({ ...editForm, email: e.target.value })}
                   required
@@ -282,16 +313,16 @@ const Profile = () => {
                 <label>Phone Number</label>
                 <input
                   type="tel"
-                  className="pro-input"
+                  className="expert-clean-input border"
                   value={editForm.phone}
                   onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
                 />
               </div>
               <div className="pro-modal-actions">
-                <button type="button" className="btn-pro-cancel" onClick={() => setEditMode(false)}>
+                <button type="button" className="expert-btn-secondary" onClick={() => setEditMode(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-pro-primary" disabled={loading}>
+                <button type="submit" className="expert-btn-primary" disabled={loading}>
                   {loading ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
@@ -318,40 +349,42 @@ const Profile = () => {
                 </div>
               )}
               <div className="pro-form-group">
-                <label>Current Password</label>
+                <label>Current Password <span className="pro-required">*</span></label>
                 <input
                   type="password"
-                  className="pro-input"
+                  className="expert-clean-input border"
                   value={passwordForm.currentPassword}
                   onChange={e => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
                   required
                 />
               </div>
               <div className="pro-form-group">
-                <label>New Password</label>
+                <label>New Password <span className="pro-required">*</span></label>
                 <input
                   type="password"
-                  className="pro-input"
+                  className="expert-clean-input border"
                   value={passwordForm.newPassword}
                   onChange={e => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  minLength={6}
                   required
                 />
+                <span className="pro-hint">Must be at least 6 characters long.</span>
               </div>
               <div className="pro-form-group">
-                <label>Confirm New Password</label>
+                <label>Confirm New Password <span className="pro-required">*</span></label>
                 <input
                   type="password"
-                  className="pro-input"
+                  className="expert-clean-input border"
                   value={passwordForm.confirmPassword}
                   onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
                   required
                 />
               </div>
               <div className="pro-modal-actions">
-                <button type="button" className="btn-pro-cancel" onClick={() => setShowPasswordModal(false)}>
+                <button type="button" className="expert-btn-secondary" onClick={() => setShowPasswordModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-pro-primary" disabled={changingPassword}>
+                <button type="submit" className="expert-btn-primary" disabled={changingPassword}>
                   {changingPassword ? 'Updating...' : 'Update Password'}
                 </button>
               </div>

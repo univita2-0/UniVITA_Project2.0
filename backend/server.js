@@ -183,12 +183,22 @@ function logVisitorHistory(visitorId, visitorName, bleId, floor, currentRoom, ev
   });
 }
 
-function logAction(userId, action, targetType, targetId, req) {
+function logAction(userId, action, targetType, targetId, req, oldValue = null, newValue = null) {
   if (!userId) return;
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || null;
   const userAgent = req.headers['user-agent'] || null;
-  const sql = `INSERT INTO audit_logs (user_id, action, target_type, target_id, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?)`;
-  db.query(sql, [userId, action, targetType, targetId, ip, userAgent], (err) => {
+  const sql = `INSERT INTO audit_logs (user_id, action, target_type, target_id, old_value, new_value, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  
+  db.query(sql, [
+    userId, 
+    action, 
+    targetType, 
+    targetId, 
+    oldValue ? JSON.stringify(oldValue) : null, 
+    newValue ? JSON.stringify(newValue) : null, 
+    ip, 
+    userAgent
+  ], (err) => {
     if (err) console.error('Failed to insert audit log:', err);
   });
 }
@@ -1385,7 +1395,6 @@ app.put('/api/schedules/:id', authenticateToken, async (req, res) => {
   const scheduleId = req.params.id;
   const { date: today } = getPHTime();
 
-  // 1. Check if schedule has existing attendance
   const [attRows] = await db.promise().query(
     "SELECT id FROM attendance WHERE schedule_id = ?",
     [scheduleId]
@@ -1394,7 +1403,6 @@ app.put('/api/schedules/:id', authenticateToken, async (req, res) => {
     return res.status(403).json({ success: false, error: "Cannot modify this schedule; attendance has already been recorded." });
   }
 
-  // 2. Existing validation logic
   if (date < today) return res.status(400).json({ success: false, error: "Cannot update schedule to a past date." });
   if (place) {
     const [locRows] = await db.promise().query("SELECT id FROM school_locations WHERE name = ?", [place]);
@@ -1402,31 +1410,32 @@ app.put('/api/schedules/:id', authenticateToken, async (req, res) => {
   }
   if (start_time >= end_time) return res.status(400).json({ success: false, error: "End time must be after start time." });
 
-  const [old] = await db.promise().query("SELECT user_id FROM schedules WHERE id = ?", [scheduleId]);
+  const [old] = await db.promise().query("SELECT * FROM schedules WHERE id = ?", [scheduleId]);
   if (old.length === 0) return res.status(404).json({ success: false, error: "Schedule not found" });
   
-  const user_id = old[0].user_id;
+  const oldData = old[0];
+  const user_id = oldData.user_id;
   if (await hasScheduleConflict(user_id, date, start_time, end_time, scheduleId)) {
     return res.status(409).json({ success: false, error: "Time conflict." });
   }
 
+  const newData = { date, place, course, start_time, end_time };
+
   db.query("UPDATE schedules SET date=?, place=?, course=?, start_time=?, end_time=? WHERE id=?", 
     [date, place, course, start_time, end_time, scheduleId], (err) => {
       if (err) return res.status(500).json({ success: false, error: err.message });
-      logAction(req.user.id, 'UPDATE_SCHEDULE', 'schedule', scheduleId, req);
+      logAction(req.user.id, 'UPDATE_SCHEDULE', 'schedule', scheduleId, req, oldData, newData);
       res.json({ success: true });
     }
   );
 });
 
-// --- UPDATED DELETE (Delete Schedule) ---
 app.delete('/api/schedules/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, error: 'Forbidden' });
   }
   const scheduleId = req.params.id;
 
-  // 1. Check if schedule has existing attendance
   const [attRows] = await db.promise().query(
     "SELECT id FROM attendance WHERE schedule_id = ?",
     [scheduleId]
@@ -1435,10 +1444,15 @@ app.delete('/api/schedules/:id', authenticateToken, async (req, res) => {
     return res.status(403).json({ success: false, error: "Cannot delete this schedule; attendance has already been recorded." });
   }
 
+  const [oldRecord] = await db.promise().query("SELECT * FROM schedules WHERE id = ?", [scheduleId]);
+  if (oldRecord.length === 0) return res.status(404).json({ success: false, error: "Schedule not found" });
+  const oldData = oldRecord[0];
+
   db.query("DELETE FROM schedules WHERE id = ?", [scheduleId], (err, result) => {
     if (err) return res.status(500).json({ success: false, error: err.message });
     if (result.affectedRows === 0) return res.status(404).json({ success: false, error: "Schedule not found" });
-    logAction(req.user.id, 'DELETE_SCHEDULE', 'schedule', scheduleId, req);
+    
+    logAction(req.user.id, 'DELETE_SCHEDULE', 'schedule', scheduleId, req, oldData, null);
     res.json({ success: true });
   });
 });
@@ -1644,6 +1658,22 @@ app.get('/api/employee-documents/:userId', authenticateToken, (req, res) => {
 // ADD THESE MISSING ENDPOINTS
 // ============================================
 
+// GET ALL RECENT ATTENDANCE (For the Correction Tab Default View)
+app.get('/api/attendance/all-recent', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  const sql = `
+    SELECT a.*, DATE_FORMAT(a.date, '%Y-%m-%d') as date, u.full_name, u.employee_id 
+    FROM attendance a 
+    JOIN users u ON a.user_id = u.id 
+    ORDER BY a.date DESC, a.time_in DESC 
+    LIMIT 500
+  `;
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+});
+
 // Alias for attendance history (mobile uses /api/attendance/user/:employeeId)
 app.get('/api/attendance/user/:employeeId', (req, res) => {
   const employeeId = req.params.employeeId;
@@ -1748,13 +1778,17 @@ app.post('/api/employees', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/employees/:id', authenticateToken, (req, res) => {
+app.put('/api/employees/:id', authenticateToken, async(req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
   const employeeId = req.params.id;
   const updates = req.body;
+
+  const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [employeeId]);
+  if (oldRecord.length === 0) return res.status(404).json({ success: false, error: 'Employee not found.' });
+  const oldData = oldRecord[0];
 
   const fieldMapping = {
     full_name: 'full_name',
@@ -1803,7 +1837,8 @@ app.put('/api/employees/:id', authenticateToken, (req, res) => {
   db.query(sql, values, (err, result) => {
     if (err) return res.status(500).json({ success: false, error: err.message });
     if (result.affectedRows === 0) return res.status(404).json({ success: false, error: 'Employee not found.' });
-    logAction(req.user.id, 'UPDATE_EMPLOYEE', 'user', employeeId, req);
+    
+    logAction(req.user.id, 'UPDATE_EMPLOYEE', 'user', employeeId, req, oldData, updates);
     res.json({ success: true });
   });
 });
@@ -1821,19 +1856,22 @@ app.get('/api/employees/last-id', authenticateToken, (req, res) => {
 });
 
 
-// Delete employee (admin only, protected)
-app.delete('/api/employees/:id', authenticateToken, (req, res) => {
+app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
   const userId = req.params.id;
-  // Removed "AND LOWER(role) = 'instructor'" to allow deleting any role
+
+  const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
+  if (oldRecord.length === 0) return res.status(404).json({ success: false, message: "Employee not found." });
+  const oldData = oldRecord[0];
+
   db.query("DELETE FROM users WHERE id = ?", [userId], (err, result) => {
     if (err) return res.status(500).json({ success: false, message: err.message });
     if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Employee not found." });
     
-    logAction(req.user.id, 'DELETE_EMPLOYEE', 'user', userId, req);
+    logAction(req.user.id, 'DELETE_EMPLOYEE', 'user', userId, req, oldData, null);
     res.json({ success: true });
   });
 });
@@ -1896,14 +1934,17 @@ app.get('/api/attendance-report', (req, res) => {
 
 app.get('/api/attendance-report-user/:employeeId', (req, res) => {
     const sql = `
-      SELECT *, 
-             DATE_FORMAT(date, '%Y-%m-%d') as date, 
-             ROUND(TIMESTAMPDIFF(MINUTE, time_in, time_out) / 60, 2) as total_hours,
-             reviewed_at,
-             updated_at
-      FROM attendance 
-      WHERE user_id = ? 
-      ORDER BY date DESC
+      SELECT a.*, 
+             DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
+             ROUND(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60, 2) as total_hours,
+             a.reviewed_at,
+             a.updated_at,
+             u.full_name,
+             u.employee_id
+      FROM attendance a
+      LEFT JOIN users u ON a.user_id = u.employee_id
+      WHERE a.user_id = ? 
+      ORDER BY a.date DESC
     `;
     db.query(sql, [req.params.employeeId], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -2170,23 +2211,51 @@ app.put('/api/appointments/:id/status', (req, res) => {
   });
 });
 
-// PUT /api/appointments/:id – update visit_date and/or visit_time
+// PUT /api/appointments/:id – update visit_date, visit_time, and send reschedule email
 app.put('/api/appointments/:id', authenticateToken, (req, res) => {
-  // Only admin and security can edit appointments (adjust roles as needed)
-  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+  if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const { id } = req.params;
-  const { visit_date, visit_time } = req.body;
+  const { visit_date, visit_time, admin_notes } = req.body;
   if (!visit_date || !visit_time) {
     return res.status(400).json({ error: 'Date and time are required' });
   }
-  const sql = `UPDATE visitor_requests SET visit_date = ?, visit_time = ? WHERE id = ?`;
-  db.query(sql, [visit_date, visit_time, id], (err, result) => {
+
+  db.query("SELECT * FROM visitor_requests WHERE id = ?", [id], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Appointment not found' });
-    logAction(req.user.id, 'UPDATE_APPOINTMENT', 'visitor_request', id, req);
-    res.json({ success: true });
+    if (rows.length === 0) return res.status(404).json({ error: 'Appointment not found' });
+    
+    const request = rows[0];
+    const sql = `UPDATE visitor_requests SET visit_date = ?, visit_time = ?, admin_notes = ? WHERE id = ?`;
+    
+    db.query(sql, [visit_date, visit_time, admin_notes || null, id], (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      logAction(req.user.id, 'RESCHEDULE_APPOINTMENT', 'visitor_request', id, req);
+
+      // Send Email Notification regarding schedule changes
+      const emailBody = `Dear ${request.first_name} ${request.last_name},\n\n` +
+        `Your campus visit appointment schedule has been updated by administration.\n\n` +
+        `New Schedule Details:\n` +
+        `Date: ${visit_date}\n` +
+        `Time: ${visit_time}\n` +
+        (admin_notes ? `Reason / Remarks for Rescheduling: ${admin_notes}\n\n` : '\n') +
+        `We look forward to welcoming you to HCT Academy.\n\nBest regards,\nHCT Academy`;
+
+      const mailOptions = {
+        from: process.env.MAIL_USER,
+        to: request.email,
+        subject: 'Appointment Schedule Updated - HCT Academy',
+        text: emailBody
+      };
+
+      transporter.sendMail(mailOptions, (error) => {
+        if (error) console.error("Reschedule email error:", error);
+      });
+
+      res.json({ success: true });
+    });
   });
 });
 
@@ -2626,9 +2695,7 @@ app.post('/api/jobs', authenticateToken, (req, res) => {
   );
 });
 
-// 5. Admin: update a job posting
-// PUT /api/jobs/:id – update an existing job
-app.put('/api/jobs/:id', authenticateToken, (req, res) => {
+app.put('/api/jobs/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -2637,6 +2704,12 @@ app.put('/api/jobs/:id', authenticateToken, (req, res) => {
     location_type, location, salary_min, salary_max, status
   } = req.body;
   const jobId = req.params.id;
+
+  const [oldRecord] = await db.promise().query("SELECT * FROM job_postings WHERE id = ?", [jobId]);
+  if (oldRecord.length === 0) return res.status(404).json({ error: 'Job not found' });
+  const oldData = oldRecord[0];
+  const newData = req.body;
+
   db.query(
     `UPDATE job_postings SET
       title = ?, department = ?, description = ?, requirements = ?,
@@ -2651,7 +2724,8 @@ app.put('/api/jobs/:id', authenticateToken, (req, res) => {
     (err, result) => {
       if (err) return res.status(500).json({ error: err.message });
       if (result.affectedRows === 0) return res.status(404).json({ error: 'Job not found' });
-      logAction(req.user.id, 'UPDATE_JOB', 'job_posting', req.params.id, req);
+      
+      logAction(req.user.id, 'UPDATE_JOB', 'job_posting', jobId, req, oldData, newData);
       res.json({ success: true });
     }
   );
@@ -2979,7 +3053,7 @@ app.post('/api/school-locations', authenticateToken, (req, res) => {
 });
 
 // UPDATE a school location
-app.put('/api/school-locations/:id', authenticateToken, (req, res) => {
+app.put('/api/school-locations/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -2992,6 +3066,12 @@ app.put('/api/school-locations/:id', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'Valid latitude and longitude required' });
   }
   const locRadius = radius && radius > 0 ? radius : 200;
+
+  const [oldRecord] = await db.promise().query("SELECT * FROM school_locations WHERE id = ?", [locationId]);
+  if (oldRecord.length === 0) return res.status(404).json({ error: 'Location not found' });
+  const oldData = oldRecord[0];
+  const newData = { name: name.trim(), latitude, longitude, radius: locRadius };
+
   db.query(
     "UPDATE school_locations SET name = ?, latitude = ?, longitude = ?, radius = ? WHERE id = ?",
     [name.trim(), latitude, longitude, locRadius, locationId],
@@ -3003,22 +3083,26 @@ app.put('/api/school-locations/:id', authenticateToken, (req, res) => {
         return res.status(500).json({ error: err.message });
       }
       if (result.affectedRows === 0) {
-        
         return res.status(404).json({ error: 'Location not found' });
       }
-      logAction(req.user.id, 'UPDATE_LOCATION', 'school_location', locationId, req);
+      
+      logAction(req.user.id, 'UPDATE_LOCATION', 'school_location', locationId, req, oldData, newData);
       res.json({ success: true });
     }
   );
 });
 
 // DELETE a school location
-app.delete('/api/school-locations/:id', authenticateToken, (req, res) => {
+app.delete('/api/school-locations/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const locationId = req.params.id;
-  // Optional: check if location is referenced in schedules or attendance before deleting
+
+  const [oldRecord] = await db.promise().query("SELECT * FROM school_locations WHERE id = ?", [locationId]);
+  if (oldRecord.length === 0) return res.status(404).json({ error: 'Location not found' });
+  const oldData = oldRecord[0];
+
   db.query("SELECT id FROM schedules WHERE place = (SELECT name FROM school_locations WHERE id = ?) LIMIT 1", [locationId], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     if (rows.length > 0) {
@@ -3029,7 +3113,8 @@ app.delete('/api/school-locations/:id', authenticateToken, (req, res) => {
       if (result.affectedRows === 0) {
         return res.status(404).json({ error: 'Location not found' });
       }
-      logAction(req.user.id, 'DELETE_LOCATION', 'school_location', locationId, req);
+      
+      logAction(req.user.id, 'DELETE_LOCATION', 'school_location', locationId, req, oldData, null);
       res.json({ success: true });
     });
   });
@@ -3094,103 +3179,165 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
 
     // --- Generate PDF ---
     const PDFDocument = require('pdfkit');
-const doc = new PDFDocument({ margin: 50, size: 'A4' });
-res.setHeader('Content-Type', 'application/pdf');
-res.setHeader('Content-Disposition', `attachment; filename=attendance_compliance_${year}_${month}.pdf`);
-doc.pipe(res);
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=attendance_compliance_${year}_${month}.pdf`);
+    doc.pipe(res);
 
-// Header
-doc.fontSize(18).font('Helvetica-Bold').text('HCT ACADEMY', { align: 'center' });
-doc.fontSize(10).font('Helvetica').text('Healthcare Training Center', { align: 'center' });
-doc.fontSize(9).text('123 Healthcare Avenue, Pasay City, Metro Manila', { align: 'center' });
-doc.text('Tel: (02) 8123-4567 | Email: info@hct.ph', { align: 'center' });
-doc.moveDown(1);
+    // 1. Formal Letterhead
+    doc.fontSize(18).font('Helvetica-Bold').text('HCT ACADEMY', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').text('Healthcare Training Center', { align: 'center' });
+    doc.fontSize(9).text('123 Healthcare Avenue, Pasay City, Metro Manila', { align: 'center' });
+    doc.text('Tel: (02) 8123-4567 | Email: info@hct.ph', { align: 'center' });
+    doc.moveDown(0.5);
+    
+    // Header separator line
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).lineWidth(1).stroke();
+    doc.moveDown(1);
 
-doc.fontSize(14).font('Helvetica-Bold').text('ATTENDANCE COMPLIANCE REPORT', { align: 'center' });
-const monthName = new Date(year, month-1).toLocaleString('default', { month: 'long' });
-doc.fontSize(10).font('Helvetica').text(`Period: ${monthName} ${year}`, { align: 'center' });
-doc.moveDown(1.5);
+    doc.fontSize(14).font('Helvetica-Bold').text('ATTENDANCE COMPLIANCE REPORT', { align: 'center' });
+    const monthName = new Date(year, month-1).toLocaleString('default', { month: 'long' });
+    doc.fontSize(10).font('Helvetica').text(`Period: ${monthName} ${year}`, { align: 'center' });
+    doc.moveDown(1.5);
 
-// Table with fixed column widths
-const startX = 50;
-const colWidths = [60, 180, 50, 50, 50, 50, 60];
-const headers = ['ID', 'Name', 'Sched', 'Pres', 'Late', 'Leave', 'Comp%'];
+    // 2. Formal Table with Grid Borders
+    const startX = 50;
+    // Adjusted widths to fit "Scheduled" and "Present" cleanly (Total: 470)
+    const colWidths = [55, 145, 60, 55, 45, 50, 60]; 
+    const headers = ['ID', 'Name', 'Scheduled', 'Present', 'Late', 'Leave', 'Comp%'];
+    const rowHeight = 22;
 
-doc.font('Helvetica-Bold').fontSize(9);
-let currentY = doc.y;
-headers.forEach((h, i) => {
-  let x = startX;
-  for (let j = 0; j < i; j++) x += colWidths[j];
-  doc.text(h, x, currentY, { width: colWidths[i], align: i === 0 ? 'left' : 'center' });
-});
-doc.moveTo(startX, currentY + 12).lineTo(startX + colWidths.reduce((a,b)=>a+b,0), currentY + 12).stroke();
-currentY += 18;
+    let currentY = doc.y;
 
-doc.font('Helvetica').fontSize(8.5);
-for (const emp of reportData) {
-  if (currentY > 750) {
-    doc.addPage();
-    currentY = 50;
+    // Draw Header Row
+    doc.rect(startX, currentY, 470, rowHeight).fillAndStroke('#F3F4F6', '#000000');
+    doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9);
+    
     headers.forEach((h, i) => {
       let x = startX;
       for (let j = 0; j < i; j++) x += colWidths[j];
-      doc.text(h, x, currentY, { width: colWidths[i], align: i === 0 ? 'left' : 'center' });
+      doc.text(h, x, currentY + 6, { width: colWidths[i], align: 'center' });
+      // Draw vertical separator
+      if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).stroke();
     });
-    doc.moveTo(startX, currentY + 12).lineTo(startX + colWidths.reduce((a,b)=>a+b,0), currentY + 12).stroke();
+    
+    currentY += rowHeight;
+    doc.font('Helvetica').fontSize(8.5);
+
+    // Draw Data Rows
+    for (const emp of reportData) {
+      // Pagination Check
+      if (currentY > 700) {
+        doc.addPage();
+        currentY = 50;
+        
+        // Redraw Header on new page
+        doc.rect(startX, currentY, 470, rowHeight).fillAndStroke('#F3F4F6', '#000000');
+        doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9);
+        headers.forEach((h, i) => {
+          let x = startX;
+          for (let j = 0; j < i; j++) x += colWidths[j];
+          doc.text(h, x, currentY + 6, { width: colWidths[i], align: 'center' });
+          if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).stroke();
+        });
+        currentY += rowHeight;
+        doc.font('Helvetica').fontSize(8.5);
+      }
+
+      // Draw Row Border
+      doc.rect(startX, currentY, 470, rowHeight).stroke();
+
+      let x = startX;
+      doc.text(emp.employee_id, x + 5, currentY + 6, { width: colWidths[0] - 10, align: 'left' });
+      doc.moveTo(x + colWidths[0], currentY).lineTo(x + colWidths[0], currentY + rowHeight).stroke();
+      x += colWidths[0];
+
+      doc.text(emp.full_name.substring(0, 30), x + 5, currentY + 6, { width: colWidths[1] - 10, align: 'left' });
+      doc.moveTo(x + colWidths[1], currentY).lineTo(x + colWidths[1], currentY + rowHeight).stroke();
+      x += colWidths[1];
+
+      doc.text(emp.scheduled_days.toString(), x, currentY + 6, { width: colWidths[2], align: 'center' });
+      doc.moveTo(x + colWidths[2], currentY).lineTo(x + colWidths[2], currentY + rowHeight).stroke();
+      x += colWidths[2];
+
+      doc.text(emp.present_days.toString(), x, currentY + 6, { width: colWidths[3], align: 'center' });
+      doc.moveTo(x + colWidths[3], currentY).lineTo(x + colWidths[3], currentY + rowHeight).stroke();
+      x += colWidths[3];
+
+      doc.text(emp.late_days.toString(), x, currentY + 6, { width: colWidths[4], align: 'center' });
+      doc.moveTo(x + colWidths[4], currentY).lineTo(x + colWidths[4], currentY + rowHeight).stroke();
+      x += colWidths[4];
+
+      doc.text(emp.leave_days.toString(), x, currentY + 6, { width: colWidths[5], align: 'center' });
+      doc.moveTo(x + colWidths[5], currentY).lineTo(x + colWidths[5], currentY + rowHeight).stroke();
+      x += colWidths[5];
+
+      doc.text(`${emp.compliance_rate}%`, x, currentY + 6, { width: colWidths[6], align: 'center' });
+
+      currentY += rowHeight;
+    }
+
+    doc.moveDown(2);
+
+    // 3. Summary Block
+    currentY = doc.y;
+    const totalScheduled = reportData.reduce((s, e) => s + e.scheduled_days, 0);
+    const totalPresent = reportData.reduce((s, e) => s + e.present_days, 0);
+    const totalLate = reportData.reduce((s, e) => s + e.late_days, 0);
+    const totalLeave = reportData.reduce((s, e) => s + e.leave_days, 0);
+    const totalAbsent = totalScheduled - totalPresent - totalLeave;
+    const overallRate = totalScheduled > 0 ? (totalPresent / totalScheduled) * 100 : 0;
+
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('EXECUTIVE SUMMARY', startX, currentY, { underline: true });
+    
     currentY += 18;
-  }
-  let x = startX;
-  doc.text(emp.employee_id, x, currentY, { width: colWidths[0], align: 'left' });
-  x += colWidths[0];
-  doc.text(emp.full_name.substring(0, 25), x, currentY, { width: colWidths[1], align: 'left' });
-  x += colWidths[1];
-  doc.text(emp.scheduled_days.toString(), x, currentY, { width: colWidths[2], align: 'center' });
-  x += colWidths[2];
-  doc.text(emp.present_days.toString(), x, currentY, { width: colWidths[3], align: 'center' });
-  x += colWidths[3];
-  doc.text(emp.late_days.toString(), x, currentY, { width: colWidths[4], align: 'center' });
-  x += colWidths[4];
-  doc.text(emp.leave_days.toString(), x, currentY, { width: colWidths[5], align: 'center' });
-  x += colWidths[5];
-  doc.text(`${emp.compliance_rate}%`, x, currentY, { width: colWidths[6], align: 'center' });
-  currentY += 18;
-}
+    
+    // Summary Data Alignment (Right-aligned numbers for perfect columns)
+    doc.font('Helvetica').fontSize(9);
+    const labelWidth = 110;
+    const valueWidth = 30;
 
-// Draw bottom line
-doc.moveTo(startX, currentY - 6).lineTo(startX + colWidths.reduce((a,b)=>a+b,0), currentY - 6).stroke();
-doc.moveDown(1);
+    const drawSummaryRow = (label, value) => {
+      doc.text(label, startX, currentY, { width: labelWidth, align: 'left' });
+      doc.text(value.toString(), startX + labelWidth, currentY, { width: valueWidth, align: 'right' });
+      currentY += 14;
+    };
 
-// Summary (unchanged but ensure alignment)
-const totalScheduled = reportData.reduce((s, e) => s + e.scheduled_days, 0);
-const totalPresent = reportData.reduce((s, e) => s + e.present_days, 0);
-const totalLate = reportData.reduce((s, e) => s + e.late_days, 0);
-const totalLeave = reportData.reduce((s, e) => s + e.leave_days, 0);
-const totalAbsent = totalScheduled - totalPresent - totalLeave;
-const overallRate = totalScheduled > 0 ? (totalPresent / totalScheduled) * 100 : 0;
+    drawSummaryRow('Total Scheduled Days:', totalScheduled);
+    drawSummaryRow('Total Present Days:', totalPresent);
+    drawSummaryRow('Total Late Days:', totalLate);
+    drawSummaryRow('Total Leave Days:', totalLeave);
+    drawSummaryRow('Total Absent Days:', totalAbsent);
+    
+    currentY += 4; // Extra spacing before the rate
+    doc.font('Helvetica-Bold');
+    doc.text('Overall Compliance Rate:', startX, currentY, { width: labelWidth, align: 'left' });
+    doc.text(`${overallRate.toFixed(1)}%`, startX + labelWidth, currentY, { width: valueWidth, align: 'right' });
+    
+    if (overallRate < 85) {
+      doc.font('Helvetica').fillColor('#DC2626').text(' (Below department target of 85%)', startX + labelWidth + valueWidth + 5, currentY);
+      doc.fillColor('#000000');
+    }
 
-doc.font('Helvetica-Bold').fontSize(10);
-doc.text('SUMMARY', startX, doc.y, { underline: true });
-doc.moveDown(0.5);
-doc.font('Helvetica').fontSize(9);
-doc.text(`Total Scheduled Days: ${totalScheduled}`, startX);
-doc.text(`Total Present Days:   ${totalPresent}`, startX);
-doc.text(`Total Late Days:      ${totalLate}`, startX);
-doc.text(`Total Leave Days:     ${totalLeave}`, startX);
-doc.text(`Total Absent Days:    ${totalAbsent}`, startX);
-doc.moveDown(0.5);
-doc.text(`Overall Compliance Rate: ${overallRate.toFixed(1)}%`, startX);
-if (overallRate < 85) {
-  doc.text(' (Below target of 85%)', { continued: true });
-}
+    // 4. Formal Signatures Block
+    doc.moveDown(5);
+    currentY = doc.y;
+    
+    doc.moveTo(startX, currentY).lineTo(startX + 120, currentY).stroke();
+    doc.moveTo(startX + 175, currentY).lineTo(startX + 295, currentY).stroke();
+    doc.moveTo(startX + 350, currentY).lineTo(startX + 470, currentY).stroke();
+    
+    doc.font('Helvetica').fontSize(8);
+    doc.text('Prepared By (HR)', startX, currentY + 5, { width: 120, align: 'center' });
+    doc.text('Reviewed By (Manager)', startX + 175, currentY + 5, { width: 120, align: 'center' });
+    doc.text('Approved By (Director)', startX + 350, currentY + 5, { width: 120, align: 'center' });
 
-doc.moveDown(2);
-doc.fontSize(8).text(
-  `Generated on ${new Date().toLocaleString()}`,
-  { align: 'center', color: 'gray' }
-);
-doc.text('This is a system-generated document.', { align: 'center', color: 'gray' });
+    doc.moveDown(4);
+    doc.fontSize(8).fillColor('gray').text(`Generated on ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}`, { align: 'center' });
+    doc.text('This is a system-generated official document.', { align: 'center' });
 
-doc.end();
+    doc.end();
   } catch (err) {
     console.error('PDF generation error:', err);
     if (!res.headersSent) {
@@ -3467,20 +3614,33 @@ app.get('/api/audit-logs', authenticateToken, (req, res) => {
 });
 
 // Update user role (admin only)
-app.put('/api/users/:id/role', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+app.put('/api/users/:id/role', authenticateToken, async (req, res) => {
+  // Allow both admin and hr_admin to manage roles
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
   const { role } = req.body;
   const userId = req.params.id;
+  
   if (!['admin', 'hr_admin', 'security', 'instructor'].includes(role)) {
     return res.status(400).json({ error: 'Invalid role' });
   }
+
+  // Fetch old role for audit logging
+  const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
+  if (oldRecord.length === 0) return res.status(404).json({ error: 'User not found' });
+  const oldData = oldRecord[0];
+
   db.query("UPDATE users SET role = ? WHERE id = ?", [role, userId], (err) => {
     if (err) return res.status(500).json({ error: err.message });
-    // Also update role_id if roles table exists, but optional
+    
+    // Log the role change to audit logs
+    logAction(req.user.id, 'UPDATE_USER_ROLE', 'user', userId, req, { role: oldData.role }, { role });
+    
     res.json({ success: true });
   });
 });
-
 // System configuration (simple in-memory or new table – we'll use a new table for persistence)
 // First, create the table if not exists:
 const createConfigTable = `
@@ -3561,7 +3721,7 @@ app.post('/api/courses', authenticateToken, (req, res) => {
 });
 
 // UPDATE a course
-app.put('/api/courses/:id', authenticateToken, (req, res) => {
+app.put('/api/courses/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -3570,24 +3730,35 @@ app.put('/api/courses/:id', authenticateToken, (req, res) => {
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Course name required' });
   }
+
+  const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
+  if (oldRecord.length === 0) return res.status(404).json({ error: 'Course not found' });
+  const oldData = oldRecord[0];
+  const newData = { name: name.trim() };
+
   db.query("UPDATE courses SET name = ? WHERE id = ?", [name.trim(), courseId], (err, result) => {
     if (err) {
       if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Course name already exists' });
       return res.status(500).json({ error: err.message });
     }
     if (result.affectedRows === 0) return res.status(404).json({ error: 'Course not found' });
-    logAction(req.user.id, 'UPDATE_COURSE', 'course', courseId, req);
+    
+    logAction(req.user.id, 'UPDATE_COURSE', 'course', courseId, req, oldData, newData);
     res.json({ success: true });
   });
 });
 
 // DELETE a course
-app.delete('/api/courses/:id', authenticateToken, (req, res) => {
+app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
   const courseId = req.params.id;
-  // Optional: check if course is used in schedules before deleting
+
+  const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
+  if (oldRecord.length === 0) return res.status(404).json({ error: 'Course not found' });
+  const oldData = oldRecord[0];
+
   db.query("SELECT id FROM schedules WHERE course = (SELECT name FROM courses WHERE id = ?) LIMIT 1", [courseId], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     if (rows.length > 0) {
@@ -3598,7 +3769,8 @@ app.delete('/api/courses/:id', authenticateToken, (req, res) => {
       if (result.affectedRows === 0) {
         return res.status(404).json({ error: 'Course not found' });
       }
-      logAction(req.user.id, 'DELETE_COURSE', 'course', courseId, req);
+      
+      logAction(req.user.id, 'DELETE_COURSE', 'course', courseId, req, oldData, null);
       res.json({ success: true });
     });
   });

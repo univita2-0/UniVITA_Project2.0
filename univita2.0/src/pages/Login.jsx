@@ -63,7 +63,8 @@ const Login = ({ onBack }) => {
       }
     } catch (err) {
       console.error(err);
-      toast.error('Connection error. Please check your network or server status.');
+      // Ensure backend errors (like 401 Invalid Credentials) show the correct toast
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Incorrect email or password. Please try again.');
     } finally {
       setOtpLoading(false);
     }
@@ -108,7 +109,7 @@ const Login = ({ onBack }) => {
       }
     } catch (err) {
       console.error(err);
-      toast.error('Connection error during verification.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Connection error during verification.');
     }
   };
 
@@ -152,7 +153,7 @@ const Login = ({ onBack }) => {
         toast.error(res?.message || 'No account found with this email address.');
       }
     } catch (err) {
-      toast.error('Connection error. Please try again.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Connection error. Please try again.');
     } finally {
       setOtpLoading(false);
     }
@@ -178,7 +179,7 @@ const Login = ({ onBack }) => {
         toast.error(res?.message || 'Failed to reset password.');
       }
     } catch (err) {
-      toast.error('Connection error during password reset.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Connection error during password reset.');
     } finally {
       setOtpLoading(false);
     }
@@ -205,7 +206,7 @@ const Login = ({ onBack }) => {
               <ShieldCheck size={28} strokeWidth={2} />
             </div>
             <h1 className="gl-brand-title">Welcome back!</h1>
-            <p className="gl-brand-subtitle">Administrator</p>
+            
           </div>
         )}
 
@@ -218,7 +219,7 @@ const Login = ({ onBack }) => {
                 <input
                   type="email"
                   className="gl-input"
-                  placeholder="Administrator Email"
+                  placeholder="Email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required

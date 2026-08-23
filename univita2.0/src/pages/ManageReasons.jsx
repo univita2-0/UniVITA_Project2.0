@@ -1,8 +1,7 @@
-// src/pages/ManageReasons.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Edit2, Check, X, AlertCircle, FileText } from 'lucide-react';
+import { Plus, Trash2, Edit3, X, AlertCircle, Search, ChevronLeft, ChevronRight, Tags } from 'lucide-react';
 import { API_BASE } from '../api';
 import FormalModal from '../components/FormalModal';
 import './ManageReasons.css';
@@ -13,207 +12,284 @@ const getAuthHeaders = () => ({
 
 const ManageReasons = () => {
   const [reasons, setReasons] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [fetchLoading, setFetchLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // Modal States
+  const [showAddModal, setShowAddModal] = useState(false);
   const [newReason, setNewReason] = useState('');
-  const [editingId, setEditingId] = useState(null);
-  const [editValue, setEditValue] = useState('');
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editReasonId, setEditReasonId] = useState(null);
+  const [editReasonText, setEditReasonText] = useState('');
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [fetchLoading, setFetchLoading] = useState(true);
+
+  // Reset page on search
+  useEffect(() => { setCurrentPage(1); }, [searchQuery]);
 
   const fetchReasons = async () => {
     setFetchLoading(true);
     try {
       const res = await axios.get(`${API_BASE}/visit-reasons`, getAuthHeaders());
-      setReasons(res.data);
+      // Sort newest to oldest based on ID
+      const sorted = res.data.sort((a, b) => b.id - a.id);
+      setReasons(sorted);
     } catch (err) {
       console.error(err);
-      toast.error('Failed to load reasons');
+      toast.error('Failed to load visit reasons');
     } finally {
       setFetchLoading(false);
     }
   };
 
-  useEffect(() => { fetchReasons(); }, []);
+  useEffect(() => { 
+    fetchReasons(); 
+  }, []);
 
   const handleAdd = async (e) => {
     e.preventDefault();
     if (!newReason.trim()) {
-      toast.warning('Please enter a reason');
+      toast.warning('Please enter a valid reason.');
       return;
     }
-    setLoading(true);
+    setProcessing(true);
     try {
       await axios.post(`${API_BASE}/visit-reasons`, { reason_text: newReason.trim() }, getAuthHeaders());
-      toast.success('Reason added successfully');
+      toast.success('Reason added successfully.');
       setNewReason('');
+      setShowAddModal(false);
       fetchReasons();
     } catch (err) {
-      toast.error('Failed to add reason');
+      toast.error('Failed to add reason.');
     } finally {
-      setLoading(false);
+      setProcessing(false);
     }
   };
 
-  const handleDelete = (id) => {
+  const openEditModal = (id, text) => {
+    setEditReasonId(id);
+    setEditReasonText(text);
+    setShowEditModal(true);
+  };
+
+  const handleEdit = async (e) => {
+    e.preventDefault();
+    if (!editReasonText.trim()) {
+      toast.warning('Reason cannot be empty.');
+      return;
+    }
+    setProcessing(true);
+    try {
+      await axios.put(`${API_BASE}/visit-reasons/${editReasonId}`, { reason_text: editReasonText.trim() }, getAuthHeaders());
+      toast.success('Reason updated successfully.');
+      setShowEditModal(false);
+      setEditReasonId(null);
+      setEditReasonText('');
+      fetchReasons();
+    } catch (err) {
+      toast.error('Failed to update reason.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const openDeleteModal = (id) => {
     setDeleteTargetId(id);
     setShowDeleteConfirm(true);
   };
 
   const confirmDelete = async () => {
+    setProcessing(true);
     try {
       await axios.delete(`${API_BASE}/visit-reasons/${deleteTargetId}`, getAuthHeaders());
-      toast.success('Reason deleted');
+      toast.success('Reason deleted successfully.');
       setShowDeleteConfirm(false);
+      setDeleteTargetId(null);
       fetchReasons();
     } catch (err) {
-      toast.error('Failed to delete reason');
+      toast.error('Failed to delete reason.');
+    } finally {
+      setProcessing(false);
     }
   };
 
-  const startEdit = (id, text) => {
-    setEditingId(id);
-    setEditValue(text);
-  };
+  // Instant Client-Side Filtering
+  const filteredReasons = reasons.filter(r => 
+    !searchQuery || r.reason_text.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditValue('');
-  };
-
-  const saveEdit = async (id) => {
-    if (!editValue.trim()) {
-      toast.warning('Reason cannot be empty');
-      return;
-    }
-    try {
-      await axios.put(`${API_BASE}/visit-reasons/${id}`, { reason_text: editValue.trim() }, getAuthHeaders());
-      toast.success('Reason updated');
-      setEditingId(null);
-      fetchReasons();
-    } catch (err) {
-      toast.error('Failed to update reason');
-    }
-  };
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredReasons.length / itemsPerPage);
+  const currentReasons = filteredReasons.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
-    <div className="mr-container">
-      <div className="mr-header">
-        <div>
-          <h2 className="mr-title">Visit Reasons</h2>
-          <p className="mr-subtitle">Manage appointment reasons available for visitors to select during booking.</p>
+    <div className="expert-container">
+      {/* Header Section */}
+      <div className="expert-header">
+        <div className="expert-title-group">
+           
+          <div>
+            
+            <p className="expert-subtitle">Manage the list of official purposes for campus visits.</p>
+          </div>
         </div>
-        <div className="mr-header-icon">
-          <FileText size={24} color="#6B7280" />
-        </div>
+        <button className="expert-btn-primary" onClick={() => setShowAddModal(true)}>
+          <Plus size={16} /> Add New Reason
+        </button>
       </div>
 
-      <div className="mr-card">
-        {/* Toolbar / Add Form */}
-        <div className="mr-card-toolbar">
-          <form onSubmit={handleAdd} className="mr-add-form">
-            <div className="mr-input-wrapper">
-              <input
-                id="newReason"
-                type="text"
-                placeholder="Add new reason (e.g., Facility Tour, Interview)"
-                value={newReason}
-                onChange={(e) => setNewReason(e.target.value)}
-                className="mr-input"
-              />
-            </div>
-            <button type="submit" className="btn-mr-primary" disabled={loading}>
-              <Plus size={16} /> <span>{loading ? 'Adding...' : 'Add Reason'}</span>
-            </button>
-          </form>
+      {/* Search Bar */}
+      <div className="expert-search-card" style={{ padding: '12px 20px' }}>
+        <div className="expert-search-row">
+          <div className="expert-search-input-group" style={{ maxWidth: '500px' }}>
+            <Search size={18} className="text-muted" />
+            <input 
+              type="text" 
+              placeholder="Search existing reasons..." 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)} 
+              className="expert-clean-input" 
+            />
+            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+          </div>
           <div className="mr-stats-badge">
             Total Active: <strong>{reasons.length}</strong>
           </div>
         </div>
-
-        {/* Table Area */}
-        <div className="mr-table-wrapper">
-          {fetchLoading ? (
-            <div className="mr-loading-state">Loading reasons...</div>
-          ) : reasons.length === 0 ? (
-            <div className="mr-empty-state">
-              <AlertCircle size={40} className="mr-empty-icon" />
-              <p>No reasons configured yet.</p>
-              <span>Use the form above to add options for your visitors.</span>
-            </div>
-          ) : (
-            <table className="mr-table">
-              <thead>
-                <tr>
-                  <th>Reason Title</th>
-                  <th className="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reasons.map((reason) => (
-                  <tr key={reason.id}>
-                    <td className="mr-reason-cell">
-                      {editingId === reason.id ? (
-                        <input
-                          type="text"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          className="mr-edit-input"
-                          autoFocus
-                          onKeyDown={(e) => { if(e.key === 'Enter') saveEdit(reason.id); if(e.key === 'Escape') cancelEdit(); }}
-                        />
-                      ) : (
-                        <span className="mr-reason-text">{reason.reason_text}</span>
-                      )}
-                    </td>
-                    <td className="text-right">
-                      {editingId === reason.id ? (
-                        <div className="mr-action-group">
-                          <button className="btn-icon-success" onClick={() => saveEdit(reason.id)} title="Save">
-                            <Check size={16} />
-                          </button>
-                          <button className="btn-icon-neutral" onClick={cancelEdit} title="Cancel">
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="mr-action-group">
-                          <button className="btn-icon-primary" onClick={() => startEdit(reason.id, reason.reason_text)} title="Edit">
-                            <Edit2 size={16} />
-                          </button>
-                          <button className="btn-icon-danger" onClick={() => handleDelete(reason.id)} title="Delete">
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
-      <FormalModal
-        show={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        title="Delete Visit Reason"
-        footer={
+      {/* Main Table Card */}
+      <div className="expert-card">
+        {fetchLoading ? (
+          <div className="expert-loading">Loading reasons...</div>
+        ) : filteredReasons.length === 0 ? (
+          <div className="expert-empty">
+            <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
+            <p>No visit reasons found.</p>
+            {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Add New Reason" to configure options for visitors.</span>}
+          </div>
+        ) : (
           <>
-            <button className="btn-mr-cancel" onClick={() => setShowDeleteConfirm(false)}>
-              Cancel
-            </button>
-            <button className="btn-mr-danger" onClick={confirmDelete}>
-              Yes, Delete Reason
-            </button>
+            <div className="expert-table-wrapper">
+              <table className="expert-table">
+                <thead>
+                  <tr>
+                    <th>Reason Title</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentReasons.map((reason) => (
+                    <tr key={reason.id}>
+                      <td>
+                        <span className="font-semibold text-dark">{reason.reason_text}</span>
+                      </td>
+                      <td>
+                        <div className="expert-action-group right">
+                          <button className="expert-btn-icon" onClick={() => openEditModal(reason.id, reason.reason_text)} title="Edit">
+                            <Edit3 size={18} color="#475569" />
+                          </button>
+                          <button className="expert-btn-icon danger" onClick={() => openDeleteModal(reason.id)} title="Delete">
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="expert-pagination">
+                <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredReasons.length)} of {filteredReasons.length} entries</span>
+                <div className="expert-page-controls">
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
+                  <span className="expert-page-current">{currentPage} / {totalPages}</span>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
+                </div>
+              </div>
+            )}
           </>
-        }
-      >
-        <p className="mr-modal-text">Are you sure you want to permanently delete <strong>{reasons.find(r => r.id === deleteTargetId)?.reason_text}</strong>?</p>
-        <p className="mr-modal-warning">This action cannot be undone. Visitors will no longer see this reason when booking appointments.</p>
+        )}
+      </div>
+
+      {/* Add Reason Modal */}
+      <FormalModal show={showAddModal} onClose={() => setShowAddModal(false)} title="Add Visit Reason" footer={
+        <>
+          <button className="expert-btn-secondary" onClick={() => setShowAddModal(false)} disabled={processing}>Cancel</button>
+          <button className="expert-btn-primary" onClick={handleAdd} disabled={processing}>
+            {processing ? 'Saving...' : 'Save Reason'}
+          </button>
+        </>
+      }>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <label style={{ fontSize: '0.85rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase' }}>Reason Title <span className="text-danger">*</span></label>
+          <input
+            type="text"
+            placeholder="e.g., Facility Tour, Interview, Meeting"
+            value={newReason}
+            onChange={(e) => setNewReason(e.target.value)}
+            disabled={processing}
+            className="expert-clean-input border"
+            autoFocus
+            onKeyDown={(e) => { if(e.key === 'Enter') handleAdd(e); }}
+          />
+        </div>
       </FormalModal>
+
+      {/* Edit Reason Modal */}
+      <FormalModal show={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Visit Reason" footer={
+        <>
+          <button className="expert-btn-secondary" onClick={() => setShowEditModal(false)} disabled={processing}>Cancel</button>
+          <button className="expert-btn-primary" onClick={handleEdit} disabled={processing}>
+            {processing ? 'Updating...' : 'Update Reason'}
+          </button>
+        </>
+      }>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <label style={{ fontSize: '0.85rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase' }}>Reason Title <span className="text-danger">*</span></label>
+          <input
+            type="text"
+            value={editReasonText}
+            onChange={(e) => setEditReasonText(e.target.value)}
+            disabled={processing}
+            className="expert-clean-input border"
+            autoFocus
+            onKeyDown={(e) => { if(e.key === 'Enter') handleEdit(e); }}
+          />
+        </div>
+      </FormalModal>
+
+      {/* Delete Confirmation Modal */}
+      <FormalModal show={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Delete Visit Reason" footer={
+        <>
+          <button className="expert-btn-secondary" onClick={() => setShowDeleteConfirm(false)} disabled={processing}>Cancel</button>
+          <button className="expert-btn-primary bg-red" onClick={confirmDelete} disabled={processing}>
+            {processing ? 'Processing...' : 'Confirm Deletion'}
+          </button>
+        </>
+      }>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <p style={{ fontSize: '0.95rem', color: '#334155', margin: 0 }}>
+            Are you sure you want to permanently delete <strong>{reasons.find(r => r.id === deleteTargetId)?.reason_text}</strong>?
+          </p>
+          <div style={{ background: '#FEF2F2', padding: '12px', borderRadius: '8px', border: '1px solid #FECACA', marginTop: '8px' }}>
+            <p style={{ fontSize: '0.85rem', color: '#DC2626', margin: 0, fontWeight: '500' }}>
+              Warning: This action cannot be undone. Visitors will no longer see this reason when booking appointments.
+            </p>
+          </div>
+        </div>
+      </FormalModal>
+
     </div>
   );
 };

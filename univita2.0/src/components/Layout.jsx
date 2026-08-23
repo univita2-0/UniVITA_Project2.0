@@ -39,7 +39,6 @@ const menuConfig = [
     id: 'visitor', label: 'Visitor', icon: <UserCheck size={18} />,
     submenu: [
       { id: 'manage-request', label: 'Manage Request', path: 'manage-request', roles: ['admin'] },
-      { id: 'history', label: 'Visitor History', path: 'history', roles: ['admin'] },
       { id: 'manage-reasons', label: 'Manage Visit Reasons', path: 'manage-reasons', roles: ['admin'] },
       { id: 'today-visitors', label: "Today's Visitors", path: 'today-visitors', roles: ['security'] },
       { id: 'completed-visits', label: "Completed Visits", path: 'completed-visits', roles: ['admin', 'security'] },

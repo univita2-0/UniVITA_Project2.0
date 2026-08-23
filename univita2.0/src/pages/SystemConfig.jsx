@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Save, RefreshCw, Settings, ShieldCheck } from 'lucide-react';
+import { Save, RefreshCw, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
 import './SystemConfig.css';
 import { API_BASE } from '../api';
 
@@ -49,81 +49,83 @@ const SystemConfig = () => {
     }
   };
 
-  if (loading) return <div className="sc-loading-state">Loading configuration...</div>;
+  if (loading) return <div className="expert-loading">Loading system parameters...</div>;
 
   return (
-    <div className="sc-container">
-      <div className="sc-header">
-        <div>
-          <h2 className="sc-title">System Configuration</h2>
-          <p className="sc-subtitle">Manage global security policies and core system parameters.</p>
-        </div>
-        <div className="sc-header-icon">
-          <Settings size={24} color="#6B7280" />
+    <div className="expert-container">
+      {/* Header Section */}
+      <div className="expert-header">
+        <div className="expert-title-group">
+          
+          <div>
+            
+            <p className="expert-subtitle">Manage global security policies and core platform parameters.</p>
+          </div>
         </div>
       </div>
 
-      <div className="sc-card">
-        <div className="sc-card-header">
-          <ShieldCheck size={20} className="sc-card-icon" />
-          <h3>Security Policies</h3>
+      {/* Main Form Card */}
+      <div className="expert-card" style={{ padding: '2rem' }}>
+        <div className="set-card-header">
+          <ShieldCheck size={20} className="set-icon-accent" />
+          <h3>Global Security Policies</h3>
         </div>
         
         <div className="sc-form-grid">
-          <div className="sc-form-group">
+          <div className="set-form-group">
             <label>Password Expiry (Days)</label>
             <input
               type="number"
-              className="sc-input"
+              className="expert-clean-input border"
               value={config.password_expiry_days}
               onChange={e => setConfig({ ...config, password_expiry_days: parseInt(e.target.value) || 0 })}
               min="0"
             />
-            <span className="sc-hint">Set to 0 to disable expiration.</span>
+            <span className="set-hint">Set to 0 to disable expiration.</span>
           </div>
 
-          <div className="sc-form-group">
+          <div className="set-form-group">
             <label>OTP Expiry (Minutes)</label>
             <input
               type="number"
-              className="sc-input"
+              className="expert-clean-input border"
               value={config.otp_expiry_minutes}
               onChange={e => setConfig({ ...config, otp_expiry_minutes: parseInt(e.target.value) || 1 })}
               min="1"
             />
-            <span className="sc-hint">Time allowed before a verification code expires.</span>
+            <span className="set-hint">Time allowed before a verification code expires.</span>
           </div>
 
-          <div className="sc-form-group">
+          <div className="set-form-group">
             <label>Default Geofence Radius (Meters)</label>
             <input
               type="number"
-              className="sc-input"
+              className="expert-clean-input border"
               value={config.geofence_default_radius}
               onChange={e => setConfig({ ...config, geofence_default_radius: parseInt(e.target.value) || 50 })}
               min="50"
             />
-            <span className="sc-hint">Minimum radius is 50 meters.</span>
+            <span className="set-hint">Minimum radius is 50 meters.</span>
           </div>
 
-          <div className="sc-form-group">
+          <div className="set-form-group">
             <label>Max Login Attempts</label>
             <input
               type="number"
-              className="sc-input"
+              className="expert-clean-input border"
               value={config.max_login_attempts}
               onChange={e => setConfig({ ...config, max_login_attempts: parseInt(e.target.value) || 3 })}
               min="1"
             />
-            <span className="sc-hint">Accounts lock after this many failed attempts.</span>
+            <span className="set-hint">Accounts lock after this many failed attempts.</span>
           </div>
         </div>
 
         <div className="sc-actions">
-          <button className="btn-sc-reset" onClick={fetchConfig} disabled={saving}>
+          <button className="expert-btn-secondary" onClick={fetchConfig} disabled={saving}>
             <RefreshCw size={16} /> <span>Discard Changes</span>
           </button>
-          <button className="btn-sc-save" onClick={handleSave} disabled={saving}>
+          <button className="expert-btn-primary" onClick={handleSave} disabled={saving}>
             <Save size={16} /> <span>{saving ? 'Saving...' : 'Save Configuration'}</span>
           </button>
         </div>

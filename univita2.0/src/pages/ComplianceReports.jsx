@@ -1,8 +1,7 @@
-// src/pages/ComplianceReports.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Download, Calendar, FileText, ShieldCheck, CheckCircle, TrendingUp, ChevronDown } from 'lucide-react';
+import { Download, Calendar, FileText, ShieldCheck, CheckCircle, Clock, FileBadge } from 'lucide-react';
 import './ComplianceReports.css';
 import { API_BASE } from '../api';
 
@@ -62,110 +61,148 @@ const ComplianceReports = () => {
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
   return (
-    <div className="cr-container">
-      <div className="cr-header">
-        <div>
-          <h2 className="cr-title">Compliance Reports</h2>
-          <p className="cr-subtitle">Audit-ready attendance compliance reports for accreditation.</p>
+    <div className="expert-container">
+      {/* Header */}
+      <div className="expert-header" style={{ marginBottom: '2.5rem' }}>
+        <div className="expert-title-group">
+          
+          <div>
+            
+            <p className="expert-subtitle">Generate official, audit-ready attendance compliance reports for accreditation.</p>
+          </div>
         </div>
-        <div className="cr-badge">
-          <ShieldCheck size={16} />
-          <span>Accreditation Ready</span>
+        <div className="cr-accreditation-badge">
+          <FileBadge size={16} />
+          <span>Accreditation Ready format</span>
         </div>
       </div>
 
-      <div className="cr-grid">
-        {/* Main Report Card */}
-        <div className="cr-card main-card">
-          <div className="cr-card-icon teal">
-            <FileText size={20} />
+      <div className="cr-grid-layout">
+        {/* Left: Configuration Panel */}
+        <div className="expert-card cr-config-panel">
+          <div className="cr-panel-header">
+            <div className="cr-panel-icon">
+              <FileText size={20} />
+            </div>
+            <div>
+              <h3>Report Configuration</h3>
+              <p>Select the target period to compile the attendance metrics.</p>
+            </div>
           </div>
-          <h3>Attendance Compliance</h3>
-          <p className="cr-card-desc">
-            Summarizes instructor attendance, late arrivals, leave days, and compliance rate
-            for the selected month. Includes scheduled vs. actual presence metrics.
-          </p>
 
-          <div className="cr-filters-wrapper">
-            <div className="cr-filter-group">
+          <div className="cr-form-grid">
+            <div className="cr-form-group">
               <label>Target Month</label>
-              <div className="cr-select-container">
-                <Calendar size={16} className="cr-select-icon" />
-                <select value={month} onChange={e => setMonth(parseInt(e.target.value))} className="cr-select">
+              <div className="cr-select-wrapper">
+                <Calendar size={18} className="cr-select-icon" />
+                <select 
+                  value={month} 
+                  onChange={e => setMonth(parseInt(e.target.value))} 
+                  className="cr-modern-select"
+                  disabled={loading}
+                >
                   {monthNames.map((name, idx) => (
                     <option key={idx + 1} value={idx + 1}>{name}</option>
                   ))}
                 </select>
-                <ChevronDown size={16} className="cr-chevron-icon" />
               </div>
             </div>
             
-            <div className="cr-filter-group">
+            <div className="cr-form-group">
               <label>Target Year</label>
-              <div className="cr-select-container">
-                <Calendar size={16} className="cr-select-icon" />
-                <select value={year} onChange={e => setYear(parseInt(e.target.value))} className="cr-select">
+              <div className="cr-select-wrapper">
+                <Calendar size={18} className="cr-select-icon" />
+                <select 
+                  value={year} 
+                  onChange={e => setYear(parseInt(e.target.value))} 
+                  className="cr-modern-select"
+                  disabled={loading}
+                >
                   {years.map(y => (
                     <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
-                <ChevronDown size={16} className="cr-chevron-icon" />
               </div>
             </div>
           </div>
 
-          <div className="cr-action-footer">
+          <div className="cr-action-section">
             {lastGenerated ? (
-              <div className="cr-last-generated">
-                <CheckCircle size={14} />
-                <span>Last generated: {lastGenerated.toLocaleString()}</span>
+              <div className="cr-status-banner success">
+                <CheckCircle size={18} />
+                <div className="cr-status-text">
+                  <strong>Ready for download</strong>
+                  <span>Last generated: {lastGenerated.toLocaleString()}</span>
+                </div>
               </div>
             ) : (
-              <div className="cr-last-generated empty">No previous generation found.</div>
+              <div className="cr-status-banner neutral">
+                <Clock size={18} />
+                <div className="cr-status-text">
+                  <strong>No recent generations</strong>
+                  <span>Configure the period above and click generate.</span>
+                </div>
+              </div>
             )}
 
-            <button className="btn-generate-report" onClick={generateReport} disabled={loading}>
+            <button className="cr-btn-generate" onClick={generateReport} disabled={loading}>
               {loading ? (
                 <>
                   <span className="cr-spinner"></span>
-                  <span>Generating PDF...</span>
+                  <span>Compiling PDF Document...</span>
                 </>
               ) : (
                 <>
-                  <Download size={16} />
-                  <span>Generate & Download</span>
+                  <Download size={18} />
+                  <span>Generate Official Report</span>
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* What's Inside Card */}
-        <div className="cr-card info-card">
-          <div className="cr-card-icon slate">
-            <TrendingUp size={20} />
-          </div>
+        {/* Right: What's Inside / Guidelines */}
+        <div className="expert-card cr-guidelines-panel">
           <h3>Report Contents Overview</h3>
-          <ul className="cr-features-list">
+          <p className="cr-guideline-desc">
+            This document compiles automated metrics to meet strict institutional and accreditation auditing standards.
+          </p>
+
+          <ul className="cr-checklist">
             <li>
-              <CheckCircle size={14} className="feature-icon" />
-              <span>Instructor attendance summary and totals</span>
+              <div className="cr-check-icon"><CheckCircle size={16} /></div>
+              <div className="cr-check-text">
+                <strong>Attendance Summary & Totals</strong>
+                <span>Aggregated regular and overtime hours.</span>
+              </div>
             </li>
             <li>
-              <CheckCircle size={14} className="feature-icon" />
-              <span>Detailed log of late arrivals & leave days</span>
+              <div className="cr-check-icon"><CheckCircle size={16} /></div>
+              <div className="cr-check-text">
+                <strong>Detailed Incident Logs</strong>
+                <span>Itemized list of late arrivals, absences, and formal leave days.</span>
+              </div>
             </li>
             <li>
-              <CheckCircle size={14} className="feature-icon" />
-              <span>Compliance rate calculations per instructor</span>
+              <div className="cr-check-icon"><CheckCircle size={16} /></div>
+              <div className="cr-check-text">
+                <strong>Compliance Rate Calculations</strong>
+                <span>Scheduled vs. actual presence metrics calculated per instructor.</span>
+              </div>
             </li>
             <li>
-              <CheckCircle size={14} className="feature-icon" />
-              <span>Overall department summary compared to targets</span>
+              <div className="cr-check-icon"><CheckCircle size={16} /></div>
+              <div className="cr-check-text">
+                <strong>Department Target Analysis</strong>
+                <span>Overall department summary compared to expected SLA targets.</span>
+              </div>
             </li>
             <li>
-              <CheckCircle size={14} className="feature-icon" />
-              <span>Formal institution headers & signature lines</span>
+              <div className="cr-check-icon"><CheckCircle size={16} /></div>
+              <div className="cr-check-text">
+                <strong>Official Formatting</strong>
+                <span>Includes formal institution headers, timestamps, and signature lines.</span>
+              </div>
             </li>
           </ul>
         </div>

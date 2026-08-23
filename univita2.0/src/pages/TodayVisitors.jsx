@@ -1,8 +1,7 @@
-// src/pages/TodayVisitors.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { User, Info, RefreshCw, Calendar, Users, UserCheck, XCircle, ArrowLeftRight } from 'lucide-react';
+import { User, Info, RefreshCw, Users, UserCheck, XCircle, ArrowLeftRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_BASE } from '../api';
 import FormalModal from '../components/FormalModal';
 import './TodayVisitors.css';
@@ -23,12 +22,6 @@ const FLOOR_5_ROOMS = [
 ];
 
 const ALL_ROOMS = [...new Set([...FLOOR_3_ROOMS, ...FLOOR_5_ROOMS])];
-
-const getFloorByRoom = (roomName) => {
-  if (FLOOR_3_ROOMS.includes(roomName)) return '3';
-  if (FLOOR_5_ROOMS.includes(roomName)) return '5';
-  return '3';
-};
 
 const formatTo12Hour = (timeStr) => {
   if (!timeStr) return '—';
@@ -55,6 +48,15 @@ const TodayVisitors = () => {
   
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnTargetId, setReturnTargetId] = useState(null);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // Reset to page 1 when date changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedDate]);
 
   const fetchVisitorsForDate = useCallback(async (date) => {
     setLoading(true);
@@ -173,17 +175,20 @@ const TodayVisitors = () => {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
+  // Pagination Logic
+  const totalPages = Math.ceil(visitors.length / itemsPerPage);
+  const currentVisitors = visitors.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
     <div className="tv-container">
       {/* Header Section */}
       <div className="tv-header-section">
         <div>
-          <h2 className="tv-title">Daily Visitor Operations</h2>
+          
           <p className="tv-subtitle">Manage arrivals, assign BLE tags, and track scheduled visitors.</p>
         </div>
         <div className="tv-actions">
           <div className="tv-date-picker-box">
-            <Calendar size={16} className="tv-icon-muted" />
             <input
               type="date"
               value={selectedDate}
@@ -192,37 +197,37 @@ const TodayVisitors = () => {
             />
           </div>
           <button className="btn-tv-outline" onClick={() => { fetchBleTags(); setShowTagsModal(true); }}>
-            <Info size={16} /> BLE Tag Inventory
+            <Info size={16} color="#0F172A" /> BLE Tag Inventory
           </button>
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Minimalist Monochrome Stats Grid */}
       <div className="tv-stats-grid">
         <div className="tv-stat-card">
           <div className="tv-stat-header">
-            <div className="tv-stat-icon bg-blue"><Users size={20} /></div>
+            <div className="tv-stat-icon"><Users size={20} color="#0F172A" /></div>
             <span>Scheduled Today</span>
           </div>
           <div className="tv-stat-value">{stats.total}</div>
         </div>
         <div className="tv-stat-card">
           <div className="tv-stat-header">
-            <div className="tv-stat-icon bg-teal"><UserCheck size={20} /></div>
+            <div className="tv-stat-icon"><UserCheck size={20} color="#0F172A" /></div>
             <span>Checked In</span>
           </div>
           <div className="tv-stat-value">{stats.arrived}</div>
         </div>
         <div className="tv-stat-card">
           <div className="tv-stat-header">
-            <div className="tv-stat-icon bg-red"><XCircle size={20} /></div>
+            <div className="tv-stat-icon"><XCircle size={20} color="#0F172A" /></div>
             <span>No Show</span>
           </div>
           <div className="tv-stat-value">{stats.noShow}</div>
         </div>
         <div className="tv-stat-card">
           <div className="tv-stat-header">
-            <div className="tv-stat-icon bg-gray"><ArrowLeftRight size={20} /></div>
+            <div className="tv-stat-icon"><ArrowLeftRight size={20} color="#0F172A" /></div>
             <span>Tags Returned</span>
           </div>
           <div className="tv-stat-value">{stats.returned}</div>
@@ -240,97 +245,117 @@ const TodayVisitors = () => {
             <div className="tv-state-box">Loading visitor data...</div>
           ) : visitors.length === 0 ? (
             <div className="tv-state-box">
-              <User size={32} className="tv-icon-muted mb-2" />
+              <User size={32} color="#94A3B8" className="mb-2" />
               <p>No approved visitors scheduled for this date.</p>
             </div>
           ) : (
-            <table className="tv-table">
-              <thead>
-                <tr>
-                  <th>Visitor Details</th>
-                  <th>Schedule</th>
-                  <th>Purpose</th>
-                  <th>Room & Tag Assignment</th>
-                  <th className="text-center">Status</th>
-                  <th className="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visitors.map(v => (
-                  <tr key={v.id}>
-                    <td>
-                      <div className="tv-guest-name">{v.first_name} {v.last_name}</div>
-                      <div className="tv-guest-email">{v.email}</div>
-                    </td>
-                    <td><span className="tv-time-text">{v.visit_time ? formatTo12Hour(v.visit_time) : '—'}</span></td>
-                    <td><span className="tv-purpose-text" title={v.reason}>{v.reason || '—'}</span></td>
-                    <td>
-                      {!v.arrived && !v.no_show ? (
-                        <div className="tv-assignment-controls">
-                          <select id={`room-${v.id}`} className="tv-select">
-                            <option value="">Select Room</option>
-                            {ALL_ROOMS.map(room => <option key={room} value={room}>{room}</option>)}
-                          </select>
-                          <select id={`ble-${v.id}`} className="tv-select">
-                            <option value="">Select BLE Tag</option>
-                            {availableBleTags.length === 0 ? (
-                              <option disabled>No tags available</option>
-                            ) : (
-                              availableBleTags.map(tag => (
-                                <option key={tag.ble_id} value={tag.ble_id}>{tag.ble_id} – {tag.label || tag.ble_id}</option>
-                              ))
-                            )}
-                          </select>
-                        </div>
-                      ) : (
-                        <div className="tv-assigned-info">
-                          {v.destination ? <span className="tv-assigned-room">Room: {v.destination}</span> : <span>—</span>}
-                          {v.ble_id ? <span className="tv-assigned-tag">BLE: {v.ble_id}</span> : <span>—</span>}
-                        </div>
-                      )}
-                    </td>
-                    <td className="text-center">
-                      {v.arrived && v.returned ? (
-                        <span className="tv-badge returned">Returned</span>
-                      ) : v.arrived ? (
-                        <span className="tv-badge arrived">Checked In</span>
-                      ) : v.no_show ? (
-                        <span className="tv-badge noshow">No Show</span>
-                      ) : (
-                        <span className="tv-badge expected">Expected</span>
-                      )}
-                    </td>
-                    <td className="text-right">
-                      {!v.arrived && !v.no_show && (
-                        <div className="tv-action-group">
-                          <button
-                            className="btn-tv-success"
-                            onClick={() => markArrived(
-                              v.id,
-                              document.getElementById(`room-${v.id}`).value,
-                              document.getElementById(`ble-${v.id}`).value
-                            )}
-                            disabled={availableBleTags.length === 0}
-                          >
-                            Check In
-                          </button>
-                          <button className="btn-tv-danger-outline" onClick={() => confirmNoShow(v.id)}>
-                            No Show
-                          </button>
-                        </div>
-                      )}
-                      {v.arrived && !v.returned && (
-                        <button className="btn-tv-warning" onClick={() => confirmReturn(v.id)}>
-                          Return Tag
-                        </button>
-                      )}
-                      {v.returned && <span className="tv-completed-text">Completed</span>}
-                      {v.no_show && <span className="tv-completed-text">Cancelled</span>}
-                    </td>
+            <>
+              <table className="tv-table">
+                <thead>
+                  <tr>
+                    <th>Visitor Details</th>
+                    <th>Schedule</th>
+                    <th>Purpose</th>
+                    <th>Room & Tag Assignment</th>
+                    <th className="text-center">Status</th>
+                    <th className="text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {currentVisitors.map(v => {
+                    // Fallback to used_ble_id if the tag was returned to inventory
+                    const displayBleId = v.used_ble_id || v.ble_id;
+                    
+                    return (
+                      <tr key={v.id}>
+                        <td>
+                          <div className="tv-guest-name">{v.first_name} {v.last_name}</div>
+                          <div className="tv-guest-email">{v.email}</div>
+                        </td>
+                        <td><span className="tv-time-text">{v.visit_time ? formatTo12Hour(v.visit_time) : '—'}</span></td>
+                        <td><span className="tv-purpose-text" title={v.reason}>{v.reason || '—'}</span></td>
+                        <td>
+                          {v.arrived != 1 && v.no_show != 1 ? (
+                            <div className="tv-assignment-controls">
+                              <select id={`room-${v.id}`} className="tv-select">
+                                <option value="">Select Room</option>
+                                {ALL_ROOMS.map(room => <option key={room} value={room}>{room}</option>)}
+                              </select>
+                              <select id={`ble-${v.id}`} className="tv-select">
+                                <option value="">Select BLE Tag</option>
+                                {availableBleTags.length === 0 ? (
+                                  <option disabled>No tags available</option>
+                                ) : (
+                                  availableBleTags.map(tag => (
+                                    <option key={tag.ble_id} value={tag.ble_id}>{tag.ble_id} – {tag.label || tag.ble_id}</option>
+                                  ))
+                                )}
+                              </select>
+                            </div>
+                          ) : (
+                            <div className="tv-assigned-info">
+                              <span className="tv-assigned-room">Room: {v.destination || '—'}</span>
+                              <span className="tv-assigned-tag">BLE: {displayBleId || '—'}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="text-center">
+                          {v.arrived == 1 && v.returned == 1 ? (
+                            <span className="tv-badge returned">Returned</span>
+                          ) : v.arrived == 1 ? (
+                            <span className="tv-badge arrived">Checked In</span>
+                          ) : v.no_show == 1 ? (
+                            <span className="tv-badge noshow">No Show</span>
+                          ) : (
+                            <span className="tv-badge expected">Expected</span>
+                          )}
+                        </td>
+                        <td className="text-right">
+                          {v.arrived != 1 && v.no_show != 1 ? (
+                            <div className="tv-action-group">
+                              <button
+                                className="btn-tv-success"
+                                onClick={() => markArrived(
+                                  v.id,
+                                  document.getElementById(`room-${v.id}`).value,
+                                  document.getElementById(`ble-${v.id}`).value
+                                )}
+                                disabled={availableBleTags.length === 0}
+                              >
+                                Check In
+                              </button>
+                              <button className="btn-tv-danger-outline" onClick={() => confirmNoShow(v.id)}>
+                                No Show
+                              </button>
+                            </div>
+                          ) : null}
+
+                          {v.arrived == 1 && v.returned != 1 ? (
+                            <button className="btn-tv-warning" onClick={() => confirmReturn(v.id)}>
+                              Return Tag
+                            </button>
+                          ) : null}
+                          
+                          {v.returned == 1 ? <span className="tv-completed-text">Completed</span> : null}
+                          {v.no_show == 1 ? <span className="tv-completed-text">Cancelled</span> : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              
+              {totalPages > 1 && (
+                <div className="tv-pagination">
+                  <span className="tv-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, visitors.length)} of {visitors.length} entries</span>
+                  <div className="tv-page-controls">
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="tv-page-btn"><ChevronLeft size={16} /> Prev</button>
+                    <span className="tv-page-current">{currentPage} / {totalPages}</span>
+                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="tv-page-btn">Next <ChevronRight size={16} /></button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -345,7 +370,7 @@ const TodayVisitors = () => {
       >
         <div className="tv-modal-toolbar">
           <button className="btn-tv-outline-sm" onClick={fetchBleTags} disabled={tagsLoading}>
-            <RefreshCw size={14} /> {tagsLoading ? 'Refreshing...' : 'Refresh Status'}
+            <RefreshCw size={14} color="#0F172A" /> {tagsLoading ? 'Refreshing...' : 'Refresh Status'}
           </button>
         </div>
         <div className="tv-table-wrapper" style={{ maxHeight: '400px' }}>
@@ -354,7 +379,7 @@ const TodayVisitors = () => {
           ) : allBleTags.length === 0 ? (
             <div className="tv-state-box">No BLE tags registered in the system.</div>
           ) : (
-            <table className="tv-table">
+             <table className="tv-table">
               <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                 <tr>
                   <th>BLE ID</th>

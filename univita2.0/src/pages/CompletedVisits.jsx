@@ -84,12 +84,7 @@ const CompletedVisits = () => {
 
   return (
     <div className="cv-container">
-      <div className="cv-header">
-        <div>
-          <h2 className="cv-title">Completed Visits</h2>
-          <p className="cv-subtitle">View and export historical data for visitors who have checked out.</p>
-        </div>
-      </div>
+     
 
       <div className="cv-filters-card">
         <div className="cv-filters-wrapper">
