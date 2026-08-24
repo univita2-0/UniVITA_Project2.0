@@ -353,15 +353,17 @@ const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 10
 // CORS CONFIGURATION
 // --------------------------------------------------
 const allowedOrigins = [
+  'https://univitahct.tech',        // custom root domain
+  'https://www.univitahct.tech',    // custom www subdomain
   'https://univita.site',
   'http://localhost:3000',
-  'http://localhost:8081',
-  'https://univitahct.netlify.app' // This is the default Expo/React Native port
+  'http://localhost:8081',          
+  'https://univitahct.netlify.app'
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // allow requests with no origin (like mobile apps or curl requests)
+   
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
@@ -372,7 +374,6 @@ const corsOptions = {
   credentials: true,
   optionsSuccessStatus: 200
 };
-
 app.use(cors(corsOptions));
 app.use(bodyParser.json());
 
@@ -404,9 +405,9 @@ app.post('/api/auth/send-otp', otpLimiter, (req, res) => {
 
     try {
       const { data, error } = await resend.emails.send({
-        from: 'UniVITA Security <onboarding@resend.dev>', // Resend's required default sender for free tier
-        to: [email],
-        subject: 'Your OTP Code - UniVITA',
+      from: 'UniVITA Security <no-reply@univitahct.tech>', 
+      to: [email],
+      subject: 'Your OTP Code - UniVITA',
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
             <h2 style="color: #0f172a; margin-top: 0;">Login Verification Code</h2>

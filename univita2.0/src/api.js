@@ -1,6 +1,6 @@
 /* univita2.0/src/api.js */
 
-const API_BASE = process.env.REACT_APP_API_URL || 'https://univitaproject20-production.up.railway.app/api';
+const API_BASE = process.env.REACT_APP_API_URL || 'https://api.univitahct.tech/api';
 
 export { API_BASE };
 
