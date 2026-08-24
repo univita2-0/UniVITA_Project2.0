@@ -477,7 +477,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       }
       res.json({ success: true, message: 'OTP sent to your email.' });
     });
-    res.json({ success: true, message: 'DEV MODE: Check Railway logs for OTP code.' });
+    
   });
 });
 
