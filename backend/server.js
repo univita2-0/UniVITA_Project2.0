@@ -470,13 +470,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       subject: 'Password Reset OTP - UniVITA',
       text: `Your password reset OTP is: ${otp}\n\nThis code expires in 5 minutes.\n\nIf you did not request this, please ignore this email.`
     };
-    /*transporter.sendMail(mailOptions, (error) => {
+    transporter.sendMail(mailOptions, (error) => {
       if (error) {
         console.error('Reset OTP email error:', error);
         return res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
       }
       res.json({ success: true, message: 'OTP sent to your email.' });
-    });*/
+    });
     res.json({ success: true, message: 'DEV MODE: Check Railway logs for OTP code.' });
   });
 });
