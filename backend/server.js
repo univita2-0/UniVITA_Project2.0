@@ -1,5 +1,8 @@
 require('dotenv').config();
 const express = require('express');
+
+const { Resend } = require('resend');
+
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
@@ -40,6 +43,7 @@ app.disable('x-powered-by');
 const fs = require('fs');
 const visitorDestinations = {};
 const recentAlertsCache = new Set();
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // --------------------------------------------------
 // CONFIGURATION (from .env)
@@ -379,11 +383,12 @@ app.use(bodyParser.json());
 
 // Send OTP for login (callback version – matches original working code)
 app.post('/api/auth/send-otp', otpLimiter, (req, res) => {
-  console.log("✅ OTP request received for:", req.body.email);
+  console.log("OTP request received for:", req.body.email);
   const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
-  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], (err, results) => {
+  // Note the 'async' added here before (err, results)
+  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
     if (err) {
       console.error("DB error:", err);
       return res.status(500).json({ success: false, message: err.message });
@@ -397,20 +402,33 @@ app.post('/api/auth/send-otp', otpLimiter, (req, res) => {
     OTP_STORE[email] = { otp, expiresAt };
     console.log(`[OTP] ${email} -> ${otp}`);
 
-    const mailOptions = {
-      from: process.env.MAIL_USER,
-      to: email,
-      subject: 'Your OTP Code - UniVITA',
-      text: `Your OTP code is: ${otp}\n\nThis code expires in 5 minutes.\n\nIf you did not request this, please ignore this email.`
-    };
-    transporter.sendMail(mailOptions, (error) => {
+    try {
+      const { data, error } = await resend.emails.send({
+        from: 'UniVITA Security <onboarding@resend.dev>', // Resend's required default sender for free tier
+        to: [email],
+        subject: 'Your OTP Code - UniVITA',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <h2 style="color: #0f172a; margin-top: 0;">Login Verification Code</h2>
+            <p style="color: #475569; font-size: 14px;">Use the following one-time password (OTP) to complete your sign-in. This code is valid for 5 minutes.</p>
+            <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 15px; text-align: center; border-radius: 6px; margin: 20px 0;">
+              <span style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #0d9488;">${otp}</span>
+            </div>
+            <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">If you did not request this code, please ignore this email.</p>
+          </div>
+        `
+      });
+
       if (error) {
-        console.error('OTP email error:', error);
+        console.error('Resend API Error:', error);
         return res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
       }
+
       res.json({ success: true, message: 'OTP sent to your email.' });
-    });
-    
+    } catch (err) {
+      console.error('Unexpected email error:', err);
+      return res.status(500).json({ success: false, message: 'Server error while sending OTP.' });
+    }
   });
 });
 
