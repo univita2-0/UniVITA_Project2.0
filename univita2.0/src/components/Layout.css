@@ -1,4 +1,4 @@
-/* src/components/Layout.css - Modern Minimalist Redesign */
+/* src/components/Layout.css */
 
 .lay-container {
   display: flex;
@@ -308,4 +308,101 @@
     gap: 1rem;
   }
   .lay-header-right { align-self: flex-end; }
+}
+
+
+/* ---------- Logout Modal ---------- */
+
+.lay-logout-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(17, 24, 39, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.lay-logout-modal {
+  background: #FFFFFF;
+  border-radius: 12px;
+  padding: 2rem;
+  width: 90%;
+  max-width: 360px;
+  text-align: center;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  animation: popModal 0.2s ease-out forwards;
+}
+
+@keyframes popModal {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.lay-logout-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  background: #FEF2F2;
+  color: #DC2626;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1rem;
+}
+
+.lay-logout-modal h3 {
+  color: #111827;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+}
+
+.lay-logout-modal p {
+  color: #4B5563;
+  font-size: 0.95rem;
+  margin: 0 0 1.5rem 0;
+}
+
+.lay-logout-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.btn-logout-no {
+  padding: 0.65rem 1.5rem;
+  background: #FFFFFF;
+  border: 1px solid #D1D5DB;
+  color: #374151;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  flex: 1;
+  transition: all 0.2s ease;
+}
+
+.btn-logout-no:hover {
+  background: #F3F4F6;
+  color: #111827;
+}
+
+.btn-logout-yes {
+  padding: 0.65rem 1.5rem;
+  background: #DC2626;
+  border: 1px solid #DC2626;
+  color: #FFFFFF;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  flex: 1;
+  transition: all 0.2s ease;
+}
+
+.btn-logout-yes:hover {
+  background: #B91C1C;
+  border-color: #B91C1C;
 }

@@ -16,9 +16,25 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const WebSocket = require('ws');
 const url = require('url');
+const bcrypt = require('bcrypt');
 
 const app = express();
+const helmet = require('helmet');
 app.set('trust proxy', 1);
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }, 
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"], 
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: ["'self'", "https://univitaproject20-production.up.railway.app"]
+    },
+  },
+}));
+app.disable('x-powered-by');
 const fs = require('fs');
 const visitorDestinations = {};
 const recentAlertsCache = new Set();
@@ -171,6 +187,31 @@ function authenticateToken(req, res, next) {
   });
 }
 
+
+const verifyOwnership = (req, res, next) => {
+  if (req.user.role === 'admin' || req.user.role === 'hr_admin') {
+    return next();
+  }
+
+  const requestedEmployeeId = req.params.employeeId || req.params.identifier;
+  
+  if (!requestedEmployeeId) {
+    return res.status(400).json({ error: "Missing employee identifier in request." });
+  }
+
+  // Cross-reference the logged-in user's ID with the requested employee_id
+  db.query("SELECT employee_id FROM users WHERE id = ?", [req.user.id], (err, rows) => {
+    if (err) return res.status(500).json({ error: "Database verification error" });
+    
+    if (rows.length === 0 || rows[0].employee_id !== requestedEmployeeId) {
+      console.warn(`IDOR Blocked: User ID ${req.user.id} attempted to access ${requestedEmployeeId}`);
+      return res.status(403).json({ error: "Forbidden: You can only access your own data." });
+    }
+    
+    next();
+  });
+};
+
 // Helper to log visitor history (place after db connection)
 function logVisitorHistory(visitorId, visitorName, bleId, floor, currentRoom, eventType, x = null, y = null) {
   // If visitorId is the bleId (string), we might want to look up the real DB ID
@@ -228,8 +269,27 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
 }
 
 // --------------------------------------------------
-// MULTER SETUP
+// MULTER SETUP & SECURITY FILTERS
 // --------------------------------------------------
+
+// Strict file filters to prevent Remote Code Execution (RCE)
+const imageFilter = (req, file, cb) => {
+  if (['image/jpeg', 'image/jpg', 'image/png'].includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only JPG and PNG are allowed.'));
+  }
+};
+
+const pdfFilter = (req, file, cb) => {
+  if (file.mimetype === 'application/pdf') {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only PDF is allowed.'));
+  }
+};
+
+// --- Leave Images ---
 const uploadDir = path.join(__dirname, 'uploads', 'leave_images');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const storage = multer.diskStorage({
@@ -240,8 +300,9 @@ const storage = multer.diskStorage({
     cb(null, `leave_${unique}${ext}`);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
+// --- Resumes ---
 const resumeDir = path.join(__dirname, 'uploads', 'resumes');
 if (!fs.existsSync(resumeDir)) fs.mkdirSync(resumeDir, { recursive: true });
 const resumeStorage = multer.diskStorage({
@@ -251,9 +312,9 @@ const resumeStorage = multer.diskStorage({
     cb(null, `resume_${unique}${path.extname(file.originalname)}`);
   }
 });
-const uploadResume = multer({ storage: resumeStorage, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadResume = multer({ storage: resumeStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: pdfFilter });
 
-// Custom storage for selfies – adds .jpg extension
+// --- Selfies ---
 const selfieStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/selfies/');
@@ -263,9 +324,12 @@ const selfieStorage = multer.diskStorage({
     cb(null, unique + '.jpg');   // ✅ add .jpg extension
   }
 });
-const multerSelfie = multer({ storage: selfieStorage, limits: { fileSize: 5 * 1024 * 1024 } });
-const multerCorrection = multer({ dest: 'uploads/corrections/', limits: { fileSize: 5 * 1024 * 1024 } });
+const multerSelfie = multer({ storage: selfieStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
+// --- Corrections ---
+const multerCorrection = multer({ dest: 'uploads/corrections/', limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
+
+// --- Attendance Appeals ---
 const appealUploadDir = path.join(__dirname, 'uploads', 'attendance_appeals');
 if (!fs.existsSync(appealUploadDir)) fs.mkdirSync(appealUploadDir, { recursive: true });
 const appealStorage = multer.diskStorage({
@@ -275,7 +339,7 @@ const appealStorage = multer.diskStorage({
     cb(null, `appeal_${unique}${path.extname(file.originalname)}`);
   }
 });
-const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
 
 // --------------------------------------------------
@@ -348,7 +412,7 @@ app.post('/api/auth/send-otp', otpLimiter, (req, res) => {
 });
 
 // Verify OTP and issue JWT (callback version)
-app.post('/api/auth/verify-otp', (req, res) => {
+app.post('/api/auth/verify-otp', otpLimiter, (req, res) => {
   const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
   const otp = req.body.otp;
   if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
@@ -418,7 +482,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 });
 
 // Reset password – verify OTP and update password
-app.post('/api/auth/reset-password', async (req, res) => {
+app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
   const email = req.body.email?.trim().toLowerCase();
   const otp = req.body.otp;
   const newPassword = req.body.newPassword;
@@ -440,11 +504,18 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
   delete OTP_STORE[email];
 
-  const updateSql = "UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE email = ?";
-  db.query(updateSql, [newPassword, email], (err) => {
-    if (err) return res.status(500).json({ success: false, message: err.message });
-    res.json({ success: true, message: 'Password reset successfully.' });
-  });
+  try {
+   
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    const updateSql = "UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE email = ?";
+    db.query(updateSql, [hashedPassword, email], (err) => {
+      if (err) return res.status(500).json({ success: false, message: err.message });
+      res.json({ success: true, message: 'Password reset successfully.' });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error encrypting new password' });
+  }
 });
 
 // Initial login (returns requiresOtp flag)
@@ -452,11 +523,22 @@ app.post('/api/login', loginLimiter, (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-  db.query("SELECT * FROM users WHERE email = ? AND password = ? AND status = 'active'", [email, password], (err, results) => {
+  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     if (results.length === 0) return res.json({ success: false, message: 'Invalid email or password' });
 
     const user = results[0];
+    const match = await bcrypt.compare(password, user.password);
+    
+    // Auto-upgrade legacy plaintext passwords seamlessly
+    if (!match && password === user.password) {
+      const hashed = await bcrypt.hash(password, 10);
+      db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
+    } else if (!match) {
+      return res.json({ success: false, message: 'Invalid email or password' });
+    }
+
+    
     logAction(user.id, 'LOGIN', 'user', user.id, req);
     const daysSinceChange = user.password_last_changed
       ? Math.floor((Date.now() - new Date(user.password_last_changed).getTime()) / (1000 * 60 * 60 * 24))
@@ -484,34 +566,63 @@ app.post('/api/login', loginLimiter, (req, res) => {
   });
 });
 
-app.put('/api/users/:identifier/update-password', (req, res) => {
+app.put('/api/users/:identifier/update-password', async (req, res) => {
   const { identifier } = req.params;
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) return res.status(400).json({ success: false, message: 'Missing fields' });
 
-  db.query("SELECT * FROM users WHERE (id = ? OR employee_id = ?)", [identifier, identifier], (err, results) => {
+  db.query("SELECT * FROM users WHERE (id = ? OR employee_id = ?)", [identifier, identifier], async (err, results) => {
     if (err) return res.status(500).json({ success: false, message: "DB Error" });
     if (results.length === 0) return res.status(404).json({ success: false, message: "User not found." });
+    
     const user = results[0];
-    if (user.password.trim() !== currentPassword.trim()) return res.status(401).json({ success: false, message: "Invalid current password." });
-    db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [newPassword.trim(), user.id], (err) => {
-      if (err) return res.status(500).json({ success: false });
-      res.json({ success: true });
-    });
+    
+    
+    const match = await bcrypt.compare(currentPassword.trim(), user.password);
+    if (!match && currentPassword.trim() !== user.password) {
+      return res.status(401).json({ success: false, message: "Invalid current password." });
+    }
+
+    try {
+      
+      const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
+
+      db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [hashedPassword, user.id], (err) => {
+        if (err) return res.status(500).json({ success: false });
+        res.json({ success: true });
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Error encrypting new password' });
+    }
   });
 });
 
-app.put('/api/users/:id/reset-password', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+app.put('/api/users/:id/reset-password', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
   const { newPassword } = req.body;
   const userId = req.params.id;
-  if (!newPassword || newPassword.trim().length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
-  db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [newPassword.trim(), userId], (err, result) => {
-    if (err) return res.status(500).json({ success: false, message: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'User not found.' });
-    logAction(req.user.id, 'ADMIN_RESET_PASSWORD', 'user', userId, req);
-    res.json({ success: true, message: 'Password reset successfully.' });
-  });
+
+  if (!newPassword || newPassword.trim().length < 6) {
+    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+  }
+  
+  try {
+    
+    const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
+
+    db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [hashedPassword, userId], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: err.message });
+      if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+      
+      logAction(req.user.id, 'ADMIN_RESET_PASSWORD', 'user', userId, req);
+      res.json({ success: true, message: 'Password reset successfully.' });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error encrypting new password' });
+  }
 });
 
 // ============================================
@@ -594,11 +705,16 @@ if (diffMinutes < -15) {
        `${schedulePlace} (${parseFloat(latitude).toFixed(6)}, ${parseFloat(longitude).toFixed(6)})`]
     );
 
-    // ✅ Audit log – result.insertId is now defined
     logAction(req.user.id, 'CLOCK_IN', 'attendance', result.insertId, req);
 
     res.json({ success: true, message: `Clocked in as ${status} at ${currentTime}` });
   } catch (err) {
+    // Catch the unique constraint violation caused by a double-tap
+    if (err.code === 'ER_DUP_ENTRY') {
+      console.warn(`Race condition blocked: Duplicate clock-in attempt for ${employee_id}`);
+      return res.status(409).json({ success: false, message: 'Already clocked in for this schedule.' });
+    }
+    
     console.error("Clock-in error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
@@ -823,7 +939,7 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
   }
 });
 
-app.get('/api/attendance/corrections/user/:employeeId', authenticateToken, async (req, res) => {
+app.get('/api/attendance/corrections/user/:employeeId', authenticateToken, verifyOwnership, async (req, res) => {
   const { employeeId } = req.params;
   
   db.query(
@@ -1060,6 +1176,15 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
     if (userRows.length === 0) return res.status(404).json({ success: false, error: "User not found" });
     const employee_id = userRows[0].employee_id;
 
+    // Check for an existing pending or approved leave on this exact date
+    const [existingReq] = await db.promise().query(
+      "SELECT id FROM leave_requests WHERE user_id = ? AND request_date = ? AND status IN ('Pending', 'Approved')",
+      [employee_id, request_date]
+    );
+    if (existingReq.length > 0) {
+      return res.status(409).json({ success: false, error: "You already have an active leave request for this date." });
+    }
+
     const [typeRows] = await db.promise().query("SELECT id FROM leave_types WHERE name = ?", [type]);
     if (typeRows.length === 0) return res.status(400).json({ success: false, error: "Invalid leave type" });
     const leaveTypeId = typeRows[0].id;
@@ -1068,17 +1193,27 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
       [userId, leaveTypeId, leaveYear]
     );
+    
     if (balanceRows.length === 0 || balanceRows[0].remaining_days < 1) {
       return res.status(400).json({ success: false, error: `Insufficient ${type} balance for ${leaveYear}. Please contact HR.` });
     }
 
     const image_url = req.file ? `/uploads/leave_images/${req.file.filename}` : null;
-    await db.promise().query(
+    
+    const [result] = await db.promise().query(
       `INSERT INTO leave_requests (user_id, request_date, reason, type, image_url, status) VALUES (?, ?, ?, ?, ?, 'Pending')`,
       [employee_id, request_date, reason, type, image_url]
     );
+    
+    logAction(req.user.id, 'SUBMIT_LEAVE', 'leave_request', result.insertId, req);
     res.json({ success: true });
+    
   } catch (err) {
+    // Catch the unique constraint violation caused by a double-tap
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, error: "A leave request of this type already exists for this date." });
+    }
+    
     console.error("Leave request error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1107,7 +1242,7 @@ app.get('/api/leave-requests/history/:identifier', authenticateToken, (req, res)
   );
 });
 
-app.get('/api/leave-requests/user/:employeeId', authenticateToken, (req, res) => {
+app.get('/api/leave-requests/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   db.query("SELECT * FROM leave_requests WHERE user_id = ? ORDER BY request_date DESC", [req.params.employeeId], (err, result) => {
     if (err) return res.status(500).json(err);
     res.json(result || []);
@@ -1318,7 +1453,7 @@ app.get('/api/schedules', (req, res) => {
   });
 });
 
-app.get('/api/schedules/:employeeId', (req, res) => {
+app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   const sql = `
     SELECT 
       s.*, 
@@ -1704,22 +1839,7 @@ app.get('/api/payroll/employee-history/:employeeId', (req, res) => {
   });
 });
 
-// Admin resets another user's password (does not require old password)
-app.put('/api/users/:id/reset-password', (req, res) => {
-  const { newPassword } = req.body;
-  const userId = req.params.id;
 
-  if (!newPassword || newPassword.trim().length < 6) {
-    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
-  }
-
-  const sql = 'UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?';
-  db.query(sql, [newPassword.trim(), userId], (err, result) => {
-    if (err) return res.status(500).json({ success: false, message: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'User not found.' });
-    res.json({ success: true, message: 'Password reset successfully.' });
-  });
-});
 app.get('/api/employees', (req, res) => {
   db.query("SELECT * FROM users ORDER BY full_name ASC", (err, result) => {
     if (err) return res.status(500).json(err);
@@ -1727,7 +1847,7 @@ app.get('/api/employees', (req, res) => {
   });
 });
 
-app.post('/api/employees', authenticateToken, (req, res) => {
+app.post('/api/employees', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -1747,35 +1867,42 @@ app.post('/api/employees', authenticateToken, (req, res) => {
     return res.status(400).json({ success: false, message: 'Missing required fields' });
   }
 
-  const finalPin = payroll_pin || '1234';
-  const finalAccess = payroll_access || 0;
+  try {
+    
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-  const sql = `INSERT INTO users 
-    (employee_id, full_name, first_name, last_name, email, password, role, status,
-     employment_type, position_level, contract_type,
-     monthly_salary, work_days_per_month,
-     payroll_access, payroll_pin,
-     middle_initial, date_of_joining, account_expiration_date,
-     date_of_birth, phone_number, gender,
-     emergency_contact_name, emergency_contact_phone,
-     street_address, city, state_province, postal_code, country, additional_info, position)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const finalPin = payroll_pin || '1234';
+    const finalAccess = payroll_access || 0;
 
-  db.query(sql, [
-    employee_id, full_name, first_name || null, last_name || null, email, password, role,
-    employment_type, position_level, contract_type,
-    monthly_salary, work_days_per_month,
-    finalAccess, finalPin,
-    middle_initial || null, date_of_joining || null, account_expiration_date || null,
-    date_of_birth || null, phone_number || null, gender || null,
-    emergency_contact_name || null, emergency_contact_phone || null,
-    street_address || null, city || null, state_province || null,
-    postal_code || null, country || 'Philippines', additional_info || null, position || null
-  ], (err, result) => {
-    if (err) return res.status(500).json({ success: false, error: err.message });
-    logAction(req.user.id, 'CREATE_EMPLOYEE', 'user', result.insertId, req);
-    res.json({ success: true, message: 'Employee created successfully', employeeId: employee_id });
-  });
+    const sql = `INSERT INTO users 
+      (employee_id, full_name, first_name, last_name, email, password, role, status,
+       employment_type, position_level, contract_type,
+       monthly_salary, work_days_per_month,
+       payroll_access, payroll_pin,
+       middle_initial, date_of_joining, account_expiration_date,
+       date_of_birth, phone_number, gender,
+       emergency_contact_name, emergency_contact_phone,
+       street_address, city, state_province, postal_code, country, additional_info, position)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+    db.query(sql, [
+      employee_id, full_name, first_name || null, last_name || null, email, hashedPassword, role, // ⬅️ Replaced 'password' with 'hashedPassword'
+      employment_type, position_level, contract_type,
+      monthly_salary, work_days_per_month,
+      finalAccess, finalPin,
+      middle_initial || null, date_of_joining || null, account_expiration_date || null,
+      date_of_birth || null, phone_number || null, gender || null,
+      emergency_contact_name || null, emergency_contact_phone || null,
+      street_address || null, city || null, state_province || null,
+      postal_code || null, country || 'Philippines', additional_info || null, position || null
+    ], (err, result) => {
+      if (err) return res.status(500).json({ success: false, error: err.message });
+      logAction(req.user.id, 'CREATE_EMPLOYEE', 'user', result.insertId, req);
+      res.json({ success: true, message: 'Employee created successfully', employeeId: employee_id });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error processing password encryption' });
+  }
 });
 
 app.put('/api/employees/:id', authenticateToken, async(req, res) => {
@@ -1932,7 +2059,7 @@ app.get('/api/attendance-report', (req, res) => {
     });
 });
 
-app.get('/api/attendance-report-user/:employeeId', (req, res) => {
+app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
     const sql = `
       SELECT a.*, 
              DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
@@ -2347,11 +2474,18 @@ app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/ble-data', async (req, res) => {
+  // 1. HARDWARE AUTHENTICATION: Reject if the API key is missing or wrong
+  const hardwareApiKey = req.headers['x-api-key'];
+  if (!hardwareApiKey || hardwareApiKey !== process.env.HARDWARE_API_KEY) {
+    console.warn("Unauthorized hardware access attempt blocked.");
+    return res.status(401).json({ error: "Unauthorized hardware access." });
+  }
+
   const { room, floor, beaconId } = req.body;
   
   if (!beaconId) return res.status(400).json({ error: "No beacon ID received." });
 
-  // 1. Join with visitor_requests and check 'returned = 0'
+  // 2. Join with visitor_requests and check 'returned = 0'
   const sql = `
     SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
     FROM visitor_requests vr
@@ -2369,14 +2503,14 @@ app.post('/api/ble-data', async (req, res) => {
       return res.status(500).json({ error: "Database error" });
     }
     
-    // 2. If no active record is found, force clear memory for this badge
+    // 3. If no active record is found, force clear memory for this badge
     if (results.length === 0) {
       try {
         const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE mac_address = ?", [beaconId]);
         if (tagRes && tagRes.length > 0) {
           const ghostId = tagRes[0].ble_id;
           if (liveVisitors[ghostId]) {
-            console.log(`👻 Detected stray signal from returned visitor: ${ghostId}. Cleaning memory.`);
+            console.log(`Detected stray signal from returned visitor: ${ghostId}. Cleaning memory.`);
             delete liveVisitors[ghostId];
           }
         }
@@ -2391,7 +2525,7 @@ app.post('/api/ble-data', async (req, res) => {
     const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
     const destination = row.destination || 'Not Assigned';
 
-    // 3. Update liveVisitors (Only if they passed the returned = 0 check)
+    // 4. Update liveVisitors
     const wasPresent = !!liveVisitors[bleId];
     const oldRoom = wasPresent ? liveVisitors[bleId].currentRoom : null;
 
@@ -2405,15 +2539,8 @@ app.post('/api/ble-data', async (req, res) => {
       lastSeen: Date.now()
     };
 
-    // 4. Log history events with coordinate fallback
-    if (!wasPresent) {
-      logVisitorHistory(row.id, visitorName, bleId, floor, room, 'enter', null, null);
-    } else if (oldRoom !== room) {
-      logVisitorHistory(row.id, visitorName, bleId, floor, room, 'move', null, null);
-    }
-
     visitorDestinations[bleId] = destination;
-    console.log(`📍 Tracking ${visitorName} – Current: ${room}, Dest: ${destination}`);
+    console.log(`Tracking ${visitorName} – Current: ${room}, Dest: ${destination}`);
     res.json({ success: true });
   });
 });
@@ -2654,9 +2781,11 @@ app.get('/api/jobs', authenticateToken, (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   db.query(
-    `SELECT id, title, department, description, requirements, employment_type,
-            location_type, location, salary_min, salary_max, status, posted_by, created_at
-     FROM job_postings ORDER BY created_at DESC`,
+    `SELECT jp.id, jp.title, jp.department, jp.description, jp.requirements, jp.employment_type,
+            jp.location_type, jp.location, jp.salary_min, jp.salary_max, jp.status, jp.posted_by, jp.created_at,
+            (SELECT COUNT(*) FROM job_applicants ja WHERE ja.job_id = jp.id AND ja.status = 'new') AS applicant_count
+     FROM job_postings jp 
+     ORDER BY jp.created_at DESC`,
     (err, results) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(results);
@@ -3862,7 +3991,7 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
     // Find current active schedule
     const [scheduleRows] = await db.promise().query(
       `SELECT id, place, start_time, end_time FROM schedules 
-       WHERE user_id = ? AND date = ? AND TIME(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) BETWEEN start_time AND end_time`,
+       WHERE user_id = ? AND date = ? AND TIME(NOW()) BETWEEN start_time AND end_time`,
       [employeeId, today]
     );
     const currentSchedule = scheduleRows[0];
@@ -3900,13 +4029,13 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
     await db.promise().query(
       `INSERT INTO instructor_location_tracking 
        (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
       [employeeId, currentSchedule.id, latitude || 0, longitude || 0, resolvedLocationName, isInside ? 1 : 0, location_enabled ? 1 : 0]
     );
 
     // Update user heartbeat
     await db.promise().query(
-      "UPDATE users SET last_location_ping = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR), location_tracking_enabled = ? WHERE employee_id = ?",
+      "UPDATE users SET last_location_ping = NOW(), location_tracking_enabled = ? WHERE employee_id = ?",
       [location_enabled ? 1 : 0, employeeId]
     );
 
@@ -3940,7 +4069,7 @@ const broadcastInstructorStatus = async (employeeId) => {
       (CASE 
         WHEN u.last_location_ping IS NULL THEN 'DISABLED'
         WHEN u.location_tracking_enabled = 0 THEN 'DISABLED'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) > 120 THEN 'DISABLED'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'DISABLED'
         ELSE 'GPS ON'
       END) AS gps_status
     FROM users u
@@ -3951,8 +4080,8 @@ const broadcastInstructorStatus = async (employeeId) => {
   if (rows.length === 0) return;
   broadcastToAdminAndHR({ type: 'instructor_status_update', instructor: rows[0] });
 };
-// GET /api/location-tracking/status (admin/hr only)
-// GET /api/location-tracking/status (admin/hr only)
+
+
 app.get('/api/location-tracking/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
 
@@ -3969,7 +4098,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         CASE 
           WHEN u.last_location_ping IS NULL 
             OR u.location_tracking_enabled = 0 
-            OR TIMESTAMPDIFF(SECOND, u.last_location_ping, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) > 120 
+            OR TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 
           THEN 'GPS OFF'
           ELSE 'GPS ON'
         END AS gps_status,
@@ -3991,7 +4120,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           INNER JOIN (SELECT MAX(id) as max_id FROM instructor_location_tracking GROUP BY employee_id) t2 ON t1.id = t2.max_id
       ) ilt ON u.employee_id = ilt.employee_id
       WHERE u.role = 'instructor' AND u.status = 'active' AND s.date = ?
-        AND TIME(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) BETWEEN s.start_time AND s.end_time
+        AND TIME(NOW()) BETWEEN s.start_time AND s.end_time
       ORDER BY s.start_time ASC
     `, [selectedDate]);
 
@@ -4015,8 +4144,7 @@ app.get('/api/location-tracking/instructor-timeline/:employeeId', authenticateTo
   const targetDate = req.query.date || getPHTime().date;
   
   try {
-    // ✅ Enforce Manila timezone
-    await db.promise().query("SET time_zone = '+08:00'");
+   
 
     // 1. Fetch tracking records
     const [rows] = await db.promise().query(`
@@ -4062,8 +4190,7 @@ app.get('/api/location-tracking/alerts', authenticateToken, async (req, res) => 
   const targetDate = req.query.date || getPHTime().date;
 
   try {
-    // ✅ Enforce Manila timezone so dates match correctly
-    await db.promise().query("SET time_zone = '+08:00'");
+   
 
     const sql = `
       SELECT 
@@ -4089,13 +4216,13 @@ async function insertAndBroadcastAlert(alertMsg, context) {
   try {
     const [result] = await db.promise().query(
       `INSERT INTO location_alerts (employee_id, alert_message, latitude, longitude, created_at)
-       SELECT ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)
+       SELECT ?, ?, ?, ?, NOW()
        FROM DUAL
        WHERE NOT EXISTS (
-           SELECT 1 FROM location_alerts 
-           WHERE employee_id = ? AND alert_message = ? 
-             AND created_at > DATE_SUB(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR), INTERVAL 1 MINUTE)
-       )`,
+       SELECT 1 FROM location_alerts 
+       WHERE employee_id = ? AND alert_message = ? 
+       AND created_at > DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+)`,
       [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0, context.employeeId, alertMsg]
     );
 
@@ -4206,6 +4333,10 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
 
   if (!date || !start_time || !end_time || !reason || !scenario_type) {
     return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  if (start_time >= end_time) {
+    return res.status(400).json({ error: 'End time must be strictly after the start time.' });
   }
 
   try {
@@ -4548,7 +4679,7 @@ setInterval(async () => {
       JOIN schedules s ON a.schedule_id = s.id
       WHERE a.time_out IS NULL 
         AND a.date <= ? 
-        AND TIMESTAMPDIFF(HOUR, STR_TO_DATE(CONCAT(a.date, ' ', s.end_time), '%Y-%m-%d %H:%i:%s'), DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)) >= 3
+        AND TIMESTAMPDIFF(HOUR, STR_TO_DATE(CONCAT(a.date, ' ', s.end_time), '%Y-%m-%d %H:%i:%s'), NOW()) >= 3
     `;
     
     const [forgottenRecords] = await db.promise().query(sql, [todayDate]);

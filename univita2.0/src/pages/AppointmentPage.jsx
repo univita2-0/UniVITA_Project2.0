@@ -5,7 +5,7 @@ import {
   Mail, Phone, MapPin, Clock, Calendar, User, MessageSquare,
   Award, Users, Plus, Trash2, ShieldCheck, X,
   Stethoscope, GraduationCap, Building2, Check, ArrowRight,
-  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, AlertCircle
+  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, AlertCircle, Download
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AppointmentPage.css';
@@ -14,6 +14,15 @@ import simulation2 from '../assets/images/simulation2.png';
 import simulation3 from '../assets/images/simulation3.png';
 import simulation4 from '../assets/images/simulation4.png';
 import classroom1 from '../assets/images/classroom1.png';
+
+// Helper to reliably get local YYYY-MM-DD instead of UTC
+const getLocalTodayString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const AppointmentPage = ({ onAdminLogin }) => {
   const [activePage, setActivePage] = useState('home');
@@ -87,12 +96,66 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setMobileMenuOpen(false);
   };
 
-  const addVisitorRow = () => setAdditionalVisitors([...additionalVisitors, { name: '' }]);
-  const removeVisitorRow = (index) => setAdditionalVisitors(additionalVisitors.filter((_, i) => i !== index));
+  const addVisitorRow = () => {
+    if (additionalVisitors.length >= 5) {
+      showToast('Maximum of 5 companions allowed manually. For more than 5, please use the CSV upload.', true);
+      return;
+    }
+    setAdditionalVisitors([...additionalVisitors, { name: '' }]);
+  };
+
+  const removeVisitorRow = (index) => {
+    setAdditionalVisitors(additionalVisitors.filter((_, i) => i !== index));
+  };
+
   const updateVisitorField = (index, field, value) => {
     const updated = [...additionalVisitors];
     updated[index][field] = value;
     setAdditionalVisitors(updated);
+  };
+
+  // ----- BULK COMPANION CSV LOGIC -----
+  const downloadCompanionTemplate = () => {
+    const content = "Companion Full Name\nJuan Dela Cruz\nMaria Santos\n";
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "Companion_Template.csv");
+    document.body.appendChild(link); 
+    link.click(); 
+    document.body.removeChild(link);
+  };
+
+  const handleCompanionCSVUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const rows = text.split(/\r?\n/).filter(row => row.trim());
+      const newCompanions = [];
+      
+      let startIndex = 0;
+      if (rows[0].toLowerCase().includes('name')) {
+        startIndex = 1; // Skip header
+      }
+      for (let i = startIndex; i < rows.length; i++) {
+        const cols = rows[i].split(',');
+        if (cols[0] && cols[0].trim()) {
+          newCompanions.push({ name: cols[0].trim() });
+        }
+      }
+      
+      if (newCompanions.length > 0) {
+        setAdditionalVisitors(prev => [...prev, ...newCompanions]);
+        showToast(`Successfully added ${newCompanions.length} companions from CSV.`);
+      } else {
+        showToast(`No valid companions found in CSV.`, true);
+      }
+      e.target.value = null; // reset input to allow re-upload
+    };
+    reader.readAsText(file);
   };
 
   // Available Time Slots Grid (8:00 AM to 5:00 PM)
@@ -113,6 +176,27 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setShowTimeModal(false);
   };
 
+  // Helper function to check if a specific time slot has already passed today
+  const isPastSlot = (slotTimeStr) => {
+    if (!formData.date) return false;
+    
+    const localToday = getLocalTodayString();
+    
+    // Only block times if the selected date is today
+    if (formData.date === localToday) {
+      const now = new Date();
+      const [slotHour, slotMinute] = slotTimeStr.split(':').map(Number);
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      
+      // If the current hour is greater, OR it's the same hour but current minute is past
+      if (currentHour > slotHour || (currentHour === slotHour && currentMinute >= slotMinute)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.email.trim() || !formData.date || !formData.time || !formData.message) {
@@ -123,6 +207,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
     const hour = parseInt(formData.time.split(':')[0], 10);
     if (hour < 8 || hour > 17) {
       showToast('Please select a time within office hours (8:00 AM - 5:00 PM).', true);
+      return;
+    }
+
+    // Strict validation to prevent bypassing past-time rules on the current day
+    if (isPastSlot(formData.time)) {
+      showToast('You cannot book an appointment for a time that has already passed.', true);
       return;
     }
 
@@ -594,7 +684,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     name="date" 
                     value={formData.date} 
                     onChange={e => { handleChange(e); setFormData(prev => ({ ...prev, time: '' })); }} 
-                    min={new Date().toISOString().split('T')[0]} 
+                    min={getLocalTodayString()} 
                     required 
                   />
                 </div>
@@ -631,16 +721,38 @@ const AppointmentPage = ({ onAdminLogin }) => {
               
               {isMultipleVisitors && (
                 <div className="ap-companions-box">
-                  <p className="ap-companions-info">Please register all accompanying visitors for campus security clearance.</p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+                    <p className="ap-companions-info" style={{ margin: 0, flex: 1, minWidth: '200px' }}>
+                      Please register all accompanying visitors for campus security clearance.
+                    </p>
+                    <div className="ap-csv-actions">
+                      <button type="button" className="btn-ap-outline-sm" onClick={downloadCompanionTemplate} title="Download CSV Template">
+                        <Download size={14} /> Template
+                      </button>
+                      <label className="btn-ap-outline-sm ap-file-upload-label-small" style={{ margin: 0, cursor: 'pointer' }}>
+                        <Upload size={14} /> Upload CSV
+                        <input type="file" accept=".csv" onChange={handleCompanionCSVUpload} style={{ display: 'none' }} />
+                      </label>
+                    </div>
+                  </div>
+
                   {additionalVisitors.map((v, idx) => (
                     <div key={idx} className="ap-companion-row">
                       <input type="text" placeholder="Companion Full Name" value={v.name} onChange={e => updateVisitorField(idx, 'name', e.target.value)} required />
                       <button type="button" onClick={() => removeVisitorRow(idx)} title="Remove Companion"><Trash2 size={18} /></button>
                     </div>
                   ))}
-                  <button type="button" className="btn-ap-outline-sm" onClick={addVisitorRow}>
-                    <Plus size={16} /> Add Companion
-                  </button>
+                  
+                  {additionalVisitors.length < 5 && (
+                    <button type="button" className="btn-ap-outline-sm" onClick={addVisitorRow}>
+                      <Plus size={16} /> Add Companion
+                    </button>
+                  )}
+                  {additionalVisitors.length >= 5 && (
+                    <p className="ap-input-hint text-accent font-semibold" style={{ marginTop: '0.5rem' }}>
+                      For more than 5 companions, please download the CSV template and upload your list.
+                    </p>
+                  )}
                 </div>
               )}
               
@@ -674,17 +786,23 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   return sDate === formData.date && sTime === slot.value;
                 });
 
+                // Check if this slot has already passed on the current day
+                const isPast = isPastSlot(slot.value);
+                const isDisabled = isBooked || isPast;
+
                 return (
                   <button
                     key={slot.value}
                     type="button"
-                    className={`ap-time-slot-box ${isBooked ? 'booked' : ''}`}
-                    disabled={isBooked}
+                    className={`ap-time-slot-box ${isDisabled ? 'booked' : ''}`}
+                    disabled={isDisabled}
                     onClick={() => handleSelectTimeSlot(slot.value)}
                   >
                     <Clock size={16} />
                     <span>{slot.label}</span>
-                    <span className="ap-slot-status">{isBooked ? 'Unavailable' : 'Available'}</span>
+                    <span className="ap-slot-status">
+                      {isBooked ? 'Unavailable' : isPast ? 'Passed' : 'Available'}
+                    </span>
                   </button>
                 );
               })}

@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   ShieldCheck, Users, Activity, FileText, Bell, Zap,
-  Clock, AlertCircle, ChevronRight, Calendar, CheckCircle
+  Clock, AlertCircle, ChevronRight, Calendar, CheckCircle, Server
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './Dashboard.css';
@@ -86,101 +86,112 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
 
   if (loading) {
     return (
-      <div className="db-state-container">
-        <Clock size={32} className="db-icon-muted" />
-        <p>Loading System Dashboard Data...</p>
+      <div className="expert-loading">
+        <Server size={48} className="text-muted" style={{ marginBottom: '1rem', animation: 'pulse 2s infinite' }} />
+        <p>Loading System Telemetry...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="db-state-container error">
-        <AlertCircle size={32} />
+      <div className="expert-empty">
+        <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
         <p>{error}</p>
-        <button onClick={loadDashboardData} className="btn-db-outline">Retry Connection</button>
+        <button onClick={loadDashboardData} className="expert-btn-secondary" style={{ marginTop: '1rem' }}>Retry Connection</button>
       </div>
     );
   }
 
   return (
-    <div className="db-container">
+    <div className="expert-container">
+      {/* Header Section */}
+      <div className="expert-header">
+        <div className="expert-title-group">
+          
+          <div>
+            
+            <p className="expert-subtitle">Overview of global system health, active personnel, and pending operational requests.</p>
+          </div>
+        </div>
+      </div>
+
       {/* System Health Banner */}
-      <section className="db-banner">
-        <div className="db-banner-item">
-          <ShieldCheck size={18} className="text-teal" />
+      <section className="expert-banner">
+        <div className="expert-banner-item">
+          <ShieldCheck size={18} className="text-muted" />
           <span>Security Protocol: <strong>Active</strong></span>
         </div>
-        <div className="db-banner-item">
-          <Activity size={18} className="text-blue" />
+        <div className="expert-banner-item">
+          <Activity size={18} className="text-muted" />
           <span>System Status: <strong>{stats.systemStatus}</strong></span>
         </div>
-        <div className="db-banner-item">
-          <Clock size={18} className="text-amber" />
-          <span>Last Updated: <strong>{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</strong></span>
+        <div className="expert-banner-item">
+          <Clock size={18} className="text-muted" />
+          <span>Last Synchronized: <strong>{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</strong></span>
         </div>
       </section>
 
       {/* Key Metrics Grid */}
-      <section className="db-stats-grid admin-grid">
-        <div className="db-stat-card border-teal" onClick={() => setView('employee-management')}>
-          <div className="db-stat-header">
-            <div className="db-stat-icon bg-teal-light text-teal"><Users size={20} /></div>
-            <span className="db-stat-label">Active Personnel</span>
+      <section className="expert-stats-grid grid-3">
+        <div className="expert-stat-card" onClick={() => setView('employee-management')}>
+          <div className="expert-stat-header">
+            <div className="expert-stat-icon bg-slate text-muted"><Users size={20} /></div>
+            <span className="expert-stat-label">Active Personnel</span>
           </div>
-          <div className="db-stat-value">{stats.totalEmployees}</div>
+          <div className="expert-stat-value">{stats.totalEmployees}</div>
         </div>
 
-        <div className="db-stat-card border-blue" onClick={() => setView('manage-request')}>
-          <div className="db-stat-header">
-            <div className="db-stat-icon bg-blue-light text-blue"><Calendar size={20} /></div>
-            <span className="db-stat-label">Today's Visitors</span>
+        <div className="expert-stat-card" onClick={() => setView('manage-request')}>
+          <div className="expert-stat-header">
+            <div className="expert-stat-icon bg-slate text-muted"><Calendar size={20} /></div>
+            <span className="expert-stat-label">Today's Visitors</span>
           </div>
-          <div className="db-stat-value">{stats.todayVisitors}</div>
+          <div className="expert-stat-value">{stats.todayVisitors}</div>
         </div>
 
-        <div className="db-stat-card border-amber" onClick={() => setView('leave-management')}>
-          <div className="db-stat-header">
-            <div className="db-stat-icon bg-amber-light text-amber"><Bell size={20} /></div>
-            <span className="db-stat-label">Pending Leaves</span>
+        <div className="expert-stat-card" onClick={() => setView('leave-management')}>
+          <div className="expert-stat-header">
+            <div className="expert-stat-icon bg-slate text-muted"><Bell size={20} /></div>
+            <span className="expert-stat-label">Pending Leaves</span>
           </div>
-          <div className="db-stat-value">{stats.pendingLeaves}</div>
+          <div className="expert-stat-value">{stats.pendingLeaves}</div>
         </div>
       </section>
 
       {/* Middle Section: Tasks & Quick Actions */}
-      <section className="db-middle-section">
-        <div className="db-panel flex-2">
-          <div className="db-panel-header">
-            <div className="db-ph-title">
-              <Clock size={18} className="text-teal" />
+      <section className="expert-dashboard-panels">
+        <div className="expert-panel flex-2">
+          <div className="expert-panel-header">
+            <div className="expert-ph-title">
+              <Clock size={18} className="text-muted" />
               <span>Recent Pending Requests</span>
             </div>
             {stats.pendingLeaves > 5 && (
-              <button className="btn-db-text" onClick={() => setView('leave-management')}>
+              <button className="expert-btn-text" onClick={() => setView('leave-management')}>
                 View All <ChevronRight size={14} />
               </button>
             )}
           </div>
-          <div className="db-task-list">
+          <div className="expert-task-list">
             {pendingTasks.length === 0 ? (
-              <div className="db-empty-state">
-                <CheckCircle size={24} className="text-teal" />
+              <div className="expert-empty-state">
+                <CheckCircle size={28} className="text-muted" />
                 <p>No pending system requests.</p>
               </div>
             ) : (
               pendingTasks.map(task => (
-                <div key={task.id} className="db-task-item">
-                  <div className="db-task-info">
-                    <AlertCircle size={16} className="text-amber" />
+                <div key={task.id} className="expert-task-item">
+                  <div className="expert-task-info">
+                    <AlertCircle size={18} className="text-muted" />
                     <div>
-                      <p className="db-task-text">
+                      <p className="expert-task-text">
                         <strong>{task.full_name || `ID: ${task.user_id}`}</strong> requested <strong>{task.type}</strong>
                       </p>
-                      <p className="db-task-subtext">{formatDate(task.request_date)}</p>
+                      <p className="expert-task-subtext">{formatDate(task.request_date)}</p>
                     </div>
                   </div>
-                  <button className="btn-db-small" onClick={() => setView('leave-management')}>
+                  <button className="expert-btn-outline-small" onClick={() => setView('leave-management')}>
                     Review
                   </button>
                 </div>
@@ -189,31 +200,28 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
           </div>
         </div>
 
-        <div className="db-panel flex-1">
-          <div className="db-panel-header">
-            <div className="db-ph-title">
-              <Zap size={18} className="text-orange" />
+        <div className="expert-panel flex-1">
+          <div className="expert-panel-header">
+            <div className="expert-ph-title">
+              <Zap size={18} className="text-muted" />
               <span>System Shortcuts</span>
             </div>
           </div>
-          <div className="db-action-list">
-            <button className="db-action-btn" onClick={() => setView('manage-request')}>
+          <div className="expert-action-list">
+            <button className="expert-action-btn" onClick={() => setView('manage-request')}>
               <span>Approve Visitor Entries</span>
               <ChevronRight size={16} />
             </button>
-            <button className="db-action-btn" onClick={() => setView('attendance-report')}>
-              <span>View Today's Attendance</span>
-              <ChevronRight size={16} />
-            </button>
-            <button className="db-action-btn" onClick={() => setView('employee-management')}>
+            
+            <button className="expert-action-btn" onClick={() => setView('employee-management')}>
               <span>Add New Employee</span>
               <ChevronRight size={16} />
             </button>
-            <button className="db-action-btn" onClick={onShowPayrollHistory}>
+            <button className="expert-action-btn" onClick={onShowPayrollHistory}>
               <span>Payroll Access Logs</span>
               <ChevronRight size={16} />
             </button>
-            <button className="db-action-btn" onClick={() => setView('reports')}>
+            <button className="expert-action-btn" onClick={() => setView('reports')}>
               <span>Generate Compliance Report</span>
               <ChevronRight size={16} />
             </button>

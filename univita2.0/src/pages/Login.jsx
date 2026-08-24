@@ -195,7 +195,7 @@ const Login = ({ onBack }) => {
       </div>
 
       <button className="btn-glass-back" onClick={onBack}>
-        <ArrowLeft size={16} /> Back to Portal
+        <ArrowLeft size={16} /> Back
       </button>
 
       <div className="glass-login-card">

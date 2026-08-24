@@ -61,8 +61,8 @@ const SecurityDashboard = ({ setView }) => {
 
   if (loading) {
     return (
-      <div className="db-state-container">
-        <Clock size={32} className="db-icon-muted" />
+      <div className="expert-loading">
+        <ShieldCheck size={48} className="text-muted" style={{ marginBottom: '1rem', animation: 'pulse 2s infinite' }} />
         <p>Loading Security Dashboard Data...</p>
       </div>
     );
@@ -70,90 +70,101 @@ const SecurityDashboard = ({ setView }) => {
 
   if (error) {
     return (
-      <div className="db-state-container error">
-        <AlertCircle size={32} />
+      <div className="expert-empty">
+        <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
         <p>{error}</p>
-        <button onClick={loadDashboardData} className="btn-db-outline">Retry Connection</button>
+        <button onClick={loadDashboardData} className="expert-btn-secondary" style={{ marginTop: '1rem' }}>Retry Connection</button>
       </div>
     );
   }
 
   return (
-    <div className="db-container">
+    <div className="expert-container">
+      {/* Header Section */}
+      <div className="expert-header">
+        <div className="expert-title-group">
+          
+          <div>
+            
+            <p className="expert-subtitle">Track live visitor movements, monitor BLE tags, and review daily campus entry logs.</p>
+          </div>
+        </div>
+      </div>
+
       {/* System Health Banner */}
-      <section className="db-banner">
-        <div className="db-banner-item">
-          <ShieldCheck size={18} className="text-teal" />
+      <section className="expert-banner">
+        <div className="expert-banner-item">
+          <ShieldCheck size={18} className="text-muted" />
           <span>Security Protocol: <strong>Active</strong></span>
         </div>
-        <div className="db-banner-item">
-          <MapPin size={18} className="text-blue" />
+        <div className="expert-banner-item">
+          <MapPin size={18} className="text-muted" />
           <span>Active BLE Tags: <strong>{stats.activeBleTags}</strong></span>
         </div>
-        <div className="db-banner-item">
-          <Users size={18} className="text-amber" />
+        <div className="expert-banner-item">
+          <Users size={18} className="text-muted" />
           <span>Visitors Today: <strong>{stats.totalVisitorsToday}</strong></span>
         </div>
       </section>
 
       {/* Key Metrics Grid */}
-      <section className="db-stats-grid security-grid">
-        <div className="db-stat-card border-blue" onClick={() => handleNavigate('manage-request')}>
-          <div className="db-stat-header">
-            <div className="db-stat-icon bg-blue-light text-blue"><Calendar size={20} /></div>
-            <span className="db-stat-label">Approved Today</span>
+      <section className="expert-stats-grid grid-3">
+        <div className="expert-stat-card" onClick={() => handleNavigate('manage-request')}>
+          <div className="expert-stat-header">
+            <div className="expert-stat-icon bg-slate text-muted"><Calendar size={20} /></div>
+            <span className="expert-stat-label">Approved Today</span>
           </div>
-          <div className="db-stat-value">{stats.approvedToday}</div>
+          <div className="expert-stat-value">{stats.approvedToday}</div>
         </div>
 
-        <div className="db-stat-card border-amber" onClick={() => handleNavigate('visitor-history')}>
-          <div className="db-stat-header">
-            <div className="db-stat-icon bg-amber-light text-amber"><Users size={20} /></div>
-            <span className="db-stat-label">Total Visitors</span>
+        <div className="expert-stat-card" onClick={() => handleNavigate('visitor-history')}>
+          <div className="expert-stat-header">
+            <div className="expert-stat-icon bg-slate text-muted"><Users size={20} /></div>
+            <span className="expert-stat-label">Total Visitors</span>
           </div>
-          <div className="db-stat-value">{stats.totalVisitorsToday}</div>
+          <div className="expert-stat-value">{stats.totalVisitorsToday}</div>
         </div>
 
-        <div className="db-stat-card border-purple" onClick={() => handleNavigate('ble-tags')}>
-          <div className="db-stat-header">
-            <div className="db-stat-icon bg-purple-light text-purple"><MapPin size={20} /></div>
-            <span className="db-stat-label">Active BLE Tags</span>
+        <div className="expert-stat-card" onClick={() => handleNavigate('ble-tags')}>
+          <div className="expert-stat-header">
+            <div className="expert-stat-icon bg-slate text-muted"><MapPin size={20} /></div>
+            <span className="expert-stat-label">Active BLE Tags</span>
           </div>
-          <div className="db-stat-value">{stats.activeBleTags}</div>
+          <div className="expert-stat-value">{stats.activeBleTags}</div>
         </div>
       </section>
 
       {/* Middle Section: Today's Visitors & Quick Actions */}
-      <section className="db-middle-section">
-        <div className="db-panel flex-2">
-          <div className="db-panel-header">
-            <div className="db-ph-title">
-              <UserCheck size={18} className="text-teal" />
+      <section className="expert-dashboard-panels">
+        <div className="expert-panel flex-2">
+          <div className="expert-panel-header">
+            <div className="expert-ph-title">
+              <UserCheck size={18} className="text-muted" />
               <span>Today's Approved Visitors</span>
             </div>
           </div>
-          <div className="db-task-list">
+          <div className="expert-task-list">
             {todayVisitors.length === 0 ? (
-              <div className="db-empty-state">
-                <CheckCircle size={24} className="text-teal" />
+              <div className="expert-empty-state">
+                <CheckCircle size={28} className="text-muted" />
                 <p>No approved visitors scheduled for today.</p>
               </div>
             ) : (
               todayVisitors.map(visitor => (
-                <div key={visitor.id} className="db-task-item">
-                  <div className="db-task-info">
-                    <UserCheck size={16} className="text-teal" />
+                <div key={visitor.id} className="expert-task-item">
+                  <div className="expert-task-info">
+                    <UserCheck size={18} className="text-muted" />
                     <div>
-                      <p className="db-task-text">
+                      <p className="expert-task-text">
                         <strong>{visitor.first_name} {visitor.last_name}</strong>
                       </p>
-                      <p className="db-task-subtext">
+                      <p className="expert-task-subtext">
                         {visitor.visit_time ? visitor.visit_time.substring(0,5) : 'No time'}
                         {visitor.reason && ` · ${visitor.reason.substring(0,40)}${visitor.reason.length > 40 ? '…' : ''}`}
                       </p>
                     </div>
                   </div>
-                  <button className="btn-db-small" onClick={() => handleNavigate('track-visitor')}>
+                  <button className="expert-btn-outline-small" onClick={() => handleNavigate('track-visitor')}>
                     Track
                   </button>
                 </div>
@@ -162,23 +173,23 @@ const SecurityDashboard = ({ setView }) => {
           </div>
         </div>
 
-        <div className="db-panel flex-1">
-          <div className="db-panel-header">
-            <div className="db-ph-title">
-              <Zap size={18} className="text-orange" />
+        <div className="expert-panel flex-1">
+          <div className="expert-panel-header">
+            <div className="expert-ph-title">
+              <Zap size={18} className="text-muted" />
               <span>Security Shortcuts</span>
             </div>
           </div>
-          <div className="db-action-list">
-            <button className="db-action-btn" onClick={() => handleNavigate('track-visitor')}>
+          <div className="expert-action-list">
+            <button className="expert-action-btn" onClick={() => handleNavigate('track-visitor')}>
               <span>Live Visitor Tracking</span>
               <ChevronRight size={16} />
             </button>
-            <button className="db-action-btn" onClick={() => handleNavigate('completed-visits')}>
+            <button className="expert-action-btn" onClick={() => handleNavigate('completed-visits')}>
               <span>View Visitor History</span>
               <ChevronRight size={16} />
             </button>
-            <button className="db-action-btn" onClick={() => handleNavigate('manage-ble')}>
+            <button className="expert-action-btn" onClick={() => handleNavigate('manage-ble')}>
               <span>Manage BLE Tags</span>
               <ChevronRight size={16} />
             </button>

@@ -79,6 +79,8 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
   const [dateString, setDateString] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState({});
+  const [showLogoutModal, setShowLogoutModal] = useState(false); // Added state for logout validation
+  
   const token = localStorage.getItem('auth_token');
   const userRole = localStorage.getItem('user_role') || 'instructor';
 
@@ -97,6 +99,11 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
   const handleNavClick = (path) => {
     setView(path);
     setSidebarOpen(false);
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutModal(false);
+    onLogout();
   };
 
   const getFilteredMenu = () => {
@@ -174,7 +181,8 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
               <span className="lay-nav-label">Settings</span>
             </div>
           </div>
-          <div className="lay-nav-group" onClick={onLogout}>
+          {/* Modified to trigger the modal instead of logging out instantly */}
+          <div className="lay-nav-group" onClick={() => setShowLogoutModal(true)}>
             <div className="lay-nav-parent logout">
               <div className="lay-nav-icon"><LogOut size={18} /></div>
               <span className="lay-nav-label">Logout</span>
@@ -217,6 +225,23 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
       </main>
 
       {token && <ChatPanel token={token} />}
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="lay-logout-overlay" onClick={() => setShowLogoutModal(false)}>
+          <div className="lay-logout-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="lay-logout-icon-wrapper">
+              <LogOut size={24} />
+            </div>
+            <h3>Confirm Logout</h3>
+            <p>Are you sure you want to logout?</p>
+            <div className="lay-logout-actions">
+              <button className="btn-logout-no" onClick={() => setShowLogoutModal(false)}>No</button>
+              <button className="btn-logout-yes" onClick={confirmLogout}>Yes</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
