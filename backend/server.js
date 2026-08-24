@@ -1,5 +1,7 @@
 require('dotenv').config();
 const express = require('express');
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
 
 const { Expo } = require('expo-server-sdk');
 let expo = new Expo();
@@ -164,9 +166,7 @@ function clearPinAttempts(email) {
 // EMAIL TRANSPORTER
 // --------------------------------------------------
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // Use SSL/TLS
+  service: 'gmail',
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS
