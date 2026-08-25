@@ -23,8 +23,8 @@ const Profile = () => {
   const [loading, setLoading] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
-    full_name: '',
-    email: '',
+    full_name: localStorage.getItem('user_name') || '',
+    email: localStorage.getItem('user_email') || '',
     phone: ''
   });
   const [editError, setEditError] = useState('');
@@ -49,29 +49,24 @@ const Profile = () => {
   const fetchUserDetails = useCallback(async () => {
     if (!user.id) return;
     try {
-      // Fetch latest employee list to get up-to-date name, email, phone, etc.
-      const res = await authAxios.get(`/api/employees`);
-      const employees = res.data;
-      const data = employees.find(e => e.id.toString() === user.id.toString());
-      
-      if (data) {
-        const updatedUser = {
-          ...user,
-          name: data.full_name || user.name,
-          email: data.email || user.email,
-          phone: data.phone_number || '',
-          position: data.position_level || data.position || '',
-          daysSinceChange: data.password_last_changed
-            ? Math.floor((Date.now() - new Date(data.password_last_changed).getTime()) / (1000 * 60 * 60 * 24))
-            : 0
-        };
-        setUser(updatedUser);
-        setEditForm({
-          full_name: updatedUser.name,
-          email: updatedUser.email,
-          phone: updatedUser.phone
-        });
-      }
+      const res = await authAxios.get(`/api/employees/${user.id}`);
+      const data = res.data;
+      const updatedUser = {
+        ...user,
+        name: data.full_name || user.name,
+        email: data.email || user.email,
+        phone: data.phone_number || '',
+        position: data.position_level || data.position || '',
+        daysSinceChange: data.password_last_changed
+          ? Math.floor((Date.now() - new Date(data.password_last_changed).getTime()) / (1000 * 60 * 60 * 24))
+          : 0
+      };
+      setUser(updatedUser);
+      setEditForm({
+        full_name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone
+      });
     } catch (err) {
       console.error('Failed to load user details', err);
     }
@@ -84,9 +79,18 @@ const Profile = () => {
   const daysRemaining = Math.max(0, 365 - user.daysSinceChange);
   const isExpiringSoon = daysRemaining <= 30;
 
-  // Validation Helpers
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const isValidPhone = (phone) => phone === '' || /^[\d\s\-\+\(\)]*$/.test(phone);
+
+  const handleOpenEditModal = () => {
+    setEditForm({
+      full_name: user.name || '',
+      email: user.email || '',
+      phone: user.phone || ''
+    });
+    setEditError('');
+    setEditMode(true);
+  };
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
@@ -123,6 +127,7 @@ const Profile = () => {
       setMessage({ type: 'success', text: 'Profile updated successfully' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
       setEditMode(false);
+      fetchUserDetails();
     } catch (err) {
       setEditError(err.response?.data?.message || err.response?.data?.error || 'Profile update failed');
     } finally {
@@ -199,7 +204,7 @@ const Profile = () => {
             </div>
           </div>
         </div>
-        <button className="expert-btn-secondary" onClick={() => { setEditError(''); setEditMode(true); }}>
+        <button className="expert-btn-secondary" onClick={handleOpenEditModal}>
           <Edit2 size={16} /> <span>Edit Profile</span>
         </button>
       </div>
