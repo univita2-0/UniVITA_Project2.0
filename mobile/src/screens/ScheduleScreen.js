@@ -1,5 +1,5 @@
 // src/screens/ScheduleScreen.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
   ActivityIndicator, RefreshControl, StatusBar
@@ -10,9 +10,19 @@ import {
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchUserSchedule } from './api';
+import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 
 export default function ScheduleScreen() {
   const insets = useSafeAreaInsets();
+  
+  // Connect to global Theme
+  const { isDark } = useContext(ThemeContext);
+  const colors = isDark ? themeColors.dark : themeColors.light;
+  const isLight = !isDark;
+  
+  // Dynamically generate styles based on theme
+  const styles = React.useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
+
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -53,7 +63,15 @@ export default function ScheduleScreen() {
     const start = getStartOfWeek(currentDate);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
-    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${start.getFullYear()}`;
+    
+    // Formats strictly as "Aug 24 – Aug 30, 2026" to match reference
+    const startMonth = start.toLocaleDateString('en-US', { month: 'short' });
+    const startDay = start.getDate();
+    const endMonth = end.toLocaleDateString('en-US', { month: 'short' });
+    const endDay = end.getDate();
+    const year = start.getFullYear();
+
+    return `${startMonth} ${startDay} – ${endMonth} ${endDay}, ${year}`;
   };
 
   const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -66,21 +84,21 @@ export default function ScheduleScreen() {
   const getStatusBadge = (status) => {
     switch (status) {
       case 'IN PROGRESS':
-        return { label: 'IN PROGRESS', color: '#B45309', bg: '#FFFBEB', border: '#FEF3C7' };
+        return { label: 'IN PROGRESS', color: isLight ? '#B45309' : '#FBBF24', bg: isLight ? '#FFFBEB' : 'rgba(251, 191, 36, 0.15)', border: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.3)' };
       case 'COMPLETED':
-        return { label: 'COMPLETED', color: '#047857', bg: '#ECFDF5', border: '#D1FAE5' };
+        return { label: 'COMPLETED', color: isLight ? '#047857' : '#34D399', bg: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)', border: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.3)' };
       default:
-        return { label: 'SCHEDULED', color: '#4B5563', bg: '#F9FAFB', border: '#E5E7EB' };
+        return { label: 'SCHEDULED', color: isLight ? '#4B5563' : colors.textSecondary, bg: isLight ? '#F9FAFB' : colors.iconBg, border: isLight ? '#E5E7EB' : colors.border };
     }
   };
 
   if (loading) {
     return (
       <>
-        <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
-        <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+        <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
+        <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#0D9488" />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>Loading schedule...</Text>
           </View>
         </SafeAreaView>
@@ -90,28 +108,28 @@ export default function ScheduleScreen() {
 
   return (
     <>
-      <StatusBar barStyle="dark-content" backgroundColor="#FAFAFA" />
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
+      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
         <ScrollView
           contentContainerStyle={styles.scroll}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#0D9488"]} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <CalIcon size={24} color="#0D9488" />
+            <CalIcon size={26} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={2} />
             <Text style={styles.title}>My Schedule</Text>
           </View>
 
           {/* Week Navigator */}
           <View style={styles.weekNavigator}>
-            <TouchableOpacity onPress={() => changeWeek(-7)} style={styles.navButton} activeOpacity={1}>
-              <ChevronLeft size={20} color="#374151" />
+            <TouchableOpacity onPress={() => changeWeek(-7)} style={styles.navButton} activeOpacity={0.7}>
+              <ChevronLeft size={20} color={isLight ? "#0F172A" : colors.textPrimary} />
             </TouchableOpacity>
             <View style={styles.weekRangeContainer}>
               <Text style={styles.weekRangeText}>{getWeekRange()}</Text>
             </View>
-            <TouchableOpacity onPress={() => changeWeek(7)} style={styles.navButton} activeOpacity={1}>
-              <ChevronRight size={20} color="#374151" />
+            <TouchableOpacity onPress={() => changeWeek(7)} style={styles.navButton} activeOpacity={0.7}>
+              <ChevronRight size={20} color={isLight ? "#0F172A" : colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -135,18 +153,18 @@ export default function ScheduleScreen() {
                   {daySchedule ? (
                     <View style={styles.scheduleItem}>
                       <View style={styles.courseHeader}>
-                        <BookOpen size={16} color="#0D9488" />
+                        <BookOpen size={16} color={colors.primary} />
                         <Text style={styles.courseText}>{daySchedule.course}</Text>
                       </View>
                       <View style={styles.detailsGrid}>
                         <View style={styles.infoRow}>
-                          <Clock size={14} color="#6B7280" />
+                          <Clock size={14} color={isLight ? "#64748B" : colors.textSecondary} />
                           <Text style={styles.infoText}>
                             {daySchedule.start_time?.substring(0,5)} – {daySchedule.end_time?.substring(0,5)}
                           </Text>
                         </View>
                         <View style={styles.infoRow}>
-                          <MapPin size={14} color="#6B7280" />
+                          <MapPin size={14} color={isLight ? "#64748B" : colors.textSecondary} />
                           <Text style={styles.infoText}>{daySchedule.place || 'Main Campus'}</Text>
                         </View>
                       </View>
@@ -167,64 +185,71 @@ export default function ScheduleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
-  scroll: { paddingHorizontal: 20, paddingBottom: 40 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, marginBottom: 20 },
-  title: { fontSize: 22, fontWeight: '700', color: '#111827', letterSpacing: -0.5 },
+// DYNAMIC STYLESHEET GENERATOR
+const getDynamicStyles = (colors, isLight) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  scroll: { paddingHorizontal: 22, paddingBottom: 120, paddingTop: 10 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  loadingText: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary },
+  
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10, marginBottom: 28 },
+  title: { fontFamily: 'Inter_18pt-Bold', fontSize: 26, color: isLight ? '#0F172A' : colors.textPrimary, letterSpacing: -0.5 },
+  
   weekNavigator: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginBottom: 20,
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 24,
+    marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.2, shadowRadius: 10, elevation: 2
   },
   navButton: { padding: 4 },
   weekRangeContainer: { flex: 1, alignItems: 'center' },
-  weekRangeText: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  weekRangeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
+  
   dayCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    borderRadius: 24,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+    overflow: 'hidden'
   },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
+    borderBottomColor: isLight ? '#F1F5F9' : colors.border,
   },
-  dayName: { fontSize: 12, fontWeight: '700', color: '#4B5563', letterSpacing: 0.5 },
-  dayDate: { fontSize: 14, fontWeight: '700', color: '#111827' },
-  dayContent: { padding: 16 },
-  noSchedule: { color: '#9CA3AF', fontSize: 13, textAlign: 'center' },
-  scheduleItem: { gap: 12 },
-  courseHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  courseText: { fontSize: 15, fontWeight: '700', color: '#111827', flex: 1 },
-  detailsGrid: { gap: 6 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  infoText: { fontSize: 13, color: '#374151' },
+  dayName: { fontFamily: 'Inter_18pt-Bold', fontSize: 11, color: isLight ? '#64748B' : colors.textSecondary, letterSpacing: 1.5 },
+  dayDate: { fontFamily: 'Inter_18pt-Black', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },
+  
+  dayContent: { padding: 20 },
+  noSchedule: { fontFamily: 'Inter_18pt-Medium', color: isLight ? '#64748B' : colors.textSecondary, fontSize: 14, textAlign: 'center', marginVertical: 6 },
+  
+  scheduleItem: { gap: 14 },
+  courseHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  courseText: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, flex: 1 },
+  detailsGrid: { gap: 8 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  infoText: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#475569' : colors.textPrimary },
+  
   statusBadge: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
     borderWidth: 1,
-    marginTop: 4,
+    marginTop: 6,
   },
-  statusText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  statusText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, letterSpacing: 0.5 },
 });

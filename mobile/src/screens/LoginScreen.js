@@ -68,7 +68,6 @@ export default function LoginScreen({ navigation }) {
   const saveSession = async (user, token) => {
     if (token) {
       await AsyncStorage.setItem('auth_token', token);
-      // Automatically register and update push token upon session creation
       await registerDeviceForPushNotifications(token);
     }
     await AsyncStorage.setItem('user', JSON.stringify({
@@ -268,24 +267,28 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
+      <StatusBar barStyle="light-content" backgroundColor="#060913" />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
         <View style={styles.containerInner}>
+          
+          {/* Header Branding */}
           <View style={styles.header}>
-           
+            <Text style={styles.brandTitle}>UniVITA</Text>
+            <Text style={styles.brandSubtitle}>Welcome back!</Text>
+            <View style={styles.headerDivider} />
           </View>
 
+          {/* Main Login Card */}
           <View style={styles.card}>
-            <Text style={styles.welcome}>Welcome Back</Text>
-            <Text style={styles.welcomeSub}>Sign in to manage your schedule and attendance</Text>
+            <Text style={styles.cardHeaderTitle}>LOGIN</Text>
             
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email Address</Text>
+              <Text style={styles.inputLabel}>Email</Text>
               <View style={styles.inputWrapper}>
                 <TextInput
                   style={styles.input}
-                  placeholder="employee@gmail.com"
-                  placeholderTextColor="#9CA3AF"
+                  placeholder="employee@example.com"
+                  placeholderTextColor="#475569"
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
@@ -300,8 +303,8 @@ export default function LoginScreen({ navigation }) {
                 <TextInput
                   style={styles.input}
                   secureTextEntry
-                  placeholder="••••••••"
-                  placeholderTextColor="#9CA3AF"
+                  placeholder="******"
+                  placeholderTextColor="#475569"
                   value={password}
                   onChangeText={setPassword}
                 />
@@ -309,7 +312,7 @@ export default function LoginScreen({ navigation }) {
             </View>
 
             <TouchableOpacity style={styles.forgotLink} onPress={() => setShowForgotModal(true)} activeOpacity={0.8}>
-              <Text style={styles.forgotText}>Forgot password?</Text>
+              <Text style={styles.forgotText}>Forgot Password?</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -318,7 +321,7 @@ export default function LoginScreen({ navigation }) {
               disabled={loading}
               activeOpacity={0.8}
             >
-              {loading ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.signInText}>Sign In</Text>}
+              {loading ? <ActivityIndicator color="#060913" size="small" /> : <Text style={styles.signInText}>LOGIN</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -333,7 +336,7 @@ export default function LoginScreen({ navigation }) {
             <TextInput
               style={styles.otpInput}
               placeholder="000000"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor="#64748B"
               keyboardType="number-pad"
               maxLength={6}
               value={otp}
@@ -377,8 +380,8 @@ export default function LoginScreen({ navigation }) {
                 <Text style={styles.modalSubtitle}>Enter your registered email address to receive a recovery code.</Text>
                 <TextInput
                   style={styles.resetInput}
-                  placeholder="employee@hct.edu.ph"
-                  placeholderTextColor="#9CA3AF"
+                  placeholder="Enter your Email"
+                  placeholderTextColor="#64748B"
                   value={resetEmail}
                   onChangeText={setResetEmail}
                   autoCapitalize="none"
@@ -397,7 +400,7 @@ export default function LoginScreen({ navigation }) {
                 <TextInput
                   style={styles.otpInput}
                   placeholder="000000"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor="#64748B"
                   keyboardType="number-pad"
                   maxLength={6}
                   value={resetOtp}
@@ -427,7 +430,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="New password (min. 6 chars)"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor="#64748B"
                   value={resetNewPassword}
                   onChangeText={setResetNewPassword}
                 />
@@ -435,7 +438,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="Confirm new password"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor="#64748B"
                   value={resetConfirmPassword}
                   onChangeText={setResetConfirmPassword}
                 />
@@ -457,44 +460,44 @@ export default function LoginScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0F172A' },
+  safeArea: { flex: 1, backgroundColor: '#060913' },
   keyboardView: { flex: 1, justifyContent: 'center' },
-  containerInner: { width: '100%', maxWidth: 380, alignSelf: 'center', paddingHorizontal: 20 },
+  containerInner: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 24 },
   
-  header: { alignItems: 'center', marginBottom: 30 },
-  title: { fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
-  subtitle: { fontSize: 12, color: '#94A3B8', marginTop: 4, letterSpacing: 1, textTransform: 'uppercase', fontWeight: '600' },
+  header: { alignItems: 'center', marginBottom: 36 },
+  brandTitle: { fontFamily: 'Inter_18pt-Black', fontSize: 36, color: '#FFFFFF', letterSpacing: 1.5, textAlign: 'center' },
+  brandSubtitle: { fontFamily: 'Inter_18pt-Regular', fontSize: 15, color: '#94A3B8', marginTop: 6, letterSpacing: 0.5, textAlign: 'center' },
+  headerDivider: { width: '85%', height: 1, backgroundColor: '#1E293B', marginTop: 24 },
   
-  card: { backgroundColor: '#FFFFFF', borderRadius: 20, paddingVertical: 28, paddingHorizontal: 22, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 8 },
-  welcome: { fontSize: 20, fontWeight: '700', color: '#0F172A', marginBottom: 4, textAlign: 'center' },
-  welcomeSub: { fontSize: 13, color: '#64748B', marginBottom: 24, textAlign: 'center', lineHeight: 18 },
+  card: { width: '100%' },
+  cardHeaderTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 22, color: '#FFFFFF', marginBottom: 28, textAlign: 'center', letterSpacing: 1 },
   
-  inputGroup: { marginBottom: 16 },
-  inputLabel: { fontSize: 12, fontWeight: '600', color: '#334155', marginBottom: 6, letterSpacing: 0.3 },
-  inputWrapper: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, backgroundColor: '#F8FAFC' },
-  input: { height: 48, paddingHorizontal: 16, fontSize: 15, color: '#0F172A' },
+  inputGroup: { marginBottom: 20 },
+  inputLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: '#94A3B8', marginBottom: 8 },
+  inputWrapper: { borderWidth: 1, borderColor: '#1E293B', borderRadius: 10, backgroundColor: '#0B132B' },
+  input: { fontFamily: 'Inter_18pt-Regular', height: 52, paddingHorizontal: 16, fontSize: 15, color: '#FFFFFF' },
   
-  forgotLink: { alignSelf: 'flex-end', marginTop: 4, marginBottom: 20 },
-  forgotText: { color: '#0D9488', fontSize: 13, fontWeight: '600' },
+  forgotLink: { alignSelf: 'flex-start', marginTop: 2, marginBottom: 28 },
+  forgotText: { fontFamily: 'Inter_18pt-Medium', color: '#FFFFFF', fontSize: 13 },
   
-  signInButton: { backgroundColor: '#0D9488', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: '#0D9488', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
-  signInText: { color: 'white', fontSize: 15, fontWeight: '700' },
-  buttonDisabled: { backgroundColor: '#94A3B8', shadowOpacity: 0 },
+  signInButton: { backgroundColor: '#FFFFFF', height: 52, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5 },
+  signInText: { fontFamily: 'Inter_18pt-Black', color: '#060913', fontSize: 16, letterSpacing: 1 },
+  buttonDisabled: { backgroundColor: '#475569', shadowOpacity: 0 },
   
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.75)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 24, width: '100%', maxWidth: 340, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 15, elevation: 10 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginBottom: 8, textAlign: 'center' },
-  modalSubtitle: { fontSize: 13, color: '#64748B', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(6, 9, 19, 0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalCard: { backgroundColor: '#0B132B', borderWidth: 1, borderColor: '#1E293B', borderRadius: 20, padding: 24, width: '100%', maxWidth: 340, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.4, shadowRadius: 15, elevation: 10 },
+  modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: '#FFFFFF', marginBottom: 8, textAlign: 'center' },
+  modalSubtitle: { fontFamily: 'Inter_18pt-Regular', fontSize: 13, color: '#94A3B8', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
   
-  otpInput: { width: '100%', height: 52, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, fontSize: 24, fontWeight: '700', letterSpacing: 8, backgroundColor: '#F8FAFC', marginBottom: 20, color: '#0F172A' },
-  resetInput: { width: '100%', height: 48, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 16, fontSize: 14, backgroundColor: '#F8FAFC', color: '#0F172A', marginBottom: 16 },
+  otpInput: { width: '100%', height: 52, borderWidth: 1, borderColor: '#1E293B', borderRadius: 12, paddingHorizontal: 16, fontFamily: 'Inter_18pt-Bold', fontSize: 24, letterSpacing: 8, backgroundColor: '#060913', marginBottom: 20, color: '#FFFFFF' },
+  resetInput: { width: '100%', height: 48, borderWidth: 1, borderColor: '#1E293B', borderRadius: 12, paddingHorizontal: 16, fontFamily: 'Inter_18pt-Regular', fontSize: 14, backgroundColor: '#060913', color: '#FFFFFF', marginBottom: 16 },
   
-  modalButton: { backgroundColor: '#0D9488', width: '100%', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  modalButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  modalButton: { backgroundColor: '#FFFFFF', width: '100%', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  modalButtonText: { fontFamily: 'Inter_18pt-Bold', color: '#060913', fontSize: 14 },
   
   modalFooterActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, width: '100%' },
-  timerText: { fontSize: 13, color: '#64748B', fontWeight: '500' },
-  resendLink: { color: '#0D9488', fontSize: 13, fontWeight: '600' },
-  cancelText: { color: '#64748B', fontSize: 13, fontWeight: '600', textAlign: 'center', width: '100%' },
-  errorText: { color: '#EF4444', fontSize: 12, marginBottom: 12, textAlign: 'center', fontWeight: '500' },
+  timerText: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: '#94A3B8' },
+  resendLink: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 13 },
+  cancelText: { fontFamily: 'Inter_18pt-Medium', color: '#94A3B8', fontSize: 13, textAlign: 'center', width: '100%' },
+  errorText: { fontFamily: 'Inter_18pt-Medium', color: '#F87171', fontSize: 12, marginBottom: 12, textAlign: 'center' },
 });

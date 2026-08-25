@@ -1,6 +1,7 @@
+// App.js
 import { registerRootComponent } from 'expo';
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal } from 'react-native';
+import React, { useEffect, useState, useRef, useContext } from 'react';
+import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -8,6 +9,7 @@ import { Home, Calendar, Clock, User, AlertCircle } from 'lucide-react-native';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Font from 'expo-font';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as Haptics from 'expo-haptics';
@@ -18,6 +20,9 @@ import axios from 'axios';
 import ErrorBoundary from './ErrorBoundary';
 
 import { API_URL, fetchEmergencyAlerts, markAlertAsRead } from './src/screens/api';
+
+// IMPORT THEME CONTEXT
+import { ThemeProvider, ThemeContext, themeColors } from './src/context/ThemeContext'; 
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
@@ -76,73 +81,11 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-function ProfileStack() {
-  return (
-    <Stack.Navigator
-      screenOptions={{
-        headerShown: true,
-        headerTintColor: '#0D9488',
-        headerTitleAlign: 'center',
-        headerBackTitleVisible: false,
-        headerStyle: { backgroundColor: '#FAFAFA' },
-        headerShadowVisible: false,
-      }}
-    >
-      <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Security" component={SecurityScreen} options={{ title: 'Security & Password' }} />
-      <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Emergency Alerts' }} />
-    </Stack.Navigator>
-  );
-}
+// --- INTERNAL APP COMPONENT (Consumes ThemeContext) ---
+function AppContent() {
+  const { isDark } = useContext(ThemeContext);
+  const colors = isDark ? themeColors.dark : themeColors.light;
 
-function MainTabs() {
-  return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: '#0D9488',
-        tabBarInactiveTintColor: '#6B7280',
-        tabBarStyle: { 
-          height: 65, 
-          paddingBottom: 8, 
-          paddingTop: 8, 
-          backgroundColor: '#FFFFFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E5E7EB',
-          elevation: 0,
-          shadowOpacity: 0
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-      }}
-    >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{ tabBarIcon: ({ color }) => <Home size={22} color={color} /> }}
-      />
-      <Tab.Screen
-        name="Calendar"
-        component={CalendarScreen}
-        options={{ tabBarIcon: ({ color }) => <Calendar size={22} color={color} /> }}
-      />
-      <Tab.Screen
-        name="Schedule"
-        component={ScheduleScreen}
-        options={{ tabBarIcon: ({ color }) => <Clock size={22} color={color} /> }}
-      />
-      <Tab.Screen
-        name="ProfileTab"
-        component={ProfileStack}
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color }) => <User size={22} color={color} />,
-        }}
-      />
-    </Tab.Navigator>
-  );
-}
-
-export default function App() {
   const [appIsReady, setAppIsReady] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
@@ -154,7 +97,26 @@ export default function App() {
   const alertSound = useRef(null);
   const activeAlertId = useRef(null);
 
-  // 1. Constantly check session user status
+  useEffect(() => {
+    async function prepare() {
+      try {
+        // Load Inter Font Family
+        await Font.loadAsync({
+          'Inter_18pt-Regular': require('./assets/fonts/Inter_18pt-Regular.ttf'),
+          'Inter_18pt-Medium': require('./assets/fonts/Inter_18pt-Medium.ttf'),
+          'Inter_18pt-Bold': require('./assets/fonts/Inter_18pt-Bold.ttf'),
+          'Inter_18pt-Black': require('./assets/fonts/Inter_18pt-Black.ttf'),
+        });
+
+        const { status } = await Location.requestBackgroundPermissionsAsync();
+        if (status !== 'granted') console.warn('Background location permission not granted');
+        await new Promise(resolve => setTimeout(resolve, 800));
+      } catch (e) { console.warn(e); } 
+      finally { setAppIsReady(true); }
+    }
+    prepare();
+  }, []);
+
   useEffect(() => {
     const checkUser = async () => {
       try {
@@ -175,38 +137,27 @@ export default function App() {
 
   useEffect(() => {
     const registerPushToken = async () => {
-      if (!userId) {
-        console.log("Push Token: No userId found yet.");
-        return;
-      }
+      if (!userId) return;
       try {
         const { status } = await Notifications.requestPermissionsAsync();
-        console.log("Push Token Permission Status:", status);
         if (status !== 'granted') return;
 
         const projectId = Constants?.expoConfig?.extra?.eas?.projectId || Constants?.easConfig?.projectId;
-        console.log("Using Project ID:", projectId);
-
         const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
-        console.log("Generated Expo Push Token:", tokenData.data);
         
         if (tokenData && tokenData.data) {
           const authToken = await AsyncStorage.getItem('auth_token');
-          console.log("Sending token to backend API:", `${API_URL}/users/save-push-token`);
-          
-          const res = await axios.put(`${API_URL}/users/save-push-token`, { token: tokenData.data }, {
+          await axios.put(`${API_URL}/users/save-push-token`, { token: tokenData.data }, {
             headers: { Authorization: `Bearer ${authToken}` }
           });
-          console.log("Backend response for token save:", res.data);
         }
       } catch (error) { 
-        console.error("DETAILED Push token error:", error); 
+        console.error("Push token error:", error); 
       }
     };
     registerPushToken();
   }, [userId]);
 
-  // 3. Global Alert Polling across all tabs
   useEffect(() => {
     if (!userId) return;
 
@@ -279,31 +230,6 @@ export default function App() {
     }
   };
 
-  // Handle user tapping the push notification while app is closed or backgrounded
-  useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      if (data && data.alertId) {
-        // You can trigger your alert modal or navigate here if needed
-        console.log("Notification tapped with alert ID:", data.alertId);
-      }
-    });
-
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    async function prepare() {
-      try {
-        const { status } = await Location.requestBackgroundPermissionsAsync();
-        if (status !== 'granted') console.warn('Background location permission not granted');
-        await new Promise(resolve => setTimeout(resolve, 800));
-      } catch (e) { console.warn(e); } 
-      finally { setAppIsReady(true); }
-    }
-    prepare();
-  }, []);
-
   const onLayoutRootView = async () => {
     if (appIsReady) {
       await SplashScreen.hideAsync();
@@ -311,22 +237,78 @@ export default function App() {
     }
   };
 
-  if (!appIsReady) return null;
+  if (!appIsReady) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.textPrimary} />
+      </View>
+    );
+  }
+
+  // Define dynamically themed navigators inside the component scope
+  function ProfileStack() {
+    return (
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: true,
+          headerTintColor: colors.textPrimary,
+          headerTitleStyle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16 },
+          headerTitleAlign: 'center',
+          headerBackTitleVisible: false,
+          headerStyle: { backgroundColor: colors.surface },
+          headerShadowVisible: false,
+        }}
+      >
+        <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
+        <Stack.Screen name="Security" component={SecurityScreen} options={{ title: 'Security & Password' }} />
+        <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Emergency Alerts' }} />
+      </Stack.Navigator>
+    );
+  }
+
+  function MainTabs() {
+    return (
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: colors.textPrimary,
+          tabBarInactiveTintColor: colors.textSecondary,
+          tabBarStyle: { 
+            height: 65, 
+            paddingBottom: 8, 
+            paddingTop: 8, 
+            backgroundColor: colors.surface,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            elevation: 0,
+            shadowOpacity: 0
+          },
+          tabBarLabelStyle: { fontFamily: 'Inter_18pt-Medium', fontSize: 11 },
+        }}
+      >
+        <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarIcon: ({ color }) => <Home size={22} color={color} /> }} />
+        <Tab.Screen name="Calendar" component={CalendarScreen} options={{ tabBarIcon: ({ color }) => <Calendar size={22} color={color} /> }} />
+        <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ tabBarIcon: ({ color }) => <Clock size={22} color={color} /> }} />
+        <Tab.Screen name="ProfileTab" component={ProfileStack} options={{ title: 'Profile', tabBarIcon: ({ color }) => <User size={22} color={color} /> }} />
+      </Tab.Navigator>
+    );
+  }
 
   return (
-    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+    <View style={{ flex: 1, backgroundColor: colors.background }} onLayout={onLayoutRootView}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
       <ErrorBoundary>
         <NavigationContainer>
-          <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#FAFAFA' } }}>
+          <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="Requests" component={RequestsScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="MyPayroll" component={MyPayrollScreen} options={{ headerShown: true, title: 'My Payroll', headerTintColor: '#0D9488', headerStyle: { backgroundColor: '#FAFAFA' }, headerShadowVisible: false }} />
+            <Stack.Screen name="MyPayroll" component={MyPayrollScreen} options={{ headerShown: true, title: 'My Payroll', headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
             <Stack.Screen name="LeaveHistory" component={LeaveHistoryScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ScheduleHistory" component={ScheduleHistoryScreen} options={{ headerShown: false }} />
             <Stack.Screen name="AppealHistory" component={AppealHistoryScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CorrectionHistory" component={CorrectionHistoryScreen} options={{ headerShown: false }} /> 
-            <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} options={{ headerTintColor: '#0D9488', headerStyle: { backgroundColor: '#FAFAFA' }, headerShadowVisible: false }} />
+            <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} options={{ headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
           </Stack.Navigator>
         </NavigationContainer>
       </ErrorBoundary>
@@ -334,47 +316,54 @@ export default function App() {
       {/* --- GLOBAL EMERGENCY ALERT MODAL --- */}
       <Modal visible={showAlertModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={[styles.alertModal, currentAlert?.severity === 'critical' ? styles.alertCritical : currentAlert?.severity === 'warning' ? styles.alertWarning : styles.alertInfo]}>
+          <View style={[styles.alertModal, { backgroundColor: colors.surface, borderColor: colors.border }, currentAlert?.severity === 'critical' ? styles.alertCritical : currentAlert?.severity === 'warning' ? styles.alertWarning : styles.alertInfo]}>
             <View style={{ alignItems: 'center', marginBottom: 16 }}>
-              <AlertCircle size={48} color={currentAlert?.severity === 'critical' ? '#DC2626' : currentAlert?.severity === 'warning' ? '#F59E0B' : '#3B82F6'} />
+              <AlertCircle size={48} color={currentAlert?.severity === 'critical' ? colors.danger : currentAlert?.severity === 'warning' ? colors.warning : colors.info} />
             </View>
-            <Text style={[styles.alertHeader, { textAlign: 'center', fontSize: 14 }]}>
+            <Text style={[styles.alertHeader, { color: colors.textSecondary }]}>
               {currentAlert?.severity === 'critical' ? 'CRITICAL ALERT' : currentAlert?.severity === 'warning' ? 'WARNING' : 'SYSTEM INFO'}
             </Text>
-            <Text style={[styles.alertTitle, { textAlign: 'center', fontSize: 20 }]}>{currentAlert?.title}</Text>
-            <Text style={[styles.alertBody, { textAlign: 'center', marginTop: 8 }]}>{currentAlert?.message}</Text>
+            <Text style={[styles.alertTitle, { color: colors.textPrimary }]}>{currentAlert?.title}</Text>
+            <Text style={[styles.alertBody, { color: colors.textPrimary }]}>{currentAlert?.message}</Text>
             <View style={styles.alertActions}>
-              <TouchableOpacity style={styles.btnAlertDismiss} onPress={dismissAlert}>
-                <Text style={styles.btnAlertText}>Acknowledge</Text>
+              <TouchableOpacity style={[styles.btnAlertDismiss, { backgroundColor: colors.buttonBg }]} onPress={dismissAlert} activeOpacity={0.8}>
+                <Text style={[styles.btnAlertText, { color: colors.buttonText }]}>Acknowledge</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Animated.View pointerEvents="none" style={[styles.splashOverlay, { opacity: fadeAnim }]} />
+      <Animated.View pointerEvents="none" style={[styles.splashOverlay, { backgroundColor: colors.background, opacity: fadeAnim }]} />
     </View>
   );
 }
 
+// Generate static layout styles (colors are handled dynamically inline)
 const styles = StyleSheet.create({
   splashOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#0F172A',
     zIndex: 99999,
   },
-  // Global Alert Modal Styles
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(17, 24, 39, 0.75)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  alertModal: { width: '100%', borderRadius: 16, padding: 24, backgroundColor: '#FFFFFF', borderWidth: 2 },
-  alertCritical: { borderColor: '#FECACA', backgroundColor: '#FEF2F2' },
-  alertWarning: { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' },
-  alertInfo: { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
-  alertHeader: { fontWeight: '800', marginBottom: 12, color: '#111827', letterSpacing: 1 },
-  alertTitle: { fontWeight: '800', color: '#111827', marginBottom: 12 },
-  alertBody: { color: '#374151', lineHeight: 22, marginBottom: 20 },
-  alertActions: { width: '100%', marginTop: 10 },
-  btnAlertDismiss: { backgroundColor: '#111827', borderRadius: 10, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
-  btnAlertText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(6, 9, 19, 0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  alertModal: { width: '100%', borderRadius: 20, padding: 24, borderWidth: 1 },
+  alertCritical: { borderColor: '#F87171' },
+  alertWarning: { borderColor: '#FBBF24' },
+  alertInfo: { borderColor: '#60A5FA' },
+  alertHeader: { fontFamily: 'Inter_18pt-Bold', textAlign: 'center', fontSize: 14, marginBottom: 12, letterSpacing: 1 },
+  alertTitle: { fontFamily: 'Inter_18pt-Bold', textAlign: 'center', fontSize: 20, marginBottom: 12 },
+  alertBody: { fontFamily: 'Inter_18pt-Regular', textAlign: 'center', lineHeight: 22, marginBottom: 20, marginTop: 8 },
+  alertActions: { width: '100%', marginTop: 24, alignItems: 'stretch' },
+  btnAlertDismiss: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  btnAlertText: { fontFamily: 'Inter_18pt-Bold', fontSize: 15 },
 });
 
+// --- MAIN EXPORT WRAPPED IN PROVIDER ---
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+}
 registerRootComponent(App);

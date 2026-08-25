@@ -27,6 +27,7 @@ const app = express();
 const helmet = require('helmet');
 app.set('trust proxy', 1);
 
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }, 
   contentSecurityPolicy: {
@@ -38,7 +39,22 @@ app.use(helmet({
       connectSrc: ["'self'", "https://univitaproject20-production.up.railway.app"]
     },
   },
+  frameguard: { action: 'sameorigin' }, 
+  noSniff: true,                        
+  hsts: {                               
+    maxAge: 31536000, 
+    includeSubDomains: true, 
+    preload: true 
+  },
 }));
+
+
+app.use((req, res, next) => {
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
 app.disable('x-powered-by');
 const fs = require('fs');
 const visitorDestinations = {};
@@ -1255,7 +1271,11 @@ app.get('/api/leave-requests/all', authenticateToken, (req, res) => {
 app.get('/api/leave-requests/history/:identifier', authenticateToken, (req, res) => {
   const { identifier } = req.params;
   db.query(
-    `SELECT lr.*, DATE_FORMAT(lr.request_date, '%Y-%m-%d') as formatted_date FROM leave_requests lr JOIN users u ON (lr.user_id = u.employee_id OR lr.user_id = u.id) WHERE (u.employee_id = ? OR u.id = ?) AND lr.status IN ('Approved', 'Rejected') AND lr.is_hidden = 0 ORDER BY lr.request_date DESC`,
+    `SELECT lr.*, DATE_FORMAT(lr.request_date, '%Y-%m-%d') as formatted_date, lr.reviewed_at 
+     FROM leave_requests lr 
+     JOIN users u ON (lr.user_id = u.employee_id OR lr.user_id = u.id) 
+     WHERE (u.employee_id = ? OR u.id = ?) AND lr.status IN ('Approved', 'Rejected') AND lr.is_hidden = 0 
+     ORDER BY lr.request_date DESC`,
     [identifier, identifier],
     (err, results) => {
       if (err) return res.status(500).json({ success: false, message: err.message });
@@ -1283,7 +1303,8 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
     if (leaveRows.length === 0) throw new Error("Leave request not found");
     const { user_id, request_date, type } = leaveRows[0];
 
-    await connection.query(`UPDATE leave_requests SET status = ? WHERE id = ?`, [status, requestId]);
+    // Updated to update status AND record the review timestamp
+    await connection.query(`UPDATE leave_requests SET status = ?, reviewed_at = NOW() WHERE id = ?`, [status, requestId]);
 
     if (status === 'Approved') {
       const leaveYear = new Date(request_date).getFullYear();
@@ -1756,7 +1777,7 @@ app.put('/api/schedule-requests/:id/status', authenticateToken, (req, res) => {
     if (err || rows.length === 0) return res.status(500).json({ error: 'Request not found' });
     const request = rows[0];
     const newStatus = status.toLowerCase();
-    db.query("UPDATE schedule_change_requests SET status = ?, admin_remarks = ? WHERE id = ?", [newStatus, admin_remarks || null, requestId], async (err) => {
+    db.query("UPDATE schedule_change_requests SET status = ?, admin_remarks = ?, reviewed_at = NOW() WHERE id = ?", [newStatus, admin_remarks || null, requestId], async (err) => {
       if (err) return res.status(500).json({ error: err.message });
       const action = newStatus === 'approved' ? 'APPROVE_SCHEDULE_REQUEST' : 'REJECT_SCHEDULE_REQUEST';
       logAction(req.user.id, action, 'schedule_request', requestId, req);
@@ -4453,7 +4474,7 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
     const reqData = rows[0];
 
     // Update status
-    await connection.query(`UPDATE overtime_requests SET status = ?, processed = 1 WHERE id = ?`, [status, id]);
+    await connection.query(`UPDATE overtime_requests SET status = ?, processed = 1, reviewed_at = NOW() WHERE id = ?`, [status, id]);
 
     if (status === 'approved') {
       const overtimeHours = calculateHours(reqData.start_time, reqData.end_time);

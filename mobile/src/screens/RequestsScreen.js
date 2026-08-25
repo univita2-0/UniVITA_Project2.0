@@ -1,5 +1,5 @@
 // src/screens/RequestsScreen.js
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar
@@ -9,8 +9,9 @@ import { Calendar } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { submitLeaveRequest, requestAttendanceCorrection, API_URL, submitScheduleRequest } from './api';
-import { Upload, X, Calendar as CalendarIcon, Camera, Clock, FileText, AlertCircle } from 'lucide-react-native';
+import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft } from 'lucide-react-native';
 
 const formatTo12Hour = (timeStr) => {
   if (!timeStr) return '';
@@ -31,25 +32,28 @@ const formatTimeForDB = (timeStr) => {
 const getLocalTodayString = () => {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60000;
-  const localISOTime = (new Date(now - offset)).toISOString().split('T')[0];
-  return localISOTime;
+  return (new Date(now - offset)).toISOString().split('T')[0];
 };
 
-const RequestsScreen = ({ navigation, route }) => {
+export default function RequestsScreen({ navigation, route }) {
   const prefill = route.params || {};
   const insets = useSafeAreaInsets();
+  
+  const { isDark } = useContext(ThemeContext);
+  const colors = isDark ? themeColors.dark : themeColors.light;
+  const isLight = !isDark;
+  const styles = React.useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
+
   const [activeTab, setActiveTab] = useState(prefill.prefillTab || 'leave');
 
-  // ---------- Time Picker States ----------
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timePickerMode, setTimePickerMode] = useState('');
   const [tempDate, setTempDate] = useState(new Date());
 
-  // ---------- Dropdown Lists for Schedule ----------
   const locationList = ['S Residence Tower 3', 'Main Campus', 'Pasig Branch'];
   const courseList = ['Allied Health', 'Healthcare101', 'Information Technology'];
 
-  // ---------- Leave ----------
+  // Leave
   const [leaveDateFrom, setLeaveDateFrom] = useState('');
   const [leaveDateTo, setLeaveDateTo] = useState('');
   const [isRange, setIsRange] = useState(false);
@@ -63,7 +67,7 @@ const RequestsScreen = ({ navigation, route }) => {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [loadingBalances, setLoadingBalances] = useState(false);
 
-  // ---------- Schedule ----------
+  // Schedule
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleStart, setScheduleStart] = useState('09:00');
   const [scheduleEnd, setScheduleEnd] = useState('17:00');
@@ -73,7 +77,7 @@ const RequestsScreen = ({ navigation, route }) => {
   const [submittingSchedule, setSubmittingSchedule] = useState(false);
   const [showScheduleCalendar, setShowScheduleCalendar] = useState(false);
 
-  // ---------- Appeal ----------
+  // Appeal
   const [appealDate, setAppealDate] = useState('');
   const [appealReason, setAppealReason] = useState('');
   const [appealImage, setAppealImage] = useState(null);
@@ -82,7 +86,7 @@ const RequestsScreen = ({ navigation, route }) => {
   const [appealTimeIn, setAppealTimeIn] = useState('');
   const [appealTimeOut, setAppealTimeOut] = useState('');
 
-  // ---------- Correction ----------
+  // Correction
   const [correctionDate, setCorrectionDate] = useState(prefill.prefillDate || '');
   const [correctionType, setCorrectionType] = useState(prefill.prefillType || 'clock_in');
   const [correctionTime, setCorrectionTime] = useState(prefill.prefillTime || '');
@@ -91,7 +95,7 @@ const RequestsScreen = ({ navigation, route }) => {
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
   const [showCorrectionCalendar, setShowCorrectionCalendar] = useState(false);
 
-  // ---------- Overtime ----------
+  // Overtime
   const [overtimeDate, setOvertimeDate] = useState('');
   const [overtimeStart, setOvertimeStart] = useState('');
   const [overtimeEnd, setOvertimeEnd] = useState('');
@@ -123,35 +127,34 @@ const RequestsScreen = ({ navigation, route }) => {
   const fetchLeaveBalances = async () => {
     setLoadingBalances(true);
     const userId = await AsyncStorage.getItem('user_id');
-    if (!userId) {
-      Alert.alert('Error', 'User not found');
-      setLoadingBalances(false);
-      return;
-    }
+    if (!userId) { Alert.alert('Error', 'User not found'); setLoadingBalances(false); return; }
     try {
       const year = new Date().getFullYear();
       const res = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) setLeaveBalances(data);
-      else {
-        setLeaveBalances([
-          { leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 },
-          { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 },
-          { leave_type: 'Emergency Leave', remaining_days: 5, annual_quota: 5 },
-        ]);
-      }
+      else setLeaveBalances([{ leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 }, { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 }]);
       setShowBalancesModal(true);
     } catch (err) {
-      setLeaveBalances([
-        { leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 },
-        { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 },
-        { leave_type: 'Emergency Leave', remaining_days: 5, annual_quota: 5 },
-      ]);
+      setLeaveBalances([{ leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 }, { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 }]);
       setShowBalancesModal(true);
-    } finally {
-      setLoadingBalances(false);
-    }
+    } finally { setLoadingBalances(false); }
+  };
+
+  const pickImage = async (setFn) => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Permission needed', 'Allow access to photos.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.7 });
+    if (!result.canceled) setFn(result.assets[0].uri);
+  };
+
+  const takeSelfie = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Camera permission needed'); return null; }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+    if (!result.canceled) return result.assets[0].uri;
+    return null;
   };
 
   const handleSubmitLeave = async () => {
@@ -264,17 +267,6 @@ const RequestsScreen = ({ navigation, route }) => {
     }
   };
 
-  const pickImage = async (setFn) => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Allow access to photos.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.7,
-    });
-    if (!result.canceled) setFn(result.assets[0].uri);
-  };
-
   const submitAppeal = async () => {
     if (!appealDate) { Alert.alert('Required', 'Select a date.'); return; }
     if (!appealReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
@@ -314,14 +306,6 @@ const RequestsScreen = ({ navigation, route }) => {
     } finally {
       setSubmittingAppeal(false);
     }
-  };
-
-  const takeSelfie = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Camera permission needed'); return null; }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-    if (!result.canceled) return result.assets[0].uri;
-    return null;
   };
 
   const submitCorrection = async () => {
@@ -417,13 +401,13 @@ const RequestsScreen = ({ navigation, route }) => {
       <View style={styles.calendarModal}>
         <View style={styles.calendarHeader}>
           <Text style={styles.calendarTitle}>Select Date</Text>
-          <TouchableOpacity onPress={() => setShow(false)}><X size={20} color="#64748B" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => setShow(false)}><X size={20} color={colors.textSecondary} /></TouchableOpacity>
         </View>
         <Calendar
           onDayPress={(day) => { setDate(day.dateString); setShow(false); }}
           markedDates={{ [date]: { selected: true, selectedColor: '#00897B' } }}
           minDate={minDate}
-          theme={{ selectedDayBackgroundColor: '#00897B', todayTextColor: '#00897B', arrowColor: '#00897B' }}
+          theme={{ calendarBackground: 'transparent', textDayFontFamily: 'Inter_18pt-Medium', textMonthFontFamily: 'Inter_18pt-Bold', selectedDayBackgroundColor: '#00897B', todayTextColor: '#00897B', arrowColor: '#00897B', monthTextColor: colors.textPrimary, dayTextColor: colors.textPrimary }}
         />
       </View>
     );
@@ -431,11 +415,12 @@ const RequestsScreen = ({ navigation, route }) => {
 
   return (
     <>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
       <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
+        
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <X size={24} color="#0f172a" />
+            <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Requests</Text>
           <View style={{ width: 40 }} />
@@ -450,7 +435,7 @@ const RequestsScreen = ({ navigation, route }) => {
                 onPress={() => setActiveTab(tab)}
               >
                 <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-                  {tab === 'leave' ? 'Leave' : tab === 'schedule' ? 'Schedule' : tab === 'appeal' ? 'Appeal' : tab === 'correction' ? 'Correction' : 'Overtime'}
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -459,7 +444,7 @@ const RequestsScreen = ({ navigation, route }) => {
 
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           
-          {/* Leave Tab */}
+          {/* LEAVE TAB */}
           {activeTab === 'leave' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('LeaveHistory')}>
@@ -506,11 +491,11 @@ const RequestsScreen = ({ navigation, route }) => {
               </View>
 
               <Text style={styles.label}>Reason</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain reason..." value={leaveReason} onChangeText={setLeaveReason} />
+              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain reason..." placeholderTextColor={colors.textSecondary} value={leaveReason} onChangeText={setLeaveReason} />
 
               <Text style={styles.label}>Attachment (optional)</Text>
               <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setLeaveImage)}>
-                <Upload size={18} color="#0d9488" /><Text style={styles.uploadText}>{leaveImage ? 'Change Image' : 'Upload'}</Text>
+                <Upload size={18} color="#00897B" /><Text style={styles.uploadText}>{leaveImage ? 'Change Image' : 'Upload'}</Text>
               </TouchableOpacity>
               {leaveImage && <Image source={{ uri: leaveImage }} style={styles.previewImage} />}
 
@@ -520,7 +505,7 @@ const RequestsScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Schedule Tab */}
+          {/* SCHEDULE TAB */}
           {activeTab === 'schedule' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('ScheduleHistory')}>
@@ -565,7 +550,7 @@ const RequestsScreen = ({ navigation, route }) => {
               </View>
 
               <Text style={styles.label}>Reason for Request</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="e.g., Need to cover a shift..." value={scheduleReason} onChangeText={setScheduleReason} />
+              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="e.g., Need to cover a shift..." placeholderTextColor={colors.textSecondary} value={scheduleReason} onChangeText={setScheduleReason} />
 
               <TouchableOpacity style={styles.submitBtn} onPress={handleSubmitSchedule} disabled={submittingSchedule}>
                 <Text style={styles.submitBtnText}>{submittingSchedule ? 'Sending...' : 'Send Schedule Request'}</Text>
@@ -573,7 +558,7 @@ const RequestsScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Appeal Tab */}
+          {/* APPEAL TAB */}
           {activeTab === 'appeal' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('AppealHistory')}>
@@ -585,7 +570,7 @@ const RequestsScreen = ({ navigation, route }) => {
                 <CalendarIcon size={20} color="#00897B" />
                 <Text style={styles.dateText}>{appealDate || 'Select date'}</Text>
               </TouchableOpacity>
-              {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, todayStr, todayStr)}
+              {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, null)}
 
               <Text style={styles.label}>Time In (optional)</Text>
               <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealIn'); setShowTimePicker(true); }}>
@@ -600,11 +585,11 @@ const RequestsScreen = ({ navigation, route }) => {
               </TouchableOpacity>
 
               <Text style={styles.label}>Reason</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain why you couldn't clock in/out..." value={appealReason} onChangeText={setAppealReason} />
+              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain why you couldn't clock in/out..." placeholderTextColor={colors.textSecondary} value={appealReason} onChangeText={setAppealReason} />
 
               <Text style={styles.label}>Proof (optional)</Text>
               <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setAppealImage)}>
-                <Upload size={18} color="#0d9488" /><Text style={styles.uploadText}>{appealImage ? 'Change Image' : 'Upload'}</Text>
+                <Upload size={18} color="#00897B" /><Text style={styles.uploadText}>{appealImage ? 'Change Image' : 'Upload'}</Text>
               </TouchableOpacity>
               {appealImage && <Image source={{ uri: appealImage }} style={styles.previewImage} />}
 
@@ -614,7 +599,7 @@ const RequestsScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Correction Tab */}
+          {/* CORRECTION TAB */}
           {activeTab === 'correction' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('CorrectionHistory')}>
@@ -626,7 +611,7 @@ const RequestsScreen = ({ navigation, route }) => {
                 <CalendarIcon size={20} color="#00897B" />
                 <Text style={styles.dateText}>{correctionDate || 'Select date'}</Text>
               </TouchableOpacity>
-              {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, todayStr, todayStr)}
+              {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, null)}
 
               <Text style={styles.label}>What to correct?</Text>
               <View style={styles.typeGroup}>
@@ -648,11 +633,11 @@ const RequestsScreen = ({ navigation, route }) => {
               </TouchableOpacity>
 
               <Text style={styles.label}>Reason</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why did you forget to clock or need to leave early?" value={correctionReason} onChangeText={setCorrectionReason} />
+              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why did you forget to clock or need to leave early?" placeholderTextColor={colors.textSecondary} value={correctionReason} onChangeText={setCorrectionReason} />
 
               <Text style={styles.label}>Selfie (proof)</Text>
               <TouchableOpacity style={styles.uploadBtn} onPress={async () => { const uri = await takeSelfie(); if (uri) setCorrectionSelfie(uri); }}>
-                <Camera size={18} color="#0d9488" /><Text style={styles.uploadText}>{correctionSelfie ? 'Retake Selfie' : 'Take Selfie'}</Text>
+                <Camera size={18} color="#00897B" /><Text style={styles.uploadText}>{correctionSelfie ? 'Retake Selfie' : 'Take Selfie'}</Text>
               </TouchableOpacity>
               {correctionSelfie && <Image source={{ uri: correctionSelfie }} style={styles.previewImage} />}
 
@@ -662,7 +647,7 @@ const RequestsScreen = ({ navigation, route }) => {
             </View>
           )}
 
-          {/* Overtime Tab */}
+          {/* OVERTIME TAB */}
           {activeTab === 'overtime' && (
             <View>
               <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('OvertimeHistory')}>
@@ -708,11 +693,11 @@ const RequestsScreen = ({ navigation, route }) => {
               </TouchableOpacity>
 
               <Text style={styles.label}>Reason / Task</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why is overtime needed?" value={overtimeReason} onChangeText={setOvertimeReason} />
+              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why is overtime needed?" placeholderTextColor={colors.textSecondary} value={overtimeReason} onChangeText={setOvertimeReason} />
 
               <Text style={styles.label}>Attachment (optional)</Text>
               <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setOvertimeImage)}>
-                <Upload size={18} color="#0d9488" /><Text style={styles.uploadText}>{overtimeImage ? 'Change Image' : 'Upload'}</Text>
+                <Upload size={18} color="#00897B" /><Text style={styles.uploadText}>{overtimeImage ? 'Change Image' : 'Upload'}</Text>
               </TouchableOpacity>
               {overtimeImage && <Image source={{ uri: overtimeImage }} style={styles.previewImage} />}
 
@@ -740,7 +725,7 @@ const RequestsScreen = ({ navigation, route }) => {
             <View style={styles.balancesModal}>
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Leave Balances ({new Date().getFullYear()})</Text>
-                <TouchableOpacity onPress={() => setShowBalancesModal(false)}><X size={22} color="#64748B" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowBalancesModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
               </View>
               {loadingBalances ? (
                 <ActivityIndicator size="small" color="#00897B" style={{ marginVertical: 20 }} />
@@ -755,7 +740,7 @@ const RequestsScreen = ({ navigation, route }) => {
                 ))
               )}
               <TouchableOpacity style={styles.closeBalancesBtn} onPress={() => setShowBalancesModal(false)}>
-                <Text style={{ fontWeight: '600', color: '#0F172A' }}>Close</Text>
+                <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary }}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -763,55 +748,65 @@ const RequestsScreen = ({ navigation, route }) => {
       </SafeAreaView>
     </>
   );
-};
+}
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#fff' },
+const getDynamicStyles = (colors, isLight) => StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border, backgroundColor: isLight ? '#FFFFFF' : colors.surface },
   backButton: { padding: 4 },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
-  tabBar: { backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  tab: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
-  activeTab: { backgroundColor: '#E0F2F1' },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  headerTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
+  
+  tabBar: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border },
+  tab: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 24 },
+  activeTab: { backgroundColor: isLight ? '#E0F2F1' : 'rgba(0, 137, 123, 0.2)' },
+  tabText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary },
   activeTabText: { color: '#00897B' },
-  container: { padding: 20, paddingBottom: 40 },
-  label: { fontSize: 14, fontWeight: '600', color: '#334155', marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 14, padding: 12, fontSize: 15, backgroundColor: '#F8FAFC', marginBottom: 16 },
-  textArea: { height: 100, textAlignVertical: 'top' },
-  datePicker: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 14, padding: 12, backgroundColor: '#F8FAFC', marginBottom: 16 },
-  dateText: { fontSize: 15, color: '#0F172A', flex: 1 },
-  calendarModal: { backgroundColor: 'white', borderRadius: 16, padding: 16, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 5 },
-  calendarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  calendarTitle: { fontSize: 16, fontWeight: '600', color: '#0F172A' },
-  typeGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  typeChip: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 30, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: 'white' },
+  
+  container: { padding: 22, paddingBottom: 60 },
+  label: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#334155' : colors.textPrimary, marginBottom: 8, marginTop: 16 },
+  
+  input: { fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, padding: 16, fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, marginBottom: 16 },
+  textArea: { height: 110, textAlignVertical: 'top' },
+  
+  datePicker: { flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, padding: 16, backgroundColor: isLight ? '#FFFFFF' : colors.surface, marginBottom: 16 },
+  dateText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, flex: 1 },
+  
+  typeGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  typeChip: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 30, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, backgroundColor: isLight ? '#FFFFFF' : colors.surface },
   typeChipActive: { backgroundColor: '#00897B', borderColor: '#00897B' },
-  typeChipText: { fontSize: 13, color: '#1E293B' },
-  typeChipTextActive: { color: 'white' },
-  uploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F1F5F9', padding: 12, borderRadius: 14, marginTop: 8, marginBottom: 12 },
-  uploadText: { color: '#0d9488', fontWeight: '500' },
-  previewImage: { width: '100%', height: 180, borderRadius: 14, marginTop: 12 },
-  submitBtn: { backgroundColor: '#00897B', padding: 14, borderRadius: 16, alignItems: 'center', marginTop: 24 },
-  submitBtnText: { color: 'white', fontWeight: '700', fontSize: 16 },
-  historyButton: { backgroundColor: '#E0F2F1', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 12 },
-  historyButtonText: { color: '#00897B', fontWeight: '600', fontSize: 14 },
-  balancesButton: { backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0' },
-  balancesButtonText: { color: '#475569', fontWeight: '600', fontSize: 14 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  balancesModal: { backgroundColor: 'white', borderRadius: 24, padding: 20, width: '85%', alignSelf: 'center' },
-  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A' },
-  balanceRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  balanceType: { fontWeight: '600', color: '#1E293B' },
-  balanceDays: { fontWeight: '500', color: '#00897B' },
-  closeBalancesBtn: { marginTop: 20, alignItems: 'center', paddingVertical: 10 },
-  emptyText: { textAlign: 'center', color: '#94A3B8', marginTop: 20 },
-  rangeToggle: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  rangeButton: { flex: 1, paddingVertical: 8, borderRadius: 30, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center' },
+  typeChipText: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary },
+  typeChipTextActive: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF' },
+  
+  uploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, padding: 16, borderRadius: 16, marginTop: 4, marginBottom: 16 },
+  uploadText: { fontFamily: 'Inter_18pt-Bold', color: '#00897B', fontSize: 14 },
+  previewImage: { width: '100%', height: 180, borderRadius: 16, marginTop: 12, marginBottom: 20 },
+  
+  submitBtn: { backgroundColor: '#00897B', padding: 16, borderRadius: 16, alignItems: 'center', marginTop: 24, shadowColor: '#00897B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  submitBtnText: { fontFamily: 'Inter_18pt-Black', color: '#FFFFFF', fontSize: 15, letterSpacing: 0.5 },
+  
+  historyButton: { backgroundColor: isLight ? '#E0F2F1' : 'rgba(0, 137, 123, 0.15)', padding: 16, borderRadius: 16, alignItems: 'center', marginBottom: 12 },
+  historyButtonText: { fontFamily: 'Inter_18pt-Bold', color: '#00897B', fontSize: 14 },
+  
+  balancesButton: { backgroundColor: isLight ? '#F1F5F9' : colors.surface, padding: 16, borderRadius: 16, alignItems: 'center', marginBottom: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  balancesButtonText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#475569' : colors.textSecondary, fontSize: 14 },
+  
+  rangeToggle: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  rangeButton: { flex: 1, paddingVertical: 12, borderRadius: 30, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, alignItems: 'center', backgroundColor: isLight ? '#FFFFFF' : colors.surface },
   rangeButtonActive: { backgroundColor: '#00897B', borderColor: '#00897B' },
-  rangeButtonText: { fontSize: 14, fontWeight: '500', color: '#1E293B' },
-  rangeButtonTextActive: { color: 'white' },
-});
+  rangeButtonText: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary },
+  rangeButtonTextActive: { color: '#FFFFFF' },
+  
+  calendarModal: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 20, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  calendarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  calendarTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary },
 
-export default RequestsScreen;
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  balancesModal: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, padding: 20, width: '85%', alignSelf: 'center', borderWidth: 1, borderColor: colors.border },
+  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },
+  balanceRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
+  balanceType: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#1E293B' : colors.textPrimary },
+  balanceDays: { fontFamily: 'Inter_18pt-Medium', color: '#00897B' },
+  closeBalancesBtn: { marginTop: 20, alignItems: 'center', paddingVertical: 10 },
+  emptyText: { fontFamily: 'Inter_18pt-Medium', textAlign: 'center', color: isLight ? '#94A3B8' : colors.textSecondary, marginTop: 20 },
+});
