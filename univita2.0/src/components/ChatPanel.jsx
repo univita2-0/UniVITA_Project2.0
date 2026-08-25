@@ -5,7 +5,13 @@ import {
   X, Send, Plus, ArrowLeft, MessageSquare, Search, Trash2, LogOut, Users
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:5000';
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:5000'
+  : 'https://api.univitahct.tech';
+
+const WS_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'ws://localhost:5000'
+  : 'wss://api.univitahct.tech';
 
 const ChatPanel = ({ token }) => {
   const [open, setOpen] = useState(false);
@@ -18,6 +24,13 @@ const ChatPanel = ({ token }) => {
   const [myUserId, setMyUserId] = useState(null);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [unreadMap, setUnreadMap] = useState({});
+
+  // Use refs to avoid stale closures inside WebSocket message listeners
+  const activeRoomRef = useRef(activeRoom);
+  useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
+
+  const openRef = useRef(open);
+  useEffect(() => { openRef.current = open; }, [open]);
 
   // Search
   const [searchTerm, setSearchTerm] = useState('');
@@ -66,24 +79,31 @@ const ChatPanel = ({ token }) => {
 
     fetchUnreadCounts();
 
-    const ws = new WebSocket(`ws://localhost:5000?token=${token}`);
+    const ws = new WebSocket(`${WS_URL}?token=${token}`);
     wsRef.current = ws;
     
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'new_message') {
-        setMessages((prev) => [...prev, data.message]);
-        if (!open) {
+        const msgRoomId = data.message.room_id;
+        
+        // Append message only if user is currently viewing this exact room
+        if (activeRoomRef.current && activeRoomRef.current.id === msgRoomId) {
+          setMessages((prev) => [...prev, data.message]);
+        }
+        
+        // Increment unread count if panel is closed or user is in a different room
+        if (!openRef.current || !activeRoomRef.current || activeRoomRef.current.id !== msgRoomId) {
           setUnreadMap(prev => ({
             ...prev,
-            [data.message.room_id]: (prev[data.message.room_id] || 0) + 1
+            [msgRoomId]: (prev[msgRoomId] || 0) + 1
           }));
           setUnreadTotal(prev => prev + 1);
         }
       }
     };
     return () => ws.close();
-  }, [token, open, fetchUnreadCounts]);
+  }, [token, fetchUnreadCounts]);
 
   useEffect(() => {
     const interval = setInterval(fetchUnreadCounts, 10000);
@@ -121,7 +141,6 @@ const ChatPanel = ({ token }) => {
       .catch(console.error);
   }, [token]);
 
-  // Validation: Improved Search
   useEffect(() => {
     const cleanSearch = searchTerm.trim().toLowerCase();
     if (cleanSearch.length === 0) {
@@ -159,7 +178,6 @@ const ChatPanel = ({ token }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Validation: Prevent empty send & check WS state
   const handleSend = () => {
     if (!newMsg.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({
@@ -195,7 +213,6 @@ const ChatPanel = ({ token }) => {
     setShowSearchResults(false);
   };
 
-  // Validation: Enforce constraints before creating group
   const createGroup = async () => {
     if (!groupName.trim() || selectedUsers.length < 1) return;
     
