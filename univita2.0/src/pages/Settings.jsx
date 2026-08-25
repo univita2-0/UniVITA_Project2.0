@@ -1,5 +1,5 @@
 // src/pages/Settings.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { User, Lock, Bell, Eye, EyeOff, Key, Settings as SettingsIcon, Save, ShieldCheck } from 'lucide-react';
@@ -52,29 +52,55 @@ const Settings = () => {
   const userRole = localStorage.getItem('user_role');
   const canChangePin = userRole === 'admin' || userRole === 'hr_admin';
 
-  useEffect(() => {
-    const storedUser = {
-      id: localStorage.getItem('user_id'),
-      full_name: localStorage.getItem('user_name'),
-      email: localStorage.getItem('user_email'),
-      role: localStorage.getItem('user_role'),
-      employee_id: localStorage.getItem('employee_id')
-    };
+  const fetchUserData = useCallback(async (userId) => {
+    try {
+      const res = await axios.get(`${API_BASE}/employees`, getAuthHeaders());
+      const employees = res.data;
+      const currentEmp = employees.find(e => e.id.toString() === userId.toString());
+      if (currentEmp) {
+        const freshUser = {
+          id: currentEmp.id,
+          full_name: currentEmp.full_name,
+          email: currentEmp.email,
+          role: currentEmp.role,
+          employee_id: currentEmp.employee_id
+        };
+        setUser(freshUser);
+        setProfileData({
+          full_name: currentEmp.full_name || '',
+          email: currentEmp.email || '',
+          phone: currentEmp.phone_number || '',
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch latest user data', err);
+    }
+  }, []);
 
-    if (storedUser.id) {
+  useEffect(() => {
+    const userId = localStorage.getItem('user_id');
+    if (userId) {
+      const storedUser = {
+        id: userId,
+        full_name: localStorage.getItem('user_name'),
+        email: localStorage.getItem('user_email'),
+        role: localStorage.getItem('user_role'),
+        employee_id: localStorage.getItem('employee_id')
+      };
       setUser(storedUser);
       setProfileData({
         full_name: storedUser.full_name || '',
         email: storedUser.email || '',
         phone: '',
       });
+      fetchUserData(userId);
     }
 
     const savedPrefs = localStorage.getItem('user_preferences');
     if (savedPrefs) {
       setPreferences(JSON.parse(savedPrefs));
     }
-  }, []);
+  }, [fetchUserData]);
 
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const isValidPhone = (phone) => phone === '' || /^[\d\s\-\+\(\)]*$/.test(phone);
@@ -102,6 +128,13 @@ const Settings = () => {
       
       localStorage.setItem('user_name', profileData.full_name.trim());
       localStorage.setItem('user_email', profileData.email.trim());
+      
+      setUser(prev => ({
+        ...prev,
+        full_name: profileData.full_name.trim(),
+        email: profileData.email.trim()
+      }));
+
       toast.success('Profile updated successfully.');
     } catch (err) {
       toast.error(err.response?.data?.message || err.response?.data?.error || 'Profile update failed.');
@@ -181,9 +214,7 @@ const Settings = () => {
     <div className="expert-container">
       <div className="expert-header">
         <div className="expert-title-group">
-          
           <div>
-            
             <p className="expert-subtitle">Manage your profile, security credentials, and personal interface preferences.</p>
           </div>
         </div>

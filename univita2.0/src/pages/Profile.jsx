@@ -1,12 +1,11 @@
 // src/pages/Profile.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './Profile.css';
 import {
   Mail, Shield, Clock, Key, Phone, Briefcase, Edit2, X, AlertCircle, CheckCircle, UserCircle
 } from 'lucide-react';
 import axios from 'axios';
-
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+import { API_BASE } from '../api';
 
 const Profile = () => {
   const [user, setUser] = useState({
@@ -47,35 +46,40 @@ const Profile = () => {
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   });
 
-  useEffect(() => {
-    fetchUserDetails();
-  }, []);
-
-  const fetchUserDetails = async () => {
+  const fetchUserDetails = useCallback(async () => {
     if (!user.id) return;
     try {
-      const res = await authAxios.get(`/api/employees/${user.id}`);
-      const data = res.data;
-      const updatedUser = {
-        ...user,
-        name: data.full_name || user.name,
-        email: data.email || user.email,
-        phone: data.phone || '',
-        position: data.position_level || data.position || '',
-        daysSinceChange: data.password_last_changed
-          ? Math.floor((Date.now() - new Date(data.password_last_changed).getTime()) / (1000 * 60 * 60 * 24))
-          : 0
-      };
-      setUser(updatedUser);
-      setEditForm({
-        full_name: updatedUser.name,
-        email: updatedUser.email,
-        phone: updatedUser.phone
-      });
+      // Fetch latest employee list to get up-to-date name, email, phone, etc.
+      const res = await authAxios.get(`/api/employees`);
+      const employees = res.data;
+      const data = employees.find(e => e.id.toString() === user.id.toString());
+      
+      if (data) {
+        const updatedUser = {
+          ...user,
+          name: data.full_name || user.name,
+          email: data.email || user.email,
+          phone: data.phone_number || '',
+          position: data.position_level || data.position || '',
+          daysSinceChange: data.password_last_changed
+            ? Math.floor((Date.now() - new Date(data.password_last_changed).getTime()) / (1000 * 60 * 60 * 24))
+            : 0
+        };
+        setUser(updatedUser);
+        setEditForm({
+          full_name: updatedUser.name,
+          email: updatedUser.email,
+          phone: updatedUser.phone
+        });
+      }
     } catch (err) {
       console.error('Failed to load user details', err);
     }
-  };
+  }, [user.id, authAxios]);
+
+  useEffect(() => {
+    fetchUserDetails();
+  }, [fetchUserDetails]);
 
   const daysRemaining = Math.max(0, 365 - user.daysSinceChange);
   const isExpiringSoon = daysRemaining <= 30;
@@ -181,14 +185,11 @@ const Profile = () => {
         </div>
       )}
 
-      {/* Header Section */}
-      
-
       {/* Profile Header Card */}
       <div className="pro-header-card expert-card">
         <div className="pro-header-content">
           <div className="pro-avatar">
-            <span>{user.name.charAt(0).toUpperCase()}</span>
+            <span>{user.name ? user.name.charAt(0).toUpperCase() : '?'}</span>
           </div>
           <div className="pro-user-info">
             <h1 className="pro-name">{user.name}</h1>

@@ -1949,16 +1949,31 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
 });
 
 app.put('/api/employees/:id', authenticateToken, async(req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+  const employeeId = req.params.id;
+  
+  // Allow admin, hr_admin, OR the user updating their own profile
+  const isPrivileged = req.user.role === 'admin' || req.user.role === 'hr_admin';
+  const isSelf = req.user.id.toString() === employeeId.toString();
+
+  if (!isPrivileged && !isSelf) {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
-  const employeeId = req.params.id;
   const updates = req.body;
 
   const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [employeeId]);
   if (oldRecord.length === 0) return res.status(404).json({ success: false, error: 'Employee not found.' });
   const oldData = oldRecord[0];
+
+  // If regular user is updating themselves, prevent them from changing restricted fields (like role or salary)
+  if (!isPrivileged) {
+    delete updates.role;
+    delete updates.status;
+    delete updates.monthly_salary;
+    delete updates.work_days_per_month;
+    delete updates.payroll_access;
+    delete updates.payroll_pin;
+  }
 
   const fieldMapping = {
     full_name: 'full_name',
@@ -3005,7 +3020,27 @@ app.post('/api/policies', authenticateToken, upload.single('file'), (req, res) =
 // ============================================
 app.get('/api/chat/rooms', authenticateToken, (req, res) => {
   const userId = req.user.id;
-  db.query(`SELECT r.id, r.name, r.type, CASE WHEN r.type = 'direct' THEN (SELECT u.full_name FROM users u WHERE u.id = CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(r.name, '_', -1), '_', 1) AS UNSIGNED)) END as display_name FROM chat_rooms r WHERE (r.type = 'direct' AND (r.name LIKE CONCAT('dm_%\_', ?) OR r.name LIKE CONCAT('dm\_', ?, '\_%'))) OR (r.type = 'group' AND EXISTS (SELECT 1 FROM chat_room_members rm WHERE rm.room_id = r.id AND rm.user_id = ?)) ORDER BY r.created_at DESC`, [userId, userId, userId], (err, rooms) => {
+  
+  // Dynamically selects the partner's full name for direct messages based on the logged-in user ID
+  const sql = `
+    SELECT r.id, r.name, r.type, 
+      CASE 
+        WHEN r.type = 'direct' THEN (
+          SELECT u.full_name FROM users u 
+          WHERE u.id = IF(
+            CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(r.name, '_', 2), '_', -1) AS UNSIGNED) = ?, 
+            CAST(SUBSTRING_INDEX(r.name, '_', -1) AS UNSIGNED), 
+            CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(r.name, '_', 2), '_', -1) AS UNSIGNED)
+          )
+        )
+      END as display_name 
+    FROM chat_rooms r 
+    WHERE (r.type = 'direct' AND (r.name LIKE CONCAT('dm_%\_', ?) OR r.name LIKE CONCAT('dm\_', ?, '\_%'))) 
+       OR (r.type = 'group' AND EXISTS (SELECT 1 FROM chat_room_members rm WHERE rm.room_id = r.id AND rm.user_id = ?)) 
+    ORDER BY r.created_at DESC
+  `;
+
+  db.query(sql, [userId, userId, userId, userId], (err, rooms) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rooms);
   });
