@@ -1,13 +1,33 @@
-import React, { useState, useEffect, useRef } from 'react';
+// src/screens/ChatScreen.js
+import React, { useState, useEffect, useRef, useContext, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, SafeAreaView, Modal, Alert, ActivityIndicator, ScrollView
+  StyleSheet, SafeAreaView, Modal, Alert, ActivityIndicator, ScrollView,
+  KeyboardAvoidingView, Platform
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ThemeContext, themeColors } from '../context/ThemeContext';
+import { ArrowLeft, Search, Plus, X, Users, MessageCircle, Send, Trash2, LogOut } from 'lucide-react-native';
+import { API_URL } from './api';
 
-const API_BASE = 'http://10.0.2.2:5000'; // change for real devices
+// Derive WebSocket URL from API_URL (e.g., https://api.univitahct.tech/api -> wss://api.univitahct.tech)
+const getWsUrl = (url) => {
+  if (!url) return '';
+  return url.replace(/^http/, 'ws').replace(/\/api\/?$/, ''); 
+};
+
+const getInitials = (name) => {
+  if (!name) return '?';
+  const parts = name.split(' ');
+  return parts.length > 1 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : parts[0][0].toUpperCase();
+};
 
 export default function ChatScreen() {
+  const { isDark } = useContext(ThemeContext);
+  const colors = isDark ? themeColors.dark : themeColors.light;
+  const isLight = !isDark;
+  const styles = useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
+
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -29,7 +49,6 @@ export default function ChatScreen() {
 
   const [unreadCounts, setUnreadCounts] = useState({});
 
-  // ---- Initial auth & data ----
   useEffect(() => {
     AsyncStorage.getItem('auth_token').then((t) => {
       setToken(t);
@@ -42,48 +61,42 @@ export default function ChatScreen() {
 
   const fetchRooms = async (authToken) => {
     try {
-      const res = await fetch(`${API_BASE}/api/chat/rooms`, {
+      const res = await fetch(`${API_URL}/chat/rooms`, {
         headers: { Authorization: `Bearer ${authToken}` }
       });
       const data = await res.json();
       setRooms(data || []);
-    } catch (err) {
-      console.error('Error fetching rooms:', err);
-    }
+    } catch (err) {}
   };
 
   const fetchAllUsers = async (authToken) => {
     try {
-      const res = await fetch(`${API_BASE}/api/employees`, {
+      const res = await fetch(`${API_URL}/employees`, {
         headers: { Authorization: `Bearer ${authToken}` }
       });
       const data = await res.json();
       setAllUsers(data || []);
-    } catch (err) {
-      console.error('Error fetching users:', err);
-    }
+    } catch (err) {}
   };
 
   const fetchUnreadCounts = async (authToken) => {
     try {
-      const res = await fetch(`${API_BASE}/api/chat/unread-counts`, {
+      const res = await fetch(`${API_URL}/chat/unread-counts`, {
         headers: { Authorization: `Bearer ${authToken}` }
       });
       const data = await res.json();
       const counts = {};
       data.forEach(r => { counts[r.room_id] = r.unread; });
       setUnreadCounts(counts);
-    } catch (err) {
-      console.error('Error fetching unread counts:', err);
-    }
+    } catch (err) {}
   };
 
-  // ---- WebSocket connection ----
   useEffect(() => {
     if (!token || !activeRoom) return;
-    const ws = new WebSocket(`ws://10.0.2.2:5000?token=${token}`);
+    const WS_URL = getWsUrl(API_URL);
+    const ws = new WebSocket(`${WS_URL}?token=${token}`);
     wsRef.current = ws;
-    ws.onopen = () => console.log('Mobile chat WS open');
+    
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === 'new_message') {
@@ -91,33 +104,28 @@ export default function ChatScreen() {
         fetchUnreadCounts(token);
       }
     };
-    ws.onerror = (e) => console.error('WS error:', e.message);
-    ws.onclose = () => console.log('Mobile chat WS closed');
     return () => ws.close();
   }, [token, activeRoom]);
 
-  // Record reading when room becomes active
   useEffect(() => {
     if (!activeRoom || !token) return;
-    fetch(`${API_BASE}/api/chat/read/${activeRoom.id}`, {
+    fetch(`${API_URL}/chat/read/${activeRoom.id}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` }
-    }).catch(console.error);
+    }).catch(() => {});
     fetchUnreadCounts(token);
   }, [activeRoom, token]);
 
-  // Fetch message history on room change
   useEffect(() => {
     if (!activeRoom || !token) return;
-    fetch(`${API_BASE}/api/chat/history/${activeRoom.id}`, {
+    fetch(`${API_URL}/chat/history/${activeRoom.id}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(res => res.json())
       .then(data => setMessages(data || []))
-      .catch(console.error);
+      .catch(() => {});
   }, [activeRoom, token]);
 
-  // ---- Send message (this is the missing function) ----
   const handleSend = () => {
     if (!newMsg.trim() || !wsRef.current) return;
     wsRef.current.send(JSON.stringify({
@@ -129,25 +137,16 @@ export default function ChatScreen() {
     setNewMsg('');
   };
 
-  // ---- Start DM ----
   const startDM = async (partner) => {
     try {
-      const dmRes = await fetch(`${API_BASE}/api/chat/dm-room`, {
+      const dmRes = await fetch(`${API_URL}/chat/dm-room`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ partnerUserId: partner.id })
       });
       const dmData = await dmRes.json();
       if (dmData.roomId) {
-        const newRoom = {
-          id: dmData.roomId,
-          name: dmData.roomName,
-          display_name: partner.full_name,
-          type: 'direct'
-        };
+        const newRoom = { id: dmData.roomId, name: dmData.roomName, display_name: partner.full_name, type: 'direct' };
         setRooms(prev => [newRoom, ...prev.filter(r => r.id !== newRoom.id)]);
         setActiveRoom(newRoom);
       }
@@ -158,28 +157,22 @@ export default function ChatScreen() {
     }
   };
 
-  // ---- Create group ----
   const createGroup = async () => {
     if (!groupName.trim() || selectedUsers.length < 1) {
-      Alert.alert('Error', 'Group name and at least 2 members are required.');
+      Alert.alert('Error', 'Group name and at least 1 other member required.');
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/chat/group-room`, {
+      const res = await fetch(`${API_URL}/chat/group-room`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: groupName, memberIds: selectedUsers.map(u => u.id) })
       });
       const data = await res.json();
       if (data.success) {
         fetchRooms(token);
         setShowGroupModal(false);
-        setGroupName('');
-        setSelectedUsers([]);
-        setGroupSearch('');
+        setGroupName(''); setSelectedUsers([]); setGroupSearch('');
       } else {
         Alert.alert('Error', data.error || 'Failed to create group');
       }
@@ -188,63 +181,53 @@ export default function ChatScreen() {
     }
   };
 
-  // ---- Leave / Delete room ----
   const leaveRoom = async (roomId) => {
     try {
-      await fetch(`${API_BASE}/api/chat/rooms/${roomId}/leave`, {
+      await fetch(`${API_URL}/chat/rooms/${roomId}/leave`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
       setRooms(prev => prev.filter(r => r.id !== roomId));
       if (activeRoom?.id === roomId) setActiveRoom(null);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to leave group');
-    }
+    } catch (err) {}
   };
 
   const deleteRoom = async (roomId) => {
     try {
-      await fetch(`${API_BASE}/api/chat/rooms/${roomId}`, {
+      await fetch(`${API_URL}/chat/rooms/${roomId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
       setRooms(prev => prev.filter(r => r.id !== roomId));
       if (activeRoom?.id === roomId) setActiveRoom(null);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to delete group');
-    }
+    } catch (err) {}
   };
 
-  // ---- Filter users ----
   useEffect(() => {
     if (!searchTerm.trim()) {
-      setFilteredUsers([]);
-      setShowUserList(false);
-      return;
+      setFilteredUsers([]); setShowUserList(false); return;
     }
     const lower = searchTerm.toLowerCase();
-    const filtered = allUsers.filter(u =>
-      u.full_name.toLowerCase().includes(lower) && u.id !== myUserId
-    );
+    const filtered = allUsers.filter(u => u.full_name.toLowerCase().includes(lower) && u.id !== myUserId);
     setFilteredUsers(filtered);
     setShowUserList(true);
   }, [searchTerm, allUsers, myUserId]);
 
-  // ---- Render functions ----
   const renderRoom = ({ item }) => {
     const isGroup = item.type === 'group';
     const displayName = isGroup ? item.name : (item.display_name || item.name);
     const unread = unreadCounts[item.id] || 0;
+    
     return (
       <TouchableOpacity
         style={styles.roomItem}
+        activeOpacity={0.7}
         onPress={() => setActiveRoom(item)}
         onLongPress={() => {
           if (isGroup) {
             Alert.alert(displayName, 'Choose an action', [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Leave Group', onPress: () => leaveRoom(item.id) },
-              { text: 'Delete Group', style: 'destructive', onPress: () => deleteRoom(item.id) }
+              { text: 'Leave Group', style: 'destructive', onPress: () => leaveRoom(item.id) }
             ]);
           } else {
             Alert.alert('Delete Conversation', `Delete your conversation with ${displayName}?`, [
@@ -254,17 +237,18 @@ export default function ChatScreen() {
           }
         }}
       >
-        <View style={styles.roomRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.roomName}>{displayName}</Text>
-            <Text style={styles.roomType}>{isGroup ? 'Group' : 'Direct Message'}</Text>
-          </View>
-          {unread > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadText}>{unread}</Text>
-            </View>
-          )}
+        <View style={styles.avatarCircle}>
+          {isGroup ? <Users size={20} color={colors.primary} /> : <Text style={styles.avatarText}>{getInitials(displayName)}</Text>}
         </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.roomName}>{displayName}</Text>
+          <Text style={styles.roomType}>{isGroup ? 'Group Chat' : 'Direct Message'}</Text>
+        </View>
+        {unread > 0 && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -272,45 +256,53 @@ export default function ChatScreen() {
   const renderMessage = ({ item }) => {
     const isSent = item.user_id === myUserId;
     return (
-      <View style={[styles.messageBubble, isSent ? styles.sentBubble : styles.receivedBubble]}>
-        <Text style={[styles.sender, isSent && styles.sentSender]}>{item.full_name || 'User'}</Text>
-        <Text style={[styles.messageText, isSent && styles.sentMessageText]}>{item.message}</Text>
+      <View style={[styles.messageWrapper, isSent ? styles.messageWrapperSent : styles.messageWrapperReceived]}>
+        {!isSent && (
+          <View style={styles.messageAvatar}>
+            <Text style={styles.messageAvatarText}>{getInitials(item.full_name || 'U')}</Text>
+          </View>
+        )}
+        <View style={[styles.messageBubble, isSent ? styles.sentBubble : styles.receivedBubble]}>
+          {!isSent && activeRoom?.type === 'group' && <Text style={styles.senderName}>{item.full_name}</Text>}
+          <Text style={[styles.messageText, isSent && styles.sentMessageText]}>{item.message}</Text>
+        </View>
       </View>
     );
   };
 
-  if (!token) {
-    return <View style={styles.container}><Text>Loading...</Text></View>;
-  }
+  if (!token) return <View style={styles.container}><ActivityIndicator style={{marginTop: 50}} color={colors.primary} /></View>;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {!activeRoom ? (
-        <>
-          <View style={styles.headerRow}>
-            <Text style={styles.header}>Chat</Text>
-            <TouchableOpacity style={styles.newGroupButton} onPress={() => setShowGroupModal(true)}>
-              <Text style={styles.newGroupText}>+ Group</Text>
+        <View style={{ flex: 1 }}>
+          <View style={styles.listHeaderRow}>
+            <View style={styles.searchBar}>
+              <Search size={18} color={isLight ? "#94A3B8" : colors.textSecondary} style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search colleagues..."
+                placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
+                value={searchTerm}
+                onChangeText={setSearchTerm}
+                onFocus={() => searchTerm.length > 0 && setShowUserList(true)}
+                onBlur={() => setTimeout(() => setShowUserList(false), 200)}
+              />
+            </View>
+            <TouchableOpacity style={styles.newGroupBtn} onPress={() => setShowGroupModal(true)} activeOpacity={0.8}>
+              <Plus size={20} color="#FFFFFF" />
             </TouchableOpacity>
-          </View>
-
-          <View style={styles.searchBar}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search users..."
-              value={searchTerm}
-              onChangeText={setSearchTerm}
-              onFocus={() => searchTerm.length > 0 && setShowUserList(true)}
-              onBlur={() => setTimeout(() => setShowUserList(false), 200)}
-            />
           </View>
 
           {showUserList && filteredUsers.length > 0 && (
             <View style={styles.userListContainer}>
               {filteredUsers.map(user => (
                 <TouchableOpacity key={user.id} style={styles.userItem} onPress={() => startDM(user)}>
-                  <Text style={styles.userName}>{user.full_name}</Text>
-                  <Text style={styles.userRole}>{user.role}</Text>
+                  <View style={styles.avatarCircleSmall}><Text style={styles.avatarTextSmall}>{getInitials(user.full_name)}</Text></View>
+                  <View>
+                    <Text style={styles.userName}>{user.full_name}</Text>
+                    <Text style={styles.userRole}>{user.role}</Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>
@@ -320,25 +312,26 @@ export default function ChatScreen() {
             data={rooms}
             keyExtractor={item => item.id.toString()}
             renderItem={renderRoom}
+            contentContainerStyle={{ paddingBottom: 20 }}
             ListEmptyComponent={
               <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>No conversations yet.</Text>
-                <Text style={styles.emptySubtext}>Search for a user above to start chatting.</Text>
+                <MessageCircle size={48} color={isLight ? "#E2E8F0" : colors.border} />
+                <Text style={styles.emptyText}>No conversations yet</Text>
+                <Text style={styles.emptySubtext}>Search for a colleague above to start chatting.</Text>
               </View>
             }
           />
-        </>
+        </View>
       ) : (
-        <>
-          <View style={styles.roomHeader}>
-            <TouchableOpacity onPress={() => setActiveRoom(null)}>
-              <Text style={styles.backBtn}>← Back</Text>
+        <View style={{ flex: 1 }}>
+          <View style={styles.activeRoomHeader}>
+            <TouchableOpacity onPress={() => setActiveRoom(null)} style={styles.backBtnWrapper}>
+              <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
             </TouchableOpacity>
-            <Text style={styles.roomTitle}>
-              {activeRoom.type === 'group'
-                ? activeRoom.name
-                : (activeRoom.display_name || activeRoom.name)}
-            </Text>
+            <View style={styles.activeRoomHeaderInfo}>
+              <Text style={styles.activeRoomTitle}>{activeRoom.type === 'group' ? activeRoom.name : (activeRoom.display_name || activeRoom.name)}</Text>
+              <Text style={styles.activeRoomSubtitle}>{activeRoom.type === 'group' ? 'Group Chat' : 'Direct Message'}</Text>
+            </View>
           </View>
 
           <FlatList
@@ -347,100 +340,140 @@ export default function ChatScreen() {
             keyExtractor={item => item.id.toString()}
             renderItem={renderMessage}
             style={styles.messageList}
+            contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           />
 
           <View style={styles.inputArea}>
             <TextInput
-              style={styles.input}
+              style={styles.chatInput}
               value={newMsg}
               onChangeText={setNewMsg}
-              placeholder="Type message..."
+              placeholder="Type a message..."
+              placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
               onSubmitEditing={handleSend}
               returnKeyType="send"
             />
-            <TouchableOpacity onPress={handleSend} style={styles.sendBtn}>
-              <Text style={{ color: 'white' }}>Send</Text>
+            <TouchableOpacity onPress={handleSend} style={styles.sendBtn} activeOpacity={0.8} disabled={!newMsg.trim()}>
+              <Send size={18} color={newMsg.trim() ? "#FFFFFF" : "rgba(255,255,255,0.5)"} />
             </TouchableOpacity>
           </View>
-        </>
+        </View>
       )}
 
-      {/* Group creation modal */}
-      <Modal visible={showGroupModal} transparent animationType="slide">
+      {/* Group Creation Modal */}
+      <Modal visible={showGroupModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Create Group Chat</Text>
-            <TextInput style={styles.modalInput} placeholder="Group name" value={groupName} onChangeText={setGroupName} />
-            <TextInput style={styles.modalInput} placeholder="Search members..." value={groupSearch} onChangeText={setGroupSearch} />
-            <ScrollView style={styles.memberList}>
-              {allUsers.filter(u => u.full_name.toLowerCase().includes(groupSearch.toLowerCase()) && u.id !== myUserId).map(u => (
-                <TouchableOpacity key={u.id} style={styles.memberItem} onPress={() => {
-                  setSelectedUsers(prev => prev.some(s => s.id === u.id) ? prev.filter(s => s.id !== u.id) : [...prev, u]);
-                }}>
-                  <Text style={{ flex: 1 }}>{u.full_name} ({u.role})</Text>
-                  {selectedUsers.some(s => s.id === u.id) && <Text style={{ color: '#00897B' }}>✓</Text>}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity onPress={() => setShowGroupModal(false)} style={styles.cancelBtn}>
-                <Text>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={createGroup} style={styles.startBtn}>
-                <Text style={styles.startBtnText}>Create</Text>
-              </TouchableOpacity>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>New Group Chat</Text>
+              <TouchableOpacity onPress={() => setShowGroupModal(false)}><X size={24} color={isLight ? "#64748B" : colors.textSecondary} /></TouchableOpacity>
             </View>
+            
+            <Text style={styles.label}>Group Name</Text>
+            <TextInput style={styles.modalInput} placeholder="e.g. IT Department" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} value={groupName} onChangeText={setGroupName} />
+            
+            <Text style={styles.label}>Add Members</Text>
+            <TextInput style={styles.modalInput} placeholder="Search members..." placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} value={groupSearch} onChangeText={setGroupSearch} />
+            
+            <ScrollView style={styles.memberList} showsVerticalScrollIndicator={false}>
+              {allUsers.filter(u => u.full_name.toLowerCase().includes(groupSearch.toLowerCase()) && u.id !== myUserId).map(u => {
+                const isSelected = selectedUsers.some(s => s.id === u.id);
+                return (
+                  <TouchableOpacity key={u.id} style={[styles.memberItem, isSelected && styles.memberItemSelected]} onPress={() => {
+                    setSelectedUsers(prev => isSelected ? prev.filter(s => s.id !== u.id) : [...prev, u]);
+                  }}>
+                    <View style={styles.avatarCircleSmall}><Text style={styles.avatarTextSmall}>{getInitials(u.full_name)}</Text></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.memberItemName}>{u.full_name}</Text>
+                      <Text style={styles.memberItemRole}>{u.role}</Text>
+                    </View>
+                    <View style={[styles.checkbox, isSelected && styles.checkboxActive]} />
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            
+            <TouchableOpacity onPress={createGroup} style={styles.createBtn} activeOpacity={0.8}>
+              <Text style={styles.createBtnText}>Create Group</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
-  header: { fontSize: 20, fontWeight: 'bold' },
-  newGroupButton: { backgroundColor: '#00897B', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  newGroupText: { color: 'white', fontWeight: '600' },
-  searchBar: { paddingHorizontal: 16, paddingBottom: 8 },
-  searchInput: { backgroundColor: '#f1f5f9', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14, borderWidth: 1, borderColor: '#e2e8f0' },
-  userListContainer: { backgroundColor: 'white', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10, marginHorizontal: 16, marginBottom: 8, maxHeight: 200 },
-  userItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  userName: { fontSize: 15, fontWeight: '500' },
-  userRole: { fontSize: 13, color: '#64748b' },
-  roomItem: { paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
-  roomRow: { flexDirection: 'row', alignItems: 'center' },
-  roomName: { fontSize: 16, fontWeight: '600' },
-  roomType: { fontSize: 12, color: '#64748b', marginTop: 2 },
-  unreadBadge: { backgroundColor: '#00897B', borderRadius: 12, width: 24, height: 24, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
-  unreadText: { color: 'white', fontSize: 12, fontWeight: '700' },
-  roomHeader: { flexDirection: 'row', alignItems: 'center', padding: 12, backgroundColor: '#00897B' },
-  backBtn: { color: 'white', marginRight: 12 },
-  roomTitle: { color: 'white', fontSize: 18, fontWeight: 'bold' },
-  messageList: { flex: 1, padding: 10, backgroundColor: '#f0f0f0' },
-  messageBubble: { padding: 10, marginBottom: 8, borderRadius: 8, maxWidth: '80%' },
-  receivedBubble: { backgroundColor: 'white', alignSelf: 'flex-start' },
-  sentBubble: { backgroundColor: '#00897B', alignSelf: 'flex-end' },
-  sender: { fontWeight: 'bold', marginBottom: 4, color: '#00897B' },
-  sentSender: { color: '#B2DFDB' },
-  messageText: { color: '#1e293b' },
-  sentMessageText: { color: 'white' },
-  inputArea: { flexDirection: 'row', padding: 8, borderTopWidth: 1, borderColor: '#ddd' },
-  input: { flex: 1, borderWidth: 1, borderColor: '#ccc', borderRadius: 20, paddingHorizontal: 12, marginRight: 8 },
-  sendBtn: { backgroundColor: '#00897B', borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
-  modalOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 12, padding: 20, maxHeight: '80%' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
-  modalInput: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 12 },
-  memberList: { maxHeight: 150, marginBottom: 10, borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, padding: 5 },
-  memberItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8 },
-  modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
-  cancelBtn: { padding: 10, marginRight: 10 },
-  startBtn: { backgroundColor: '#00897B', padding: 10, borderRadius: 8 },
-  startBtnText: { color: 'white', fontWeight: '600' },
-  emptyState: { alignItems: 'center', paddingVertical: 30 },
-  emptyText: { fontSize: 16, color: '#64748b', fontWeight: '600' },
-  emptySubtext: { fontSize: 14, color: '#94a3b8', marginTop: 4 }
+const getDynamicStyles = (colors, isLight) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  
+  // List Header (Search & Add Group)
+  listHeaderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12 },
+  searchBar: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 20, paddingHorizontal: 16, height: 48, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  searchInput: { flex: 1, fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
+  newGroupBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#00897B', justifyContent: 'center', alignItems: 'center', shadowColor: '#00897B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  
+  // User Search Dropdown
+  userListContainer: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 16, marginHorizontal: 20, marginBottom: 12, maxHeight: 200, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
+  userItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border, gap: 12 },
+  userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
+  userRole: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
+  
+  // Room List
+  roomItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
+  avatarCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  avatarText: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: colors.primary },
+  roomName: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 4 },
+  roomType: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
+  unreadBadge: { backgroundColor: '#EF4444', borderRadius: 12, paddingHorizontal: 8, height: 24, justifyContent: 'center', alignItems: 'center' },
+  unreadText: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 11 },
+  
+  // Empty State
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, paddingHorizontal: 30 },
+  emptyText: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 16, marginBottom: 8 },
+  emptySubtext: { fontFamily: 'Inter_18pt-Regular', fontSize: 14, color: isLight ? '#94A3B8' : colors.textSecondary, textAlign: 'center' },
+  
+  // Active Chat Header
+  activeRoomHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border },
+  backBtnWrapper: { padding: 8, marginRight: 8 },
+  activeRoomHeaderInfo: { flex: 1 },
+  activeRoomTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },
+  activeRoomSubtitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
+  
+  // Chat Area
+  messageList: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  messageWrapper: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 12 },
+  messageWrapperSent: { justifyContent: 'flex-end' },
+  messageWrapperReceived: { justifyContent: 'flex-start' },
+  messageAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: isLight ? '#E2E8F0' : colors.iconBg, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
+  messageAvatarText: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
+  messageBubble: { maxWidth: '75%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20 },
+  receivedBubble: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  sentBubble: { backgroundColor: '#00897B', borderBottomRightRadius: 4 },
+  senderName: { fontFamily: 'Inter_18pt-Bold', fontSize: 11, color: colors.primary, marginBottom: 4 },
+  messageText: { fontFamily: 'Inter_18pt-Regular', fontSize: 15, color: isLight ? '#334155' : colors.textPrimary, lineHeight: 22 },
+  sentMessageText: { color: '#FFFFFF' },
+  
+  inputArea: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderTopWidth: 1, borderTopColor: isLight ? '#E2E8F0' : colors.border },
+  chatInput: { flex: 1, minHeight: 44, maxHeight: 100, backgroundColor: isLight ? '#F1F5F9' : colors.background, borderRadius: 22, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, fontSize: 15, fontFamily: 'Inter_18pt-Medium', color: isLight ? '#0F172A' : colors.textPrimary, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#00897B', justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
+  
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 28, padding: 24, width: '100%', maxWidth: 400, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
+  label: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 8, marginTop: 12 },
+  modalInput: { fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, padding: 16, fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  memberList: { maxHeight: 200, marginTop: 8, marginBottom: 20 },
+  memberItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 16, marginBottom: 4, gap: 12 },
+  memberItemSelected: { backgroundColor: isLight ? '#E0F2F1' : 'rgba(0, 137, 123, 0.15)' },
+  avatarCircleSmall: { width: 36, height: 36, borderRadius: 18, backgroundColor: isLight ? '#E2E8F0' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },
+  avatarTextSmall: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: colors.primary },
+  memberItemName: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
+  memberItemRole: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
+  checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 2, borderColor: isLight ? '#CBD5E1' : colors.border },
+  checkboxActive: { backgroundColor: '#00897B', borderColor: '#00897B' },
+  createBtn: { backgroundColor: '#00897B', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  createBtnText: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 15 },
 });

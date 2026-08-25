@@ -1,16 +1,22 @@
 // src/screens/MyPayrollScreen.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useMemo } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, ActivityIndicator,
-  RefreshControl, Modal, TouchableOpacity, Dimensions
+  RefreshControl, Modal, TouchableOpacity, StatusBar
 } from 'react-native';
-import { CalendarDays, X, FileText, ChevronRight, Wallet, TrendingDown, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CalendarDays, X, FileText, ChevronRight, Wallet, TrendingDown, ArrowDownToLine, ArrowUpFromLine, ArrowLeft } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { fetchEmployeePayrollHistory } from './api';
 
-const { width } = Dimensions.get('window');
+export default function MyPayrollScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const { isDark } = useContext(ThemeContext);
+  const colors = isDark ? themeColors.dark : themeColors.light;
+  const isLight = !isDark;
+  const styles = useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
 
-export default function MyPayrollScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [allPayslips, setAllPayslips] = useState([]);
@@ -56,7 +62,7 @@ export default function MyPayrollScreen() {
     return `₱${num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  // Modern Card for the Current Month
+  // Primary Card for Current Month
   const renderCurrentMonthCard = (record) => {
     const totalDeductions = (record.sss_deduction || 0) + (record.philhealth_deduction || 0) + 
                             (record.pagibig_deduction || 0) + (record.tax_deduction || 0) + 
@@ -65,9 +71,9 @@ export default function MyPayrollScreen() {
     return (
       <View style={styles.primaryCard}>
         <View style={styles.primaryCardHeader}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <View style={styles.iconCircle}>
-              <Wallet size={20} color="#0D9488" />
+              <Wallet size={20} color="#00897B" />
             </View>
             <Text style={styles.primaryCardTitle}>{record.month_year}</Text>
           </View>
@@ -83,7 +89,7 @@ export default function MyPayrollScreen() {
 
         <View style={styles.primaryCardFooter}>
           <View style={styles.footerItem}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <ArrowDownToLine size={14} color="#D1FAE5" />
               <Text style={styles.footerLabel}>Gross Pay</Text>
             </View>
@@ -91,7 +97,7 @@ export default function MyPayrollScreen() {
           </View>
           <View style={styles.footerDivider} />
           <View style={styles.footerItem}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <ArrowUpFromLine size={14} color="#FECACA" />
               <Text style={styles.footerLabel}>Deductions</Text>
             </View>
@@ -107,7 +113,7 @@ export default function MyPayrollScreen() {
     );
   };
 
-  // Minimal List Item for Past Payslips
+  // Past Payslip Item
   const renderPastPayslipItem = (record) => (
     <TouchableOpacity 
       style={styles.historyItem} 
@@ -116,7 +122,7 @@ export default function MyPayrollScreen() {
       key={record.id}
     >
       <View style={styles.historyIconWrapper}>
-        <FileText size={20} color="#64748B" />
+        <FileText size={20} color={isLight ? "#64748B" : colors.textSecondary} />
       </View>
       <View style={styles.historyInfo}>
         <Text style={styles.historyMonth}>{record.month_year}</Text>
@@ -124,7 +130,7 @@ export default function MyPayrollScreen() {
       </View>
       <View style={styles.historyAmountWrapper}>
         <Text style={styles.historyAmount}>{formatCurrency(record.net_pay)}</Text>
-        <ChevronRight size={18} color="#CBD5E1" />
+        <ChevronRight size={18} color={isLight ? "#CBD5E1" : colors.border} />
       </View>
     </TouchableOpacity>
   );
@@ -136,24 +142,22 @@ export default function MyPayrollScreen() {
                             (p.tax_deduction || 0) + (p.loan_deduction || 0) + (p.other_deduction || 0);
 
     return (
-      <Modal visible={showDetailModal} animationType="slide" transparent onRequestClose={() => setShowDetailModal(false)}>
+      <Modal visible={showDetailModal} animationType="fade" transparent onRequestClose={() => setShowDetailModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.detailModalContainer}>
             
-            {/* Modal Header */}
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>Payslip Details</Text>
                 <Text style={styles.modalSubtitle}>{p.month_year}</Text>
               </View>
-              <TouchableOpacity onPress={() => setShowDetailModal(false)} style={styles.closeButton}>
-                <X size={20} color="#64748B" />
+              <TouchableOpacity onPress={() => setShowDetailModal(false)} style={styles.closeButton} activeOpacity={0.8}>
+                <X size={20} color={isLight ? "#64748B" : colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
               
-              {/* Earnings Breakdown */}
               <View style={styles.receiptSection}>
                 <Text style={styles.sectionTitle}>Earnings</Text>
                 
@@ -193,9 +197,8 @@ export default function MyPayrollScreen() {
                 </View>
               </View>
 
-              {/* Deductions Breakdown */}
               <View style={styles.receiptSection}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                   <TrendingDown size={18} color="#EF4444" />
                   <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Deductions</Text>
                 </View>
@@ -236,7 +239,6 @@ export default function MyPayrollScreen() {
                 </View>
               </View>
 
-              {/* Net Pay Highlight */}
               <View style={styles.netPayHighlight}>
                 <Text style={styles.netPayHighlightLabel}>Net Take-Home Pay</Text>
                 <Text style={styles.netPayHighlightValue}>{formatCurrency(p.net_pay)}</Text>
@@ -255,135 +257,147 @@ export default function MyPayrollScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#0D9488" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#0D9488"]} />}
-      >
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>My Payroll</Text>
-          <Text style={styles.headerSubtitle}>View and track your finalized payslips</Text>
+    <>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
+      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+        
+        {/* Top Navbar */}
+        <View style={styles.topHeader}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.8}>
+            <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
+          </TouchableOpacity>
         </View>
 
-        {/* Current Month Section */}
-        <Text style={styles.sectionHeading}>Current Period</Text>
-        {currentMonthPayslip ? (
-          renderCurrentMonthCard(currentMonthPayslip)
-        ) : (
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIconWrapper}>
-              <CalendarDays size={32} color="#94A3B8" />
-            </View>
-            <Text style={styles.emptyText}>No payslip yet</Text>
-            <Text style={styles.emptySubtext}>
-              Your payslip will appear here once HR finalizes the payroll for {currentMonth}.
-            </Text>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        >
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>My Payroll</Text>
+            <Text style={styles.headerSubtitle}>View and track your finalized payslips</Text>
           </View>
-        )}
 
-        {/* Past Payslips Section */}
-        {pastPayslips.length > 0 && (
-          <View style={styles.historySection}>
-            <Text style={styles.sectionHeading}>Previous Payslips</Text>
-            <View style={styles.historyList}>
-              {pastPayslips.map(record => renderPastPayslipItem(record))}
+          <Text style={styles.sectionHeading}>Current Period</Text>
+          {currentMonthPayslip ? (
+            renderCurrentMonthCard(currentMonthPayslip)
+          ) : (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconWrapper}>
+                <CalendarDays size={32} color={isLight ? "#94A3B8" : colors.textSecondary} />
+              </View>
+              <Text style={styles.emptyText}>No payslip yet</Text>
+              <Text style={styles.emptySubtext}>
+                Your payslip will appear here once HR finalizes the payroll for {currentMonth}.
+              </Text>
             </View>
-          </View>
-        )}
-      </ScrollView>
+          )}
 
-      {renderDetailModal()}
-    </SafeAreaView>
+          {pastPayslips.length > 0 && (
+            <View style={styles.historySection}>
+              <Text style={styles.sectionHeading}>Previous Payslips</Text>
+              <View style={styles.historyList}>
+                {pastPayslips.map(record => renderPastPayslipItem(record))}
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        {renderDetailModal()}
+      </SafeAreaView>
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC' },
-  scroll: { padding: 20, paddingBottom: 40 },
+const getDynamicStyles = (colors, isLight) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  topHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12 },
+  backButton: { padding: 4 },
   
-  header: { marginBottom: 24, marginTop: 10 },
-  headerTitle: { fontSize: 28, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
-  headerSubtitle: { fontSize: 14, color: '#64748B', marginTop: 4 },
+  scroll: { padding: 22, paddingBottom: 60 },
+  
+  header: { marginBottom: 24, marginTop: 4 },
+  headerTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 26, color: isLight ? '#0F172A' : colors.textPrimary, letterSpacing: -0.5 },
+  headerSubtitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 4 },
 
-  sectionHeading: { fontSize: 16, fontWeight: '700', color: '#1E293B', marginBottom: 12, marginTop: 8 },
+  sectionHeading: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 16, marginTop: 8 },
 
   // Primary Card (Current Month)
   primaryCard: {
-    backgroundColor: '#0D9488',
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#0D9488',
+    backgroundColor: '#00897B',
+    borderRadius: 24,
+    padding: 22,
+    shadowColor: '#00897B',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25,
-    shadowRadius: 12,
+    shadowRadius: 16,
     elevation: 8,
-    marginBottom: 24,
+    marginBottom: 28,
   },
   primaryCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  iconCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
-  primaryCardTitle: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
-  statusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  statusText: { fontSize: 10, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 },
+  iconCircle: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
+  primaryCardTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: '#FFFFFF' },
+  statusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+  statusText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, color: '#FFFFFF', letterSpacing: 0.5 },
   
   primaryCardBody: { alignItems: 'center', marginBottom: 24 },
-  netPayLabel: { fontSize: 13, color: '#CCFBF1', fontWeight: '500', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 },
-  netPayValue: { fontSize: 40, fontWeight: '800', color: '#FFFFFF', letterSpacing: -1 },
+  netPayLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
+  netPayValue: { fontFamily: 'Inter_18pt-Black', fontSize: 38, color: '#FFFFFF', letterSpacing: -1 },
 
-  primaryCardFooter: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 12, padding: 16, marginBottom: 16 },
+  primaryCardFooter: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 16, padding: 16, marginBottom: 16 },
   footerItem: { flex: 1, alignItems: 'center' },
   footerDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 10 },
-  footerLabel: { fontSize: 12, color: '#CCFBF1', fontWeight: '500' },
-  footerValue: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  footerLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1' },
+  footerValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: '#FFFFFF' },
 
   viewDetailsBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 8 },
-  viewDetailsBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  viewDetailsBtnText: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 14 },
 
   // Empty State
-  emptyCard: { alignItems: 'center', padding: 32, backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', borderStyle: 'dashed', marginBottom: 24 },
-  emptyIconWrapper: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-  emptyText: { fontSize: 16, fontWeight: '700', color: '#334155', marginBottom: 8 },
-  emptySubtext: { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 20 },
+  emptyCard: { alignItems: 'center', padding: 36, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderStyle: 'dashed', marginBottom: 28 },
+  emptyIconWrapper: { width: 64, height: 64, borderRadius: 32, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  emptyText: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 6 },
+  emptySubtext: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary, textAlign: 'center', lineHeight: 20 },
 
   // History List
-  historySection: { marginTop: 10 },
-  historyList: { backgroundColor: '#FFFFFF', borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
-  historyItem: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  historyIconWrapper: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  historySection: { marginTop: 4 },
+  historyList: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.15, shadowRadius: 10, elevation: 2 },
+  historyItem: { flexDirection: 'row', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
+  historyIconWrapper: { width: 44, height: 44, borderRadius: 12, backgroundColor: isLight ? '#F8FAFC' : colors.background, justifyContent: 'center', alignItems: 'center', marginRight: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   historyInfo: { flex: 1 },
-  historyMonth: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
-  historyHours: { fontSize: 12, color: '#64748B', fontWeight: '500' },
+  historyMonth: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 2 },
+  historyHours: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
   historyAmountWrapper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  historyAmount: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  historyAmount: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
 
   // Detail Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.6)', justifyContent: 'flex-end' },
-  detailModalContainer: { backgroundColor: '#FAFAFA', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '90%', minHeight: '60%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 },
-  modalTitle: { fontSize: 22, fontWeight: '800', color: '#0F172A', letterSpacing: -0.5 },
-  modalSubtitle: { fontSize: 14, color: '#64748B', fontWeight: '500', marginTop: 2 },
-  closeButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  detailModalContainer: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 28, padding: 24, width: '100%', maxWidth: 420, maxHeight: '85%', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
+  modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
+  modalSubtitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 2 },
+  closeButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },
 
-  receiptSection: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0' },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 16 },
-  receiptRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  receiptLabel: { fontSize: 13, color: '#4B5563', fontWeight: '500' },
-  receiptValue: { fontSize: 13, color: '#0F172A', fontWeight: '600' },
-  receiptValueRed: { fontSize: 13, color: '#EF4444', fontWeight: '600' },
-  receiptDivider: { height: 1, backgroundColor: '#E2E8F0', marginVertical: 12, borderStyle: 'dashed' },
-  receiptLabelBold: { fontSize: 14, color: '#0F172A', fontWeight: '700' },
-  receiptValueBold: { fontSize: 14, color: '#0F172A', fontWeight: '800' },
+  receiptSection: { backgroundColor: isLight ? '#F8FAFC' : colors.background, borderRadius: 20, padding: 18, marginBottom: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  sectionTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 },
+  receiptRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  receiptLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#475569' : colors.textSecondary },
+  receiptValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary },
+  receiptValueRed: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: '#EF4444' },
+  receiptDivider: { height: 1, backgroundColor: isLight ? '#E2E8F0' : colors.border, marginVertical: 12 },
+  receiptLabelBold: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
+  receiptValueBold: { fontFamily: 'Inter_18pt-Black', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
 
-  netPayHighlight: { backgroundColor: '#0D9488', borderRadius: 16, padding: 20, alignItems: 'center', marginTop: 8, marginBottom: 20 },
-  netPayHighlightLabel: { fontSize: 13, color: '#CCFBF1', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
-  netPayHighlightValue: { fontSize: 32, color: '#FFFFFF', fontWeight: '800', letterSpacing: -1 },
+  netPayHighlight: { backgroundColor: '#00897B', borderRadius: 20, padding: 20, alignItems: 'center', marginTop: 4, marginBottom: 16 },
+  netPayHighlightLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
+  netPayHighlightValue: { fontFamily: 'Inter_18pt-Black', fontSize: 30, color: '#FFFFFF', letterSpacing: -0.5 },
 
-  footnote: { fontSize: 11, color: '#94A3B8', textAlign: 'center', fontStyle: 'italic', paddingHorizontal: 20, lineHeight: 16 },
+  footnote: { fontFamily: 'Inter_18pt-Regular', fontSize: 11, color: isLight ? '#94A3B8' : colors.textSecondary, textAlign: 'center', fontStyle: 'italic', paddingHorizontal: 10, lineHeight: 16 },
 });
