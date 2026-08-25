@@ -24,7 +24,6 @@ export default function ProfileScreen({ navigation }) {
 
   const styles = useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
 
-  // Fetch real profile data and dynamic password expiry every time screen focuses
   useFocusEffect(
     useCallback(() => {
       const fetchRealProfile = async () => {
@@ -32,7 +31,6 @@ export default function ProfileScreen({ navigation }) {
           const token = await AsyncStorage.getItem('auth_token');
           if (!token) return;
 
-          // Fetch fresh user data from your backend
           const response = await axios.get(`${API_URL}/users/me`, {
             headers: { Authorization: `Bearer ${token}` }
           });
@@ -47,34 +45,35 @@ export default function ProfileScreen({ navigation }) {
           setEditName(freshUser.full_name || freshUser.name);
           setEditEmail(freshUser.email);
 
-          // Dynamic Expiration Calculation
           if (freshUser.password_updated_at) {
             const updatedDate = new Date(freshUser.password_updated_at);
             const today = new Date();
-            // Calculate time difference in milliseconds
             const diffTime = Math.abs(today - updatedDate);
-            // Convert to days
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-            
             const remaining = 365 - diffDays;
             setDaysRemaining(remaining > 0 ? remaining : 0);
           } else {
-            setDaysRemaining(365); // Fallback if no date exists
+            setDaysRemaining(365);
           }
-
         } catch (error) {
-          console.log("Failed to fetch fresh profile data:", error);
-          // Fallback to AsyncStorage if API fails
           const id = await AsyncStorage.getItem('user_id');
           const name = await AsyncStorage.getItem('user_name');
           const email = await AsyncStorage.getItem('user_email');
           setUserData({ id: id || '', name: name || 'Employee', email: email || 'user@hct.com' });
+          setEditName(name || 'Employee');
+          setEditEmail(email || 'user@hct.com');
         }
       };
 
       fetchRealProfile();
     }, [])
   );
+
+  const handleOpenEditModal = () => {
+    setEditName(userData.name);
+    setEditEmail(userData.email);
+    setShowEditModal(true);
+  };
 
   const handleLogout = async () => {
     Alert.alert("Logout", "Are you sure you want to log out?", [
@@ -84,20 +83,18 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleUpdateProfile = async () => {
-    if (!editName || !editEmail) return Alert.alert("Error", "Fields cannot be empty");
+    if (!editName.trim() || !editEmail.trim()) return Alert.alert("Error", "Fields cannot be empty");
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      // Update data on backend (assuming you have a PUT endpoint)
       await axios.put(`${API_URL}/users/profile`, 
-        { full_name: editName, email: editEmail },
+        { full_name: editName.trim(), email: editEmail.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Update local storage
-      await AsyncStorage.setItem('user_name', editName);
-      await AsyncStorage.setItem('user_email', editEmail);
-      setUserData({ ...userData, name: editName, email: editEmail });
+      await AsyncStorage.setItem('user_name', editName.trim());
+      await AsyncStorage.setItem('user_email', editEmail.trim());
+      setUserData({ ...userData, name: editName.trim(), email: editEmail.trim() });
       
       Alert.alert("Success", "Profile updated successfully");
       setShowEditModal(false);
@@ -134,7 +131,7 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.headerSection}>
             <View style={styles.avatarContainer}>
               <View style={styles.avatar}><User size={44} color={isLight ? "#FFFFFF" : colors.primary} /></View>
-              <TouchableOpacity style={styles.editAvatarBtn} onPress={() => setShowEditModal(true)} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.editAvatarBtn} onPress={handleOpenEditModal} activeOpacity={0.8}>
                 <Edit2 size={14} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
@@ -148,7 +145,7 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.menuSection}>
             <Text style={styles.sectionHeader}>ACCOUNT</Text>
             <View style={styles.menuCard}>
-              <MenuItem icon={User} title="Edit Profile" subtitle="Update your information" onPress={() => setShowEditModal(true)} />
+              <MenuItem icon={User} title="Edit Profile" subtitle="Update your information" onPress={handleOpenEditModal} />
               <View style={styles.divider} />
               <MenuItem icon={Shield} title="Security" subtitle="Password and authentication" onPress={() => navigation.navigate('Security')} />
               <View style={styles.divider} />
@@ -169,7 +166,6 @@ export default function ProfileScreen({ navigation }) {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Edit Profile Modal */}
         <Modal visible={showEditModal} animationType="fade" transparent={true}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -179,9 +175,9 @@ export default function ProfileScreen({ navigation }) {
                 <View style={{ width: 24 }} />
               </View>
               <Text style={styles.inputLabel}>Full Name</Text>
-              <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
+              <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Enter full name" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
               <Text style={styles.inputLabel}>Email Address</Text>
-              <TextInput style={styles.input} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
+              <TextInput style={styles.input} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" placeholder="Enter email" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.modalBtnOutline} onPress={() => setShowEditModal(false)}>
                   <Text style={styles.modalBtnTextOutline}>Cancel</Text>
@@ -198,23 +194,19 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-// DYNAMIC STYLESHEET GENERATOR
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
   scroll: { paddingHorizontal: 22, paddingBottom: 120, paddingTop: 10 },
   topBar: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 10 },
   themeToggle: { padding: 12, borderRadius: 24, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.2, shadowRadius: 8, elevation: 2 },
-  
   headerSection: { alignItems: 'center', marginBottom: 36 },
   avatarContainer: { position: 'relative', marginBottom: 20 },
   avatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: isLight ? '#0F172A' : colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: isLight ? '#E2E8F0' : colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: isLight ? 0.1 : 0.3, shadowRadius: 10, elevation: 4 },
   editAvatarBtn: { position: 'absolute', bottom: 0, right: -4, backgroundColor: isLight ? '#A78BFA' : colors.primary, padding: 10, borderRadius: 24, borderWidth: 3, borderColor: isLight ? '#F8FAFC' : colors.background },
   userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 24, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 6 },
   userEmail: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 16 },
-  
   expiryBadge: { backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: isLight ? '#FDE68A' : 'rgba(251, 191, 36, 0.2)' },
   expiryText: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#D97706' : '#FBBF24' },
-  
   menuSection: { marginBottom: 28 },
   sectionHeader: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 12, marginLeft: 4, letterSpacing: 1.2 },
   menuCard: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.15, shadowRadius: 10, elevation: 2 },
@@ -224,10 +216,8 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   menuTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
   menuSub: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 3 },
   divider: { height: 1, backgroundColor: isLight ? '#F1F5F9' : colors.border, marginLeft: 80 },
-  
   logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: isLight ? '#0F172A' : colors.buttonBg, paddingVertical: 18, borderRadius: 30, marginTop: 10, gap: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
   logoutText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText, fontSize: 15, letterSpacing: 0.5 },
-  
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 28, padding: 24, width: '100%', maxWidth: 400, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 },

@@ -112,13 +112,7 @@ export default function AlertsScreen({ navigation }) {
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
         
         {/* Top Navbar */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.8}>
-            <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Emergency Alerts</Text>
-          <View style={{ width: 40 }} />
-        </View>
+        
 
         <FlatList
           data={alerts}

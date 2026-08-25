@@ -5,7 +5,7 @@ import {
   RefreshControl, Modal, TouchableOpacity, StatusBar
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CalendarDays, X, FileText, ChevronRight, Wallet, TrendingDown, ArrowDownToLine, ArrowUpFromLine, ArrowLeft } from 'lucide-react-native';
+import { CalendarDays, X, FileText, ChevronRight, Wallet, TrendingDown, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { fetchEmployeePayrollHistory } from './api';
@@ -21,7 +21,6 @@ export default function MyPayrollScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [allPayslips, setAllPayslips] = useState([]);
 
-  // Modal states
   const [selectedPayslip, setSelectedPayslip] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
@@ -62,11 +61,11 @@ export default function MyPayrollScreen({ navigation }) {
     return `₱${num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  // Primary Card for Current Month
   const renderCurrentMonthCard = (record) => {
-    const totalDeductions = (record.sss_deduction || 0) + (record.philhealth_deduction || 0) + 
-                            (record.pagibig_deduction || 0) + (record.tax_deduction || 0) + 
-                            (record.loan_deduction || 0) + (record.other_deduction || 0);
+    // Safely parse numbers to prevent NaN display errors
+    const totalDeductions = Number(record.sss_deduction || 0) + Number(record.philhealth_deduction || 0) + 
+                            Number(record.pagibig_deduction || 0) + Number(record.tax_deduction || 0) + 
+                            Number(record.loan_deduction || 0) + Number(record.other_deduction || 0);
 
     return (
       <View style={styles.primaryCard}>
@@ -113,7 +112,6 @@ export default function MyPayrollScreen({ navigation }) {
     );
   };
 
-  // Past Payslip Item
   const renderPastPayslipItem = (record) => (
     <TouchableOpacity 
       style={styles.historyItem} 
@@ -138,8 +136,8 @@ export default function MyPayrollScreen({ navigation }) {
   const renderDetailModal = () => {
     if (!selectedPayslip) return null;
     const p = selectedPayslip;
-    const totalDeductions = (p.sss_deduction || 0) + (p.philhealth_deduction || 0) + (p.pagibig_deduction || 0) +
-                            (p.tax_deduction || 0) + (p.loan_deduction || 0) + (p.other_deduction || 0);
+    const totalDeductions = Number(p.sss_deduction || 0) + Number(p.philhealth_deduction || 0) + Number(p.pagibig_deduction || 0) +
+                            Number(p.tax_deduction || 0) + Number(p.loan_deduction || 0) + Number(p.other_deduction || 0);
 
     return (
       <Modal visible={showDetailModal} animationType="fade" transparent onRequestClose={() => setShowDetailModal(false)}>
@@ -162,31 +160,13 @@ export default function MyPayrollScreen({ navigation }) {
                 <Text style={styles.sectionTitle}>Earnings</Text>
                 
                 <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Basic Pay (Rate × Hours)</Text>
-                  <Text style={styles.receiptValue}>{formatCurrency(p.gross_pay - (p.overtime_pay || 0))}</Text>
+                  <Text style={styles.receiptLabel}>Basic Pay</Text>
+                  <Text style={styles.receiptValue}>{formatCurrency(Number(p.gross_pay) - Number(p.overtime_pay || 0))}</Text>
                 </View>
                 {Number(p.overtime_pay) > 0 && (
                   <View style={styles.receiptRow}>
                     <Text style={styles.receiptLabel}>Overtime Pay</Text>
                     <Text style={styles.receiptValue}>{formatCurrency(p.overtime_pay)}</Text>
-                  </View>
-                )}
-                {Number(p.transport_allowance) > 0 && (
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Transport Allowance</Text>
-                    <Text style={styles.receiptValue}>{formatCurrency(p.transport_allowance)}</Text>
-                  </View>
-                )}
-                {Number(p.meal_allowance) > 0 && (
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Meal Allowance</Text>
-                    <Text style={styles.receiptValue}>{formatCurrency(p.meal_allowance)}</Text>
-                  </View>
-                )}
-                {Number(p.housing_allowance) > 0 && (
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Housing Allowance</Text>
-                    <Text style={styles.receiptValue}>{formatCurrency(p.housing_allowance)}</Text>
                   </View>
                 )}
                 
@@ -219,18 +199,6 @@ export default function MyPayrollScreen({ navigation }) {
                   <Text style={styles.receiptLabel}>Pag-IBIG</Text>
                   <Text style={styles.receiptValueRed}>-{formatCurrency(p.pagibig_deduction)}</Text>
                 </View>
-                {Number(p.loan_deduction) > 0 && (
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Loan Deduction</Text>
-                    <Text style={styles.receiptValueRed}>-{formatCurrency(p.loan_deduction)}</Text>
-                  </View>
-                )}
-                {Number(p.other_deduction) > 0 && (
-                  <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Other Deductions</Text>
-                    <Text style={styles.receiptValueRed}>-{formatCurrency(p.other_deduction)}</Text>
-                  </View>
-                )}
                 
                 <View style={styles.receiptDivider} />
                 <View style={styles.receiptRow}>
@@ -243,10 +211,6 @@ export default function MyPayrollScreen({ navigation }) {
                 <Text style={styles.netPayHighlightLabel}>Net Take-Home Pay</Text>
                 <Text style={styles.netPayHighlightValue}>{formatCurrency(p.net_pay)}</Text>
               </View>
-
-              <Text style={styles.footnote}>
-                * Absent and late deductions are already factored into the total hours and basic pay calculation.
-              </Text>
             </ScrollView>
           </View>
         </View>
@@ -266,24 +230,11 @@ export default function MyPayrollScreen({ navigation }) {
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
-        
-        {/* Top Navbar */}
-        <View style={styles.topHeader}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.8}>
-            <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
-
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         >
-          <View style={styles.header}>
-            <Text style={styles.headerTitle}>My Payroll</Text>
-            <Text style={styles.headerSubtitle}>View and track your finalized payslips</Text>
-          </View>
-
           <Text style={styles.sectionHeading}>Current Period</Text>
           {currentMonthPayslip ? (
             renderCurrentMonthCard(currentMonthPayslip)
@@ -318,18 +269,8 @@ export default function MyPayrollScreen({ navigation }) {
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   container: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background },
-  topHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12 },
-  backButton: { padding: 4 },
-  
-  scroll: { padding: 22, paddingBottom: 60 },
-  
-  header: { marginBottom: 24, marginTop: 4 },
-  headerTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 26, color: isLight ? '#0F172A' : colors.textPrimary, letterSpacing: -0.5 },
-  headerSubtitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 4 },
-
-  sectionHeading: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 16, marginTop: 8 },
-
-  // Primary Card (Current Month)
+  scroll: { padding: 22, paddingBottom: 60, paddingTop: 12 },
+  sectionHeading: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 16, marginTop: 4 },
   primaryCard: {
     backgroundColor: '#00897B',
     borderRadius: 24,
@@ -346,27 +287,20 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   primaryCardTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: '#FFFFFF' },
   statusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   statusText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, color: '#FFFFFF', letterSpacing: 0.5 },
-  
   primaryCardBody: { alignItems: 'center', marginBottom: 24 },
   netPayLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
   netPayValue: { fontFamily: 'Inter_18pt-Black', fontSize: 38, color: '#FFFFFF', letterSpacing: -1 },
-
   primaryCardFooter: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 16, padding: 16, marginBottom: 16 },
   footerItem: { flex: 1, alignItems: 'center' },
   footerDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 10 },
   footerLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1' },
   footerValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: '#FFFFFF' },
-
   viewDetailsBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 8 },
   viewDetailsBtnText: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 14 },
-
-  // Empty State
   emptyCard: { alignItems: 'center', padding: 36, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderStyle: 'dashed', marginBottom: 28 },
   emptyIconWrapper: { width: 64, height: 64, borderRadius: 32, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
   emptyText: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 6 },
   emptySubtext: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary, textAlign: 'center', lineHeight: 20 },
-
-  // History List
   historySection: { marginTop: 4 },
   historyList: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.15, shadowRadius: 10, elevation: 2 },
   historyItem: { flexDirection: 'row', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
@@ -376,15 +310,12 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   historyHours: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
   historyAmountWrapper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   historyAmount: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
-
-  // Detail Modal
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
   detailModalContainer: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 28, padding: 24, width: '100%', maxWidth: 420, maxHeight: '85%', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
   modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
   modalSubtitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 2 },
   closeButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },
-
   receiptSection: { backgroundColor: isLight ? '#F8FAFC' : colors.background, borderRadius: 20, padding: 18, marginBottom: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   sectionTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 },
   receiptRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
@@ -394,10 +325,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   receiptDivider: { height: 1, backgroundColor: isLight ? '#E2E8F0' : colors.border, marginVertical: 12 },
   receiptLabelBold: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
   receiptValueBold: { fontFamily: 'Inter_18pt-Black', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
-
   netPayHighlight: { backgroundColor: '#00897B', borderRadius: 20, padding: 20, alignItems: 'center', marginTop: 4, marginBottom: 16 },
   netPayHighlightLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
   netPayHighlightValue: { fontFamily: 'Inter_18pt-Black', fontSize: 30, color: '#FFFFFF', letterSpacing: -0.5 },
-
-  footnote: { fontFamily: 'Inter_18pt-Regular', fontSize: 11, color: isLight ? '#94A3B8' : colors.textSecondary, textAlign: 'center', fontStyle: 'italic', paddingHorizontal: 10, lineHeight: 16 },
 });

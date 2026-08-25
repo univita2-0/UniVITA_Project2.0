@@ -489,33 +489,52 @@ app.post('/api/auth/verify-otp', otpLimiter, (req, res) => {
 });
 
 // Forgot password – send OTP
+
 app.post('/api/auth/forgot-password', async (req, res) => {
   const email = req.body.email?.trim().toLowerCase();
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
-  db.query("SELECT id FROM users WHERE email = ? AND status = 'active'", [email], (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: err.message });
-    if (results.length === 0) return res.status(404).json({ success: false, message: 'No active account with that email.' });
+  db.query("SELECT id FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
+    if (err) {
+      console.error("DB error:", err);
+      return res.status(500).json({ success: false, message: err.message });
+    }
+    if (results.length === 0) {
+      return res.status(404).json({ success: false, message: 'No active account with that email.' });
+    }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 5 * 60 * 1000;
     OTP_STORE[email] = { otp, expiresAt };
     console.log(`[PASSWORD RESET OTP] ${email} → ${otp}`);
 
-    const mailOptions = {
-      from: process.env.MAIL_USER,
-      to: email,
-      subject: 'Password Reset OTP - UniVITA',
-      text: `Your password reset OTP is: ${otp}\n\nThis code expires in 5 minutes.\n\nIf you did not request this, please ignore this email.`
-    };
-    transporter.sendMail(mailOptions, (error) => {
+    try {
+      const { data, error } = await resend.emails.send({
+        from: 'UniVITA Security <no-reply@univitahct.tech>',
+        to: [email],
+        subject: 'Password Reset OTP - UniVITA',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <h2 style="color: #0f172a; margin-top: 0;">Password Reset Code</h2>
+            <p style="color: #475569; font-size: 14px;">Use the following one-time password (OTP) to reset your password. This code is valid for 5 minutes.</p>
+            <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 15px; text-align: center; border-radius: 6px; margin: 20px 0;">
+              <span style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #0d9488;">${otp}</span>
+            </div>
+            <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">If you did not request this, please ignore this email.</p>
+          </div>
+        `
+      });
+
       if (error) {
-        console.error('Reset OTP email error:', error);
-        return res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
+        console.error('Resend API Error:', error);
+        return res.status(500).json({ success: false, message: 'Failed to send password reset email.' });
       }
+
       res.json({ success: true, message: 'OTP sent to your email.' });
-    });
-    
+    } catch (err) {
+      console.error('Unexpected email error:', err);
+      return res.status(500).json({ success: false, message: 'Server error while sending reset OTP.' });
+    }
   });
 });
 

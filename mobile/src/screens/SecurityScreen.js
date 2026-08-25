@@ -1,4 +1,4 @@
-/* src/screens/SecurityScreen.js */
+// src/screens/SecurityScreen.js
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -7,6 +7,28 @@ import {
 import { Eye, EyeOff, Lock } from 'lucide-react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from './api';
+
+// Moved outside the parent component to prevent re-creation on every keystroke (which dismissed the keyboard)
+const PasswordField = ({ label, value, onChange, placeholder, isVisible, toggleVisible }) => (
+  <View style={styles.inputGroup}>
+    <Text style={styles.label}>{label}</Text>
+    <View style={styles.inputWrapper}>
+      <TextInput
+        style={styles.flexInput}
+        secureTextEntry={!isVisible}
+        placeholder={placeholder}
+        placeholderTextColor="#9CA3AF"
+        value={value}
+        onChangeText={onChange}
+        autoCapitalize="none"
+      />
+      <TouchableOpacity onPress={toggleVisible} style={styles.eyeBtn} activeOpacity={0.7}>
+        {isVisible ? <EyeOff size={20} color="#6B7280" /> : <Eye size={20} color="#6B7280" />}
+      </TouchableOpacity>
+    </View>
+  </View>
+);
 
 export default function SecurityScreen({ navigation }) {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -15,10 +37,10 @@ export default function SecurityScreen({ navigation }) {
 
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleUpdatePassword = async () => {
-    // Validate inputs
     if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
       Alert.alert("Error", "Please fill in all fields.");
       return;
@@ -34,13 +56,15 @@ export default function SecurityScreen({ navigation }) {
 
     setLoading(true);
     try {
-      // Get user identifier
       let id = await AsyncStorage.getItem('employee_id');
       if (!id) id = await AsyncStorage.getItem('user_id');
 
-      const res = await axios.put(`http://192.168.86.3:5000/api/users/${id}/update-password`, {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await axios.put(`${API_URL}/users/${id}/update-password`, {
         currentPassword: currentPassword.trim(),
         newPassword: newPassword.trim()
+      }, {
+        headers: { Authorization: `Bearer ${token || ''}` }
       });
 
       if (res.data.success) {
@@ -51,10 +75,7 @@ export default function SecurityScreen({ navigation }) {
             {
               text: "OK",
               onPress: async () => {
-                // Clear all stored session data
                 await AsyncStorage.clear();
-
-                // Reset navigation to Login screen
                 navigation.reset({
                   index: 0,
                   routes: [{ name: 'Login' }],
@@ -67,30 +88,11 @@ export default function SecurityScreen({ navigation }) {
         Alert.alert("Error", res.data.message || "Password update failed.");
       }
     } catch (error) {
-      console.error(error);
       Alert.alert("Error", error.response?.data?.message || error.message || "Network error");
     } finally {
       setLoading(false);
     }
   };
-
-  const PasswordField = ({ label, value, onChange, placeholder, isVisible, toggleVisible }) => (
-    <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.inputWrapper}>
-        <TextInput
-          style={styles.flexInput}
-          secureTextEntry={!isVisible}
-          placeholder={placeholder}
-          value={value}
-          onChangeText={onChange}
-        />
-        <TouchableOpacity onPress={toggleVisible} style={styles.eyeBtn}>
-          {isVisible ? <EyeOff size={20} color="#6B7280" /> : <Eye size={20} color="#6B7280" />}
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
 
   return (
     <View style={styles.container}>
@@ -124,14 +126,15 @@ export default function SecurityScreen({ navigation }) {
         value={confirmPassword}
         onChange={setConfirmPassword}
         placeholder="Re-type new password"
-        isVisible={showNew}
-        toggleVisible={() => setShowNew(!showNew)}
+        isVisible={showConfirm}
+        toggleVisible={() => setShowConfirm(!showConfirm)}
       />
 
       <TouchableOpacity
         style={[styles.btn, loading && styles.btnDisabled]}
         onPress={handleUpdatePassword}
         disabled={loading}
+        activeOpacity={0.8}
       >
         {loading ? (
           <ActivityIndicator color="white" />
@@ -167,7 +170,8 @@ const styles = StyleSheet.create({
   flexInput: {
     flex: 1,
     padding: 12,
-    fontSize: 16
+    fontSize: 16,
+    color: '#111827'
   },
   eyeBtn: {
     padding: 12
