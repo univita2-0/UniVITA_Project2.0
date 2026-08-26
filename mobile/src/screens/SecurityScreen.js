@@ -9,7 +9,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from './api';
 
-// Moved outside the parent component to prevent re-creation on every keystroke (which dismissed the keyboard)
+// FIX: Moved outside the main component so it doesn't unmount and hide the keyboard on every keystroke
 const PasswordField = ({ label, value, onChange, placeholder, isVisible, toggleVisible }) => (
   <View style={styles.inputGroup}>
     <Text style={styles.label}>{label}</Text>
@@ -41,17 +41,15 @@ export default function SecurityScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
 
   const handleUpdatePassword = async () => {
+    // FIX: Strict Validations
     if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) {
-      Alert.alert("Error", "Please fill in all fields.");
-      return;
+      return Alert.alert("Validation Error", "Please fill in all password fields.");
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert("Error", "New passwords do not match.");
-      return;
+      return Alert.alert("Validation Error", "Your new passwords do not match.");
     }
     if (newPassword.trim().length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters.");
-      return;
+      return Alert.alert("Validation Error", "Your new password must be at least 6 characters.");
     }
 
     setLoading(true);
@@ -76,10 +74,7 @@ export default function SecurityScreen({ navigation }) {
               text: "OK",
               onPress: async () => {
                 await AsyncStorage.clear();
-                navigation.reset({
-                  index: 0,
-                  routes: [{ name: 'Login' }],
-                });
+                navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
               }
             }
           ]
@@ -116,7 +111,7 @@ export default function SecurityScreen({ navigation }) {
         label="New Password"
         value={newPassword}
         onChange={setNewPassword}
-        placeholder="Enter new password"
+        placeholder="Enter new password (min. 6 chars)"
         isVisible={showNew}
         toggleVisible={() => setShowNew(!showNew)}
       />

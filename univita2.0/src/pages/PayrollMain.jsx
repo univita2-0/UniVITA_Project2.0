@@ -106,8 +106,11 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     let monthlySalary = Number(emp.monthly_salary) || 0;
     let workDays = Number(emp.work_days_per_month) || 22;
     
+    // FIX: Proper hourly calculation. Gross pay comes from hours actually worked!
     const hourlyRate = workDays > 0 ? (monthlySalary / workDays / 8) : 0;
     const regularHours = Number(att.regularHours);
+    const baseEarnings = regularHours * hourlyRate; // Strict Multiplier
+
     const overtimeHours = Number(att.overtimeHours);
     const overtimePay = overtimeHours * hourlyRate * OT_MULTIPLIER;
     const extras = employeeExtras[emp.employee_id] || {};
@@ -117,11 +120,13 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     const lateDeduction = (lateMinutes / 60) * hourlyRate;
 
     const allowances = (Number(extras.transport) || 0) + (Number(extras.meal) || 0) + (Number(extras.housing) || 0);
-    const grossPay = monthlySalary + overtimePay + allowances - lateDeduction;
+    
+    // Base Earnings + Overtime + Allowances - Lates
+    const grossPay = baseEarnings + overtimePay + allowances - lateDeduction;
 
-    let sss = (extras.sssOverride != null) ? Number(extras.sssOverride) : Math.min(monthlySalary * 0.045, 1125);
-    let philHealth = (extras.philHealthOverride != null) ? Number(extras.philHealthOverride) : Math.min(monthlySalary * 0.025, 1250);
-    let pagIbig = (extras.pagIbigOverride != null) ? Number(extras.pagIbigOverride) : Math.min(monthlySalary * 0.02, 100);
+    let sss = (extras.sssOverride != null) ? Number(extras.sssOverride) : Math.min(grossPay * 0.045, 1125);
+    let philHealth = (extras.philHealthOverride != null) ? Number(extras.philHealthOverride) : Math.min(grossPay * 0.025, 1250);
+    let pagIbig = (extras.pagIbigOverride != null) ? Number(extras.pagIbigOverride) : Math.min(grossPay * 0.02, 100);
 
     const taxableIncome = grossPay - sss - philHealth - pagIbig;
     const tax = computeMonthlyTax(taxableIncome);
@@ -129,10 +134,10 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     const other = Number(extras.other) || 0;
     
     const totalDeductions = tax + sss + philHealth + pagIbig + loans + other;
-    const netPay = grossPay - totalDeductions;
+    const netPay = Math.max(0, grossPay - totalDeductions); // Prevent negative nets
 
     return {
-      regularHours, overtimeHours, overtimePay, allowances, grossPay,
+      regularHours, overtimeHours, overtimePay, allowances, grossPay, baseEarnings,
       sss, philHealth, pagIbig, loans, other, tax, netPay, totalDeductions,
       monthlySalary, hourlyRate, workDays, lateMinutes, lateDeduction,
     };
@@ -185,7 +190,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
   };
 
   const updateExtras = (empId, field, value) => {
-    const numericValue = value === '' ? null : Math.max(0, parseFloat(value) || 0); // Validation: No negatives
+    const numericValue = value === '' ? null : Math.max(0, parseFloat(value) || 0);
     setEmployeeExtras(prev => ({
       ...prev,
       [empId]: { ...prev[empId], [field]: numericValue }
@@ -199,10 +204,8 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
 
   const printPayslip = (emp) => {
     const calc = computePayroll(emp);
-    const extras = employeeExtras[emp.employee_id] || {};
     const printWindow = window.open('', '_blank', 'width=800,height=600');
     
-    // Modern Print Template
     printWindow.document.write(`
       <html><head><title>Payslip - ${emp.full_name}</title>
       <style>
@@ -227,7 +230,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
         <div class="box">
           <h4 style="margin-top:0">Earnings</h4>
           <table>
-            <tr><td>Base Salary</td><td class="right">₱${calc.monthlySalary.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
+            <tr><td>Base Earnings (${calc.regularHours} hrs)</td><td class="right">₱${calc.baseEarnings.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
             <tr><td>Overtime (${calc.overtimeHours} hrs)</td><td class="right">₱${calc.overtimePay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
             <tr><td>Allowances</td><td class="right">₱${calc.allowances.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
             <tr><th>Gross Earnings</th><th class="right">₱${calc.grossPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</th></tr>
@@ -255,14 +258,14 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     if (filteredEmployees.length === 0) return toast.warning("No data to export.");
     const headers = [
       "Full Name","Employee ID","Regular Hours","Overtime Hours","Late Minutes","Late Deduction",
-      "Monthly Salary","Overtime Pay","Allowances", "Gross Pay","SSS","PhilHealth","Pag-IBIG",
+      "Base Earnings","Overtime Pay","Allowances", "Gross Pay","SSS","PhilHealth","Pag-IBIG",
       "Loans","Other Deductions","Tax","Net Pay"
     ];
     const rows = filteredEmployees.map(emp => {
       const calc = computePayroll(emp);
       return [
         emp.full_name, emp.employee_id, calc.regularHours, calc.overtimeHours, calc.lateMinutes, calc.lateDeduction,
-        calc.monthlySalary, calc.overtimePay, calc.allowances, calc.grossPay, calc.sss, calc.philHealth, 
+        calc.baseEarnings, calc.overtimePay, calc.allowances, calc.grossPay, calc.sss, calc.philHealth, 
         calc.pagIbig, calc.loans, calc.other, calc.tax, calc.netPay
       ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
     });
@@ -378,7 +381,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
                     <tr>
                       <th>Employee ID</th>
                       <th>Full Name</th>
-                      <th>Contract</th>
+                      <th>Hours Logged</th>
                       <th className="text-right">Est. Net Pay</th>
                       <th className="text-right">Actions</th>
                     </tr>
@@ -393,7 +396,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
                           <tr key={emp.employee_id}>
                             <td><span className="pm-mono-text">{emp.employee_id}</span></td>
                             <td><strong>{emp.full_name}</strong></td>
-                            <td><span className="pm-badge">{emp.contract_type || 'Contractor'}</span></td>
+                            <td><span className="pm-badge">{calc.regularHours} hrs</span></td>
                             <td className="text-right"><strong>₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></td>
                             <td className="text-right">
                               <div className="pm-action-group">
@@ -431,7 +434,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
           </>
         }
       >
-        <p className="pm-modal-desc">This action calculates and finalizes base pay for all active instructors for the selected period.</p>
+        <p className="pm-modal-desc">This action calculates and finalizes base pay for all active instructors for the selected period using verified attendance logs.</p>
         <div className="pm-form-row">
           <div className="pm-form-group">
             <label>Month</label>
@@ -475,10 +478,9 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
             <div className="pm-payslip-grid">
               <div className="pm-payslip-panel">
                 <h4 className="pm-panel-title">Earnings</h4>
-                <div className="pm-ps-row"><span>Base Monthly Salary</span><strong>₱{calc.monthlySalary.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
-                <div className="pm-ps-row"><span>Regular Hours</span><span>{calc.regularHours} hrs</span></div>
-                <div className="pm-ps-row"><span>Overtime Hours</span><span>{calc.overtimeHours} hrs</span></div>
-                <div className="pm-ps-row"><span>Overtime Pay</span><strong>₱{calc.overtimePay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
+                <div className="pm-ps-row"><span>Hourly Rate</span><strong>₱{calc.hourlyRate.toLocaleString('en-PH', { minimumFractionDigits: 2 })}/hr</strong></div>
+                <div className="pm-ps-row"><span>Base Earnings ({calc.regularHours} hrs)</span><strong>₱{calc.baseEarnings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
+                <div className="pm-ps-row"><span>Overtime Pay ({calc.overtimeHours} hrs)</span><strong>₱{calc.overtimePay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
                 
                 <h4 className="pm-panel-title mt-4">Allowances {!eligible && <small className="text-danger">(Not Eligible)</small>}</h4>
                 <div className="pm-ps-row"><span>Transport</span>

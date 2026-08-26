@@ -62,7 +62,6 @@ export default function MyPayrollScreen({ navigation }) {
   };
 
   const renderCurrentMonthCard = (record) => {
-    // Safely parse numbers to prevent NaN display errors
     const totalDeductions = Number(record.sss_deduction || 0) + Number(record.philhealth_deduction || 0) + 
                             Number(record.pagibig_deduction || 0) + Number(record.tax_deduction || 0) + 
                             Number(record.loan_deduction || 0) + Number(record.other_deduction || 0);
@@ -160,7 +159,7 @@ export default function MyPayrollScreen({ navigation }) {
                 <Text style={styles.sectionTitle}>Earnings</Text>
                 
                 <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Basic Pay</Text>
+                  <Text style={styles.receiptLabel}>Base Earnings</Text>
                   <Text style={styles.receiptValue}>{formatCurrency(Number(p.gross_pay) - Number(p.overtime_pay || 0))}</Text>
                 </View>
                 {Number(p.overtime_pay) > 0 && (
@@ -288,8 +287,11 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   statusBadge: { backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   statusText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, color: '#FFFFFF', letterSpacing: 0.5 },
   primaryCardBody: { alignItems: 'center', marginBottom: 24 },
-  netPayLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
-  netPayValue: { fontFamily: 'Inter_18pt-Black', fontSize: 38, color: '#FFFFFF', letterSpacing: -1 },
+  
+  // FIX: Added includeFontPadding and lineHeight to strip out the extra invisible space from custom fonts
+  netPayLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2, includeFontPadding: false },
+  netPayValue: { fontFamily: 'Inter_18pt-Black', fontSize: 38, color: '#FFFFFF', letterSpacing: -1, includeFontPadding: false, lineHeight: 40 },
+  
   primaryCardFooter: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 16, padding: 16, marginBottom: 16 },
   footerItem: { flex: 1, alignItems: 'center' },
   footerDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 10 },
@@ -326,6 +328,6 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   receiptLabelBold: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
   receiptValueBold: { fontFamily: 'Inter_18pt-Black', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
   netPayHighlight: { backgroundColor: '#00897B', borderRadius: 20, padding: 20, alignItems: 'center', marginTop: 4, marginBottom: 16 },
-  netPayHighlightLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
-  netPayHighlightValue: { fontFamily: 'Inter_18pt-Black', fontSize: 30, color: '#FFFFFF', letterSpacing: -0.5 },
+  netPayHighlightLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#CCFBF1', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2, includeFontPadding: false },
+  netPayHighlightValue: { fontFamily: 'Inter_18pt-Black', fontSize: 30, color: '#FFFFFF', letterSpacing: -0.5, includeFontPadding: false, lineHeight: 32 },
 });

@@ -42,8 +42,6 @@ export default function ProfileScreen({ navigation }) {
             name: freshUser.full_name || freshUser.name,
             email: freshUser.email
           });
-          setEditName(freshUser.full_name || freshUser.name);
-          setEditEmail(freshUser.email);
 
           if (freshUser.password_updated_at) {
             const updatedDate = new Date(freshUser.password_updated_at);
@@ -55,13 +53,12 @@ export default function ProfileScreen({ navigation }) {
           } else {
             setDaysRemaining(365);
           }
+
         } catch (error) {
           const id = await AsyncStorage.getItem('user_id');
           const name = await AsyncStorage.getItem('user_name');
           const email = await AsyncStorage.getItem('user_email');
           setUserData({ id: id || '', name: name || 'Employee', email: email || 'user@hct.com' });
-          setEditName(name || 'Employee');
-          setEditEmail(email || 'user@hct.com');
         }
       };
 
@@ -69,6 +66,7 @@ export default function ProfileScreen({ navigation }) {
     }, [])
   );
 
+  // FIX: Pre-fill data immediately when modal opens
   const handleOpenEditModal = () => {
     setEditName(userData.name);
     setEditEmail(userData.email);
@@ -83,7 +81,15 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleUpdateProfile = async () => {
-    if (!editName.trim() || !editEmail.trim()) return Alert.alert("Error", "Fields cannot be empty");
+    // FIX: Strict Validation
+    if (!editName.trim() || !editEmail.trim()) {
+      return Alert.alert("Validation Error", "Full Name and Email Address cannot be empty.");
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(editEmail.trim())) {
+      return Alert.alert("Validation Error", "Please enter a valid email address.");
+    }
+
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -175,9 +181,9 @@ export default function ProfileScreen({ navigation }) {
                 <View style={{ width: 24 }} />
               </View>
               <Text style={styles.inputLabel}>Full Name</Text>
-              <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Enter full name" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
+              <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Enter your full name" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
               <Text style={styles.inputLabel}>Email Address</Text>
-              <TextInput style={styles.input} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" placeholder="Enter email" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
+              <TextInput style={styles.input} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" placeholder="Enter your email" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.modalBtnOutline} onPress={() => setShowEditModal(false)}>
                   <Text style={styles.modalBtnTextOutline}>Cancel</Text>
