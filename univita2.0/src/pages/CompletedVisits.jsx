@@ -1,3 +1,4 @@
+// src/pages/CompletedVisits.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -8,6 +9,37 @@ import './CompletedVisits.css';
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
+
+// Helper to strictly format raw timestamps to Philippine Time (12-hour AM/PM)
+const formatToManilaTime = (timestamp) => {
+  if (!timestamp) return '—';
+  
+  // Ensure cross-browser parsing support for MySQL datetime strings
+  let safeStamp = timestamp;
+  if (typeof timestamp === 'string' && timestamp.includes(' ') && !timestamp.includes('T')) {
+    safeStamp = timestamp.replace(' ', 'T') + 'Z';
+  }
+
+  const date = new Date(safeStamp);
+  if (isNaN(date.getTime())) return '—';
+
+  return date.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Manila',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+};
+
+// Helper to format "14:30:00" to "2:30 PM"
+const formatVisitTime = (timeStr) => {
+  if (!timeStr) return '—';
+  const [hour, minute] = timeStr.split(':');
+  let h = parseInt(hour, 10);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${minute} ${ampm}`;
+};
 
 const CompletedVisits = () => {
   const [visitors, setVisitors] = useState([]);
@@ -55,8 +87,8 @@ const CompletedVisits = () => {
     const rows = visitors.map(v => [
       `${v.first_name} ${v.last_name}`,
       v.visit_date,
-      v.arrived_time,
-      v.returned_time,
+      formatToManilaTime(v.arrived_at),
+      formatToManilaTime(v.returned_at),
       v.duration,
       v.destination || '—',
       v.ble_id || '—'
@@ -84,8 +116,6 @@ const CompletedVisits = () => {
 
   return (
     <div className="cv-container">
-     
-
       <div className="cv-filters-card">
         <div className="cv-filters-wrapper">
           <div className="cv-date-group">
@@ -154,10 +184,10 @@ const CompletedVisits = () => {
                     </td>
                     <td>
                       <div className="cv-date-text">{v.visit_date}</div>
-                      <div className="cv-time-text">{v.visit_time?.slice(0,5)}</div>
+                      <div className="cv-time-text">{formatVisitTime(v.visit_time)}</div>
                     </td>
-                    <td className="font-medium text-gray-900">{v.arrived_time}</td>
-                    <td className="font-medium text-gray-900">{v.returned_time}</td>
+                    <td className="font-medium text-gray-900">{formatToManilaTime(v.arrived_at)}</td>
+                    <td className="font-medium text-gray-900">{formatToManilaTime(v.returned_at)}</td>
                     <td>
                       <span className="cv-duration-badge">{v.duration}</span>
                     </td>
