@@ -2707,6 +2707,80 @@ app.post('/api/ble-data', async (req, res) => {
   }
 });
 
+app.post('/api/scan', async (req, res) => {
+  // 1. Hardware Authentication (Matches your existing security setup)
+  const hardwareApiKey = req.headers['x-api-key'];
+  if (process.env.HARDWARE_API_KEY && hardwareApiKey !== process.env.HARDWARE_API_KEY) {
+    console.warn("Unauthorized scanner access attempt blocked.");
+    return res.status(401).json({ error: "Unauthorized hardware access." });
+  }
+
+  const { scannerId, tagMac, tagName, rssi } = req.body;
+
+  if (!scannerId || !tagMac) {
+    return res.status(400).json({ error: "Missing scannerId or tagMac." });
+  }
+
+  // 2. Validate against active visitor appointments
+  const sql = `
+    SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
+    FROM visitor_requests vr
+    JOIN ble_tags bt ON vr.ble_id = bt.ble_id
+    WHERE bt.mac_address = ? 
+    AND vr.arrived = 1 
+    AND vr.no_show = 0 
+    AND vr.returned = 0
+    LIMIT 1
+  `;
+
+  db.query(sql, [tagMac], async (err, results) => {
+    if (err) {
+      console.error("Scanner DB Error:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    
+    // 3. Ghost Cleanup: If no active visitor is found, clear stale memory
+    if (results.length === 0) {
+      try {
+        const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE mac_address = ?", [tagMac]);
+        if (tagRes && tagRes.length > 0) {
+          const ghostId = tagRes[0].ble_id;
+          if (liveVisitors[ghostId]) {
+            console.log(`Detected stray signal from returned visitor: ${ghostId}. Cleaning memory.`);
+            delete liveVisitors[ghostId];
+          }
+        }
+      } catch (dbErr) {
+        console.error("Ghost cleanup DB error:", dbErr);
+      }
+      return res.json({ success: false, message: "Visitor not found or already returned" });
+    }
+
+    // 4. Extract active visitor details
+    const row = results[0];
+    const bleId = row.ble_id;
+    const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
+    const destination = row.destination || 'Not Assigned';
+
+    // 5. Update the live map memory object
+    liveVisitors[bleId] = {
+      id: bleId,
+      name: visitorName,
+      bleId: bleId,
+      floor: "Unknown", // You can parse floor numbers from your scannerId if needed
+      currentRoom: scannerId,
+      destination: destination,
+      lastSeen: Date.now(),
+      rssi: rssi // Useful for debugging signal strength
+    };
+
+    visitorDestinations[bleId] = destination;
+    console.log(`[ESP32] Tracking ${visitorName} – Room: ${scannerId} | Dest: ${destination} | Signal: ${rssi}dBm`);
+    
+    res.status(200).json({ success: true, message: "Visitor tracked successfully" });
+  });
+});
+
 // The React Map knocks on this door every 2 seconds to get the latest coordinates
 app.get('/api/positions', async (req, res) => {
   try {
