@@ -1,3 +1,4 @@
+// src/App.js
 import React, { useState, useEffect } from 'react';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -40,6 +41,7 @@ import Settings from './pages/Settings';
 import AuditLogs from './pages/AuditLogs';
 import RoleManagement from './pages/RoleManagement';
 import SystemConfig from './pages/SystemConfig';
+import ManageScanners from './pages/ManageScanners'; // <--- NEW IMPORT
 import 'leaflet/dist/leaflet.css';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -169,6 +171,7 @@ function App() {
       case 'location-tracking': return { title: 'Location Tracking' };
       case 'manage-reasons': return { title: 'Manage Visit Reasons' };
       case 'manage-ble': return { title: 'Manage BLE Tags' };
+      case 'manage-scanners': return { title: 'Room Scanners Management' }; // <--- NEW TITLE
       case 'completed-visits': return { title: 'Completed Visits' };
       case 'overtime-requests': return { title: 'Overtime Requests' };
       default: return { title: 'Dashboard' };
@@ -197,6 +200,7 @@ function App() {
       case 'shared-calendar': return <SharedCalendar />;
       case 'job-postings': return <JobPostings />;
       case 'manage-ble': return <ManageBLETags />;
+      case 'manage-scanners': return <ManageScanners />; // <--- NEW ROUTE RENDER
       case 'completed-visits': return <CompletedVisits />;
       case 'performance': return <PerformanceEvaluation />;
       case 'location-tracking': return <LocationTracking />;
