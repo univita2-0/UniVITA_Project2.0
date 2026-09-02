@@ -137,7 +137,7 @@ const ManageScanners = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            <h2 className="expert-title">Room Scanners Management</h2>
+            
             <p className="expert-subtitle">Dynamically configure physical ESP32 scanner boxes and room assignments.</p>
           </div>
         </div>
