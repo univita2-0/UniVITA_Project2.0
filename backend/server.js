@@ -2282,6 +2282,61 @@ app.put('/api/visitor-requests/:id/return', authenticateToken, (req, res) => {
   });
 });
 
+// ============================================
+// DYNAMIC SCANNER MANAGEMENT ENDPOINTS
+// ============================================
+
+// Get all registered scanners
+app.get('/api/scanners', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin' && req.user.role !== 'security') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  db.query("SELECT * FROM scanners ORDER BY scanner_id ASC", (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+});
+
+// Register or update a scanner's room assignment
+app.post('/api/scanners', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const { scanner_id, assigned_room, assigned_floor } = req.body;
+  if (!scanner_id || !assigned_room || !assigned_floor) {
+    return res.status(400).json({ error: "Scanner ID, room, and floor are required." });
+  }
+
+  try {
+    const sql = `
+      INSERT INTO scanners (scanner_id, assigned_room, assigned_floor) 
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE assigned_room = VALUES(assigned_room), assigned_floor = VALUES(assigned_floor)
+    `;
+    await db.promise().query(sql, [scanner_id.trim(), assigned_room.trim(), assigned_floor.trim()]);
+    
+    logAction(req.user.id, 'SAVE_SCANNER', 'scanner', scanner_id, req);
+    res.json({ success: true, message: "Scanner successfully updated." });
+  } catch (err) {
+    console.error("Scanner save error:", err);
+    res.status(500).json({ error: "Internal server error while saving scanner." });
+  }
+});
+
+// Delete a scanner
+app.delete('/api/scanners/:id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  db.query("DELETE FROM scanners WHERE id = ?", [req.params.id], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Scanner not found." });
+    logAction(req.user.id, 'DELETE_SCANNER', 'scanner', req.params.id, req);
+    res.json({ success: true });
+  });
+});
+
 // Manually update live visitor data (called from TodayVisitors after check‑in)
 app.post('/api/update-live-visitor', authenticateToken, (req, res) => {
   const { bleId, name, destination, floor, currentRoom } = req.body;
@@ -2566,68 +2621,90 @@ app.post('/api/ble-data', async (req, res) => {
     return res.status(401).json({ error: "Unauthorized hardware access." });
   }
 
-  const { room, floor, beaconId } = req.body;
+  // Now extracting scannerId instead of hardcoded room/floor
+  const { scannerId, beaconId } = req.body;
   
-  if (!beaconId) return res.status(400).json({ error: "No beacon ID received." });
+  if (!scannerId || !beaconId) {
+    return res.status(400).json({ error: "Missing scannerId or beaconId." });
+  }
 
-  // 2. Join with visitor_requests and check 'returned = 0'
-  const sql = `
-    SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
-    FROM visitor_requests vr
-    JOIN ble_tags bt ON vr.ble_id = bt.ble_id
-    WHERE bt.mac_address = ? 
-    AND vr.arrived = 1 
-    AND vr.no_show = 0 
-    AND vr.returned = 0
-    LIMIT 1
-  `;
+  try {
+    // 2. DYNAMIC LOOKUP: Find what room and floor this physical scanner is currently assigned to
+    const [scannerRows] = await db.promise().query(
+      "SELECT assigned_room, assigned_floor FROM scanners WHERE scanner_id = ?",
+      [scannerId]
+    );
 
-  db.query(sql, [beaconId], async (err, results) => {
-    if (err) {
-      console.error("BLE Data DB Error:", err);
-      return res.status(500).json({ error: "Database error" });
+    if (scannerRows.length === 0) {
+      return res.status(404).json({ success: false, message: `Scanner ID '${scannerId}' is not registered in the database.` });
     }
-    
-    // 3. If no active record is found, force clear memory for this badge
-    if (results.length === 0) {
-      try {
-        const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE mac_address = ?", [beaconId]);
-        if (tagRes && tagRes.length > 0) {
-          const ghostId = tagRes[0].ble_id;
-          if (liveVisitors[ghostId]) {
-            console.log(`Detected stray signal from returned visitor: ${ghostId}. Cleaning memory.`);
-            delete liveVisitors[ghostId];
-          }
-        }
-      } catch (dbErr) {
-        console.error("Ghost cleanup DB error:", dbErr);
+
+    const room = scannerRows[0].assigned_room;
+    const floor = scannerRows[0].assigned_floor;
+
+    // 3. Join with visitor_requests and check 'returned = 0'
+    const sql = `
+      SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
+      FROM visitor_requests vr
+      JOIN ble_tags bt ON vr.ble_id = bt.ble_id
+      WHERE bt.mac_address = ? 
+      AND vr.arrived = 1 
+      AND vr.no_show = 0 
+      AND vr.returned = 0
+      LIMIT 1
+    `;
+
+    db.query(sql, [beaconId], async (err, results) => {
+      if (err) {
+        console.error("BLE Data DB Error:", err);
+        return res.status(500).json({ error: "Database error" });
       }
-      return res.json({ success: false, message: "Visitor not found or already returned" });
-    }
+      
+      // 4. If no active record is found, force clear memory for this badge (Ghost cleanup)
+      if (results.length === 0) {
+        try {
+          const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE mac_address = ?", [beaconId]);
+          if (tagRes && tagRes.length > 0) {
+            const ghostId = tagRes[0].ble_id;
+            if (liveVisitors[ghostId]) {
+              console.log(`Detected stray signal from returned visitor: ${ghostId}. Cleaning memory.`);
+              delete liveVisitors[ghostId];
+            }
+          }
+        } catch (dbErr) {
+          console.error("Ghost cleanup DB error:", dbErr);
+        }
+        return res.json({ success: false, message: "Visitor not found or already returned" });
+      }
 
-    const row = results[0];
-    const bleId = row.ble_id;
-    const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-    const destination = row.destination || 'Not Assigned';
+      const row = results[0];
+      const bleId = row.ble_id;
+      const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
+      const destination = row.destination || 'Not Assigned';
 
-    // 4. Update liveVisitors
-    const wasPresent = !!liveVisitors[bleId];
-    const oldRoom = wasPresent ? liveVisitors[bleId].currentRoom : null;
+      // 5. Update liveVisitors using the dynamically fetched room & floor
+      const wasPresent = !!liveVisitors[bleId];
+      const oldRoom = wasPresent ? liveVisitors[bleId].currentRoom : null;
 
-    liveVisitors[bleId] = {
-      id: bleId,
-      name: visitorName,
-      bleId: bleId,
-      floor: floor,
-      currentRoom: room,
-      destination: destination,
-      lastSeen: Date.now()
-    };
+      liveVisitors[bleId] = {
+        id: bleId,
+        name: visitorName,
+        bleId: bleId,
+        floor: floor,           // Fetched dynamically from database
+        currentRoom: room,      // Fetched dynamically from database
+        destination: destination,
+        lastSeen: Date.now()
+      };
 
-    visitorDestinations[bleId] = destination;
-    console.log(`Tracking ${visitorName} – Current: ${room}, Dest: ${destination}`);
-    res.json({ success: true });
-  });
+      visitorDestinations[bleId] = destination;
+      console.log(`Tracking [${visitorName}] via [${scannerId}] – Room: ${room}, Floor: ${floor}, Dest: ${destination}`);
+      res.json({ success: true });
+    });
+
+  } catch (dbErr) {
+    console.error("Dynamic Scanner Lookup Error:", dbErr);
+    return res.status(500).json({ error: "Server error during scanner lookup" });
+  }
 });
 
 // The React Map knocks on this door every 2 seconds to get the latest coordinates
