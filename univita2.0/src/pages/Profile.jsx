@@ -80,7 +80,12 @@ const Profile = () => {
   const isExpiringSoon = daysRemaining <= 30;
 
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const isValidPhone = (phone) => phone === '' || /^[\d\s\-\+\(\)]*$/.test(phone);
+  
+  // Safely cast to string for regex testing in case of numerical data
+  const isValidPhone = (phone) => {
+    const phoneStr = String(phone || '');
+    return phoneStr === '' || /^[\d\s\-\+\(\)]*$/.test(phoneStr);
+  };
 
   const handleOpenEditModal = () => {
     setEditForm({
@@ -96,40 +101,54 @@ const Profile = () => {
     e.preventDefault();
     setEditError('');
 
-    if (!editForm.full_name.trim() || !editForm.email.trim()) {
+    // 1. Safely convert to strings before trimming to prevent TypeErrors
+    const fullNameStr = String(editForm.full_name || '').trim();
+    const emailStr = String(editForm.email || '').trim();
+    const phoneStr = String(editForm.phone || '').trim();
+
+    if (!fullNameStr || !emailStr) {
       setEditError('Full Name and Email Address are required fields.');
       return;
     }
-    if (!isValidEmail(editForm.email)) {
+    if (!isValidEmail(emailStr)) {
       setEditError('Please enter a valid email address.');
       return;
     }
-    if (!isValidPhone(editForm.phone)) {
+    if (!isValidPhone(phoneStr)) {
       setEditError('Please enter a valid phone number format.');
+      return;
+    }
+
+    // 2. Prevent sending empty updates to avoid backend "AffectedRows === 0" 404 errors
+    if (fullNameStr === user.name && emailStr === user.email && phoneStr === (user.phone || '')) {
+      setEditMode(false);
       return;
     }
 
     setLoading(true);
     try {
       await authAxios.put(`/api/employees/${user.id}`, {
-        full_name: editForm.full_name.trim(),
-        email: editForm.email.trim(),
-        phone: editForm.phone.trim()
+        full_name: fullNameStr,
+        email: emailStr,
+        phone: phoneStr
       });
-      localStorage.setItem('user_name', editForm.full_name.trim());
-      localStorage.setItem('user_email', editForm.email.trim());
+      
+      localStorage.setItem('user_name', fullNameStr);
+      localStorage.setItem('user_email', emailStr);
+      
       setUser(prev => ({
         ...prev,
-        name: editForm.full_name.trim(),
-        email: editForm.email.trim(),
-        phone: editForm.phone.trim()
+        name: fullNameStr,
+        email: emailStr,
+        phone: phoneStr
       }));
+      
       setMessage({ type: 'success', text: 'Profile updated successfully' });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
       setEditMode(false);
       fetchUserDetails();
     } catch (err) {
-      setEditError(err.response?.data?.message || err.response?.data?.error || 'Profile update failed');
+      setEditError(err.response?.data?.message || err.response?.data?.error || 'Profile update failed. Please check your connection.');
     } finally {
       setLoading(false);
     }

@@ -2,7 +2,7 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Alert,
-  ActivityIndicator, Modal, Keyboard, KeyboardAvoidingView, Platform, StatusBar
+  ActivityIndicator, Modal, Keyboard, KeyboardAvoidingView, Platform, StatusBar, Animated
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,6 +15,10 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Custom Toast State
+  const [toastMessage, setToastMessage] = useState('');
+  const toastOpacity = useRef(new Animated.Value(0)).current;
 
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState('');
@@ -33,6 +37,19 @@ export default function LoginScreen({ navigation }) {
   const [resetTimer, setResetTimer] = useState(0);
   const [resetError, setResetError] = useState('');
 
+  // Toast Function
+  const showToast = (message) => {
+    setToastMessage(message);
+    toastOpacity.setValue(0);
+    Animated.sequence([
+      Animated.timing(toastOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.delay(2500),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true })
+    ]).start(() => {
+      setToastMessage('');
+    });
+  };
+
   const startResendTimer = (setterFn) => {
     setterFn(60);
     if (timerRef.current) clearInterval(timerRef.current);
@@ -49,6 +66,13 @@ export default function LoginScreen({ navigation }) {
 
   const registerDeviceForPushNotifications = async (authToken) => {
     try {
+     
+      if (Constants.executionEnvironment === 'storeClient') {
+        console.log("Push notifications bypassed in Expo Go");
+        return;
+      }
+   
+
       const { status } = await Notifications.requestPermissionsAsync();
       if (status !== 'granted') return;
 
@@ -87,12 +111,33 @@ export default function LoginScreen({ navigation }) {
   };
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter both email and password');
+    Keyboard.dismiss();
+    const emailClean = email.trim().toLowerCase();
+
+    // Frontend Validations
+    if (!emailClean && !password) {
+      showToast('Please enter both email and password');
       return;
     }
+    if (!emailClean) {
+      showToast('Please enter your email');
+      return;
+    }
+    
+    // Check Email Format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailClean)) {
+      showToast('Email invalid');
+      return;
+    }
+
+    if (!password) {
+      showToast('Please enter your password');
+      return;
+    }
+
     setLoading(true);
-    const result = await loginUser(email, password);
+    const result = await loginUser(emailClean, password);
     setLoading(false);
 
     if (result.success) {
@@ -114,7 +159,6 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      const emailClean = email.trim().toLowerCase();
       setEmail(emailClean);
 
       const otpRes = await sendOtp(emailClean);
@@ -123,10 +167,18 @@ export default function LoginScreen({ navigation }) {
         setShowOtpModal(true);
         startResendTimer(setResendTimer);
       } else {
-        Alert.alert('Error', otpRes.message || 'Failed to send OTP');
+        showToast(otpRes.message || 'Failed to send OTP');
       }
     } else {
-      Alert.alert('Login Failed', result.message || 'Invalid credentials');
+      // Backend Error Mapping
+      const backendMsg = (result.message || '').toLowerCase();
+      if (backendMsg.includes('password') || backendMsg.includes('credentials')) {
+        showToast('password incorrect');
+      } else if (backendMsg.includes('email') || backendMsg.includes('user')) {
+        showToast('Email invalid');
+      } else {
+        showToast('password incorrect'); // Default fallback
+      }
     }
   };
 
@@ -268,6 +320,14 @@ export default function LoginScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#060913" />
+
+      {/* Custom Animated Toast */}
+      {toastMessage !== '' && (
+        <Animated.View style={[styles.toastContainer, { opacity: toastOpacity }]}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </Animated.View>
+      )}
+
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
         <View style={styles.containerInner}>
           
@@ -462,6 +522,30 @@ export default function LoginScreen({ navigation }) {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#060913' },
   keyboardView: { flex: 1, justifyContent: 'center' },
+  
+  // Custom Toast Styles
+  toastContainer: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    backgroundColor: '#F87171',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    zIndex: 999,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+  },
+  toastText: {
+    fontFamily: 'Inter_18pt-Medium',
+    color: '#FFFFFF',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+
   containerInner: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 24 },
   
   header: { alignItems: 'center', marginBottom: 36 },

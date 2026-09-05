@@ -1,5 +1,5 @@
-// App.js
-import { registerRootComponent } from 'expo';
+// App.js 
+
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -13,7 +13,7 @@ import * as Font from 'expo-font';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as Haptics from 'expo-haptics';
-import { Audio } from 'expo-av';
+import { createAudioPlayer } from 'expo-audio';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import axios from 'axios';
@@ -139,6 +139,13 @@ function AppContent() {
     const registerPushToken = async () => {
       if (!userId) return;
       try {
+       
+        if (Constants.executionEnvironment === 'storeClient') {
+          console.log("Push notifications bypassed in Expo Go");
+          return;
+        }
+      
+
         const { status } = await Notifications.requestPermissionsAsync();
         if (status !== 'granted') return;
 
@@ -187,10 +194,11 @@ function AppContent() {
     else if (alert.severity === 'warning') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    try {
+   try {
+     
       if (alertSound.current) {
-        await alertSound.current.stopAsync();
-        await alertSound.current.unloadAsync();
+        alertSound.current.pause();
+        alertSound.current.release(); 
         alertSound.current = null;
       }
 
@@ -199,19 +207,23 @@ function AppContent() {
       else if (alert.severity === 'warning') soundSource = require('./assets/warning.mp3'); 
       else soundSource = require('./assets/info.mp3'); 
       
-      const { sound } = await Audio.Sound.createAsync(soundSource);
+  
+      const sound = createAudioPlayer(soundSource);
       alertSound.current = sound;
       
-      await sound.setIsLoopingAsync(true);
-      await sound.playAsync();
+    
+      sound.loop = true;
+      sound.play();
+
     } catch (error) { console.log("Error playing alert sound:", error); }
   };
 
   const dismissAlert = async () => {
+  
     if (alertSound.current) {
       try {
-        await alertSound.current.stopAsync();
-        await alertSound.current.unloadAsync();
+        alertSound.current.pause();
+        alertSound.current.release();
         alertSound.current = null;
       } catch (error) {}
     }
@@ -366,4 +378,3 @@ export default function App() {
     </ThemeProvider>
   );
 }
-registerRootComponent(App);
