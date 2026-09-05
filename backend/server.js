@@ -582,17 +582,19 @@ app.post('/api/login', loginLimiter, (req, res) => {
 
   db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.json({ success: false, message: 'Invalid email or password' });
+    
+    // CHANGE 1: Specify Email Invalid when no user is found
+    if (results.length === 0) return res.json({ success: false, message: 'Email invalid' }); 
 
     const user = results[0];
     const match = await bcrypt.compare(password, user.password);
     
-    // Auto-upgrade legacy plaintext passwords seamlessly
     if (!match && password === user.password) {
       const hashed = await bcrypt.hash(password, 10);
       db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
     } else if (!match) {
-      return res.json({ success: false, message: 'Invalid email or password' });
+      // CHANGE 2: Specify Password Incorrect when bcrypt fails
+      return res.json({ success: false, message: 'Password incorrect' });
     }
 
     

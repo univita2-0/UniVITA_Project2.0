@@ -1,5 +1,3 @@
-// App.js 
-
 import React, { useEffect, useState, useRef, useContext } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -13,18 +11,15 @@ import * as Font from 'expo-font';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as Haptics from 'expo-haptics';
-import { createAudioPlayer } from 'expo-audio';
+import { createAudioPlayer } from 'expo-audio'; // The new SDK 57 audio engine
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import axios from 'axios';
 import ErrorBoundary from './ErrorBoundary';
 
 import { API_URL, fetchEmergencyAlerts, markAlertAsRead } from './src/screens/api';
-
-// IMPORT THEME CONTEXT
 import { ThemeProvider, ThemeContext, themeColors } from './src/context/ThemeContext'; 
 
-// Screens
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
@@ -40,12 +35,11 @@ import AppealHistoryScreen from './src/screens/AppealHistoryScreen';
 import OvertimeHistoryScreen from './src/screens/OvertimeHistoryScreen';
 import CorrectionHistoryScreen from './src/screens/CorrectionHistoryScreen'; 
 
-// Keep the native splash screen visible while loading resources
+// Keep splash screen visible initially
 SplashScreen.preventAutoHideAsync();
 
 const LOCATION_TASK_NAME = 'background-location-task';
 
-// ---------- GLOBAL BACKGROUND LOCATION TASK ----------
 TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error) {
     console.error("Background Location Error:", error);
@@ -81,7 +75,6 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// --- INTERNAL APP COMPONENT (Consumes ThemeContext) ---
 function AppContent() {
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
@@ -89,7 +82,6 @@ function AppContent() {
   const [appIsReady, setAppIsReady] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  // Global Alert States
   const [userId, setUserId] = useState(null);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [currentAlert, setCurrentAlert] = useState(null);
@@ -100,7 +92,6 @@ function AppContent() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Load Inter Font Family
         await Font.loadAsync({
           'Inter_18pt-Regular': require('./assets/fonts/Inter_18pt-Regular.ttf'),
           'Inter_18pt-Medium': require('./assets/fonts/Inter_18pt-Medium.ttf'),
@@ -111,8 +102,13 @@ function AppContent() {
         const { status } = await Location.requestBackgroundPermissionsAsync();
         if (status !== 'granted') console.warn('Background location permission not granted');
         await new Promise(resolve => setTimeout(resolve, 800));
-      } catch (e) { console.warn(e); } 
-      finally { setAppIsReady(true); }
+      } catch (e) { 
+        console.warn(e); 
+      } finally { 
+        setAppIsReady(true);
+        // Force hide the splash screen here so it never traps you
+        await SplashScreen.hideAsync(); 
+      }
     }
     prepare();
   }, []);
@@ -139,12 +135,11 @@ function AppContent() {
     const registerPushToken = async () => {
       if (!userId) return;
       try {
-       
+        // EXPO GO PUSH NOTIFICATION BYPASS
         if (Constants.executionEnvironment === 'storeClient') {
-          console.log("Push notifications bypassed in Expo Go");
+          console.log("Push notifications safely bypassed for Expo Go testing.");
           return;
         }
-      
 
         const { status } = await Notifications.requestPermissionsAsync();
         if (status !== 'granted') return;
@@ -194,11 +189,11 @@ function AppContent() {
     else if (alert.severity === 'warning') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-   try {
-     
+    try {
+      // NEW EXPO-AUDIO LOGIC
       if (alertSound.current) {
         alertSound.current.pause();
-        alertSound.current.release(); 
+        alertSound.current.release();
         alertSound.current = null;
       }
 
@@ -207,19 +202,16 @@ function AppContent() {
       else if (alert.severity === 'warning') soundSource = require('./assets/warning.mp3'); 
       else soundSource = require('./assets/info.mp3'); 
       
-  
       const sound = createAudioPlayer(soundSource);
       alertSound.current = sound;
       
-    
       sound.loop = true;
       sound.play();
-
     } catch (error) { console.log("Error playing alert sound:", error); }
   };
 
   const dismissAlert = async () => {
-  
+    // NEW EXPO-AUDIO RELEASE
     if (alertSound.current) {
       try {
         alertSound.current.pause();
@@ -244,20 +236,14 @@ function AppContent() {
 
   const onLayoutRootView = async () => {
     if (appIsReady) {
-      await SplashScreen.hideAsync();
       Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
     }
   };
 
   if (!appIsReady) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator size="large" color={colors.textPrimary} />
-      </View>
-    );
+    return null; // Maintain null so the native splash screen stays up until ready
   }
 
-  // Define dynamically themed navigators inside the component scope
   function ProfileStack() {
     return (
       <Stack.Navigator
@@ -325,7 +311,6 @@ function AppContent() {
         </NavigationContainer>
       </ErrorBoundary>
 
-      {/* --- GLOBAL EMERGENCY ALERT MODAL --- */}
       <Modal visible={showAlertModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={[styles.alertModal, { backgroundColor: colors.surface, borderColor: colors.border }, currentAlert?.severity === 'critical' ? styles.alertCritical : currentAlert?.severity === 'warning' ? styles.alertWarning : styles.alertInfo]}>
@@ -351,12 +336,8 @@ function AppContent() {
   );
 }
 
-// Generate static layout styles (colors are handled dynamically inline)
 const styles = StyleSheet.create({
-  splashOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 99999,
-  },
+  splashOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 99999 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(6, 9, 19, 0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   alertModal: { width: '100%', borderRadius: 20, padding: 24, borderWidth: 1 },
   alertCritical: { borderColor: '#F87171' },
@@ -370,7 +351,7 @@ const styles = StyleSheet.create({
   btnAlertText: { fontFamily: 'Inter_18pt-Bold', fontSize: 15 },
 });
 
-// --- MAIN EXPORT WRAPPED IN PROVIDER ---
+// Final export explicitly handled here without root registrar
 export default function App() {
   return (
     <ThemeProvider>

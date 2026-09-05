@@ -10,15 +10,17 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import axios from 'axios';
 import { loginUser, sendOtp, verifyOtp, forgotPassword, resetPassword, API_URL } from './api';
+import { AlertCircle, CheckCircle2 } from 'lucide-react-native';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Custom Toast State
+  // --- Custom Animated Toast State ---
   const [toastMessage, setToastMessage] = useState('');
-  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [toastType, setToastType] = useState('error'); // 'error' or 'success'
+  const toastAnim = useRef(new Animated.Value(-100)).current;
 
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState('');
@@ -35,19 +37,16 @@ export default function LoginScreen({ navigation }) {
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [resetTimer, setResetTimer] = useState(0);
-  const [resetError, setResetError] = useState('');
 
-  // Toast Function
-  const showToast = (message) => {
+  // --- Toast Trigger Function ---
+  const showToast = (message, type = 'error') => {
     setToastMessage(message);
-    toastOpacity.setValue(0);
+    setToastType(type);
     Animated.sequence([
-      Animated.timing(toastOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
-      Animated.delay(2500),
-      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true })
-    ]).start(() => {
-      setToastMessage('');
-    });
+      Animated.timing(toastAnim, { toValue: Platform.OS === 'ios' ? 50 : 20, duration: 400, useNativeDriver: true }),
+      Animated.delay(3000),
+      Animated.timing(toastAnim, { toValue: -150, duration: 400, useNativeDriver: true })
+    ]).start();
   };
 
   const startResendTimer = (setterFn) => {
@@ -66,13 +65,6 @@ export default function LoginScreen({ navigation }) {
 
   const registerDeviceForPushNotifications = async (authToken) => {
     try {
-     
-      if (Constants.executionEnvironment === 'storeClient') {
-        console.log("Push notifications bypassed in Expo Go");
-        return;
-      }
-   
-
       const { status } = await Notifications.requestPermissionsAsync();
       if (status !== 'granted') return;
 
@@ -112,36 +104,27 @@ export default function LoginScreen({ navigation }) {
 
   const handleLogin = async () => {
     Keyboard.dismiss();
-    const emailClean = email.trim().toLowerCase();
-
-    // Frontend Validations
-    if (!emailClean && !password) {
-      showToast('Please enter both email and password');
-      return;
-    }
-    if (!emailClean) {
-      showToast('Please enter your email');
-      return;
-    }
     
-    // Check Email Format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(emailClean)) {
-      showToast('Email invalid');
+    // 1. Basic empty check
+    if (!email || !password) {
+      showToast('Please enter both email and password', 'error');
       return;
     }
 
-    if (!password) {
-      showToast('Please enter your password');
+    // 2. Client-side Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      showToast('Email invalid', 'error');
       return;
     }
 
     setLoading(true);
-    const result = await loginUser(emailClean, password);
+    const result = await loginUser(email, password);
     setLoading(false);
 
     if (result.success) {
       if (result.requiresPasswordReset) {
+        // Keeping Alert here because it requires active user interaction/choice
         Alert.alert(
           'Password Expired',
           'Your password is over 365 days old. You must change it now.',
@@ -159,6 +142,7 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
+      const emailClean = email.trim().toLowerCase();
       setEmail(emailClean);
 
       const otpRes = await sendOtp(emailClean);
@@ -166,25 +150,19 @@ export default function LoginScreen({ navigation }) {
         setOtp('');
         setShowOtpModal(true);
         startResendTimer(setResendTimer);
+        showToast('OTP sent to your email', 'success');
       } else {
-        showToast(otpRes.message || 'Failed to send OTP');
+        showToast(otpRes.message || 'Failed to send OTP', 'error');
       }
     } else {
-      // Backend Error Mapping
-      const backendMsg = (result.message || '').toLowerCase();
-      if (backendMsg.includes('password') || backendMsg.includes('credentials')) {
-        showToast('password incorrect');
-      } else if (backendMsg.includes('email') || backendMsg.includes('user')) {
-        showToast('Email invalid');
-      } else {
-        showToast('password incorrect'); // Default fallback
-      }
+      // 3. Catches backend "Email invalid" or "Password incorrect"
+      showToast(result.message || 'Invalid credentials', 'error');
     }
   };
 
   const handleVerifyOtp = async () => {
     if (!otp || otp.length !== 6) {
-      Alert.alert('Error', 'Please enter the 6-digit OTP');
+      showToast('Please enter the 6-digit OTP', 'error');
       return;
     }
     Keyboard.dismiss();
@@ -196,10 +174,10 @@ export default function LoginScreen({ navigation }) {
         setShowOtpModal(false);
         navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
       } else {
-        Alert.alert('Verification Failed', result.message || 'Invalid OTP');
+        showToast(result.message || 'Invalid OTP', 'error');
       }
     } catch (error) {
-      Alert.alert('Error', 'Connection failed. Please try again.');
+      showToast('Connection failed. Please try again.', 'error');
     } finally {
       setVerifyingOtp(false);
     }
@@ -211,30 +189,35 @@ export default function LoginScreen({ navigation }) {
     setSendingOtpResend(false);
     if (result.success) {
       startResendTimer(setResendTimer);
-      Alert.alert('OTP Resent', `A new code has been sent to ${email}`);
+      showToast(`A new code has been sent`, 'success');
     } else {
-      Alert.alert('Error', result.message || 'Failed to resend OTP');
+      showToast(result.message || 'Failed to resend OTP', 'error');
     }
   };
 
   const handleForgotPassword = async () => {
     if (!resetEmail.trim()) {
-      setResetError('Email is required');
+      showToast('Email is required', 'error');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(resetEmail)) {
+      showToast('Email invalid', 'error');
       return;
     }
     setResetLoading(true);
-    setResetError('');
     try {
       const result = await forgotPassword(resetEmail.trim().toLowerCase());
       if (result.success) {
         setResetStep('otp');
         startResendTimer(setResetTimer);
-        Alert.alert('Code Sent', `An OTP has been sent to ${resetEmail}`);
+        showToast(`An OTP has been sent`, 'success');
       } else {
-        setResetError(result.message || 'Failed to send reset code');
+        // Backend says email invalid
+        showToast(result.message || 'Email invalid', 'error');
       }
     } catch (err) {
-      setResetError('Network error. Please try again.');
+      showToast('Network error. Please try again.', 'error');
     } finally {
       setResetLoading(false);
     }
@@ -242,21 +225,20 @@ export default function LoginScreen({ navigation }) {
 
   const handleVerifyResetOtp = async () => {
     if (!resetOtp || resetOtp.length !== 6) {
-      setResetError('Please enter the 6-digit code');
+      showToast('Please enter the 6-digit code', 'error');
       return;
     }
     setResetLoading(true);
-    setResetError('');
     try {
       const result = await verifyOtp(resetEmail, resetOtp);
       if (result.success) {
         setResetStep('password');
         setResetOtp('');
       } else {
-        setResetError(result.message || 'Invalid OTP');
+        showToast(result.message || 'Invalid OTP', 'error');
       }
     } catch (err) {
-      setResetError('Verification failed');
+      showToast('Verification failed', 'error');
     } finally {
       setResetLoading(false);
     }
@@ -264,25 +246,24 @@ export default function LoginScreen({ navigation }) {
 
   const handleResetPassword = async () => {
     if (!resetNewPassword || resetNewPassword.length < 6) {
-      setResetError('Password must be at least 6 characters');
+      showToast('Password must be at least 6 characters', 'error');
       return;
     }
     if (resetNewPassword !== resetConfirmPassword) {
-      setResetError('Passwords do not match');
+      showToast('Passwords do not match', 'error');
       return;
     }
     setResetLoading(true);
-    setResetError('');
     try {
       const result = await resetPassword(resetEmail, resetOtp, resetNewPassword);
       if (result.success) {
-        Alert.alert('Success', 'Your password has been reset. Please log in.');
+        showToast('Password reset successfully!', 'success');
         closeForgotModal();
       } else {
-        setResetError(result.message || 'Password reset failed');
+        showToast(result.message || 'Password reset failed', 'error');
       }
     } catch (err) {
-      setResetError('Network error. Please try again.');
+      showToast('Network error. Please try again.', 'error');
     } finally {
       setResetLoading(false);
     }
@@ -295,7 +276,6 @@ export default function LoginScreen({ navigation }) {
     setResetOtp('');
     setResetNewPassword('');
     setResetConfirmPassword('');
-    setResetError('');
     setResetTimer(0);
   };
 
@@ -306,12 +286,12 @@ export default function LoginScreen({ navigation }) {
       const result = await forgotPassword(resetEmail);
       if (result.success) {
         startResendTimer(setResetTimer);
-        Alert.alert('Code resent', `A new OTP was sent to ${resetEmail}`);
+        showToast(`A new OTP was sent`, 'success');
       } else {
-        Alert.alert('Error', result.message);
+        showToast(result.message, 'error');
       }
     } catch (err) {
-      Alert.alert('Error', 'Could not resend code');
+      showToast('Could not resend code', 'error');
     } finally {
       setResetLoading(false);
     }
@@ -321,12 +301,14 @@ export default function LoginScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#060913" />
 
-      {/* Custom Animated Toast */}
-      {toastMessage !== '' && (
-        <Animated.View style={[styles.toastContainer, { opacity: toastOpacity }]}>
-          <Text style={styles.toastText}>{toastMessage}</Text>
-        </Animated.View>
-      )}
+      {/* --- CUSTOM ANIMATED TOAST --- */}
+      <Animated.View style={[styles.toastContainer, { 
+          transform: [{ translateY: toastAnim }],
+          backgroundColor: toastType === 'error' ? '#EF4444' : '#10B981'
+        }]}>
+        {toastType === 'error' ? <AlertCircle size={20} color="#FFF" /> : <CheckCircle2 size={20} color="#FFF" />}
+        <Text style={styles.toastText}>{toastMessage}</Text>
+      </Animated.View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
         <View style={styles.containerInner}>
@@ -350,7 +332,7 @@ export default function LoginScreen({ navigation }) {
                   placeholder="employee@example.com"
                   placeholderTextColor="#475569"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(text) => setEmail(text.trim())} // Auto-trim spaces
                   autoCapitalize="none"
                   keyboardType="email-address"
                 />
@@ -443,11 +425,10 @@ export default function LoginScreen({ navigation }) {
                   placeholder="Enter your Email"
                   placeholderTextColor="#64748B"
                   value={resetEmail}
-                  onChangeText={setResetEmail}
+                  onChangeText={(text) => setResetEmail(text.trim())}
                   autoCapitalize="none"
                   keyboardType="email-address"
                 />
-                {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
                 <TouchableOpacity style={styles.modalButton} onPress={handleForgotPassword} disabled={resetLoading} activeOpacity={0.8}>
                   <Text style={styles.modalButtonText}>{resetLoading ? 'Sending...' : 'Send Code'}</Text>
                 </TouchableOpacity>
@@ -467,7 +448,6 @@ export default function LoginScreen({ navigation }) {
                   onChangeText={setResetOtp}
                   textAlign="center"
                 />
-                {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
                 <TouchableOpacity style={styles.modalButton} onPress={handleVerifyResetOtp} disabled={resetLoading} activeOpacity={0.8}>
                   <Text style={styles.modalButtonText}>{resetLoading ? 'Verifying...' : 'Verify Code'}</Text>
                 </TouchableOpacity>
@@ -502,7 +482,6 @@ export default function LoginScreen({ navigation }) {
                   value={resetConfirmPassword}
                   onChangeText={setResetConfirmPassword}
                 />
-                {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
                 <TouchableOpacity style={styles.modalButton} onPress={handleResetPassword} disabled={resetLoading} activeOpacity={0.8}>
                   <Text style={styles.modalButtonText}>{resetLoading ? 'Updating...' : 'Update Password'}</Text>
                 </TouchableOpacity>
@@ -522,32 +501,34 @@ export default function LoginScreen({ navigation }) {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#060913' },
   keyboardView: { flex: 1, justifyContent: 'center' },
+  containerInner: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 24 },
   
-  // Custom Toast Styles
+  // --- TOAST STYLES ---
   toastContainer: {
     position: 'absolute',
-    top: 60,
+    top: 0,
     alignSelf: 'center',
-    backgroundColor: '#F87171',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    zIndex: 999,
-    elevation: 10,
+    width: '90%',
+    maxWidth: 400,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    zIndex: 9999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
-    shadowRadius: 5,
+    shadowRadius: 10,
+    elevation: 10,
   },
   toastText: {
-    fontFamily: 'Inter_18pt-Medium',
-    color: '#FFFFFF',
+    fontFamily: 'Inter_18pt-Bold',
+    color: '#FFF',
     fontSize: 14,
-    textAlign: 'center',
+    marginLeft: 10,
+    flex: 1,
   },
 
-  containerInner: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 24 },
-  
   header: { alignItems: 'center', marginBottom: 36 },
   brandTitle: { fontFamily: 'Inter_18pt-Black', fontSize: 36, color: '#FFFFFF', letterSpacing: 1.5, textAlign: 'center' },
   brandSubtitle: { fontFamily: 'Inter_18pt-Regular', fontSize: 15, color: '#94A3B8', marginTop: 6, letterSpacing: 0.5, textAlign: 'center' },
@@ -583,5 +564,4 @@ const styles = StyleSheet.create({
   timerText: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: '#94A3B8' },
   resendLink: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 13 },
   cancelText: { fontFamily: 'Inter_18pt-Medium', color: '#94A3B8', fontSize: 13, textAlign: 'center', width: '100%' },
-  errorText: { fontFamily: 'Inter_18pt-Medium', color: '#F87171', fontSize: 12, marginBottom: 12, textAlign: 'center' },
 });
