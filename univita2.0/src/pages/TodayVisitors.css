@@ -175,7 +175,7 @@
 
 /* Make the FormalModal wide class expand nicely to fit all columns */
 .formal-modal.wide {
-  max-width: 950px !important;
+  max-width: 1500px !important;
   width: 95% !important;
 }
 
