@@ -2179,7 +2179,37 @@ app.get('/api/appointments/:id/visitors', (req, res) => {
 });
 
 app.get('/api/ble-tags', (req, res) => {
-  db.query("SELECT * FROM ble_tags ORDER BY label", (err, results) => {
+  const sql = `
+    SELECT 
+      t.id, 
+      t.ble_id, 
+      t.label, 
+      t.mac_address,
+      VR_ACTIVE.first_name AS active_first,
+      VR_ACTIVE.last_name AS active_last,
+      VR_ACTIVE.arrived_at AS active_arrived_at,
+      VR_LAST.first_name AS last_first,
+      VR_LAST.last_name AS last_last,
+      VR_LAST.returned_at AS last_returned_at,
+      CASE 
+        WHEN VR_ACTIVE.id IS NOT NULL THEN 'IN USE'
+        ELSE 'AVAILABLE'
+      END AS current_status
+    FROM ble_tags t
+    -- Check if currently in use
+    LEFT JOIN visitor_requests VR_ACTIVE 
+      ON t.ble_id = VR_ACTIVE.ble_id AND VR_ACTIVE.arrived = 1 AND VR_ACTIVE.returned = 0 AND VR_ACTIVE.no_show = 0
+    -- Fallback to the most recent historical user if not currently in use
+    LEFT JOIN visitor_requests VR_LAST 
+      ON t.ble_id = COALESCE(VR_LAST.ble_id, VR_LAST.used_ble_id) 
+      AND VR_LAST.id = (
+        SELECT MAX(id) FROM visitor_requests 
+        WHERE ble_id = t.ble_id OR used_ble_id = t.ble_id
+      )
+    ORDER BY t.label
+  `;
+
+  db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(results);
   });

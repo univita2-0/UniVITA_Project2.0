@@ -90,7 +90,7 @@ const TodayVisitors = () => {
       ]);
       const allTags = tagsRes.data.map(tag => ({
         ...tag,
-        inUse: inUseRes.data.includes(tag.ble_id)
+        inUse: inUseRes.data.includes(tag.ble_id) || tag.current_status === 'IN USE'
       }));
       setAllBleTags(allTags);
       setAvailableBleTags(allTags.filter(tag => !tag.inUse));
@@ -184,7 +184,6 @@ const TodayVisitors = () => {
       {/* Header Section */}
       <div className="tv-header-section">
         <div>
-          
           <p className="tv-subtitle">Manage arrivals, assign BLE tags, and track scheduled visitors.</p>
         </div>
         <div className="tv-actions">
@@ -263,7 +262,6 @@ const TodayVisitors = () => {
                 </thead>
                 <tbody>
                   {currentVisitors.map(v => {
-                    // Fallback to used_ble_id if the tag was returned to inventory
                     const displayBleId = v.used_ble_id || v.ble_id;
                     
                     return (
@@ -385,6 +383,7 @@ const TodayVisitors = () => {
                   <th>BLE ID</th>
                   <th>Hardware Label</th>
                   <th>MAC Address</th>
+                  <th>Last Used / Assigned To</th>
                   <th className="text-center">Current Status</th>
                 </tr>
               </thead>
@@ -394,6 +393,22 @@ const TodayVisitors = () => {
                     <td><strong>{tag.ble_id}</strong></td>
                     <td>{tag.label || '—'}</td>
                     <td><span className="tv-mono-text">{tag.mac_address || '—'}</span></td>
+                    <td>
+                      {tag.inUse ? (
+                        <span className="text-red-600 font-medium">
+                          In use by: {tag.active_first} {tag.active_last}
+                        </span>
+                      ) : tag.last_last ? (
+                        <span className="text-gray-600" style={{ fontSize: '0.85rem' }}>
+                          {tag.last_first} {tag.last_last} <br/>
+                          <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
+                            Returned: {tag.last_returned_at ? new Date(tag.last_returned_at).toLocaleString() : '—'}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-400" style={{ fontSize: '0.85rem' }}>Never used</span>
+                      )}
+                    </td>
                     <td className="text-center">
                       {tag.inUse ? (
                         <span className="tv-badge noshow">In Use</span>
