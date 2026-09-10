@@ -226,10 +226,21 @@ const Schedule = () => {
       toast.warning("Time conflict – please adjust.");
       return;
     }
-    if (formData.date && formData.date < todayStr) {
+
+    const now = new Date();
+    const currentLocalDate = now.toLocaleDateString('en-CA');
+    const currentTimeStr = now.toTimeString().substring(0, 5); 
+
+    if (formData.date < currentLocalDate) {
       toast.warning("Cannot schedule for a past date.");
       return;
     }
+
+    if (formData.date === currentLocalDate && formData.start_time < currentTimeStr) {
+      toast.warning("Cannot schedule a start time that has already passed today.");
+      return;
+    }
+
     if (!formData.place) {
       toast.warning("Please select a school location.");
       return;
@@ -238,6 +249,7 @@ const Schedule = () => {
       toast.warning("End time must be after start time.");
       return;
     }
+
     try {
       const url = isEditing
         ? `${API_BASE}/schedules/${currentScheduleId}`
