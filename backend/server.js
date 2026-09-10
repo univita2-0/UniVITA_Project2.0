@@ -2196,10 +2196,8 @@ app.get('/api/ble-tags', (req, res) => {
         ELSE 'AVAILABLE'
       END AS current_status
     FROM ble_tags t
-    -- Check if currently in use
     LEFT JOIN visitor_requests VR_ACTIVE 
       ON t.ble_id = VR_ACTIVE.ble_id AND VR_ACTIVE.arrived = 1 AND VR_ACTIVE.returned = 0 AND VR_ACTIVE.no_show = 0
-    -- Fallback to the most recent historical user if not currently in use
     LEFT JOIN visitor_requests VR_LAST 
       ON t.ble_id = COALESCE(VR_LAST.ble_id, VR_LAST.used_ble_id) 
       AND VR_LAST.id = (

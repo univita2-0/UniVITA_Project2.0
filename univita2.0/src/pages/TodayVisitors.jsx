@@ -364,6 +364,7 @@ const TodayVisitors = () => {
         onClose={() => setShowTagsModal(false)}
         title="BLE Tags Inventory"
         wide
+        style={{ maxWidth: '850px', width: '90%' }}
         footer={<button className="btn-tv-cancel" onClick={() => setShowTagsModal(false)}>Close</button>}
       >
         <div className="tv-modal-toolbar">
@@ -395,12 +396,15 @@ const TodayVisitors = () => {
                     <td><span className="tv-mono-text">{tag.mac_address || '—'}</span></td>
                     <td>
                       {tag.inUse ? (
-                        <span className="text-red-600 font-medium">
-                          In use by: {tag.active_first} {tag.active_last}
+                        <span className="text-red-600 font-medium" style={{ fontSize: '0.85rem' }}>
+                          In use by: {tag.active_first} {tag.active_last} <br/>
+                          <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
+                            Checked in: {tag.active_arrived_at ? new Date(tag.active_arrived_at).toLocaleString() : '—'}
+                          </span>
                         </span>
                       ) : tag.last_last ? (
                         <span className="text-gray-600" style={{ fontSize: '0.85rem' }}>
-                          {tag.last_first} {tag.last_last} <br/>
+                          {tag.last_last ? `${tag.last_first} ${tag.last_last}` : '—'} <br/>
                           <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
                             Returned: {tag.last_returned_at ? new Date(tag.last_returned_at).toLocaleString() : '—'}
                           </span>
