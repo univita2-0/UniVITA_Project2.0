@@ -12,15 +12,40 @@ import infoSound from '../assets/sounds/info.mp3';
 const EmergencyAlertBanner = () => {
   const [alerts, setAlerts] = useState([]);
   const userId = localStorage.getItem('user_id');
-  const prevAlertIdsRef = useRef(new Set());
 
-  // Helper to get the correct audio file based on severity
-  const getAudioForSeverity = (severity) => {
-    switch (severity) {
-      case 'critical': return new Audio(criticalSound);
-      case 'warning': return new Audio(warningSound);
-      default: return new Audio(infoSound);
-    }
+  // Pre-load audio elements
+  const audioMap = useRef({
+    critical: new Audio(criticalSound),
+    warning: new Audio(warningSound),
+    info: new Audio(infoSound)
+  });
+
+  const isAudioUnlocked = useRef(false);
+
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (isAudioUnlocked.current) return;
+      Object.values(audioMap.current).forEach(audio => {
+        audio.play().then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+        }).catch(() => {});
+      });
+      isAudioUnlocked.current = true;
+      window.removeEventListener('click', unlockAudio);
+    };
+
+    window.addEventListener('click', unlockAudio);
+    return () => window.removeEventListener('click', unlockAudio);
+  }, []);
+
+  const playSeveritySound = (severity) => {
+    const sound = audioMap.current[severity] || audioMap.current.info;
+    sound.currentTime = 0;
+    sound.play().catch(err => {
+      console.warn('Audio play blocked: Click anywhere on the dashboard to enable alert sounds.', err);
+    });
   };
 
   useEffect(() => {
@@ -33,34 +58,37 @@ const EmergencyAlertBanner = () => {
           params: { userId },
           headers: { Authorization: `Bearer ${token}` }
         });
-        
+
         const activeAlerts = res.data || [];
-        const currentIds = new Set(activeAlerts.map(a => a.id));
-        
-        // Find if there is any brand new alert
-        const newAlerts = activeAlerts.filter(a => !prevAlertIdsRef.current.has(a.id));
-
-        if (newAlerts.length > 0 && prevAlertIdsRef.current.size > 0) {
-          // Play the sound corresponding to the highest severity of the new alerts
-          const highestSeverityAlert = newAlerts.find(a => a.severity === 'critical') || 
-                                       newAlerts.find(a => a.severity === 'warning') || 
-                                       newAlerts[0];
-
-          const soundToPlay = getAudioForSeverity(highestSeverityAlert.severity);
-          soundToPlay.play().catch(e => {
-            console.log('Audio autoplay prevented by browser policy until user interacts with page', e);
-          });
-        }
-
-        prevAlertIdsRef.current = currentIds;
         setAlerts(activeAlerts);
+
+        // Retrieve already-heard alerts from this session
+        const heardAlerts = JSON.parse(sessionStorage.getItem('heard_alerts') || '[]');
+
+        // Check if there is any unread alert that hasn't made a sound yet
+        const unplayed = activeAlerts.filter(a => !heardAlerts.includes(a.id));
+
+        if (unplayed.length > 0) {
+          // Play the sound of the most critical alert
+          const highest = unplayed.find(a => a.severity === 'critical') ||
+                          unplayed.find(a => a.severity === 'warning') ||
+                          unplayed[0];
+
+          playSeveritySound(highest.severity);
+
+          // Mark all current active alerts as heard in sessionStorage
+          const updatedHeard = [...new Set([...heardAlerts, ...unplayed.map(a => a.id)])];
+          sessionStorage.setItem('heard_alerts', JSON.stringify(updatedHeard));
+        }
       } catch (err) {
         console.error('Failed to fetch active alerts', err);
       }
     };
 
     fetchActiveAlerts();
-    const interval = setInterval(fetchActiveAlerts, 30000);
+    
+    // Poll every 5 seconds for near real-time emergency responsiveness
+    const interval = setInterval(fetchActiveAlerts, 5000);
     return () => clearInterval(interval);
   }, [userId]);
 
@@ -70,8 +98,8 @@ const EmergencyAlertBanner = () => {
       await axios.post(`${API_BASE}/emergency-alerts/${alertId}/read`, { userId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      // Remove immediately from UI
       setAlerts(prev => prev.filter(a => a.id !== alertId));
-      prevAlertIdsRef.current.delete(alertId);
     } catch (err) {
       console.error('Failed to mark alert as read', err);
     }
@@ -84,7 +112,7 @@ const EmergencyAlertBanner = () => {
       {alerts.map(alert => (
         <div key={alert.id} className={`emergency-banner ${alert.severity}`}>
           <div className="emergency-banner-content">
-            {alert.severity === 'critical' ? <AlertOctagon size={18} /> : 
+            {alert.severity === 'critical' ? <AlertOctagon size={18} /> :
              alert.severity === 'warning' ? <AlertTriangle size={18} /> : <Info size={18} />}
             <div>
               <strong>{alert.title}:</strong> {alert.message}

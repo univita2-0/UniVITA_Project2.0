@@ -3052,7 +3052,20 @@ app.put('/api/users/save-push-token', authenticateToken, async (req, res) => {
 app.get('/api/emergency-alerts/active', (req, res) => {
   const userId = req.query.userId;
   if (!userId) return res.status(400).json({ error: 'userId required' });
-  db.query("SELECT a.id, a.title, a.message, a.severity, a.sent_at, ar.read_at FROM alert_receipts ar JOIN emergency_alerts a ON ar.alert_id = a.id WHERE ar.user_id = ? AND a.is_active = 1 AND (a.expires_at IS NULL OR a.expires_at > NOW()) ORDER BY a.sent_at DESC", [userId], (err, results) => {
+
+  // Notice the addition of: AND ar.read_at IS NULL
+  const sql = `
+    SELECT a.id, a.title, a.message, a.severity, a.sent_at, ar.read_at 
+    FROM alert_receipts ar 
+    JOIN emergency_alerts a ON ar.alert_id = a.id 
+    WHERE ar.user_id = ? 
+      AND ar.read_at IS NULL 
+      AND a.is_active = 1 
+      AND (a.expires_at IS NULL OR a.expires_at > NOW()) 
+    ORDER BY a.sent_at DESC
+  `;
+
+  db.query(sql, [userId], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(results);
   });
