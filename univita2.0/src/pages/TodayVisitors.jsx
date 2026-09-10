@@ -364,7 +364,7 @@ const TodayVisitors = () => {
         onClose={() => setShowTagsModal(false)}
         title="BLE Tags Inventory"
         wide
-        style={{ maxWidth: '850px', width: '90%' }}
+       
         footer={<button className="btn-tv-cancel" onClick={() => setShowTagsModal(false)}>Close</button>}
       >
         <div className="tv-modal-toolbar">

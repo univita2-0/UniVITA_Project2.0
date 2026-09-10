@@ -173,6 +173,24 @@
 .tv-table tr:hover td { background: #F8FAFC; }
 .tv-table tr:last-child td { border-bottom: none; }
 
+/* Make the FormalModal wide class expand nicely to fit all columns */
+.formal-modal.wide {
+  max-width: 950px !important;
+  width: 95% !important;
+}
+
+/* Ensure the table fills the container 100% and prevents horizontal wrapping */
+.tv-table {
+  width: 100% !important;
+  table-layout: auto;
+}
+
+/* Give explicit formatting so table cells wrap text instead of stretching */
+.tv-table th, .tv-table td {
+  white-space: normal !important;
+  word-break: break-word;
+}
+
 /* Table Specific Cells */
 .tv-guest-name { font-weight: 600; color: #0F172A; margin-bottom: 0.2rem; }
 .tv-guest-email { font-size: 0.8rem; color: #64748B; }
