@@ -626,12 +626,12 @@ const Schedule = () => {
               <div className="sch-form-group">
                 <label>Start Time (AM/PM format)</label>
                 <input type="time" name="start_time" className="sch-input" value={formData.start_time} onChange={handleInputChange} required step="60" />
-                <span className="sch-time-preview">Reflects as: <strong>{formatTo12Hour(formData.start_time)}</strong></span>
+                
               </div>
               <div className="sch-form-group">
                 <label>End Time (AM/PM format)</label>
                 <input type="time" name="end_time" className="sch-input" value={formData.end_time} onChange={handleInputChange} required step="60" />
-                <span className="sch-time-preview">Reflects as: <strong>{formatTo12Hour(formData.end_time)}</strong></span>
+                
               </div>
             </div>
 

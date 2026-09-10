@@ -2962,8 +2962,22 @@ app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
   }
   
   const { title, message, severity, target_roles } = req.body;
-  const safeRoles = target_roles || ['instructor', 'admin', 'security', 'hr_admin'];
-  const targetRolesJson = JSON.stringify(safeRoles);
+  
+  // Default roles if none provided
+  const rawRoles = target_roles || ['instructor', 'admin', 'security', 'hr_admin'];
+
+  // Normalize roles to match database convention (e.g., lowercase, handling labels)
+  const safeRoles = rawRoles.map(role => {
+    const r = role.toLowerCase().trim();
+    if (r.includes('security')) return 'security';
+    if (r.includes('admin') && !r.includes('hr')) return 'admin';
+    if (r.includes('hr')) return 'hr_admin';
+    return 'instructor';
+  });
+
+  // Remove duplicates
+  const uniqueRoles = [...new Set(safeRoles)];
+  const targetRolesJson = JSON.stringify(uniqueRoles);
   
   try {
     // Save alert to database
@@ -2974,10 +2988,10 @@ app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
     const alertId = result.insertId;
 
     // Fetch users in target roles who have push tokens
-    const rolePlaceholders = safeRoles.map(() => '?').join(',');
+    const rolePlaceholders = uniqueRoles.map(() => '?').join(',');
     const [users] = await db.promise().query(
-      `SELECT id, expo_push_token FROM users WHERE role IN (${rolePlaceholders}) AND status = 'active'`, 
-      safeRoles
+      `SELECT id, role, expo_push_token FROM users WHERE role IN (${rolePlaceholders}) AND status = 'active'`, 
+      uniqueRoles
     );
 
     if (users.length > 0) {

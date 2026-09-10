@@ -41,7 +41,8 @@ import Settings from './pages/Settings';
 import AuditLogs from './pages/AuditLogs';
 import RoleManagement from './pages/RoleManagement';
 import SystemConfig from './pages/SystemConfig';
-import ManageScanners from './pages/ManageScanners'; // <--- NEW IMPORT
+import ManageScanners from './pages/ManageScanners';
+import EmergencyAlertBanner from './components/EmergencyAlertBanner'; // <--- NEW IMPORT FOR WEB BANNER
 import 'leaflet/dist/leaflet.css';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -171,7 +172,7 @@ function App() {
       case 'location-tracking': return { title: 'Location Tracking' };
       case 'manage-reasons': return { title: 'Manage Visit Reasons' };
       case 'manage-ble': return { title: 'Manage BLE Tags' };
-      case 'manage-scanners': return { title: 'Room Scanners Management' }; // <--- NEW TITLE
+      case 'manage-scanners': return { title: 'Room Scanners Management' };
       case 'completed-visits': return { title: 'Completed Visits' };
       case 'overtime-requests': return { title: 'Overtime Requests' };
       default: return { title: 'Dashboard' };
@@ -200,7 +201,7 @@ function App() {
       case 'shared-calendar': return <SharedCalendar />;
       case 'job-postings': return <JobPostings />;
       case 'manage-ble': return <ManageBLETags />;
-      case 'manage-scanners': return <ManageScanners />; // <--- NEW ROUTE RENDER
+      case 'manage-scanners': return <ManageScanners />;
       case 'completed-visits': return <CompletedVisits />;
       case 'performance': return <PerformanceEvaluation />;
       case 'location-tracking': return <LocationTracking />;
@@ -253,6 +254,9 @@ function App() {
 
   return (
     <NotificationProvider>
+      {/* Global Live Emergency Banner for Web Users (Admins, HR, Security, Instructors) */}
+      <EmergencyAlertBanner />
+
       <Layout
         currentView={currentView}
         setView={handleSetView}
