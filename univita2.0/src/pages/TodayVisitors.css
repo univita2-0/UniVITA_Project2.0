@@ -173,23 +173,29 @@
 .tv-table tr:hover td { background: #F8FAFC; }
 .tv-table tr:last-child td { border-bottom: none; }
 
-/* Make the FormalModal wide class expand nicely to fit all columns */
+
 .formal-modal.wide {
-  max-width: 1500px !important;
+  max-width: 1050px !important;
   width: 95% !important;
 }
 
-/* Ensure the table fills the container 100% and prevents horizontal wrapping */
+
 .tv-table {
   width: 100% !important;
-  table-layout: auto;
+  table-layout: fixed; 
 }
 
-/* Give explicit formatting so table cells wrap text instead of stretching */
-.tv-table th, .tv-table td {
-  white-space: normal !important;
-  word-break: break-word;
+
+.tv-table th:nth-child(1), .tv-table td:nth-child(1), 
+.tv-table th:nth-child(3), .tv-table td:nth-child(3), 
+.tv-table th:nth-child(5), .tv-table td:nth-child(5)   {
+  white-space: nowrap !important;
+  width: 15%;
 }
+
+
+.tv-table th:nth-child(2), .tv-table td:nth-child(2) { width: 18%; }
+.tv-table th:nth-child(4), .tv-table td:nth-child(4) { width: 37%; }
 
 /* Table Specific Cells */
 .tv-guest-name { font-weight: 600; color: #0F172A; margin-bottom: 0.2rem; }
