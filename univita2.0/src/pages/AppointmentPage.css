@@ -1,4 +1,4 @@
-/* src/pages/AppointmentPage.css - Pure CSS3 Upgrade with Minimalist Navigation */
+/* src/pages/AppointmentPage.css */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
@@ -9,6 +9,7 @@ html { scroll-behavior: smooth; }
   overflow-x: hidden; 
   background-color: var(--bg-light);
   color: var(--text-gray);
+  font-family: 'Inter', sans-serif;
 }
 
 .text-white { color: var(--white) !important; }
@@ -150,7 +151,7 @@ html { scroll-behavior: smooth; }
   gap: 0.5rem;
 }
 
-/* ---------- NAVBAR BUTTONS (NEW DESIGN) ---------- */
+/* ---------- NAVBAR BUTTONS ---------- */
 .btn-ap-nav-primary {
   background: #1F2937;
   color: var(--white);
@@ -186,13 +187,12 @@ html { scroll-behavior: smooth; }
   transform: translateY(-2px);
 }
 
-/* ---------- HEADER (MINIMALIST) ---------- */
+/* ---------- HEADER (NEW MINIMALIST & FIX) ---------- */
 .ap-header {
   position: fixed; top: 0; width: 100%; z-index: 1000; height: 85px;
   display: flex; align-items: center;
   background: var(--white);
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  border-bottom: none;
 }
 
 .ap-header-container {
@@ -204,7 +204,9 @@ html { scroll-behavior: smooth; }
 .ap-brand-icon-wrapper { background: var(--primary-teal); color: var(--white); padding: 0.5rem; border-radius: 10px; display: flex; }
 .ap-brand-name { font-size: 1.4rem; font-weight: 800; color: var(--text-dark); letter-spacing: -0.03em; }
 
-.ap-nav { display: flex; align-items: center; gap: 2.5rem; }
+/* Desktop Navigation */
+.ap-nav-desktop, .ap-header-actions-desktop { display: flex; align-items: center;}
+.ap-nav-desktop { gap: 2.5rem; }
 
 .ap-nav-link { 
   font-size: 1rem; 
@@ -217,8 +219,68 @@ html { scroll-behavior: smooth; }
 
 .ap-nav-link:hover { color: var(--text-dark); }
 
-.ap-nav-actions { display: flex; align-items: center; gap: 1rem; margin-left: 1rem; }
-.ap-nav-close, .ap-mobile-toggle { display: none; background: transparent; border: none; color: var(--text-dark); cursor: pointer; }
+/* Header Actions */
+.ap-header-actions { display: flex; align-items: center; gap: 1rem; }
+.ap-header-actions-desktop { gap: 1rem; margin-left: 1rem; }
+
+/* Mobile Menu Toggle */
+.ap-mobile-toggle { display: none; background: transparent; border: none; cursor: pointer; color: var(--text-dark); padding: 0.5rem;}
+.ap-mobile-toggle:hover { color: var(--primary-teal); }
+
+/* Hide desktop elements on mobile */
+@media (max-width: 900px) {
+  .ap-nav-desktop, .ap-header-actions-desktop { display: none; }
+  .ap-mobile-toggle { display: block; }
+}
+
+/* ---------- MOBILE MENU DRAWER (NEW SIDE BAR) ---------- */
+.ap-mobile-menu {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(17, 24, 39, 0.6); backdrop-filter: blur(2px);
+  opacity: 0; visibility: hidden; transition: all 0.3s ease;
+  display: flex; justify-content: flex-end; /* opens from right side */
+}
+.ap-mobile-menu.open { opacity: 1; visibility: visible; }
+
+.ap-mobile-nav {
+  width: 320px; max-width: 100%; height: 100%;
+  background: var(--white); box-shadow: -10px 0 30px rgba(0,0,0,0.1);
+  transform: translateX(100%); transition: transform 0.3s ease;
+  display: flex; flex-direction: column; padding: 0;
+}
+.ap-mobile-menu.open .ap-mobile-nav { transform: translateX(0); }
+
+.ap-nav-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 1.5rem 2rem; border-bottom: 1px solid var(--border-color);
+}
+.ap-mobile-brand { font-size: 1.35rem; font-weight: 800; color: var(--text-dark); margin: 0; letter-spacing: -0.02em;}
+.ap-nav-close { background: transparent; border: none; cursor: pointer; color: var(--text-gray); display: flex; padding: 0.5rem; transition: color 0.2s;}
+.ap-nav-close:hover { color: var(--text-dark);}
+
+.ap-nav-body { flex: 1; display: flex; flex-direction: column; overflow-y: auto;}
+
+.ap-nav-list { display: flex; flex-direction: column; gap: 0.25rem; padding: 1rem;}
+.ap-mobile-nav-link {
+  font-size: 1rem; font-weight: 600; color: var(--text-dark);
+  text-decoration: none; cursor: pointer;
+  padding: 1rem 1rem; border-radius: var(--radius-sm);
+  transition: all 0.2s; display: block;
+}
+.ap-mobile-nav-link:hover { background: rgba(0, 137, 123, 0.05); color: var(--primary-teal); }
+
+.ap-nav-divider { height: 1px; background: var(--border-color); margin: 0 1rem;}
+
+.ap-nav-actions-mobile { margin-top: auto; padding: 2rem 1rem 1rem; display: flex; flex-direction: column; gap: 1rem; border-top: 1px solid var(--border-color); }
+.btn-ap-primary-mobile, .btn-ap-outline-mobile {
+  width: 100%; height: 50px; border-radius: 8px; font-size: 1rem;
+  font-weight: 600; cursor: pointer; transition: all 0.2s; border: 1px solid transparent;
+  font-family: inherit; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+}
+.btn-ap-primary-mobile { background: var(--primary-teal); color: var(--white); }
+.btn-ap-primary-mobile:hover { background: var(--primary-dark-teal); transform: translateY(-2px); }
+.btn-ap-outline-mobile { background: var(--white); color: var(--text-dark); border-color: var(--border-color); }
+.btn-ap-outline-mobile:hover { background: var(--bg-light); border-color: #D1D5DB; transform: translateY(-2px); }
 
 /* ---------- HERO SECTION ---------- */
 .ap-hero-section {
@@ -259,11 +321,12 @@ html { scroll-behavior: smooth; }
 .ap-floating-item p { font-size: 0.95rem; color: #9CA3AF; margin: 0; }
 
 /* ---------- SHARED CARD STYLES ---------- */
-.ap-features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2.5rem; }
+/* CSS GRIDS FIXES FOR MOBILE */
+.ap-features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2.5rem; }
 .ap-contact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2rem; }
-.ap-course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 2rem; }
-.ap-facilities-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 2.5rem; }
-.ap-jobs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 2rem; }
+.ap-course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2rem; }
+.ap-facilities-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2.5rem; }
+.ap-jobs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 2rem; }
 
 .ap-feature-card, .ap-contact-card, .ap-course-group, .ap-facility-card, .ap-job-card {
   background: var(--white);
@@ -304,7 +367,7 @@ html { scroll-behavior: smooth; }
 
 /* Course Specific */
 .ap-category-title { padding-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.5rem; }
-.ap-course-list { list-style: none; display: flex; flex-direction: column; gap: 1rem;}
+.ap-course-list { list-style: none; display: flex; flex-direction: column; gap: 1rem; padding: 0;}
 .ap-course-item { display: flex; align-items: flex-start; gap: 1rem; font-size: 1rem; color: var(--text-dark); font-weight: 500; line-height: 1.5;}
 .ap-course-icon { color: var(--primary-teal); flex-shrink: 0; margin-top: 3px; }
 
@@ -322,11 +385,11 @@ html { scroll-behavior: smooth; }
 
 /* Job Specific */
 .ap-job-header { display: flex; align-items: flex-start; gap: 1.25rem; margin-bottom: 1.25rem; }
-.ap-job-meta { display: flex; gap: 1.25rem; font-size: 0.9rem; color: var(--text-gray); font-weight: 600; margin-bottom: 1.5rem; }
+.ap-job-meta { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.9rem; color: var(--text-gray); font-weight: 600; margin-bottom: 1.5rem; }
 .ap-job-meta span { display: flex; align-items: center; gap: 0.4rem; background: var(--bg-light); padding: 0.4rem 0.8rem; border-radius: 6px;}
 .ap-job-desc { margin: 0 0 2.5rem 0; flex: 1; }
-.ap-job-actions { display: flex; gap: 1rem; margin-top: auto; }
-.ap-job-actions button { flex: 1; }
+.ap-job-actions { display: flex; gap: 1rem; margin-top: auto; flex-wrap: wrap;}
+.ap-job-actions button { flex: 1; min-width: 120px; }
 
 .ap-empty-state { text-align: center; padding: 6rem 2rem; color: var(--text-gray); background: var(--white); border: 2px dashed var(--border-color); border-radius: var(--radius-lg); }
 .ap-empty-icon { color: var(--border-color); margin-bottom: 1.5rem; }
@@ -438,12 +501,12 @@ html { scroll-behavior: smooth; }
 }
 .ap-job-modal-header { background: var(--text-dark); color: var(--white); padding: 2.5rem; display: flex; justify-content: space-between; align-items: flex-start; }
 .ap-job-header-text h2 { font-size: 1.75rem; margin: 0 0 0.75rem 0; color: var(--white); font-weight: 800; letter-spacing: -0.02em;}
-.ap-job-meta-light { display: flex; gap: 1.5rem; font-size: 1rem; color: #9CA3AF; font-weight: 500;}
+.ap-job-meta-light { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 1rem; color: #9CA3AF; font-weight: 500;}
 .ap-job-meta-light span { display: flex; align-items: center; gap: 0.5rem; }
 .ap-btn-close-light { background: rgba(255,255,255,0.1); border: none; color: var(--white); padding: 0.5rem; border-radius: 8px; cursor: pointer; display: flex; transition: background 0.2s;}
 .ap-btn-close-light:hover { background: rgba(255,255,255,0.2); }
 .ap-job-modal-body { padding: 2.5rem; overflow-y: auto; flex: 1; }
-.ap-job-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; background: var(--bg-light); padding: 2rem; border-radius: 12px; border: 1px solid var(--border-color); margin-bottom: 2.5rem; }
+.ap-job-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1.5rem; background: var(--bg-light); padding: 2rem; border-radius: 12px; border: 1px solid var(--border-color); margin-bottom: 2.5rem; }
 .ap-stat-box { display: flex; flex-direction: column; gap: 0.5rem; }
 .ap-stat-label { font-size: 0.8rem; color: var(--text-gray); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 .ap-stat-val { font-size: 1.05rem; font-weight: 600; color: var(--text-dark); display: flex; align-items: center; gap: 0.5rem; }
@@ -475,7 +538,7 @@ html { scroll-behavior: smooth; }
 .ap-toast.success { background: var(--success-green); }
 .ap-toast.error { background: var(--danger-red); }
 
-/* ---------- RESPONSIVE ---------- */
+/* ---------- RESPONSIVE FINETUNING ---------- */
 @media (max-width: 1024px) {
   .ap-footer-grid { grid-template-columns: repeat(2, 1fr); gap: 3rem; }
   .ap-contact-grid { grid-template-columns: repeat(2, 1fr); }
@@ -483,33 +546,35 @@ html { scroll-behavior: smooth; }
   .ap-hero-grid { gap: 3rem; }
 }
 @media (max-width: 900px) {
-  .ap-nav {
-    display: none; flex-direction: column; align-items: stretch; gap: 1rem;
-    position: absolute; top: 85px; left: 0; width: 100%;
-    background: var(--white); padding: 1.5rem 2rem 2rem; box-shadow: 0 10px 20px rgba(0,0,0,0.08);
-    border-bottom: 1px solid var(--border-color); z-index: 2000;
-  }
-  .ap-nav.open { display: flex; }
-  .ap-mobile-toggle { display: block; }
-  .ap-nav-close { display: none; }
   .ap-hero-grid { grid-template-columns: 1fr; gap: 4rem; }
-  .ap-form-row { flex-direction: column; gap: 0; }
-  .ap-nav-actions { width: 100%; justify-content: space-between; margin-top: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);}
-  .btn-ap-nav-primary { flex: 1; }
-  .ap-time-slots-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 600px) {
+  .ap-container { padding: 0 1.25rem; }
   .ap-hero-section { padding: 9rem 1rem 5rem; min-height: auto;}
   .ap-hero-title { font-size: 3rem; }
-  .ap-section-header h2 { font-size: 2.25rem; }
+  .ap-hero-actions { flex-direction: column; gap: 1rem; }
+  .ap-hero-actions button { width: 100%; }
+
   .ap-section { padding: 5rem 0; }
+  .ap-section-header { margin-bottom: 2rem; }
+  .ap-section-header h2 { font-size: 2.25rem; }
+
+  /* GAPS & GRID TWEAKS FOR MOBILE */
+  .ap-features-grid, .ap-course-grid, .ap-facilities-grid, .ap-jobs-grid, .ap-contact-grid { gap: 1rem; }
+  .ap-contact-grid { grid-template-columns: 1fr; }
+  
   .ap-footer { padding: 5rem 1.5rem 2rem; }
   .ap-footer-grid { grid-template-columns: 1fr; gap: 2.5rem; }
-  .ap-contact-grid { grid-template-columns: 1fr; }
+
   .ap-modal-content, .ap-gallery-modal, .ap-job-modal-body, .ap-job-modal-header { padding: 1.5rem; }
-  .ap-job-modal-footer { padding: 1.25rem 1.5rem; }
-  .ap-gallery-grid { grid-template-columns: 1fr; }
-  .ap-gallery-img-box { height: 220px; }
-  .ap-hero-actions { flex-direction: column; }
-  .ap-hero-actions button { width: 100%; }
+  .ap-job-modal-footer { padding: 1.25rem 1.5rem; flex-direction: column-reverse; gap: 0.75rem;}
+  .ap-job-modal-footer button { width: 100%; }
+  
+  .ap-form-row { flex-direction: column; gap: 0; }
+  .ap-gallery-grid { grid-template-columns: 1fr; gap: 1rem;}
+  .ap-gallery-img-box { height: auto; aspect-ratio: 16/9; }
+  
+  .ap-time-slots-grid { grid-template-columns: repeat(2, 1fr); }
+  .ap-job-section h4 { font-size: 1.15rem; }
+  .ap-job-stats-grid { padding: 1.25rem; grid-template-columns: 1fr;}
 }

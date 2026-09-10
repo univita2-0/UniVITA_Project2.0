@@ -13,6 +13,7 @@
   font-family: 'Inter', system-ui, sans-serif;
   background-color: #0F172A; /* Deep Slate Base */
   overflow: hidden;
+  box-sizing: border-box; /* Added to keep padding inside bounds */
 }
 
 .login-ambient-bg {
@@ -102,6 +103,7 @@
     0 25px 50px -12px rgba(0, 0, 0, 0.5),
     0 0 0 1px rgba(255, 255, 255, 0.2) inset;
   animation: cardEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  box-sizing: border-box; /* CRITICAL FIX: Forces padding to be calculated inward */
 }
 
 @keyframes cardEntrance {
@@ -206,7 +208,7 @@
   background: #FAFAFA;
   outline: none;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-sizing: border-box;
+  box-sizing: border-box; /* Keeps input padding inside */
 }
 
 .gl-input:focus {
@@ -325,9 +327,27 @@
 
 /* ---------- RESPONSIVE ---------- */
 @media (max-width: 600px) {
-  .modern-login-wrapper { padding: 1rem; }
-  .glass-login-card { padding: 2.5rem 1.5rem; border-radius: 16px; }
-  .btn-glass-back { top: 1rem; left: 1rem; padding: 0.5rem 1rem; font-size: 0.8rem;}
-  .gl-brand-icon { width: 48px; height: 48px; margin-bottom: 0.75rem; }
-  .gl-brand-title { font-size: 1.35rem; }
+  .modern-login-wrapper { 
+    padding: 1.5rem; 
+  }
+  .glass-login-card { 
+    padding: 2rem 1.5rem; 
+    border-radius: 20px; 
+    width: 100%;
+    max-width: 100%; /* Prevents stretching issues on very small screens */
+  }
+  .btn-glass-back { 
+    top: 1.5rem; 
+    left: 1.5rem; 
+    padding: 0.5rem 1rem; 
+    font-size: 0.8rem;
+  }
+  .gl-brand-icon { 
+    width: 48px; 
+    height: 48px; 
+    margin-bottom: 0.75rem; 
+  }
+  .gl-brand-title { 
+    font-size: 1.35rem; 
+  }
 }

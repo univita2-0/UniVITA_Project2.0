@@ -233,7 +233,7 @@ export default function LoginScreen({ navigation }) {
       const result = await verifyOtp(resetEmail, resetOtp);
       if (result.success) {
         setResetStep('password');
-        setResetOtp('');
+       
       } else {
         showToast(result.message || 'Invalid OTP', 'error');
       }

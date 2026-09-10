@@ -87,7 +87,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setTimeout(() => {
       const element = document.getElementById(id);
       if (element) {
-        const headerOffset = 80; 
+        const headerOffset = 85; 
         const elementPosition = element.getBoundingClientRect().top;
         const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
         window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
@@ -379,26 +379,63 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
             <span className="ap-brand-name">HCT Academy</span>
           </div>
-          <nav className={`ap-nav ${mobileMenuOpen ? 'open' : ''}`}>
-            <button className="ap-nav-close" onClick={() => setMobileMenuOpen(false)}><X size={24} /></button>
-            <a className="ap-nav-link" onClick={() => { setActivePage('home'); setMobileMenuOpen(false); }}>Home</a>
+          
+          {/* Main Nav Links (Desktop) */}
+          <nav className="ap-nav-desktop">
+            <a className="ap-nav-link" onClick={() => { setActivePage('home'); window.scrollTo(0,0); }}>Home</a>
             <a className="ap-nav-link" onClick={() => scrollToSection('about')}>About</a>
             <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
             <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
-            <a className="ap-nav-link" onClick={() => { setActivePage('careers'); setMobileMenuOpen(false); }}>Careers</a>
-            
-            <div className="ap-nav-actions">
-              <button className="btn-ap-nav-primary" onClick={() => { setShowAppointmentModal(true); setMobileMenuOpen(false); }}>Book Visit</button>
+            <a className="ap-nav-link" onClick={() => setActivePage('careers')}>Careers</a>
+          </nav>
+          
+          {/* Actions (Desktop) & Mobile Toggle */}
+          <div className="ap-header-actions">
+            <div className="ap-header-actions-desktop">
+              <button className="btn-ap-nav-primary" onClick={() => setShowAppointmentModal(true)}>Book Visit</button>
               <button className="btn-ap-nav-icon" onClick={onAdminLogin} title="Admin Portal">
                 <User size={18} />
               </button>
             </div>
-          </nav>
-          <button className="ap-mobile-toggle" onClick={() => setMobileMenuOpen(true)}><Menu size={24} /></button>
+            <button className="ap-mobile-toggle" onClick={() => setMobileMenuOpen(true)}>
+              <Menu size={24} />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* HOME */}
+      {/* MOBILE MENU DRAWER (SIDE BAR) */}
+      <div className={`ap-mobile-menu ${mobileMenuOpen ? 'open' : ''}`} onClick={() => setMobileMenuOpen(false)}>
+        <nav className="ap-mobile-nav" onClick={(e) => e.stopPropagation()}>
+          <div className="ap-nav-header">
+            <h3 className="ap-mobile-brand">Menu</h3>
+            <button className="ap-nav-close" onClick={() => setMobileMenuOpen(false)}>
+              <X size={24} />
+            </button>
+          </div>
+          
+          <div className="ap-nav-body">
+            <div className="ap-nav-list">
+              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); setMobileMenuOpen(false); window.scrollTo(0,0); }}>Home</a>
+              <a className="ap-mobile-nav-link" onClick={() => scrollToSection('about')}>About</a>
+              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
+              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
+              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('careers'); setMobileMenuOpen(false); }}>Careers</a>
+            </div>
+            
+            <div className="ap-nav-divider"></div>
+            
+            <div className="ap-nav-actions-mobile">
+              <button className="btn-ap-primary-mobile" onClick={() => { setShowAppointmentModal(true); setMobileMenuOpen(false); }}>Book Visit</button>
+              <button className="btn-ap-outline-mobile" onClick={onAdminLogin} title="Admin Portal">
+                <User size={18} /> Admin Portal
+              </button>
+            </div>
+          </div>
+        </nav>
+      </div>
+
+      {/* HOME PAGE SECTIONS */}
       {activePage === 'home' && (
         <>
           {/* HERO */}
@@ -642,7 +679,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       </footer>
 
-      {/* APPOINTMENT MODAL */}
+      {/* APPOINTMENT BOOKING MODAL */}
       {showAppointmentModal && (
         <div className="ap-modal-overlay" onClick={() => setShowAppointmentModal(false)}>
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
@@ -767,7 +804,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
-      {/* CHOOSE TIME SELECTOR MODAL */}
+      {/* TIME SELECTION MODAL */}
       {showTimeModal && (
         <div className="ap-modal-overlay" onClick={() => setShowTimeModal(false)}>
           <div className="ap-modal-content ap-time-picker-modal" onClick={e => e.stopPropagation()}>
@@ -880,7 +917,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
-      {/* APPLY MODAL */}
+      {/* JOB APPLICATION FORM MODAL */}
       {showApplyModal && selectedJob && (
         <div className="ap-modal-overlay" onClick={() => setShowApplyModal(false)}>
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
