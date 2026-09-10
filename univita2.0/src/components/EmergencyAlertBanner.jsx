@@ -1,12 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { AlertTriangle, AlertOctagon, Info, X } from 'lucide-react';
 import { API_BASE } from '../api';
 import './EmergencyAlertBanner.css';
 
+// Import your custom mp3 sound files
+import criticalSound from '../assets/sounds/critical.mp3';
+import warningSound from '../assets/sounds/warning.mp3';
+import infoSound from '../assets/sounds/info.mp3';
+
 const EmergencyAlertBanner = () => {
   const [alerts, setAlerts] = useState([]);
   const userId = localStorage.getItem('user_id');
+  const prevAlertIdsRef = useRef(new Set());
+
+  // Helper to get the correct audio file based on severity
+  const getAudioForSeverity = (severity) => {
+    switch (severity) {
+      case 'critical': return new Audio(criticalSound);
+      case 'warning': return new Audio(warningSound);
+      default: return new Audio(infoSound);
+    }
+  };
 
   useEffect(() => {
     if (!userId) return;
@@ -18,15 +33,33 @@ const EmergencyAlertBanner = () => {
           params: { userId },
           headers: { Authorization: `Bearer ${token}` }
         });
-        setAlerts(res.data || []);
+        
+        const activeAlerts = res.data || [];
+        const currentIds = new Set(activeAlerts.map(a => a.id));
+        
+        // Find if there is any brand new alert
+        const newAlerts = activeAlerts.filter(a => !prevAlertIdsRef.current.has(a.id));
+
+        if (newAlerts.length > 0 && prevAlertIdsRef.current.size > 0) {
+          // Play the sound corresponding to the highest severity of the new alerts
+          const highestSeverityAlert = newAlerts.find(a => a.severity === 'critical') || 
+                                       newAlerts.find(a => a.severity === 'warning') || 
+                                       newAlerts[0];
+
+          const soundToPlay = getAudioForSeverity(highestSeverityAlert.severity);
+          soundToPlay.play().catch(e => {
+            console.log('Audio autoplay prevented by browser policy until user interacts with page', e);
+          });
+        }
+
+        prevAlertIdsRef.current = currentIds;
+        setAlerts(activeAlerts);
       } catch (err) {
         console.error('Failed to fetch active alerts', err);
       }
     };
 
     fetchActiveAlerts();
-    
-   
     const interval = setInterval(fetchActiveAlerts, 30000);
     return () => clearInterval(interval);
   }, [userId]);
@@ -37,8 +70,8 @@ const EmergencyAlertBanner = () => {
       await axios.post(`${API_BASE}/emergency-alerts/${alertId}/read`, { userId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-   
       setAlerts(prev => prev.filter(a => a.id !== alertId));
+      prevAlertIdsRef.current.delete(alertId);
     } catch (err) {
       console.error('Failed to mark alert as read', err);
     }
