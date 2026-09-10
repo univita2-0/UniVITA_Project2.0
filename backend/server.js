@@ -2432,12 +2432,16 @@ app.post('/api/appointments/book', (req, res) => {
       text: emailBody
     };
 
+    // 1. Respond to frontend immediately so the loading spinner stops
+    res.json({ success: true, message: "Request saved successfully." });
+
+    // 2. Send email in the background without blocking the user
     transporter.sendMail(mailOptions, (error) => {
       if (error) {
-        console.error("Email error:", error);
-        return res.json({ success: true, emailSent: false, message: "Request saved but email failed." });
+        console.error("Background Email error:", error);
+      } else {
+        console.log("Background Email sent successfully.");
       }
-      res.json({ success: true, emailSent: true });
     });
   });
 });
