@@ -7,7 +7,7 @@ const FormalModal = ({ show, onClose, title, children, footer, wide, small }) =>
 
   // Inline styles absolutely guarantee the modal ignores conflicting external CSS grid/width rules
   const getModalStyle = () => {
-    if (wide) return { width: '100%', maxWidth: '768px' }; // Perfect for 2-column forms
+    if (wide) return { width: '100%', maxWidth: '950px' }; // Perfect for 2-column forms
     if (small) return { width: '100%', maxWidth: '400px' }; // Perfect for alerts/deletes
     return { width: '100%', maxWidth: '540px' }; // Perfect default for standard forms
   };
