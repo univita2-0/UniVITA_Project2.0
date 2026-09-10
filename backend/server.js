@@ -2452,38 +2452,83 @@ app.post('/api/appointments/book', (req, res) => {
 app.put('/api/appointments/:id/status', (req, res) => {
   const { status, adminNotes, adminId } = req.body;
   const requestId = req.params.id;
+
   db.query("SELECT * FROM visitor_requests WHERE id = ?", [requestId], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     if (results.length === 0) return res.status(404).json({ error: "Request not found" });
+
     const request = results[0];
-    const { first_name, last_name, email, visit_date, visit_time, reason, phone, ble_id } = request;
-    db.query("UPDATE visitor_requests SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW() WHERE id = ?", [status, adminNotes || null, adminId, requestId], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      const action = status === 'APPROVED' ? 'APPROVE_APPOINTMENT' : 'REJECT_APPOINTMENT';
-        logAction(adminId, action, 'visitor_request', requestId, req);
-      db.query("SELECT * FROM appointment_visitors WHERE appointment_id = ?", [requestId], (err, visitors) => {
-        if (err) visitors = [];
-        const isApproved = status === 'APPROVED';
-        const subject = isApproved ? "Visit Request Approved - HCT Academy" : "Visit Request Status Update - HCT Academy";
-        let emailBody = `Dear ${first_name} ${last_name},\n\n`;
-        if (isApproved) emailBody += "Your visit request has been APPROVED.\n\nWe look forward to welcoming you to HCT Academy.\n\n";
-        else { emailBody += "We regret to inform you that your visit request has been DECLINED.\n\n"; if (adminNotes) emailBody += `Reason: ${adminNotes}\n\n`; }
-        emailBody += `Details:\nDate: ${visit_date}\nTime: ${visit_time}\nReason: ${reason}\n`;
-        if (phone) emailBody += `Phone: ${phone}\n`;
-        if (ble_id) emailBody += `Primary BLE Tag: ${ble_id}\n`;
-        if (visitors && visitors.length > 0) {
-          emailBody += "\nAdditional Visitors / BLE Tags:\n";
-          visitors.forEach((v, i) => { emailBody += `  ${i+1}. ${v.visitor_name} – BLE Tag: ${v.ble_id || 'None assigned'}\n`; });
-          emailBody += "\nPlease remind your companions to bring their assigned BLE tags. They will be used for tracking inside the building.\n";
+    const { first_name, last_name, email, visit_date, visit_time, reason, phone } = request;
+
+  
+    if (status === 'APPROVED') {
+      db.query(
+        `SELECT id FROM visitor_requests 
+         WHERE email = ? AND visit_date = ? AND visit_time = ? AND status = 'APPROVED' AND id != ?`,
+        [email, visit_date, visit_time, requestId],
+        (dupErr, existing) => {
+          if (dupErr) return res.status(500).json({ error: dupErr.message });
+          if (existing.length > 0) {
+            return res.status(400).json({ 
+              success: false, 
+              error: "Conflict: This person already has an approved appointment at this exact date and time." 
+            });
+          }
+          proceedToUpdate();
         }
-        emailBody += "\nThank you for your understanding.\n\nBest regards,\nHCT Academy";
-        const mailOptions = { from: process.env.MAIL_USER, to: email, subject: subject, text: emailBody };
-        transporter.sendMail(mailOptions, (error) => {
-          if (error) { console.error("Email error:", error); return res.json({ success: true, emailSent: false, message: "Status updated but email failed." }); }
-          res.json({ success: true, emailSent: true });
-        });
-      });
-    });
+      );
+    } else {
+      proceedToUpdate();
+    }
+
+    function proceedToUpdate() {
+      db.query(
+        "UPDATE visitor_requests SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW() WHERE id = ?", 
+        [status, adminNotes || null, adminId, requestId], 
+        (updateErr) => {
+          if (updateErr) return res.status(500).json({ error: updateErr.message });
+          
+          const action = status === 'APPROVED' ? 'APPROVE_APPOINTMENT' : 'REJECT_APPOINTMENT';
+          logAction(adminId, action, 'visitor_request', requestId, req);
+          
+          db.query("SELECT * FROM appointment_visitors WHERE appointment_id = ?", [requestId], (visErr, visitors) => {
+            if (visErr) visitors = [];
+            const isApproved = status === 'APPROVED';
+            const subject = isApproved ? "Visit Request Approved - HCT Academy" : "Visit Request Status Update - HCT Academy";
+            
+            let emailBody = `Dear ${first_name} ${last_name},\n\n`;
+            if (isApproved) {
+              emailBody += "Your visit request has been APPROVED.\n\nWe look forward to welcoming you to HCT Academy.\n\n";
+            } else { 
+              emailBody += "We regret to inform you that your visit request has been DECLINED.\n\n"; 
+              if (adminNotes) emailBody += `Reason: ${adminNotes}\n\n`; 
+            }
+            
+            emailBody += `Details:\nDate: ${visit_date}\nTime: ${visit_time}\nReason: ${reason}\n`;
+            if (phone) emailBody += `Phone: ${phone}\n`;
+            
+            if (visitors && visitors.length > 0) {
+              emailBody += "\nAdditional Visitors:\n";
+              visitors.forEach((v, i) => { 
+                emailBody += `  ${i+1}. ${v.visitor_name}\n`; 
+              });
+            }
+            
+            emailBody += "\nBLE tags for tracking will be assigned to you and your companions upon arrival by our security guard.\n";
+            emailBody += "\nThank you for your understanding.\n\nBest regards,\nHCT Academy";
+            
+            const mailOptions = { from: process.env.MAIL_USER, to: email, subject: subject, text: emailBody };
+            transporter.sendMail(mailOptions, (error) => {
+              if (error) { 
+                console.error("Email error:", error); 
+                return res.json({ success: true, emailSent: false, message: "Status updated but email failed." }); 
+              }
+              res.json({ success: true, emailSent: true });
+            });
+          });
+        }
+      );
+    }
   });
 });
 
