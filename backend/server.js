@@ -2187,10 +2187,10 @@ app.get('/api/ble-tags', (req, res) => {
       t.mac_address,
       VR_ACTIVE.first_name AS active_first,
       VR_ACTIVE.last_name AS active_last,
-      VR_ACTIVE.arrived_at AS active_arrived_at,
+      DATE_FORMAT(DATE_ADD(VR_ACTIVE.arrived_at, INTERVAL 8 HOUR), '%Y-%m-%d %h:%i:%s %p') AS active_arrived_at,
       VR_LAST.first_name AS last_first,
       VR_LAST.last_name AS last_last,
-      VR_LAST.returned_at AS last_returned_at,
+      DATE_FORMAT(DATE_ADD(VR_LAST.returned_at, INTERVAL 8 HOUR), '%Y-%m-%d %h:%i:%s %p') AS last_returned_at,
       CASE 
         WHEN VR_ACTIVE.id IS NOT NULL THEN 'IN USE'
         ELSE 'AVAILABLE'

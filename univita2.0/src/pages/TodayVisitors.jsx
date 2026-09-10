@@ -399,15 +399,14 @@ const TodayVisitors = () => {
                         <span className="text-red-600 font-medium" style={{ fontSize: '0.85rem' }}>
                           In use by: {tag.active_first} {tag.active_last} <br/>
                           <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
-                            Checked in: {tag.active_arrived_at ? new Date(tag.active_arrived_at.replace('Z', '')).toLocaleString() : '—'}
+                            Checked in: {tag.active_arrived_at || '—'}
                           </span>
                         </span>
                       ) : tag.last_last ? (
                         <span className="text-gray-600" style={{ fontSize: '0.85rem' }}>
                           {tag.last_first} {tag.last_last} <br/>
                           <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
-                            {/* Stripping the timezone offset forces it to display the exact database time */}
-                            Returned: {tag.last_returned_at ? new Date(tag.last_returned_at.replace('Z', '')).toLocaleString() : '—'}
+                            Returned: {tag.last_returned_at || '—'}
                           </span>
                         </span>
                       ) : (
