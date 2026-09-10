@@ -2436,13 +2436,16 @@ app.post('/api/appointments/book', (req, res) => {
     res.json({ success: true, message: "Request saved successfully." });
 
     // 2. Send email in the background without blocking the user
-    transporter.sendMail(mailOptions, (error) => {
-      if (error) {
-        console.error("Background Email error:", error);
-      } else {
-        console.log("Background Email sent successfully.");
-      }
-    });
+    resend.emails.send({
+    from: 'UniVITA Academy <no-reply@univitahct.tech>',
+    to: [email],
+    subject: subject,
+    text: emailBody
+  }).then(() => {
+    console.log("Background Email sent successfully.");
+  }).catch((error) => {
+    console.error("Background Email error:", error);
+  });
   });
 });
 
