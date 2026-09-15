@@ -1030,6 +1030,71 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
   }
 });
 
+// ============================================
+// COURSE MANAGEMENT
+// ============================================
+
+app.get('/api/courses', (req, res) => {
+  db.query("SELECT id, name FROM courses", (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+});
+
+app.post('/api/courses', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Course name required' });
+  db.query("INSERT INTO courses (name) VALUES (?)", [name.trim()], (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    logAction(req.user.id, 'CREATE_COURSE', 'course', result.insertId, req);
+    res.json({ success: true, id: result.insertId });
+  });
+});
+
+app.put('/api/courses/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  const { name } = req.body;
+  const courseId = req.params.id;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Course name required' });
+  
+  try {
+    const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
+    if (oldRecord.length === 0) return res.status(404).json({ error: 'Course not found' });
+    
+    db.query("UPDATE courses SET name = ? WHERE id = ?", [name.trim(), courseId], (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      logAction(req.user.id, 'UPDATE_COURSE', 'course', courseId, req, oldRecord[0], { name: name.trim() });
+      res.json({ success: true });
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  const courseId = req.params.id;
+  
+  try {
+    const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
+    if (oldRecord.length === 0) return res.status(404).json({ error: 'Course not found' });
+    
+    db.query("SELECT id FROM schedules WHERE course = ? LIMIT 1", [oldRecord[0].name], (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (rows.length > 0) return res.status(400).json({ error: 'Cannot delete course as it is assigned to existing schedules.' });
+      
+      db.query("DELETE FROM courses WHERE id = ?", [courseId], (err, result) => {
+        if (err) return res.status(500).json({ error: err.message });
+        logAction(req.user.id, 'DELETE_COURSE', 'course', courseId, req, oldRecord[0], null);
+        res.json({ success: true });
+      });
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/attendance/corrections/user/:employeeId', authenticateToken, verifyOwnership, async (req, res) => {
   const { employeeId } = req.params;
   
