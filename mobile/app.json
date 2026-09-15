@@ -1,0 +1,108 @@
+{
+  "expo": {
+    "name": "UniVITA",
+    "slug": "mobile",
+    "version": "1.0.0",
+    "newArchEnabled": true,
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "mobile",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#020817"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "UniVITA requires location access to verify attendance during your scheduled shifts.",
+        "NSLocationAlwaysUsageDescription": "Allow UniVITA to track your location in the background to ensure shift compliance.",
+        "NSLocationWhenInUseUsageDescription": "Allow UniVITA to use your location when the app is in use."
+      }
+    },
+    "android": {
+      "package": "com.anonymous.mobile",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash.png",
+          "imageWidth": 150,
+          "resizeMode": "contain",
+          "backgroundColor": "#020817",
+          "dark": {
+            "backgroundColor": "#020817"
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash.png",
+          "imageWidth": 150,
+          "resizeMode": "contain",
+          "backgroundColor": "#020817",
+          "dark": {
+            "backgroundColor": "#020817"
+          }
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "UniVITA requires access to your location to verify attendance during your scheduled shifts.",
+          "locationAlwaysPermission": "Allow UniVITA to track your location in the background to ensure compliance with shift geofencing.",
+          "locationWhenInUsePermission": "Allow UniVITA to use your location when the app is in use."
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-font",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser",
+      "expo-audio"
+    ],
+    "experiments": {
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "318655a3-1b90-4c2d-9774-4e34ac583b70"
+      }
+    },
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/318655a3-1b90-4c2d-9774-4e34ac583b70"
+    }
+  }
+}

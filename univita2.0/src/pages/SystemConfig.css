@@ -1,0 +1,41 @@
+/* src/pages/SystemConfig.css - Minimalist Expert Redesign */
+
+.expert-container { background: #F8FAFC; padding: 2rem; min-height: 100vh; font-family: 'Inter', system-ui, sans-serif; }
+.expert-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+.expert-title-group { display: flex; align-items: center; gap: 1rem; }
+.expert-icon-wrapper { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.expert-icon-wrapper.bg-slate { background: #F1F5F9; border: 1px solid #E2E8F0; }
+.expert-title { font-size: 1.6rem; font-weight: 700; color: #0F172A; margin: 0 0 0.2rem 0; letter-spacing: -0.02em; }
+.expert-subtitle { color: #64748B; font-size: 0.9rem; margin: 0; }
+
+/* Buttons */
+.expert-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.65rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease; border: none; height: 42px; background: #0F172A; color: #FFFFFF; }
+.expert-btn-primary:hover:not(:disabled) { background: #334155; }
+.expert-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.expert-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.65rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease; border: 1px solid #CBD5E1; background: #FFFFFF; color: #334155; height: 42px; }
+.expert-btn-secondary:hover:not(:disabled) { background: #F1F5F9; color: #0F172A; }
+
+.expert-card { background: #FFFFFF; border-radius: 12px; border: 1px solid #E2E8F0; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+.expert-loading { text-align: center; padding: 5rem 2rem; color: #0D9488; font-weight: 600; background: #F8FAFC; min-height: 100vh; }
+
+/* Config Form Elements */
+.set-card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #F1F5F9; }
+.set-card-header h3 { font-size: 1.1rem; font-weight: 700; color: #0F172A; margin: 0; }
+.set-icon-accent { color: #0D9488; }
+.set-form-group { display: flex; flex-direction: column; gap: 0.4rem; flex: 1; }
+.set-form-group label { font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; }
+.set-hint { font-size: 0.75rem; color: #64748B; margin-top: 0.1rem; }
+
+.expert-clean-input.border { border: 1px solid #CBD5E1; border-radius: 8px; background: #FFFFFF; padding: 0.65rem 1rem; font-size: 0.95rem; color: #0F172A; width: 100%; outline: none; transition: border-color 0.2s; box-sizing: border-box; }
+.expert-clean-input.border:focus { border-color: #0D9488; box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1); }
+
+.sc-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+.sc-actions { display: flex; justify-content: flex-end; gap: 1rem; padding-top: 1.5rem; border-top: 1px solid #E2E8F0; }
+
+@media (max-width: 768px) {
+  .expert-container { padding: 1.5rem; }
+  .sc-form-grid { grid-template-columns: 1fr; }
+  .sc-actions { flex-direction: column; }
+  .expert-btn-secondary, .expert-btn-primary { width: 100%; justify-content: center; }
+}

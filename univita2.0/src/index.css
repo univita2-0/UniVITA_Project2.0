@@ -1,0 +1,96 @@
+/* src/index.css */
+:root {
+  /* Colors remain the same */
+  --primary-teal: #00897B;
+  --primary-dark-teal: #00695C;
+  --bg-light: #F3F5F7;
+  --text-dark: #1F2937;
+  --text-gray: #6B7280;
+  --danger-red: #EF4444;
+  --success-green: #22C55E;
+  --white: #FFFFFF;
+  --border-color: #E5E7EB;
+  
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+  
+  /* UPDATED: Larger Base Font */
+  --font-main: 'Inter', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body { 
+  font-family: var(--font-main); 
+  background-color: var(--bg-light); 
+  color: var(--text-dark); 
+  font-size: 16px; /* Increased base size from default */
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased; 
+}
+
+/* --- Global Component Updates --- */
+
+.card {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  padding: 2rem; /* Increased from 1.5rem */
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 2rem;
+  width: 100%;
+}
+
+/* Bigger Buttons */
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+.btn-primary, .btn-submit, .btn-unlock {
+  font-size: 1rem; /* Increased */
+  padding: 0.85rem 1.5rem; /* Increased padding */
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+/* Bigger Inputs */
+input, select {
+  padding: 0.85rem 1rem; /* Taller inputs */
+  border-radius: 8px;
+  font-size: 1rem; /* Readable text */
+  border: 1px solid var(--border-color);
+  outline: none;
+}
+
+/* Spacious Tables */
+.table-container { width: 100%; overflow-x: auto; }
+.custom-table { width: 100%; border-collapse: collapse; min-width: 800px; }
+
+.custom-table th {
+  text-align: left;
+  padding: 1.2rem; /* More breathing room */
+  font-size: 0.9rem; /* Larger header text */
+  color: #4B5563;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+  background-color: #F9FAFB;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.custom-table td {
+  padding: 1.2rem; /* More breathing room */
+  border-bottom: 1px solid var(--border-color);
+  font-size: 1rem; /* Larger body text */
+  vertical-align: middle;
+  color: #1F2937;
+}
+
+/* Badges */
+.badge {
+  padding: 0.5rem 1.2rem; /* Larger badges */
+  border-radius: 99px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: inline-block;
+  text-align: center;
+}

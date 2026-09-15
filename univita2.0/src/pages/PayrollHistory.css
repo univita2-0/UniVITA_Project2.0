@@ -1,0 +1,200 @@
+.payroll-history-container {
+    padding: 10px;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.history-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    padding: 24px;
+    border: 1px solid #e5e7eb;
+}
+
+.history-actions-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.search-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    align-items: center;
+}
+
+.search-icon {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    width: 20px;
+    height: 20px;
+}
+
+.history-search {
+    width: 100%;
+    height: 40px;
+    padding: 0 10px 0 48px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.right-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.filter-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.filter-icon {
+    position: absolute;
+    left: 10px;
+    color: #6b7280;
+    pointer-events: none;
+}
+
+.month-filter-dropdown {
+    height: 40px;
+    padding: 0 34px 0 34px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background-color: white;
+    font-size: 14px;
+    color: #374151;
+    cursor: pointer;
+    outline: none;
+    min-width: 150px;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+    box-sizing: border-box;
+}
+
+.print-btn {
+    background: #4f46e5;
+    color: white;
+    border: none;
+    height: 40px;
+    padding: 0 18px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.history-table-wrapper {
+    overflow-x: auto;
+    border: 1px solid #f3f4f6;
+    border-radius: 8px;
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.history-table th {
+    background-color: #f9fafb;
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+    border-bottom: 2px solid #f3f4f6;
+}
+
+.history-table td {
+    padding: 16px;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.net-pay-text {
+    color: #059669;
+    font-weight: 700;
+}
+
+.status-pill.paid {
+    background-color: #d1fae5;
+    color: #065f46;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+}
+
+/* Back button styling (used in other payroll pages, but kept here) */
+.back-btn-payroll {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    color: #4f46e5;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 1rem;
+    padding: 0;
+}
+
+.back-btn-payroll:hover {
+    text-decoration: underline;
+}
+
+/* --- PRINT OPTIMIZATION --- */
+@media print {
+    /* Hide everything except the main history card */
+    body * {
+        visibility: hidden;
+    }
+    
+    .history-card, .history-card * {
+        visibility: visible;
+    }
+
+    /* Move the card to the top-left of the paper */
+    .history-card {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        box-shadow: none;
+        border: none;
+        padding: 0;
+    }
+
+    /* Hide UI controls during print */
+    .history-actions-row, 
+    .back-btn, 
+    .print-btn, 
+    .right-actions,
+    .search-wrapper,
+    .back-btn-payroll {
+        display: none !important;
+    }
+
+    /* Force table header colors to show in PDF */
+    .history-table th {
+        background-color: #f9fafb !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}

@@ -1,0 +1,96 @@
+/* src/pages/ManageScanners.css */
+
+.expert-container { background: #F8FAFC; padding: 2rem; min-height: 100vh; font-family: 'Inter', system-ui, sans-serif; }
+.expert-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+.expert-title-group { display: flex; align-items: center; gap: 1rem; }
+.expert-title { font-size: 1.6rem; font-weight: 700; color: #0F172A; margin: 0 0 0.2rem 0; letter-spacing: -0.02em; }
+.expert-subtitle { color: #64748B; font-size: 0.9rem; margin: 0; }
+
+/* Buttons */
+.expert-btn-primary, .expert-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.65rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease; border: none; }
+.expert-btn-primary { background: #0F172A; color: #FFFFFF; }
+.expert-btn-primary:hover:not(:disabled) { background: #334155; }
+.expert-btn-primary.bg-red { background: #EF4444; }
+.expert-btn-primary.bg-red:hover:not(:disabled) { background: #DC2626; }
+.expert-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.expert-btn-secondary { background: #FFFFFF; color: #334155; border: 1px solid #CBD5E1; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+.expert-btn-secondary:hover:not(:disabled) { background: #F1F5F9; color: #0F172A; }
+.expert-btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Search Card */
+.expert-search-card { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+.expert-search-row { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.expert-search-input-group { display: flex; align-items: center; gap: 0.75rem; flex: 1; min-width: 250px; background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 8px; padding: 0 1rem; transition: all 0.2s ease; height: 44px; box-sizing: border-box;}
+.expert-search-input-group:focus-within { border-color: #0D9488; background: #FFFFFF; box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1); }
+.expert-clean-input { border: none; background: transparent; padding: 0.75rem 0; font-size: 0.95rem; color: #0F172A; width: 100%; outline: none; font-family: inherit; }
+.expert-clean-input.border { border: 1px solid #CBD5E1; padding: 0.85rem 1rem; border-radius: 8px; background: #FFFFFF; transition: border-color 0.2s; box-sizing: border-box;}
+.expert-clean-input.border:focus { border-color: #0D9488; box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1); }
+.cursor-pointer { cursor: pointer; }
+
+/* Stats Badge */
+.bt-stats-badge { font-size: 0.85rem; color: #475569; background: #F1F5F9; padding: 0.5rem 1rem; border-radius: 20px; font-weight: 500; border: 1px solid #E2E8F0;}
+.bt-stats-badge strong { color: #0F172A; font-weight: 700; margin-left: 0.25rem;}
+
+/* Main Card & Table */
+.expert-card { background: #FFFFFF; border-radius: 12px; border: 1px solid #E2E8F0; box-shadow: 0 1px 2px rgba(0,0,0,0.02); overflow: hidden; }
+.expert-table-wrapper { overflow-x: auto; width: 100%; }
+.expert-table { width: 100%; border-collapse: collapse; text-align: left; }
+.expert-table th { background: #F8FAFC; padding: 1.15rem 1.5rem; font-size: 0.75rem; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #E2E8F0; white-space: nowrap; }
+.expert-table td { padding: 1.15rem 1.5rem; font-size: 0.95rem; color: #334155; border-bottom: 1px solid #F1F5F9; vertical-align: middle; }
+.expert-table tr:hover td { background: #F8FAFC; }
+.expert-table tr:last-child td { border-bottom: none; }
+
+/* Custom Badge */
+.ms-floor-badge {
+  display: inline-flex;
+  align-items: center;
+  background: #F0FDFA;
+  color: #0D9488;
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  border: 1px solid #CCFBF1;
+}
+
+/* Utilities */
+.font-medium { font-weight: 500; }
+.text-dark { color: #0F172A; }
+.text-muted { color: #64748B; }
+.text-danger { color: #EF4444; }
+.text-right { text-align: right; }
+
+/* Actions */
+.expert-action-group { display: flex; gap: 0.5rem; }
+.expert-action-group.right { justify-content: flex-end; }
+.expert-btn-icon { background: transparent; border: 1px solid transparent; cursor: pointer; padding: 0.4rem; border-radius: 6px; transition: all 0.2s ease; display: inline-flex; align-items: center; justify-content: center; color: #475569; }
+.expert-btn-icon:hover { background: #F1F5F9; border-color: #E2E8F0; color: #0F172A; }
+.expert-btn-icon.danger:hover { background: #FEF2F2; color: #DC2626; border-color: #FECACA; }
+
+/* Pagination */
+.expert-pagination { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; background: #F8FAFC; border-top: 1px solid #E2E8F0; flex-wrap: wrap; gap: 1rem; }
+.expert-page-info { font-size: 0.85rem; color: #64748B; font-weight: 500; }
+.expert-page-controls { display: flex; align-items: center; gap: 1rem; }
+.expert-page-btn { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.4rem 0.75rem; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; font-size: 0.85rem; font-weight: 600; color: #334155; cursor: pointer; transition: all 0.2s; }
+.expert-page-btn:hover:not(:disabled) { background: #F1F5F9; color: #0F172A; }
+.expert-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.expert-page-current { font-size: 0.85rem; font-weight: 700; color: #0F172A; }
+
+/* States */
+.expert-empty { padding: 5rem 2rem; text-align: center; color: #64748B; font-weight: 500; font-size: 0.95rem; display: flex; flex-direction: column; align-items: center;}
+.expert-empty p { font-size: 1.1rem; color: #0F172A; font-weight: 600; margin: 0 0 0.5rem 0;}
+.expert-empty span { font-size: 0.9rem; }
+.expert-loading { padding: 4rem 2rem; text-align: center; color: #0D9488; font-weight: 600; }
+
+/* Modal Form Specifics */
+.bt-form-group { display: flex; flex-direction: column; gap: 0.4rem; }
+.bt-form-group label { font-size: 0.8rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; }
+
+@media (max-width: 768px) {
+  .expert-container { padding: 1.5rem; }
+  .expert-header { flex-direction: column; align-items: stretch; }
+  .expert-search-row { flex-direction: column; align-items: stretch; }
+  .expert-search-input-group { max-width: 100% !important; }
+  .bt-stats-badge { align-self: flex-start; }
+  .expert-pagination { justify-content: center; }
+}

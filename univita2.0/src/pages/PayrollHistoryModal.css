@@ -1,0 +1,22 @@
+.history-modal {
+  width: 600px;
+  max-width: 95%;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.history-table th,
+.history-table td {
+  padding: 10px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.history-table th {
+  background: #f8fafc;
+  font-size: 0.85rem;
+  color: #475569;
+}

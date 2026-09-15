@@ -1,0 +1,469 @@
+/* ==========================================
+   PayrollMain.css – Complete & Responsive
+   ========================================== */
+
+/* ----- Base Container ----- */
+.payroll-main-card {
+  min-height: 80vh;
+  position: relative;
+}
+
+/* ----- Month/Year Navigation Header ----- */
+.pm-month-header {
+  background: #F3F4F6;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.pm-nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.date-display-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #ffffff;
+  padding: 8px 20px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  margin: 0 16px;
+}
+
+.date-text {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #1f2937;
+  user-select: none;
+}
+
+.nav-arrow-btn {
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.nav-arrow-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+/* ----- Summary Cards ----- */
+.pm-summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.summary-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.2rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+.summary-card .icon {
+  color: #6366f1;
+  flex-shrink: 0;
+}
+
+.summary-card .icon.green { color: #10b981; }
+.summary-card .icon.red   { color: #ef4444; }
+.summary-card .icon.blue  { color: #3b82f6; }
+
+.summary-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 2px;
+}
+
+.summary-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* ----- Action Bar ----- */
+.pm-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.pm-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.flex-gap-2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ----- Action Buttons (smaller & responsive) ----- */
+.btn-monthly-payroll,
+.btn-view-history,
+.btn-export {
+  height: 34px;                  /* was 40px */
+  padding: 0 0.9rem;             /* narrower horizontal padding */
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.78rem;            /* slightly smaller text */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  white-space: nowrap;
+}
+
+.btn-monthly-payroll { background: #0d9488; color: white; }
+.btn-monthly-payroll:hover { background: #0f766e; }
+
+.btn-view-history { background: #10B981; color: white; }
+.btn-view-history:hover { background: #059669; }
+
+.btn-export { background: #6366f1; color: white; }
+.btn-export:hover { background: #4f46e5; }
+
+/* ----- Search ----- */
+.pm-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pm-search .search-input {
+  width: 250px;
+  height: 40px;
+  padding: 0 12px 0 40px;
+  border: 1px solid #D1D5DB;
+  border-radius: 8px;
+  outline: none;
+  font-size: 0.85rem;
+  transition: border-color 0.2s;
+}
+
+.pm-search .search-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.1);
+}
+
+.pm-search .search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9CA3AF;
+  pointer-events: none;
+}
+
+/* ----- Payroll Table ----- */
+.table-container {
+  overflow-x: auto;
+}
+
+.payroll-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.payroll-table th {
+  background-color: #F9FAFB;
+  color: #374151;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 14px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.payroll-table td {
+  vertical-align: top;
+  padding: 12px;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 0.9rem;
+  color: #374151;
+}
+
+.payroll-table tr:last-child td {
+  border-bottom: none;
+}
+
+.payroll-table tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+.emp-name {
+  font-weight: 600;
+  color: #111827;
+}
+
+.emp-id {
+  font-size: 0.7rem;
+  color: #6b7280;
+  font-weight: normal;
+}
+
+.net-pay {
+  color: #10b981 !important;
+  font-weight: 700;
+}
+
+.empty-row {
+  text-align: center;
+  padding: 3rem !important;
+  color: #6B7280;
+  font-size: 0.95rem;
+  background-color: #F9FAFB;
+}
+
+/* ----- Allowance & Deduction Inputs (original) ----- */
+.allowance-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.allowance-inputs input {
+  width: 90px;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.deduction-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deduction-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.deduction-row span {
+  font-size: 0.8rem;
+  color: #374151;
+  min-width: 70px;
+}
+
+.deduction-row input {
+  width: 80px;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  text-align: right;
+  margin-left: auto;
+}
+
+/* ----- Action Buttons Inside Table ----- */
+.action-buttons-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-payslip {
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  color: #4b5563;
+}
+
+.btn-payslip:hover {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.btn-finalize {
+  background-color: #4f46e5;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-finalize:hover {
+  background-color: #4338ca;
+}
+
+/* ----- Payslip Specific (inside FormalModal) ----- */
+.payslip-body {
+  padding: 16px 0;
+}
+
+.payslip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 0.95rem;
+  padding: 6px 0;
+}
+
+.payslip-row span:first-child {
+  color: #4b5563;
+  font-weight: 500;
+}
+
+.payslip-row span:last-child {
+  font-weight: 600;
+  color: #111827;
+}
+
+.payslip-row.net-row {
+  font-size: 1.1rem;
+  font-weight: 700;
+  border-top: 2px solid #e5e7eb;
+  padding-top: 12px;
+  margin-top: 6px;
+}
+
+.payslip-row.net-row span:last-child {
+  color: #10b981;
+}
+
+/* Editable number inputs inside the payslip modal */
+.payslip-edit-input {
+  width: 100px;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 12px 0;
+}
+
+.btn-print {
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.btn-print:hover {
+  background: #047857;
+}
+
+/* ----- Responsive ----- */
+@media (max-width: 1024px) {
+  .pm-summary-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .pm-actions-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .flex-gap-2 {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .btn-monthly-payroll,
+  .btn-view-history,
+  .btn-export {
+    font-size: 0.72rem;
+    padding: 0 0.7rem;
+    height: 30px;
+  }
+
+  .pm-search .search-input {
+    width: 200px;
+  }
+
+  .allowance-inputs input,
+  .deduction-row input {
+    width: 70px;
+  }
+}
+
+@media (max-width: 480px) {
+  .pm-summary-row {
+    grid-template-columns: 1fr;
+  }
+
+  .flex-gap-2 {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .btn-monthly-payroll,
+  .btn-view-history,
+  .btn-export {
+    font-size: 0.7rem;
+    padding: 0 0.6rem;
+    height: 28px;
+    gap: 3px;
+  }
+
+  .pm-search .search-input {
+    width: 140px;
+  }
+
+  .allowance-inputs input,
+  .deduction-row input {
+    width: 60px;
+  }
+}
