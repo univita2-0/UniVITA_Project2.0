@@ -161,28 +161,26 @@ function AppContent() {
 
   useEffect(() => {
     const registerPushToken = async () => {
-      if (!userId) return;
-      try {
-        if (Constants.executionEnvironment === 'storeClient') {
-          return;
-        }
+    try {
+      const authToken = await AsyncStorage.getItem('auth_token');
+      if (!authToken) return; // Stop if user isn't logged in
 
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') return;
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId || Constants?.easConfig?.projectId;
+      const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
 
-        const projectId = Constants?.expoConfig?.extra?.eas?.projectId || Constants?.easConfig?.projectId;
-        const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : {});
-        
-        if (tokenData && tokenData.data) {
-          const authToken = await AsyncStorage.getItem('auth_token');
-          await axios.put(`${API_URL}/users/save-push-token`, { token: tokenData.data }, {
-            headers: { Authorization: `Bearer ${authToken}` }
-          });
+      // 🔴 Replace your old axios call with this exact route and PUT method:
+      await axios.put(`${API_URL}/users/save-push-token`, 
+        { token: tokenData.data }, 
+        {
+          headers: { Authorization: `Bearer ${authToken}` }
         }
-      } catch (error) { 
-        console.error("Push token error:", error); 
-      }
-    };
+      );
+      
+    } catch (error) {
+      // Changed to console.log so it doesn't throw a red screen for network timeouts
+      console.log("Push token error:", error.message); 
+    }
+  };
     registerPushToken();
   }, [userId]);
 
