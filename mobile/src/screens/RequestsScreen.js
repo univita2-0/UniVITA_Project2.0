@@ -2,7 +2,7 @@
 import React, { useState, useContext } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar, Platform
+  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
@@ -14,19 +14,38 @@ import { submitLeaveRequest, requestAttendanceCorrection, API_URL, submitSchedul
 import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft } from 'lucide-react-native';
 
 const formatTo12Hour = (timeStr) => {
-  if (!timeStr) return '';
-  const parts = timeStr.substring(0, 5).split(':');
+  if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr === 'null' || timeStr == null) return '';
+  let cleanStr = String(timeStr).trim();
+  if (cleanStr.includes('T')) {
+    const tParts = cleanStr.split('T');
+    cleanStr = tParts.length > 1 ? tParts[1] : tParts[0];
+    cleanStr = cleanStr.split('Z')[0].split('+')[0];
+  }
+  const clean = cleanStr.split('.')[0].replace(',', ':');
+  const parts = clean.split(':');
+  if (parts.length < 2) return timeStr;
+  
   let hours = parseInt(parts[0], 10);
-  const minutes = parts[1] || '00';
+  let minutes = parseInt(parts[1], 10);
+  if (isNaN(hours)) return timeStr;
+  if (isNaN(minutes)) minutes = 0;
+  
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12;
   hours = hours ? hours : 12;
-  return `${hours}:${minutes} ${ampm}`;
+  return `${hours}:${String(minutes).padStart(2, '0')} ${ampm}`;
 };
 
 const formatTimeForDB = (timeStr) => {
   if (!timeStr) return null;
-  const parts = timeStr.split(':');
+  let cleanStr = String(timeStr).trim();
+  if (cleanStr.includes('T')) {
+    const tParts = cleanStr.split('T');
+    cleanStr = tParts.length > 1 ? tParts[1] : tParts[0];
+    cleanStr = cleanStr.split('Z')[0].split('+')[0];
+  }
+  const cleaned = cleanStr.replace(',', ':').split('.')[0];
+  const parts = cleaned.split(':');
   if (parts.length >= 2) {
     const h = parts[0].padStart(2, '0');
     const m = parts[1].substring(0, 2).padStart(2, '0');
@@ -161,7 +180,7 @@ export default function RequestsScreen({ navigation, route }) {
   const pickImage = async (setFn) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Permission needed', 'Allow access to photos.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.7 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.7 });
     if (!result.canceled) setFn(result.assets[0].uri);
   };
 
@@ -208,23 +227,21 @@ export default function RequestsScreen({ navigation, route }) {
 
     setSubmittingLeave(true);
     try {
-      const formDataBase = new FormData();
-      formDataBase.append('user_id', String(userId || ''));
-      formDataBase.append('type', String(leaveType));
-      formDataBase.append('reason', String(leaveReason.trim()));
-      
-      if (leaveImage) {
-        formDataBase.append('image', { 
-          uri: Platform.OS === 'ios' ? leaveImage.replace('file://', '') : leaveImage, 
-          name: 'leave.jpg', 
-          type: 'image/jpeg' 
-        });
-      }
-
+      // Build FormData uniquely per date to avoid object loss in loops
       const submitForDate = async (date) => {
         const formData = new FormData();
-        for (let pair of formDataBase._parts) formData.append(pair[0], pair[1]);
+        formData.append('user_id', String(userId || ''));
+        formData.append('type', String(leaveType));
+        formData.append('reason', String(leaveReason.trim()));
         formData.append('request_date', String(date));
+        
+        if (leaveImage) {
+          formData.append('image', { 
+            uri: leaveImage, // Do NOT strip file://
+            name: 'leave.jpg', 
+            type: 'image/jpeg' 
+          });
+        }
         return await submitLeaveRequest(formData);
       };
 
@@ -239,8 +256,11 @@ export default function RequestsScreen({ navigation, route }) {
       let failMessage = '';
       for (const date of dateList) {
         const res = await submitForDate(date);
-        if (res.success) successCount++;
-        else failMessage = res.message || `Failed for ${date}`;
+        if (res && res.success) {
+          successCount++;
+        } else {
+          failMessage = res?.message || `Failed for ${date}`;
+        }
       }
 
       if (successCount === dateList.length) {
@@ -250,6 +270,7 @@ export default function RequestsScreen({ navigation, route }) {
         Alert.alert('Partial Success', `${successCount}/${dateList.length} submitted. ${failMessage}`);
       }
     } catch (err) {
+      console.error("Leave Submission Error:", err);
       Alert.alert('Error', 'Network error. Please try again.');
     } finally {
       setSubmittingLeave(false);
@@ -293,6 +314,8 @@ export default function RequestsScreen({ navigation, route }) {
     setSubmittingAppeal(true);
     try {
       const userId = await AsyncStorage.getItem('user_id');
+      const token = await AsyncStorage.getItem('auth_token');
+      
       const formData = new FormData();
       formData.append('user_id', String(userId || ''));
       formData.append('date', String(appealDate));
@@ -303,27 +326,39 @@ export default function RequestsScreen({ navigation, route }) {
       
       if (appealImage) {
         formData.append('image', { 
-          uri: Platform.OS === 'ios' ? appealImage.replace('file://', '') : appealImage, 
+          uri: appealImage, // Do NOT strip file://
           name: 'appeal.jpg', 
           type: 'image/jpeg' 
         });
       }
       
-      const token = await AsyncStorage.getItem('auth_token');
       const response = await fetch(`${API_URL}/attendance-appeals`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token || ''}` },
+        headers: { 
+          'Authorization': `Bearer ${token || ''}`,
+        },
         body: formData,
       });
-      const result = await response.json();
-      if (result.success) {
+
+      const contentType = response.headers.get("content-type");
+      let result;
+      if (contentType && contentType.includes("application/json")) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        console.error("Non-JSON response received:", text.substring(0, 300));
+        throw new Error(`Server returned HTML/Text (Status ${response.status})`);
+      }
+
+      if (response.ok && result.success) {
         Alert.alert('Appeal Submitted', 'Your appeal has been sent.');
         setAppealDate(''); setAppealTimeIn(''); setAppealTimeOut(''); setAppealReason(''); setAppealImage(null);
       } else {
-        Alert.alert('Error', result.error || result.message || 'Failed.');
+        Alert.alert('Error', result.error || result.message || `Failed (Status ${response.status}).`);
       }
     } catch (error) {
-      Alert.alert('Error', 'Network error.');
+      console.error("Appeal submission error details:", error);
+      Alert.alert('Submission Error', error.message || 'Network error.');
     } finally {
       setSubmittingAppeal(false);
     }
@@ -345,13 +380,9 @@ export default function RequestsScreen({ navigation, route }) {
     setSubmittingCorrection(true);
     try {
       let employeeId = await AsyncStorage.getItem('employee_id');
-      let userId = await AsyncStorage.getItem('user_id');
       const userStr = await AsyncStorage.getItem('user');
-      
-      if (userStr) {
-        const userObj = JSON.parse(userStr);
-        if (!employeeId) employeeId = userObj.employee_id;
-        if (!userId) userId = userObj.id;
+      if (userStr && !employeeId) {
+        employeeId = JSON.parse(userStr).employee_id;
       }
 
       if (!employeeId) {
@@ -360,47 +391,34 @@ export default function RequestsScreen({ navigation, route }) {
         return;
       }
 
-      const formData = new FormData();
       const dbType = correctionType === 'early_out' ? 'clock_out' : correctionType;
       const finalReason = correctionType === 'early_out' ? `[Early Departure] ${correctionReason.trim()}` : correctionReason.trim();
       const formattedTime = formatTimeForDB(correctionTime);
 
-      formData.append('employee_id', String(employeeId));
-      formData.append('user_id', String(userId || ''));
+      const payload = {
+        employee_id: employeeId,
+        date: correctionDate,
+        type: dbType,
+        time: formattedTime,
+        reason: finalReason,
+        selfie: { 
+          uri: selfieUri, // Do NOT strip file://
+          name: 'correction.jpg', 
+          type: 'image/jpeg' 
+        }
+      };
       
-      // CRITICAL FIX: Appending all variations of Date and Time variables 
-      // to guarantee the backend finds exactly what it's looking for.
-      formData.append('date', String(correctionDate));
-      formData.append('attendance_date', String(correctionDate));
-      
-      formData.append('type', String(dbType));
-      formData.append('reason', String(finalReason));
-      formData.append('time', String(formattedTime));
-      
-      if (dbType === 'clock_in') {
-        formData.append('requested_clock_in', String(formattedTime));
-        formData.append('time_in', String(formattedTime));
-      } else {
-        formData.append('requested_clock_out', String(formattedTime));
-        formData.append('time_out', String(formattedTime));
-      }
-      
-      formData.append('selfie', { 
-        uri: Platform.OS === 'ios' ? selfieUri.replace('file://', '') : selfieUri, 
-        name: 'correction.jpg', 
-        type: 'image/jpeg' 
-      });
-      
-      const res = await requestAttendanceCorrection(formData);
-      if (res.success) {
+      const res = await requestAttendanceCorrection(payload);
+      if (res && res.success) {
         Alert.alert('Request Sent', 'Correction request submitted for approval.');
         setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionSelfie(null); setCorrectionType('clock_in');
         navigation.setParams({ prefillTab: undefined, prefillDate: undefined, prefillType: undefined, prefillTime: undefined, prefillReason: undefined });
         setActiveTab('leave');
       } else {
-        Alert.alert('Error', res.message || 'Failed.');
+        Alert.alert('Error', res?.message || 'Failed to submit correction.');
       }
     } catch (err) { 
+      console.error("Correction submission error:", err);
       Alert.alert('Error', 'Network error.'); 
     } finally { 
       setSubmittingCorrection(false); 
@@ -425,7 +443,7 @@ export default function RequestsScreen({ navigation, route }) {
       
       if (overtimeImage) {
         formData.append('attachment', { 
-          uri: Platform.OS === 'ios' ? overtimeImage.replace('file://', '') : overtimeImage, 
+          uri: overtimeImage, // Do NOT strip file://
           name: 'overtime.jpg', 
           type: 'image/jpeg' 
         });
@@ -433,7 +451,7 @@ export default function RequestsScreen({ navigation, route }) {
       
       const response = await fetch(`${API_URL}/overtime-requests`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` }, // Removed Content-Type, letting fetch handle boundary
         body: formData,
       });
       const result = await response.json();
@@ -444,6 +462,7 @@ export default function RequestsScreen({ navigation, route }) {
         Alert.alert('Error', result.message || 'Submission failed.');
       }
     } catch (err) {
+      console.error("Submit overtime error:", err);
       Alert.alert('Error', 'Network error.');
     } finally {
       setSubmittingOvertime(false);
@@ -769,7 +788,8 @@ export default function RequestsScreen({ navigation, route }) {
             mode="time"
             is24Hour={false}
             display="default"
-            onChange={handleTimeChange}
+            onValueChange={handleTimeChange}
+            onDismiss={() => setShowTimePicker(false)}
           />
         )}
 

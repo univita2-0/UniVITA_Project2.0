@@ -49,8 +49,6 @@ export default function LoginScreen({ navigation }) {
     ]).start();
   };
 
-  // --- REUSABLE TOAST COMPONENT ---
-  // We extract this so we can render it inside the Modals to bypass the dark overlay
   const renderToast = () => (
     <Animated.View style={[styles.toastContainer, { 
         transform: [{ translateY: toastAnim }],
@@ -77,7 +75,6 @@ export default function LoginScreen({ navigation }) {
 
   const registerDeviceForPushNotifications = async (authToken) => {
     try {
-      // Safety check in case Notifications import remains commented out
       if (typeof Notifications !== 'undefined') {
         const { status } = await Notifications.requestPermissionsAsync();
         if (status !== 'granted') return;
@@ -220,7 +217,7 @@ export default function LoginScreen({ navigation }) {
     try {
       const result = await forgotPassword(resetEmail.trim().toLowerCase());
       if (result.success) {
-        setResetStep('otp');
+        setResetStep('reset-password'); // Unified step enforces explicit verification
         startResendTimer(setResetTimer);
         showToast(`An OTP has been sent`, 'success');
       } else {
@@ -233,15 +230,11 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const handleVerifyResetOtp = () => {
+  const handleResetPassword = async () => {
     if (!resetOtp || resetOtp.length !== 6) {
-      showToast('Please enter the 6-digit code', 'error');
+      showToast('Please enter the 6-digit OTP code', 'error');
       return;
     }
-    setResetStep('password');
-  };
-
-  const handleResetPassword = async () => {
     if (!resetNewPassword || resetNewPassword.length < 6) {
       showToast('Password must be at least 6 characters', 'error');
       return;
@@ -257,6 +250,7 @@ export default function LoginScreen({ navigation }) {
         showToast('Password reset successfully!', 'success');
         closeForgotModal();
       } else {
+        // Backend actively blocks execution if OTP is invalid
         showToast(result.message || 'Password reset failed', 'error');
       }
     } catch (err) {
@@ -298,7 +292,6 @@ export default function LoginScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#060913" />
 
-      {/* Render toast here ONLY if no modals are open */}
       {!(showOtpModal || showForgotModal) && renderToast()}
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
@@ -364,7 +357,6 @@ export default function LoginScreen({ navigation }) {
       {/* Login OTP Modal */}
       <Modal visible={showOtpModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          {/* Render toast INSIDE the modal overlay so it floats above the dark background */}
           {renderToast()}
           
           <View style={styles.modalCard}>
@@ -409,7 +401,6 @@ export default function LoginScreen({ navigation }) {
       {/* Forgot Password Modal */}
       <Modal visible={showForgotModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          {/* Render toast INSIDE the modal overlay so it floats above the dark background */}
           {renderToast()}
 
           <View style={styles.modalCard}>
@@ -433,9 +424,10 @@ export default function LoginScreen({ navigation }) {
               </>
             )}
 
-            {resetStep === 'otp' && (
+            {/* Combined Step strictly forces server verification */}
+            {resetStep === 'reset-password' && (
               <>
-                <Text style={styles.modalSubtitle}>Enter the 6‑digit code sent to your email.</Text>
+                <Text style={styles.modalSubtitle}>Enter the 6‑digit code sent to your email alongside your new password.</Text>
                 <TextInput
                   style={styles.otpInput}
                   placeholder="000000"
@@ -446,24 +438,6 @@ export default function LoginScreen({ navigation }) {
                   onChangeText={setResetOtp}
                   textAlign="center"
                 />
-                <TouchableOpacity style={styles.modalButton} onPress={handleVerifyResetOtp} disabled={resetLoading} activeOpacity={0.8}>
-                  <Text style={styles.modalButtonText}>Verify Code</Text>
-                </TouchableOpacity>
-                <View style={styles.modalFooterActions}>
-                  {resetTimer > 0 ? (
-                    <Text style={styles.timerText}>Resend in {resetTimer}s</Text>
-                  ) : (
-                    <TouchableOpacity onPress={resendResetOtp} activeOpacity={0.8}>
-                      <Text style={styles.resendLink}>Resend code</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </>
-            )}
-
-            {resetStep === 'password' && (
-              <>
-                <Text style={styles.modalSubtitle}>Create a new secure password.</Text>
                 <TextInput
                   style={styles.resetInput}
                   secureTextEntry
@@ -481,8 +455,18 @@ export default function LoginScreen({ navigation }) {
                   onChangeText={setResetConfirmPassword}
                 />
                 <TouchableOpacity style={styles.modalButton} onPress={handleResetPassword} disabled={resetLoading} activeOpacity={0.8}>
-                  <Text style={styles.modalButtonText}>{resetLoading ? 'Updating...' : 'Update Password'}</Text>
+                  <Text style={styles.modalButtonText}>{resetLoading ? 'Updating System...' : 'Update Password'}</Text>
                 </TouchableOpacity>
+                
+                <View style={styles.modalFooterActions}>
+                  {resetTimer > 0 ? (
+                    <Text style={styles.timerText}>Resend in {resetTimer}s</Text>
+                  ) : (
+                    <TouchableOpacity onPress={resendResetOtp} activeOpacity={0.8}>
+                      <Text style={styles.resendLink}>Resend code</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </>
             )}
 

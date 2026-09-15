@@ -53,7 +53,6 @@ const ManageRequest = () => {
   const [editTime, setEditTime] = useState('');
   const [rescheduleReason, setRescheduleReason] = useState('');
   const [isPastAppointment, setIsPastAppointment] = useState(false);
-  const [updating, setUpdating] = useState(false);
 
   const [historyPage, setHistoryPage] = useState(1);
   const [pendingPage, setPendingPage] = useState(1);
@@ -118,12 +117,20 @@ const ManageRequest = () => {
     setShowRejectModal(true);
   };
 
+  // -------------------------------------------------------------
+  // OPTIMISTIC UPDATES: Approve & Reject (Instant UI Feedback)
+  // -------------------------------------------------------------
   const handleApprove = async (req) => {
     const currentAdminId = localStorage.getItem('user_id');
     if (!currentAdminId) return toast.error("Session Error: Please logout and login again.");
     
-    setUpdating(true);
+    // 1. Optimistic UI Update: Instantly remove from pending list and close modal
+    setPendingData(prev => prev.filter(item => item.id !== req.id));
+    setShowPendingDetailsModal(false);
+    toast.info('Processing approval and notifying visitor...', { autoClose: 2500 });
+
     try {
+      // 2. Background API Call
       await axios.put(`${API_BASE}/appointments/${req.id}/status`, {
         status: 'APPROVED',
         adminNotes: '',
@@ -131,15 +138,14 @@ const ManageRequest = () => {
         visitorName: `${req.first_name || ''} ${req.last_name || ''}`,
         adminId: currentAdminId
       }, getAuthHeaders());
+      
+      // 3. Success Notification & Sync
       toast.success('Visit request approved successfully!');
-      setShowPendingDetailsModal(false);
-      fetchPending();
-      fetchHistory();
+      fetchHistory(); // Refresh history tab in the background
     } catch (err) {
       console.error(err);
       toast.error('Failed to approve request.');
-    } finally {
-      setUpdating(false);
+      fetchPending(); // Restore pending data if it failed
     }
   };
 
@@ -148,27 +154,34 @@ const ManageRequest = () => {
     const currentAdminId = localStorage.getItem('user_id');
     if (!currentAdminId) return toast.error("Session Error: Please logout and login again.");
     
-    setUpdating(true);
+    const targetReq = selectedRequest;
+    const currentReason = rejectionReason;
+
+    // 1. Optimistic UI Update: Instantly remove and close all modals
+    setPendingData(prev => prev.filter(item => item.id !== targetReq.id));
+    setShowRejectModal(false);
+    setShowPendingDetailsModal(false);
+    setSelectedRequest(null);
+    setRejectionReason('');
+    toast.info('Processing rejection and notifying visitor...', { autoClose: 2500 });
+
     try {
-      await axios.put(`${API_BASE}/appointments/${selectedRequest.id}/status`, {
+      // 2. Background API Call
+      await axios.put(`${API_BASE}/appointments/${targetReq.id}/status`, {
         status: 'REJECTED',
-        adminNotes: rejectionReason,
-        visitorEmail: selectedRequest.email,
-        visitorName: `${selectedRequest.first_name || ''} ${selectedRequest.last_name || ''}`,
+        adminNotes: currentReason,
+        visitorEmail: targetReq.email,
+        visitorName: `${targetReq.first_name || ''} ${targetReq.last_name || ''}`,
         adminId: currentAdminId
       }, getAuthHeaders());
+      
+      // 3. Success Notification & Sync
       toast.success('Visit request rejected successfully.');
-      setShowRejectModal(false);
-      setShowPendingDetailsModal(false);
-      setSelectedRequest(null);
-      setRejectionReason('');
-      fetchPending();
       fetchHistory();
     } catch (err) {
       console.error(err);
       toast.error('Failed to reject request.');
-    } finally {
-      setUpdating(false);
+      fetchPending(); // Restore pending data if it failed
     }
   };
 
@@ -196,21 +209,25 @@ const ManageRequest = () => {
 
   const handleHistoryUpdate = async () => {
     if (!editDate || !editTime) return toast.warning('Please provide both date and time.');
-    setUpdating(true);
+    
+    const targetReq = selectedRequest;
+    
+    // Instant modal close for better UX
+    setShowEditScheduleModal(false);
+    toast.info('Updating schedule and notifying visitor...', { autoClose: 2500 });
+
     try {
-      await axios.put(`${API_BASE}/appointments/${selectedRequest.id}`, {
+      await axios.put(`${API_BASE}/appointments/${targetReq.id}`, {
         visit_date: editDate,
         visit_time: editTime,
         admin_notes: rescheduleReason
       }, getAuthHeaders());
-      toast.success('Appointment schedule updated and visitor notified via email.');
-      setShowEditScheduleModal(false);
+      
+      toast.success('Appointment schedule updated!');
       fetchHistory();
     } catch (err) {
       console.error(err);
       toast.error(err.response?.data?.error || 'Failed to update schedule.');
-    } finally {
-      setUpdating(false);
     }
   };
 
@@ -401,8 +418,8 @@ const ManageRequest = () => {
         <>
           <button className="vm-btn-secondary" onClick={() => setShowPendingDetailsModal(false)}>Close</button>
           <button className="vm-btn-primary bg-red" onClick={() => { setShowPendingDetailsModal(false); openRejectModal(selectedRequest); }}>Reject</button>
-          <button className="vm-btn-primary" onClick={() => handleApprove(selectedRequest)} disabled={updating}>
-            {updating ? 'Processing...' : 'Approve Request'}
+          <button className="vm-btn-primary" onClick={() => handleApprove(selectedRequest)}>
+            Approve Request
           </button>
         </>
       }>
@@ -526,8 +543,8 @@ const ManageRequest = () => {
         <>
           <button className="vm-btn-secondary" onClick={() => setShowEditScheduleModal(false)}>Cancel</button>
           {!isPastAppointment && (
-            <button className="vm-btn-primary" onClick={handleHistoryUpdate} disabled={updating}>
-              {updating ? 'Saving & Notifying...' : 'Save & Notify Visitor'}
+            <button className="vm-btn-primary" onClick={handleHistoryUpdate}>
+              Save & Notify Visitor
             </button>
           )}
         </>
@@ -590,9 +607,9 @@ const ManageRequest = () => {
       {/* REJECT CONFIRMATION MODAL */}
       <FormalModal show={showRejectModal} onClose={() => setShowRejectModal(false)} title="Reject Visit Request" footer={
         <>
-          <button className="vm-btn-secondary" onClick={() => setShowRejectModal(false)} disabled={updating}>Cancel</button>
-          <button className="vm-btn-primary bg-red" onClick={handleRejectConfirm} disabled={updating}>
-            {updating ? 'Processing...' : 'Confirm Rejection'}
+          <button className="vm-btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
+          <button className="vm-btn-primary bg-red" onClick={handleRejectConfirm}>
+            Confirm Rejection
           </button>
         </>
       }>
@@ -606,7 +623,6 @@ const ManageRequest = () => {
             placeholder="Provide a clear explanation..."
             value={rejectionReason}
             onChange={(e) => setRejectionReason(e.target.value)}
-            disabled={updating}
             className="vm-clean-input border"
             style={{ resize: 'vertical' }}
           />

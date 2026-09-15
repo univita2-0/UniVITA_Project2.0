@@ -1,3 +1,4 @@
+// src/pages/Login.js
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import { login, requestPasswordReset, resetPassword, API_BASE } from '../api';
@@ -59,12 +60,18 @@ const Login = ({ onBack }) => {
           toast.error(otpData?.message || 'Failed to send OTP verification code.');
         }
       } else {
-        toast.error(result?.message || 'Incorrect email or password. Please try again.');
+        // Strict exact-string matching based on backend res.json() messages
+        if (result?.message === 'Password incorrect') {
+          toast.error('Incorrect password');
+        } else if (result?.message === 'Email invalid') {
+          toast.error('Email invalid');
+        } else {
+          toast.error(result?.message || 'Incorrect email or password. Please try again.');
+        }
       }
     } catch (err) {
       console.error(err);
-      // Ensure backend errors (like 401 Invalid Credentials) show the correct toast
-      toast.error(err.response?.data?.message || err.response?.data?.error || 'Incorrect email or password. Please try again.');
+      toast.error('Connection error. Please try again.');
     } finally {
       setOtpLoading(false);
     }
@@ -77,6 +84,7 @@ const Login = ({ onBack }) => {
       return;
     }
 
+    setOtpLoading(true); // Locks the submit process
     try {
       const res = await fetch(`${API_BASE}/auth/verify-otp`, {
         method: 'POST',
@@ -105,11 +113,14 @@ const Login = ({ onBack }) => {
           window.location.href = '/';
         }, 800);
       } else {
+        // Backend returned failure - Halt and stay on OTP screen
         toast.error(data?.message || 'Invalid or expired OTP code.');
       }
     } catch (err) {
       console.error(err);
-      toast.error(err.response?.data?.message || err.response?.data?.error || 'Connection error during verification.');
+      toast.error('Connection error during verification.');
+    } finally {
+      setOtpLoading(false); // Unlocks form only after failure (or right before redirect)
     }
   };
 
@@ -153,7 +164,7 @@ const Login = ({ onBack }) => {
         toast.error(res?.message || 'No account found with this email address.');
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || err.response?.data?.error || 'Connection error. Please try again.');
+      toast.error('Connection error. Please try again.');
     } finally {
       setOtpLoading(false);
     }
@@ -179,7 +190,7 @@ const Login = ({ onBack }) => {
         toast.error(res?.message || 'Failed to reset password.');
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || err.response?.data?.error || 'Connection error during password reset.');
+      toast.error('Connection error during password reset.');
     } finally {
       setOtpLoading(false);
     }
@@ -206,7 +217,6 @@ const Login = ({ onBack }) => {
               <ShieldCheck size={28} strokeWidth={2} />
             </div>
             <h1 className="gl-brand-title">Welcome back!</h1>
-            
           </div>
         )}
 
@@ -272,8 +282,8 @@ const Login = ({ onBack }) => {
                   autoFocus
                 />
               </div>
-              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={otp.length < 6}>
-                Verify & Proceed
+              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={otp.length < 6 || otpLoading}>
+                {otpLoading ? 'Verifying...' : 'Verify & Proceed'}
               </button>
             </form>
 

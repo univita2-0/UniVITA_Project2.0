@@ -53,7 +53,7 @@ export default function HomeScreen({ navigation }) {
   const [user, setUser] = useState({ id: null, name: "Employee", employeeId: "", full_name: "" });
   const [refreshing, setRefreshing] = useState(false);
   
-  // New States for Multiple Schedules
+  // States for Multiple Schedules
   const [allTodaySchedules, setAllTodaySchedules] = useState([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   
@@ -161,55 +161,74 @@ export default function HomeScreen({ navigation }) {
         const now = new Date();
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
         
-        const todaySchedules = schedule
-          .filter(s => s.date === todayStr)
+        const parseMins = (ts) => {
+  if (!ts) return 0;
+  let cs = String(ts).split('.')[0].replace(',', ':');
+  const [h, m] = cs.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
+
+const todaySchedules = schedule
+          .filter(s => String(s.date).startsWith(todayStr))
           .map(s => {
             const record = history.find(r => r.schedule_id === s.id);
+            const startMins = parseMins(s.start_time);
+            const endMins = parseMins(s.end_time);
+            const isPassed = currentMinutes > endMins;
+            const isActive = currentMinutes >= (startMins - 30) && currentMinutes <= endMins;
+            
+            const hasClockIn = record && record.time_in && record.time_in !== '--:--' && record.time_in !== null;
+            const hasClockOut = record && record.time_out && record.time_out !== '--:--' && record.time_out !== null;
+
+            let computedStatus = 'SCHEDULED';
+            if (isPassed) {
+              if (hasClockIn && !hasClockOut) {
+                computedStatus = 'MISSING CLOCK-OUT';
+              } else if (hasClockIn && hasClockOut) {
+                computedStatus = record.status ? record.status.toUpperCase() : 'COMPLETED';
+              } else {
+                computedStatus = 'MISSED SHIFT';
+              }
+            } else if (isActive) {
+              computedStatus = hasClockIn ? 'IN PROGRESS' : 'SCHEDULED';
+            } else {
+              computedStatus = 'SCHEDULED';
+            }
+
             return {
               ...s,
-              isClockedIn: !!record?.time_in,
-              isClockedOut: record?.time_out && record.time_out !== '--:--',
+              startMins,
+              endMins,
+              isClockedIn: hasClockIn,
+              isClockedOut: hasClockOut,
+              computedStatus,
+              record,
             };
           })
-          .sort((a, b) => a.start_time.localeCompare(b.start_time));
+          .sort((a, b) => a.startMins - b.startMins);
 
         setAllTodaySchedules(todaySchedules);
 
-        let activeSchedule = null;
-
-        // 1. Find exactly active shift (with 30 min grace period before it starts)
-        for (const s of todaySchedules) {
-            if (s.isClockedOut) continue; 
-            const [startHr, startMin] = s.start_time.split(':').map(Number);
-            const [endHr, endMin] = s.end_time.split(':').map(Number);
-            const shiftStartMins = startHr * 60 + startMin;
-            const shiftEndMins = endHr * 60 + endMin;
-
-            if (currentMinutes >= (shiftStartMins - 30) && currentMinutes <= shiftEndMins) {
-                activeSchedule = s;
-                break;
-            }
-        }
+        // 1. Find currently active shift (with 30 min grace before start, through end)
+        let activeSchedule = todaySchedules.find(s => currentMinutes >= (s.startMins - 30) && currentMinutes <= s.endMins);
         
         // 2. Fallback: Find next upcoming shift that hasn't started yet
         if (!activeSchedule) {
-             activeSchedule = todaySchedules.find(s => {
-                 if (s.isClockedOut) return false;
-                 const [startHr, startMin] = s.start_time.split(':').map(Number);
-                 return (startHr * 60 + startMin) > currentMinutes;
-             });
+          activeSchedule = todaySchedules.find(s => s.startMins > currentMinutes);
         }
         
-        // 3. Final Fallback
-        if (!activeSchedule) {
-             activeSchedule = todaySchedules.find(s => !s.isClockedOut);
+        // 3. Fallback: Select latest past shift of the day if all are finished
+        if (!activeSchedule && todaySchedules.length > 0) {
+          activeSchedule = todaySchedules[todaySchedules.length - 1];
         }
         
         setTodaySchedule(activeSchedule || null);
         calculateStats(history);
         checkTodayStatus(history, activeSchedule);
       }
-    } catch (error) {}
+    } catch (error) {
+      console.error("LoadData error:", error);
+    }
   }, []);
 
   const checkTodayStatus = (history, activeSchedule) => {
@@ -373,31 +392,30 @@ export default function HomeScreen({ navigation }) {
   };
 
   const formatTo12H = (timeStr) => {
-    if (!timeStr) return '';
-    const parts = timeStr.substring(0, 5).split(':');
-    let hours = parseInt(parts[0], 10);
-    const minutes = parts[1] || '00';
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12;
-    return `${hours}:${minutes} ${ampm}`;
-  };
+  if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr == null) return '—';
+  const timePart = String(timeStr).includes('T') ? String(timeStr).split('T').split('Z')[0] : String(timeStr);
+  const cleanTime = timePart.split('.')[0].replace(',', ':');
+  const [rawH, rawM] = cleanTime.split(':');
+  
+  const h = parseInt(rawH, 10);
+  const m = parseInt(rawM, 10) || 0;
+  if (isNaN(h)) return timeStr;
+  
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 || 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${ampm}`;
+};
 
-const getModalStatusStyle = (sched) => {
-    const attStatus = sched.attendance_status ? sched.attendance_status.toUpperCase() : '';
-    const now = new Date();
-    const currentMins = now.getHours() * 60 + now.getMinutes();
-    const [endHr, endMin] = (sched.end_time || '23:59').split(':').map(Number);
-    const endMins = endHr * 60 + endMin;
-    const [startHr, startMin] = (sched.start_time || '00:00').split(':').map(Number);
-    const startMins = startHr * 60 + startMin;
-
-    if (attStatus.includes('MISS') || (currentMins > endMins && !sched.isClockedIn)) {
-      return { label: 'MISSED SCHEDULE', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
-    } else if (currentMins > endMins || sched.isClockedOut) {
+  const getModalStatusStyle = (sched) => {
+    const status = (sched.computedStatus || sched.attendance_status || '').toUpperCase();
+    if (status.includes('MISSING CLOCK-OUT')) {
+      return { label: 'MISSING CLOCK-OUT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+    } else if (status.includes('MISSED SHIFT') || status.includes('ABSENT') || status.includes('DID NOT ATTEND')) {
+      return { label: 'MISSED SHIFT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+    } else if (status.includes('COMPLETED') || status.includes('PRESENT')) {
       return { label: 'COMPLETED', bg: isLight ? '#F1F5F9' : '#334155', text: isLight ? '#64748B' : '#94A3B8' };
-    } else if (currentMins >= startMins && currentMins <= endMins) {
-      return { label: 'IN PROGRESS', bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
+    } else if (status.includes('IN PROGRESS') || status.includes('LATE')) {
+      return { label: status, bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
     } else {
       return { label: 'SCHEDULED', bg: isLight ? '#EFF6FF' : 'rgba(37, 99, 235, 0.15)', text: isLight ? '#2563EB' : '#60A5FA' };
     }
@@ -459,17 +477,11 @@ const getModalStatusStyle = (sched) => {
             {todaySchedule ? (
               <View style={styles.scheduleBody}>
                 {(() => {
-                  const now = new Date();
-                  const scheduleDateStr = todaySchedule.date ? todaySchedule.date.split('T')[0] : getTodayString();
-                  const startTime = new Date(`${scheduleDateStr}T${todaySchedule.start_time}`);
-                  const endTime = new Date(`${scheduleDateStr}T${todaySchedule.end_time}`);
-                  
-                  // Read the exact status from the backend
-                  let shiftStatus = todaySchedule.attendance_status ? todaySchedule.attendance_status.toUpperCase() : 'SCHEDULED';
+                  let shiftStatus = todaySchedule.computedStatus ? todaySchedule.computedStatus.toUpperCase() : 'SCHEDULED';
                   let statusBadgeStyle = styles.statusScheduled;
                   let statusBadgeTextColor = isLight ? '#475569' : '#CBD5E1';
 
-                  if (shiftStatus.includes('MISS') || shiftStatus.includes('ABSENT')) {
+                  if (shiftStatus.includes('MISS') || shiftStatus.includes('ABSENT') || shiftStatus.includes('DID NOT ATTEND')) {
                     statusBadgeStyle = { backgroundColor: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)' };
                     statusBadgeTextColor = isLight ? '#DC2626' : '#F87171';
                   } else if (shiftStatus.includes('IN PROGRESS') || shiftStatus.includes('LATE')) {
@@ -477,7 +489,7 @@ const getModalStatusStyle = (sched) => {
                     statusBadgeTextColor = isLight ? '#059669' : '#34D399';
                   } else if (shiftStatus.includes('COMPLETED') || shiftStatus.includes('PRESENT')) {
                     shiftStatus = 'COMPLETED'; 
-                    statusBadgeStyle = styles.statusMissed; // Using your gray out style
+                    statusBadgeStyle = styles.statusMissed;
                     statusBadgeTextColor = isLight ? '#64748B' : '#94A3B8';
                   } else {
                     shiftStatus = 'SCHEDULED';

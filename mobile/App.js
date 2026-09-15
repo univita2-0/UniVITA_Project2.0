@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Calendar, Clock, User, AlertCircle } from 'lucide-react-native';
 import * as TaskManager from 'expo-task-manager';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
