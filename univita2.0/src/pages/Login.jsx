@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import { login, requestPasswordReset, resetPassword, API_BASE } from '../api';
-import { ArrowLeft, ShieldCheck, Mail, Lock, KeyRound } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Mail, Lock, KeyRound, Eye, EyeOff } from 'lucide-react';
 import './Login.css';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -10,9 +10,14 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const Login = ({ onBack }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
-  const [step, setStep] = useState('login'); // 'login' | 'otp' | 'forgot-password' | 'reset-password'
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  
+  // Steps: 'login' | 'otp' | 'forgot-password' | 'reset-otp' | 'reset-new-password'
+  const [step, setStep] = useState('login'); 
   const [otp, setOtp] = useState('');
+  const [resetOtp, setResetOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
 
@@ -66,9 +71,10 @@ const Login = ({ onBack }) => {
           toast.error(otpData?.message || 'Failed to send OTP verification code.');
         }
       } else {
-        // Exact validation message mapping
         const serverMsg = result?.message || '';
-        if (serverMsg.toLowerCase().includes('password') || serverMsg === 'Invalid credentials.') {
+        if (serverMsg.includes("does not have access")) {
+          toast.error("This account does not have access.");
+        } else if (serverMsg.toLowerCase().includes('password') || serverMsg === 'Invalid credentials.') {
           toast.error('Password incorrect');
         } else if (serverMsg.toLowerCase().includes('email') || serverMsg.toLowerCase().includes('not found')) {
           toast.error('Email invalid or account not found');
@@ -102,7 +108,7 @@ const Login = ({ onBack }) => {
 
       if (data && data.success) {
         if (data.user.role === 'instructor') {
-          toast.error('Instructor accounts cannot log in to the web portal. Please use the UniVITA mobile app.');
+          toast.error('This account does not have access.');
           setStep('login');
           setOtp('');
           return;
@@ -120,11 +126,11 @@ const Login = ({ onBack }) => {
           window.location.href = '/';
         }, 800);
       } else {
-        toast.error(data?.message || 'Invalid or expired OTP code.');
+        toast.error('Invalid OTP');
       }
     } catch (err) {
       console.error(err);
-      toast.error('Connection error during verification.');
+      toast.error('Invalid OTP');
     } finally {
       setOtpLoading(false);
     }
@@ -169,7 +175,7 @@ const Login = ({ onBack }) => {
       const res = await requestPasswordReset(email.trim());
       if (res && res.success) {
         toast.success(res.message || 'Reset code sent to your email.');
-        setStep('reset-password');
+        setStep('reset-otp'); // First show OTP input modal for recovery
         startResendTimer();
       } else {
         toast.error(res?.message || 'No active account found with this email address.');
@@ -181,12 +187,39 @@ const Login = ({ onBack }) => {
     }
   };
 
-  const handleResetPasswordSubmit = async (e) => {
+  // Step 1 of Password Recovery: Verify OTP before opening New Password input
+  const handleVerifyResetOtp = async (e) => {
     e.preventDefault();
-    if (!otp || otp.length < 6) {
+    if (!resetOtp || resetOtp.length < 6) {
       toast.error('Please enter a valid 6-digit reset code.');
       return;
     }
+
+    setOtpLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/verify-reset-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), otp: resetOtp }),
+      });
+      const data = await res.json();
+
+      if (data && data.success) {
+        toast.success('OTP verified successfully.');
+        setStep('reset-new-password'); // Now proceed to new password & confirmation modal
+      } else {
+        toast.error('Invalid OTP');
+      }
+    } catch (err) {
+      toast.error('Invalid OTP');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // Step 2 of Password Recovery: Submit New Password & Confirmation
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
     if (!newPassword || newPassword.length < 8) {
       toast.error('For security, your password must be at least 8 characters long.');
       return;
@@ -194,11 +227,11 @@ const Login = ({ onBack }) => {
 
     setOtpLoading(true);
     try {
-      const res = await resetPassword({ email: email.trim(), otp, newPassword });
+      const res = await resetPassword({ email: email.trim(), otp: resetOtp, newPassword });
       if (res && res.success) {
         toast.success('Password reset successfully. You can now log in.');
         setStep('login');
-        setOtp('');
+        setResetOtp('');
         setNewPassword('');
         setPassword('');
       } else {
@@ -213,7 +246,6 @@ const Login = ({ onBack }) => {
 
   return (
     <div className="modern-login-wrapper">
-      {/* Animated Background Blobs */}
       <div className="login-ambient-bg">
         <div className="orb orb-1"></div>
         <div className="orb orb-2"></div>
@@ -225,7 +257,6 @@ const Login = ({ onBack }) => {
       </button>
 
       <div className="glass-login-card">
-        {/* Brand Header */}
         {step === 'login' && (
           <div className="gl-brand-header gl-stagger-1">
             <div className="gl-brand-icon">
@@ -251,16 +282,35 @@ const Login = ({ onBack }) => {
                 />
               </div>
               
-              <div className="gl-input-group gl-stagger-3">
+              <div className="gl-input-group gl-stagger-3" style={{ position: 'relative' }}>
                 <Lock size={18} className="gl-input-icon" />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   className="gl-input"
                   placeholder="Password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  style={{ paddingRight: '40px' }}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#9CA3AF',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
 
               <div className="gl-options gl-stagger-4">
@@ -318,7 +368,7 @@ const Login = ({ onBack }) => {
           </div>
         )}
 
-        {/* Step: Forgot Password */}
+        {/* Step: Forgot Password (Email Input) */}
         {step === 'forgot-password' && (
           <div className="gl-auth-container gl-fade-in-up">
             <div className="gl-instruction gl-stagger-2">
@@ -349,45 +399,95 @@ const Login = ({ onBack }) => {
           </div>
         )}
 
-        {/* Step: Reset Password */}
-        {step === 'reset-password' && (
+        {/* Step: Reset OTP Input Modal */}
+        {step === 'reset-otp' && (
+          <div className="gl-auth-container gl-fade-in-up">
+            <div className="gl-instruction gl-stagger-2">
+              <h4>Enter Reset Code</h4>
+              <p>Enter the 6-digit code sent to <strong>{email}</strong>.</p>
+            </div>
+
+            <form onSubmit={handleVerifyResetOtp}>
+              <div className="gl-input-group otp-group gl-stagger-3">
+                <input
+                  type="text"
+                  className="gl-input gl-otp-input"
+                  placeholder="0 0 0 0 0 0"
+                  value={resetOtp}
+                  onChange={(e) => setResetOtp(e.target.value.replace(/\D/g, ''))}
+                  maxLength={6}
+                  required
+                  autoFocus
+                />
+              </div>
+              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={resetOtp.length < 6 || otpLoading}>
+                {otpLoading ? 'Validating...' : 'Verify Code'}
+              </button>
+            </form>
+
+            <div className="gl-resend-timer gl-stagger-5">
+              {resendTimer > 0 ? (
+                <span>Resend in {resendTimer}s</span>
+              ) : (
+                <button onClick={handleForgotPasswordSubmit} disabled={otpLoading} className="gl-text-link">
+                  Resend Code
+                </button>
+              )}
+            </div>
+
+            <button className="btn-gl-secondary mt-3 gl-stagger-6" onClick={() => { setStep('login'); setResetOtp(''); }}>
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Step: Reset New Password & Confirmation Modal */}
+        {step === 'reset-new-password' && (
           <div className="gl-auth-container gl-fade-in-up">
             <div className="gl-instruction gl-stagger-2">
               <h4>Create New Password</h4>
-              <p>Enter the reset code sent to <strong>{email}</strong> and your new password.</p>
+              <p>Enter your new secure password below.</p>
             </div>
 
             <form onSubmit={handleResetPasswordSubmit}>
-              <div className="gl-input-group gl-stagger-3">
-                <KeyRound size={18} className="gl-input-icon" />
-                <input
-                  type="text"
-                  className="gl-input"
-                  placeholder="6-Digit Reset Code"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                  maxLength={6}
-                  required
-                />
-              </div>
-              <div className="gl-input-group gl-stagger-4">
+              <div className="gl-input-group gl-stagger-3" style={{ position: 'relative' }}>
                 <Lock size={18} className="gl-input-icon" />
                 <input
-                  type="password"
+                  type={showNewPassword ? "text" : "password"}
                   className="gl-input"
                   placeholder="New Password (min. 8 chars)"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   minLength={8}
                   required
+                  style={{ paddingRight: '40px' }}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: '#9CA3AF',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
-              <button type="submit" className="btn-gl-primary gl-stagger-5" disabled={otpLoading || otp.length < 6 || newPassword.length < 8}>
+
+              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={otpLoading || newPassword.length < 8}>
                 {otpLoading ? 'Updating System...' : 'Update Password'}
               </button>
             </form>
 
-            <button className="btn-gl-secondary mt-3 gl-stagger-6" onClick={() => { setStep('login'); setOtp(''); setNewPassword(''); }}>
+            <button className="btn-gl-secondary mt-3 gl-stagger-5" onClick={() => { setStep('login'); setResetOtp(''); setNewPassword(''); }}>
               Cancel
             </button>
           </div>

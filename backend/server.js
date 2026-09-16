@@ -615,14 +615,22 @@ app.post('/api/login', loginLimiter, (req, res) => {
       const hashed = await bcrypt.hash(password, 10);
       db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
     } else if (!match) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+      return res.status(401).json({ success: false, message: 'Invalid password.' });
     }
 
-    // 🔴 STRICT MOBILE ROLE RESTRICTION: Block non-instructors instantly on login click
+    // 🔴 MOBILE ROLE RESTRICTION
     if (isMobile && user.role !== 'instructor') {
       return res.status(403).json({ 
         success: false, 
-        message: 'This account does not have access to the mobile application.' 
+        message: 'This account does not have access to login.' 
+      });
+    }
+
+    // 🔴 WEB PORTAL ROLE RESTRICTION: Instructors cannot access web portal
+    if (!isMobile && user.role === 'instructor') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'This account does not have access to login.' 
       });
     }
     

@@ -166,7 +166,7 @@ export default function LoginScreen({ navigation }) {
         showToast(otpRes.message || 'Failed to send OTP', 'error');
       }
     } else {
-      showToast(result.message || 'Invalid credentials', 'error');
+      showToast(result.message || 'Invalid input', 'error');
     }
   };
 
