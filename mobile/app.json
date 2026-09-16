@@ -66,23 +66,13 @@
         }
       ],
       [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash.png",
-          "imageWidth": 150,
-          "resizeMode": "contain",
-          "backgroundColor": "#020817",
-          "dark": {
-            "backgroundColor": "#020817"
-          }
-        }
-      ],
-      [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "UniVITA requires access to your location to verify attendance during your scheduled shifts.",
           "locationAlwaysPermission": "Allow UniVITA to track your location in the background to ensure compliance with shift geofencing.",
-          "locationWhenInUsePermission": "Allow UniVITA to use your location when the app is in use."
+          "locationWhenInUsePermission": "Allow UniVITA to use your location when the app is in use.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "@react-native-community/datetimepicker",

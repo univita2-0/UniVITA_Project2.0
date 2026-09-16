@@ -201,15 +201,30 @@ export default function HomeScreen({ navigation }) {
             await setTrackingEnabled(true);
             const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
             if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            
             if (!isRegistered || forceRestart) {
-              await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-                accuracy: Location.Accuracy.High, timeInterval: 20000, distanceInterval: 0,
-                deferredUpdatesInterval: 20000, showsBackgroundLocationIndicator: true,
-                foregroundService: { notificationTitle: "Tracking Active", notificationBody: "Monitoring location", notificationColor: colors.primary },
-              });
+              // SAFELY WRAPPED TO PREVENT CRASHES IF ANDROID BLOCKS THE SERVICE
+              try {
+                await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+                  accuracy: Location.Accuracy.High, 
+                  timeInterval: 20000, 
+                  distanceInterval: 0,
+                  deferredUpdatesInterval: 20000, 
+                  showsBackgroundLocationIndicator: true,
+                  foregroundService: { 
+                    notificationTitle: "Tracking Active", 
+                    notificationBody: "Monitoring location for active shift", 
+                    notificationColor: colors.primary 
+                  },
+                });
+              } catch (foregroundErr) {
+                console.log("Foreground service start deferred or restricted:", foregroundErr.message);
+              }
             }
           }
-        } catch (e) {}
+        } catch (e) {
+          console.log("Tracking initialization error:", e.message);
+        }
       } else if (willStartSoon) {
         const timer = setTimeout(() => checkAndEnableTracking(true), startTime - now);
         return () => clearTimeout(timer);
@@ -336,19 +351,15 @@ export default function HomeScreen({ navigation }) {
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     
     try {
-      const formData = new FormData();
-      formData.append('employee_id', String(user.employeeId || ''));
-      formData.append('latitude', String(location.coords.latitude));
-      formData.append('longitude', String(location.coords.longitude));
-      formData.append('location_enabled', 'true');
-      formData.append('schedule_id', String(todaySchedule.id));
-      formData.append('selfie', { 
-        uri: Platform.OS === 'ios' ? selfieUri.replace('file://', '') : selfieUri, 
-        name: 'selfie.jpg', 
-        type: 'image/jpeg' 
+      const result = await clockIn({
+        employee_id: String(user.employeeId || ''),
+        latitude: String(location.coords.latitude),
+        longitude: String(location.coords.longitude),
+        location_enabled: 'true',
+        schedule_id: String(todaySchedule.id),
+        selfie: selfieUri
       });
-      
-      const result = await clockIn(formData);
+
       if (result.success) { 
         Alert.alert('Success', result.message); 
         await loadData(); 
@@ -379,19 +390,15 @@ export default function HomeScreen({ navigation }) {
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     
     try {
-      const formData = new FormData();
-      formData.append('employee_id', String(user.employeeId || ''));
-      formData.append('latitude', String(location.coords.latitude));
-      formData.append('longitude', String(location.coords.longitude));
-      formData.append('location_enabled', 'false');
-      formData.append('schedule_id', String(todaySchedule.id));
-      formData.append('selfie', { 
-        uri: Platform.OS === 'ios' ? selfieUri.replace('file://', '') : selfieUri, 
-        name: 'out.jpg', 
-        type: 'image/jpeg' 
+      const result = await clockOut({
+        employee_id: String(user.employeeId || ''),
+        latitude: String(location.coords.latitude),
+        longitude: String(location.coords.longitude),
+        location_enabled: 'false',
+        schedule_id: String(todaySchedule.id),
+        selfie: selfieUri
       });
-      
-      const result = await clockOut(formData);
+
       if (result.success) {
         Alert.alert('Success', result.message);
         try { 

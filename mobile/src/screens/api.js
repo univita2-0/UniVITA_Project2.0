@@ -2,8 +2,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-
-const LOCAL_IP = " 192.168.86.5"; 
+const LOCAL_IP = "192.168.86.5"; 
 
 const USE_REMOTE = true;
 const REMOTE_URL = "https://api.univitahct.tech"; 
@@ -56,7 +55,6 @@ export const syncOfflineQueue = async () => {
 
     const token = await AsyncStorage.getItem('auth_token');
     const headers = {}; 
-    // IMPORTANT: Do not set Content-Type to application/json for FormData
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     let synced = 0;
@@ -65,7 +63,6 @@ export const syncOfflineQueue = async () => {
     for (const item of queue) {
       let response;
       try {
-        // Reconstruct FormData so the server can process the offline selfie
         const formData = new FormData();
         const data = item.payload;
         
@@ -77,15 +74,12 @@ export const syncOfflineQueue = async () => {
         if (data.selfie) {
           const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
           if (selfieUri) {
-            formData.append('selfie', {
-              uri: selfieUri,
-              name: 'offline_selfie.jpg',
-              type: 'image/jpeg',
-            });
+            const imgResp = await fetch(selfieUri);
+            const blob = await imgResp.blob();
+            formData.append('selfie', blob, 'offline_selfie.jpg');
           }
         }
 
-        // Point to the correct /attendance/ endpoints
         const endpoint = item.action === 'clock-in' ? '/attendance/clock-in' : '/attendance/clock-out';
 
         response = await fetch(`${API_URL}${endpoint}`, {
@@ -96,7 +90,7 @@ export const syncOfflineQueue = async () => {
 
         if (response && response.ok) {
           synced++;
-          continue; // Successfully synced, do not add to remaining queue
+          continue; 
         }
       } catch (err) {
         console.error(`Sync failed for ${item.action}:`, err);
@@ -257,11 +251,9 @@ export const submitOvertimeRequest = async (data) => {
     if (data.attachment) {
       const attUri = typeof data.attachment === 'string' ? data.attachment : data.attachment.uri;
       if (attUri) {
-        formData.append('attachment', {
-          uri: attUri,
-          name: 'overtime.jpg',
-          type: 'image/jpeg',
-        });
+        const imgResp = await fetch(attUri);
+        const blob = await imgResp.blob();
+        formData.append('attachment', blob, 'overtime.jpg');
       }
     }
 
@@ -302,11 +294,9 @@ export const requestAttendanceCorrection = async (data) => {
     if (data.selfie) {
       const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
       if (selfieUri) {
-        formData.append('selfie', {
-          uri: selfieUri,
-          name: 'correction.jpg',
-          type: 'image/jpeg',
-        });
+        const imgResp = await fetch(selfieUri);
+        const blob = await imgResp.blob();
+        formData.append('selfie', blob, 'correction.jpg');
       }
     }
 
@@ -356,11 +346,9 @@ export const clockIn = async (data) => {
     if (data.selfie) {
       const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
       if (selfieUri) {
-        formData.append('selfie', {
-          uri: selfieUri,
-          name: 'selfie.jpg',
-          type: 'image/jpeg',
-        });
+        const imgResp = await fetch(selfieUri);
+        const blob = await imgResp.blob();
+        formData.append('selfie', blob, 'selfie.jpg');
       }
     }
 
@@ -373,7 +361,6 @@ export const clockIn = async (data) => {
     return await handleResponse(response);
   } catch (error) {
     console.error("Clock In API Error:", error.message);
-    // FIXED: Push to offline queue when the network connection fails
     await queueOfflineAction('clock-in', data);
     return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
   }
@@ -394,11 +381,9 @@ export const clockOut = async (data) => {
     if (data.selfie) {
       const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
       if (selfieUri) {
-        formData.append('selfie', {
-          uri: selfieUri,
-          name: 'selfie.jpg',
-          type: 'image/jpeg',
-        });
+        const imgResp = await fetch(selfieUri);
+        const blob = await imgResp.blob();
+        formData.append('selfie', blob, 'selfie.jpg');
       }
     }
 
@@ -411,7 +396,6 @@ export const clockOut = async (data) => {
     return await handleResponse(response);
   } catch (error) {
     console.error("Clock Out API Error:", error.message);
-    // FIXED: Push to offline queue when the network connection fails
     await queueOfflineAction('clock-out', data);
     return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
   }
@@ -454,11 +438,9 @@ export const submitLeaveRequest = async (payload) => {
         if (key === 'image' || key === 'attachment') {
           const imgUri = typeof payload[key] === 'string' ? payload[key] : payload[key].uri;
           if (imgUri) {
-            formData.append(key, {
-              uri: imgUri,
-              name: `${key}.jpg`,
-              type: 'image/jpeg',
-            });
+            const imgResp = await fetch(imgUri);
+            const blob = await imgResp.blob();
+            formData.append(key, blob, `${key}.jpg`);
           }
         } else {
           formData.append(key, String(payload[key]));
