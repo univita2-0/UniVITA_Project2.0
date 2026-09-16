@@ -9,11 +9,10 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  Alert,
   StatusBar
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, AlertCircle, Clock, RefreshCw } from 'lucide-react-native';
+import { AlertCircle, Clock, RefreshCw } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { API_URL } from './api'; 
@@ -52,11 +51,6 @@ export default function AlertsScreen({ navigation }) {
       setAlerts(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err.message);
-      Alert.alert(
-        'Connection Error',
-        `Cannot reach server at ${API_URL}. Please check your connection.`,
-        [{ text: 'OK' }]
-      );
       setAlerts([]);
     } finally {
       setLoading(false);
@@ -108,12 +102,9 @@ export default function AlertsScreen({ navigation }) {
 
   return (
     <>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
+      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
         
-        {/* Top Navbar */}
-        
-
         <FlatList
           data={alerts}
           keyExtractor={(item) => item.id.toString()}
@@ -131,7 +122,7 @@ export default function AlertsScreen({ navigation }) {
             ) : null
           }
           ListEmptyComponent={
-            !error && <Text style={styles.emptyText}>No active alerts</Text>
+            !error && <Text style={styles.emptyText}>No active emergency alerts</Text>
           }
           renderItem={({ item }) => {
             const accentColor = getSeverityAccent(item.severity);
@@ -161,12 +152,8 @@ export default function AlertsScreen({ navigation }) {
 }
 
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
+  safeArea: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background },
-  
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border, backgroundColor: isLight ? '#FFFFFF' : colors.surface },
-  backButton: { padding: 4 },
-  headerTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
   
   list: { padding: 22, paddingBottom: 60 },
   alertCard: {

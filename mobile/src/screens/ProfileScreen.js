@@ -3,11 +3,13 @@ import React, { useState, useEffect, useMemo, useContext, useCallback } from 're
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { User, Shield, HelpCircle, ChevronRight, LogOut, ArrowLeft, Bell, Edit2, Sun, Moon } from 'lucide-react-native';
+import { User, Shield, ChevronRight, LogOut, ArrowLeft, Bell, Edit2, Sun, Moon } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import { API_URL } from './api';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -29,9 +31,10 @@ export default function ProfileScreen({ navigation }) {
       const fetchRealProfile = async () => {
         try {
           const token = await AsyncStorage.getItem('auth_token');
-          if (!token) return;
+          const userId = await AsyncStorage.getItem('user_id');
+          if (!token || !userId) return;
 
-          const response = await axios.get(`${API_URL}/users/me`, {
+          const response = await axios.get(`${API_URL}/employees/${userId}`, {
             headers: { Authorization: `Bearer ${token}` }
           });
           
@@ -43,11 +46,18 @@ export default function ProfileScreen({ navigation }) {
             email: freshUser.email
           });
 
-          if (freshUser.password_updated_at) {
-            const updatedDate = new Date(freshUser.password_updated_at);
+          // Accurate daily decreasing password expiration calculation
+          const lastChangedStr = freshUser.password_last_changed || freshUser.password_updated_at;
+          if (lastChangedStr) {
+            const updatedDate = new Date(lastChangedStr);
             const today = new Date();
-            const diffTime = Math.abs(today - updatedDate);
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+            
+            // Normalize both to midnight to count full days elapsed accurately
+            updatedDate.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+            
+            const diffTime = today - updatedDate;
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
             const remaining = 365 - diffDays;
             setDaysRemaining(remaining > 0 ? remaining : 0);
           } else {
@@ -66,7 +76,6 @@ export default function ProfileScreen({ navigation }) {
     }, [])
   );
 
-  // FIX: Pre-fill data immediately when modal opens
   const handleOpenEditModal = () => {
     setEditName(userData.name);
     setEditEmail(userData.email);
@@ -81,19 +90,17 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleUpdateProfile = async () => {
-    // FIX: Strict Validation
     if (!editName.trim() || !editEmail.trim()) {
       return Alert.alert("Validation Error", "Full Name and Email Address cannot be empty.");
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(editEmail.trim())) {
+    if (!EMAIL_REGEX.test(editEmail.trim())) {
       return Alert.alert("Validation Error", "Please enter a valid email address.");
     }
 
     setLoading(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      await axios.put(`${API_URL}/users/profile`, 
+      await axios.put(`${API_URL}/users/${userData.id}/profile`, 
         { full_name: editName.trim(), email: editEmail.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -105,7 +112,7 @@ export default function ProfileScreen({ navigation }) {
       Alert.alert("Success", "Profile updated successfully");
       setShowEditModal(false);
     } catch (err) {
-      Alert.alert("Error", "Could not update profile information.");
+      Alert.alert("Error", err.response?.data?.message || "Could not update profile information.");
     } finally { 
       setLoading(false); 
     }
@@ -159,12 +166,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
           </View>
 
-          <View style={styles.menuSection}>
-            <Text style={styles.sectionHeader}>SUPPORT</Text>
-            <View style={styles.menuCard}>
-              <MenuItem icon={HelpCircle} title="Help Center" subtitle="FAQs and support" onPress={() => Alert.alert("Support", "Contact: help@hctacademy.com")} />
-            </View>
-          </View>
+          {/* Support block completely removed */}
 
           <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
             <LogOut size={18} color={isLight ? "#FFFFFF" : colors.buttonText} />

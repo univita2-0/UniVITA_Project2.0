@@ -3162,10 +3162,6 @@ app.put('/api/users/save-push-token', authenticateToken, async (req, res) => {
 // COURSE MANAGEMENT
 // ============================================
 
-// ============================================
-// COURSE MANAGEMENT (Secured & Validated)
-// ============================================
-
 app.get('/api/courses', (req, res) => {
   db.query("SELECT id, name FROM courses ORDER BY name ASC", (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Failed to load courses.' });
@@ -3271,25 +3267,71 @@ app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/emergency-alerts/active', (req, res) => {
+app.get('/api/emergency-alerts/active', async (req, res) => {
   const userId = req.query.userId;
-  if (!userId) return res.status(400).json({ error: 'userId required' });
+  if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
 
-  const sql = `
-    SELECT a.id, a.title, a.message, a.severity, a.sent_at, ar.read_at 
-    FROM alert_receipts ar 
-    JOIN emergency_alerts a ON ar.alert_id = a.id 
-    WHERE ar.user_id = ? 
-      AND ar.read_at IS NULL 
-      AND a.is_active = 1 
-      AND (a.expires_at IS NULL OR a.expires_at > NOW()) 
-    ORDER BY a.sent_at DESC
-  `;
+  try {
+    // 1. Get user's role
+    const [userRows] = await db.promise().query("SELECT role FROM users WHERE id = ?", [userId]);
+    if (userRows.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
+    const userRole = userRows[0].role.toLowerCase().trim();
 
-  db.query(sql, [userId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+    // 2. Fetch all currently active broadcasts
+    const [activeAlerts] = await db.promise().query(`
+      SELECT id, title, message, severity, sent_at, target_roles, is_active, expires_at 
+      FROM emergency_alerts 
+      WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > NOW())
+      ORDER BY sent_at DESC
+    `);
+
+    const validAlerts = [];
+
+    for (const alert of activeAlerts) {
+      let targetRoles = [];
+      try {
+        targetRoles = JSON.parse(alert.target_roles || '[]');
+      } catch (e) {
+        targetRoles = ['instructor', 'admin', 'security', 'hr_admin'];
+      }
+
+      // Check if this alert targets the user's role
+      const isTargeted = targetRoles.map(r => r.toLowerCase().trim()).includes(userRole) || targetRoles.length === 0;
+
+      if (isTargeted) {
+        // Ensure a receipt record exists for tracking read status
+        await db.promise().query(
+          `INSERT IGNORE INTO alert_receipts (alert_id, user_id) VALUES (?, ?)`,
+          [alert.id, userId]
+        );
+
+        // Check read status for this user
+        const [receiptRows] = await db.promise().query(
+          `SELECT read_at FROM alert_receipts WHERE alert_id = ? AND user_id = ?`,
+          [alert.id, userId]
+        );
+
+        const readAt = receiptRows.length > 0 ? receiptRows[0].read_at : null;
+
+        // Only include if unread
+        if (!readAt) {
+          validAlerts.push({
+            id: alert.id,
+            title: alert.title,
+            message: alert.message,
+            severity: alert.severity,
+            sent_at: alert.sent_at,
+            read_at: null
+          });
+        }
+      }
+    }
+
+    res.json(validAlerts);
+  } catch (err) {
+    console.error("Fetch active alerts error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 app.post('/api/emergency-alerts/:id/read', (req, res) => {

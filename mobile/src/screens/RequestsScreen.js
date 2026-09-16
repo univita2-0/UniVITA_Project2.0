@@ -12,7 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { submitLeaveRequest, requestAttendanceCorrection, API_URL, submitScheduleRequest } from './api';
-import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft, ChevronDown } from 'lucide-react-native';
+import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft, ChevronDown, MapPin, BookOpen } from 'lucide-react-native';
 
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr === 'null' || timeStr == null) return '';
