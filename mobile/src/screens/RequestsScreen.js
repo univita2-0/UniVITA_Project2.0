@@ -1,5 +1,5 @@
 // src/screens/RequestsScreen.js
-import React, { useState, useContext } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar
@@ -9,9 +9,10 @@ import { Calendar } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { submitLeaveRequest, requestAttendanceCorrection, API_URL, submitScheduleRequest } from './api';
-import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft } from 'lucide-react-native';
+import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft, ChevronDown } from 'lucide-react-native';
 
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr === 'null' || timeStr == null) return '';
@@ -54,10 +55,10 @@ const formatTimeForDB = (timeStr) => {
   return timeStr;
 };
 
-const getLocalTodayString = () => {
+const getPHNowString = () => {
   const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  return (new Date(now - offset)).toISOString().split('T')[0];
+  const options = { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' };
+  return now.toLocaleDateString('en-CA', options);
 };
 
 export default function RequestsScreen({ navigation, route }) {
@@ -75,8 +76,9 @@ export default function RequestsScreen({ navigation, route }) {
   const [timePickerMode, setTimePickerMode] = useState('');
   const [tempDate, setTempDate] = useState(new Date());
 
-  const locationList = ['S Residence Tower 3', 'Main Campus', 'Pasig Branch'];
-  const courseList = ['Allied Health', 'Healthcare101', 'Information Technology'];
+  // Dynamic dropdown lists from database
+  const [locationList, setLocationList] = useState([]);
+  const [courseList, setCourseList] = useState([]);
 
   // Leave
   const [leaveDateFrom, setLeaveDateFrom] = useState('');
@@ -96,8 +98,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleStart, setScheduleStart] = useState('09:00');
   const [scheduleEnd, setScheduleEnd] = useState('17:00');
-  const [schedulePlace, setSchedulePlace] = useState('S Residence Tower 3');
-  const [scheduleCourse, setScheduleCourse] = useState('Allied Health');
+  const [schedulePlace, setSchedulePlace] = useState('');
+  const [scheduleCourse, setScheduleCourse] = useState('');
   const [scheduleReason, setScheduleReason] = useState('');
   const [submittingSchedule, setSubmittingSchedule] = useState(false);
   const [showScheduleCalendar, setShowScheduleCalendar] = useState(false);
@@ -130,7 +132,30 @@ export default function RequestsScreen({ navigation, route }) {
   const [showOvertimeCalendar, setShowOvertimeCalendar] = useState(false);
   const [overtimeScenario, setOvertimeScenario] = useState('future');
 
-  const todayStr = getLocalTodayString();
+  const todayStr = getPHNowString();
+
+  // Fetch locations and courses from DB on mount
+  useEffect(() => {
+    const fetchDropdownData = async () => {
+      try {
+        const [locRes, courseRes] = await Promise.all([
+          axios.get(`${API_URL}/school-locations`),
+          axios.get(`${API_URL}/courses`)
+        ]);
+        if (locRes.data && Array.isArray(locRes.data)) {
+          setLocationList(locRes.data.map(l => l.name));
+          if (locRes.data.length > 0) setSchedulePlace(locRes.data[0].name);
+        }
+        if (courseRes.data && Array.isArray(courseRes.data)) {
+          setCourseList(courseRes.data.map(c => c.name));
+          if (courseRes.data.length > 0) setScheduleCourse(courseRes.data[0].name);
+        }
+      } catch (err) {
+        console.error("Failed to fetch dropdown options:", err);
+      }
+    };
+    fetchDropdownData();
+  }, []);
 
   const handleBackPress = () => {
     try {
@@ -164,22 +189,25 @@ export default function RequestsScreen({ navigation, route }) {
   const fetchLeaveBalances = async () => {
     setLoadingBalances(true);
     const userId = await AsyncStorage.getItem('user_id');
-    if (!userId) { Alert.alert('Error', 'User not found'); setLoadingBalances(false); return; }
+    if (!userId) { Alert.alert('Error', 'User account not found.'); setLoadingBalances(false); return; }
     try {
       const year = new Date().getFullYear();
       const res = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) setLeaveBalances(data);
-      setShowBalancesModal(true);
+      if (res.ok && Array.isArray(data)) {
+        setLeaveBalances(data);
+        setShowBalancesModal(true);
+      } else {
+        Alert.alert('Error', data.message || 'Failed to fetch leave balances.');
+      }
     } catch (err) {
-      Alert.alert('Error', 'Failed to fetch balances.');
+      Alert.alert('Network Error', 'Could not connect to server.');
     } finally { setLoadingBalances(false); }
   };
 
   const pickImage = async (setFn) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Allow access to photos.'); return; }
+    if (status !== 'granted') { Alert.alert('Permission needed', 'Please allow gallery permissions.'); return; }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.7 });
     if (!result.canceled) setFn(result.assets[0].uri);
   };
@@ -192,59 +220,50 @@ export default function RequestsScreen({ navigation, route }) {
     return null;
   };
 
-  const handleSubmitLeave = async () => {
-    if (!leaveDateFrom) { Alert.alert('Required', 'Select a start date.'); return; }
-    if (isRange && !leaveDateTo) { Alert.alert('Required', 'Select an end date.'); return; }
-    if (!leaveReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
+  // ==========================================
+  // SUBMISSION & VALIDATION HANDLERS
+  // ==========================================
 
-    let daysRequested = 1;
-    if (isRange) {
-      const start = new Date(leaveDateFrom);
-      const end = new Date(leaveDateTo);
-      if (end < start) { Alert.alert('Invalid Range', 'End date cannot be before start date.'); return; }
-      const diffTime = Math.abs(end - start);
-      daysRequested = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  const handleSubmitLeave = async () => {
+    if (!leaveDateFrom) { Alert.alert('Validation Error', 'Please select a start date.'); return; }
+    if (isRange && !leaveDateTo) { Alert.alert('Validation Error', 'Please select an end date for your range.'); return; }
+    if (!leaveReason.trim() || leaveReason.trim().length < 10) { 
+      Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); 
+      return; 
+    }
+
+    if (isRange && leaveDateTo < leaveDateFrom) {
+      Alert.alert('Invalid Date Range', 'End date cannot be earlier than the start date.');
+      return;
     }
 
     const userId = await AsyncStorage.getItem('user_id');
     const year = new Date(leaveDateFrom).getFullYear();
-    let remainingDays = 0;
+    let remainingDays = 15;
     
     try {
       const res = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`);
       const balances = await res.json();
       const found = balances.find(b => b.leave_type === leaveType);
-      remainingDays = found ? Number(found.remaining_days) : 0;
+      if (found) remainingDays = Number(found.remaining_days);
     } catch (err) {
-      Alert.alert('Error', 'Could not verify leave balance.');
-      return;
+      console.error("Balance check error:", err);
     }
 
-    if (leaveType !== 'Other' && daysRequested > remainingDays) {
-      Alert.alert('Insufficient Balance', `You only have ${remainingDays} day(s) left for ${leaveType}.`);
+    let daysRequested = 1;
+    if (isRange) {
+      const start = new Date(leaveDateFrom);
+      const end = new Date(leaveDateTo);
+      daysRequested = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)) + 1;
+    }
+
+    if (leaveType !== 'Emergency Leave' && daysRequested > remainingDays) {
+      Alert.alert('Insufficient Balance', `You only have ${remainingDays} day(s) remaining for ${leaveType}.`);
       return;
     }
 
     setSubmittingLeave(true);
     try {
-      // Build FormData uniquely per date to avoid object loss in loops
-      const submitForDate = async (date) => {
-        const formData = new FormData();
-        formData.append('user_id', String(userId || ''));
-        formData.append('type', String(leaveType));
-        formData.append('reason', String(leaveReason.trim()));
-        formData.append('request_date', String(date));
-        
-        if (leaveImage) {
-          formData.append('image', { 
-            uri: leaveImage, // Do NOT strip file://
-            name: 'leave.jpg', 
-            type: 'image/jpeg' 
-          });
-        }
-        return await submitLeaveRequest(formData);
-      };
-
       const start = new Date(leaveDateFrom);
       const end = isRange ? new Date(leaveDateTo) : start;
       const dateList = [];
@@ -253,35 +272,55 @@ export default function RequestsScreen({ navigation, route }) {
       }
 
       let successCount = 0;
-      let failMessage = '';
+      let lastMessage = '';
+
       for (const date of dateList) {
-        const res = await submitForDate(date);
-        if (res && res.success) {
+        const formData = new FormData();
+        formData.append('type', String(leaveType));
+        formData.append('reason', String(leaveReason.trim()));
+        formData.append('request_date', String(date));
+        
+        if (leaveImage) {
+          formData.append('image', { 
+            uri: leaveImage, 
+            name: 'leave.jpg', 
+            type: 'image/jpeg' 
+          });
+        }
+        
+        const token = await AsyncStorage.getItem('auth_token');
+        const response = await fetch(`${API_URL}/leave-requests`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        });
+        const result = await response.json();
+        if (response.ok && result.success) {
           successCount++;
         } else {
-          failMessage = res?.message || `Failed for ${date}`;
+          lastMessage = result.message || 'Failed to submit date.';
         }
       }
 
       if (successCount === dateList.length) {
-        Alert.alert('Success', `${successCount} leave request(s) submitted.`);
+        Alert.alert('Success', 'Leave request(s) submitted successfully!');
         setLeaveDateFrom(''); setLeaveDateTo(''); setLeaveReason(''); setLeaveImage(null); setIsRange(false);
       } else {
-        Alert.alert('Partial Success', `${successCount}/${dateList.length} submitted. ${failMessage}`);
+        Alert.alert('Submission Notice', `${successCount}/${dateList.length} submitted. ${lastMessage}`);
       }
     } catch (err) {
       console.error("Leave Submission Error:", err);
-      Alert.alert('Error', 'Network error. Please try again.');
+      Alert.alert('Network Error', 'Failed to connect to server.');
     } finally {
       setSubmittingLeave(false);
     }
   };
 
   const handleSubmitSchedule = async () => {
-    if (!scheduleDate) { Alert.alert('Required', 'Select a date.'); return; }
-    if (!scheduleStart || !scheduleEnd) { Alert.alert('Required', 'Enter times.'); return; }
-    if (!schedulePlace.trim()) { Alert.alert('Required', 'Select a campus location.'); return; }
-    if (!scheduleCourse.trim()) { Alert.alert('Required', 'Select a course name.'); return; }
+    if (!scheduleDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
+    if (!scheduleStart || !scheduleEnd) { Alert.alert('Validation Error', 'Please specify start and end times.'); return; }
+    if (scheduleStart >= scheduleEnd) { Alert.alert('Validation Error', 'Schedule end time must be after the start time.'); return; }
+    if (!schedulePlace.trim() || !scheduleCourse.trim()) { Alert.alert('Validation Error', 'Location and course are required.'); return; }
 
     setSubmittingSchedule(true);
     try {
@@ -292,32 +331,30 @@ export default function RequestsScreen({ navigation, route }) {
         course: scheduleCourse.trim(), 
         start_time: formatTimeForDB(scheduleStart),
         end_time: formatTimeForDB(scheduleEnd),
-        reason: scheduleReason.trim()
+        reason: scheduleReason.trim() || 'Schedule assignment request'
       });
       if (result.success) {
-        Alert.alert('Request Sent', 'Your schedule request has been submitted.');
-        setScheduleDate(''); setScheduleStart('09:00'); setScheduleEnd('17:00'); setSchedulePlace('S Residence Tower 3'); setScheduleCourse('Allied Health'); setScheduleReason('');
+        Alert.alert('Success', result.message || 'Schedule request submitted!');
+        setScheduleDate(''); setScheduleStart('09:00'); setScheduleEnd('17:00'); setScheduleReason('');
       } else {
-        Alert.alert('Error', result.message || 'Failed to submit request.');
+        Alert.alert('Submission Error', result.message || 'Failed to submit schedule request.');
       }
     } catch (error) {
-      Alert.alert('Error', 'Network error. Please try again.');
+      Alert.alert('Network Error', 'Connection failed.');
     } finally {
       setSubmittingSchedule(false);
     }
   };
 
   const submitAppeal = async () => {
-    if (!appealDate) { Alert.alert('Required', 'Select a date.'); return; }
-    if (!appealReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
+    if (!appealDate) { Alert.alert('Validation Error', 'Please select a date for your appeal.'); return; }
+    if (!appealReason.trim() || appealReason.trim().length < 10) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); return; }
 
     setSubmittingAppeal(true);
     try {
-      const userId = await AsyncStorage.getItem('user_id');
       const token = await AsyncStorage.getItem('auth_token');
-      
       const formData = new FormData();
-      formData.append('user_id', String(userId || ''));
+      
       formData.append('date', String(appealDate));
       formData.append('reason', String(appealReason.trim()));
       
@@ -326,7 +363,7 @@ export default function RequestsScreen({ navigation, route }) {
       
       if (appealImage) {
         formData.append('image', { 
-          uri: appealImage, // Do NOT strip file://
+          uri: appealImage, 
           name: 'appeal.jpg', 
           type: 'image/jpeg' 
         });
@@ -334,45 +371,33 @@ export default function RequestsScreen({ navigation, route }) {
       
       const response = await fetch(`${API_URL}/attendance-appeals`, {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token || ''}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
-      const contentType = response.headers.get("content-type");
-      let result;
-      if (contentType && contentType.includes("application/json")) {
-        result = await response.json();
-      } else {
-        const text = await response.text();
-        console.error("Non-JSON response received:", text.substring(0, 300));
-        throw new Error(`Server returned HTML/Text (Status ${response.status})`);
-      }
-
+      const result = await response.json();
       if (response.ok && result.success) {
-        Alert.alert('Appeal Submitted', 'Your appeal has been sent.');
+        Alert.alert('Success', 'Attendance appeal submitted successfully.');
         setAppealDate(''); setAppealTimeIn(''); setAppealTimeOut(''); setAppealReason(''); setAppealImage(null);
       } else {
-        Alert.alert('Error', result.error || result.message || `Failed (Status ${response.status}).`);
+        Alert.alert('Submission Error', result.message || result.error || 'Failed to submit appeal.');
       }
     } catch (error) {
-      console.error("Appeal submission error details:", error);
-      Alert.alert('Submission Error', error.message || 'Network error.');
+      Alert.alert('Network Error', 'Server connection failed.');
     } finally {
       setSubmittingAppeal(false);
     }
   };
 
   const submitCorrection = async () => {
-    if (!correctionDate) { Alert.alert('Required', 'Select a date.'); return; }
-    if (!correctionTime) { Alert.alert('Required', 'Enter the time.'); return; }
-    if (!correctionReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
+    if (!correctionDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
+    if (!correctionTime) { Alert.alert('Validation Error', 'Please select a correction time.'); return; }
+    if (!correctionReason.trim() || correctionReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a valid reason.'); return; }
 
     let selfieUri = correctionSelfie;
     if (!selfieUri) {
       const taken = await takeSelfie();
-      if (!taken) { Alert.alert('Selfie Required', 'Please take a selfie as proof.'); return; }
+      if (!taken) { Alert.alert('Selfie Required', 'A verification selfie is mandatory.'); return; }
       selfieUri = taken;
       setCorrectionSelfie(taken);
     }
@@ -386,7 +411,7 @@ export default function RequestsScreen({ navigation, route }) {
       }
 
       if (!employeeId) {
-        Alert.alert('Error', 'Session error: Employee ID not found. Please re-login.');
+        Alert.alert('Authentication Error', 'Employee ID not found. Please log in again.');
         setSubmittingCorrection(false);
         return;
       }
@@ -402,7 +427,7 @@ export default function RequestsScreen({ navigation, route }) {
         time: formattedTime,
         reason: finalReason,
         selfie: { 
-          uri: selfieUri, // Do NOT strip file://
+          uri: selfieUri, 
           name: 'correction.jpg', 
           type: 'image/jpeg' 
         }
@@ -410,25 +435,25 @@ export default function RequestsScreen({ navigation, route }) {
       
       const res = await requestAttendanceCorrection(payload);
       if (res && res.success) {
-        Alert.alert('Request Sent', 'Correction request submitted for approval.');
+        Alert.alert('Success', res.message || 'Correction request submitted.');
         setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionSelfie(null); setCorrectionType('clock_in');
         navigation.setParams({ prefillTab: undefined, prefillDate: undefined, prefillType: undefined, prefillTime: undefined, prefillReason: undefined });
         setActiveTab('leave');
       } else {
-        Alert.alert('Error', res?.message || 'Failed to submit correction.');
+        Alert.alert('Submission Error', res?.message || 'Failed to submit correction.');
       }
     } catch (err) { 
-      console.error("Correction submission error:", err);
-      Alert.alert('Error', 'Network error.'); 
+      Alert.alert('Network Error', 'Connection failed.'); 
     } finally { 
       setSubmittingCorrection(false); 
     }
   };
 
   const handleSubmitOvertime = async () => {
-    if (!overtimeDate) { Alert.alert('Required', 'Select a date.'); return; }
-    if (!overtimeStart || !overtimeEnd) { Alert.alert('Required', 'Enter start and end time.'); return; }
-    if (!overtimeReason.trim()) { Alert.alert('Required', 'Provide a reason.'); return; }
+    if (!overtimeDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
+    if (!overtimeStart || !overtimeEnd) { Alert.alert('Validation Error', 'Start and end times are required.'); return; }
+    if (overtimeStart >= overtimeEnd) { Alert.alert('Validation Error', 'Overtime end time must be strictly after the start time.'); return; }
+    if (!overtimeReason.trim() || overtimeReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 5 characters).'); return; }
 
     setSubmittingOvertime(true);
     try {
@@ -443,7 +468,7 @@ export default function RequestsScreen({ navigation, route }) {
       
       if (overtimeImage) {
         formData.append('attachment', { 
-          uri: overtimeImage, // Do NOT strip file://
+          uri: overtimeImage, 
           name: 'overtime.jpg', 
           type: 'image/jpeg' 
         });
@@ -451,19 +476,18 @@ export default function RequestsScreen({ navigation, route }) {
       
       const response = await fetch(`${API_URL}/overtime-requests`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }, // Removed Content-Type, letting fetch handle boundary
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
       const result = await response.json();
-      if (result.success) {
-        Alert.alert('Success', 'Overtime request submitted.');
+      if (response.ok && result.success) {
+        Alert.alert('Success', result.message || 'Overtime request submitted successfully.');
         setOvertimeDate(''); setOvertimeStart(''); setOvertimeEnd(''); setOvertimeReason(''); setOvertimeImage(null); setOvertimeScenario('future');
       } else {
-        Alert.alert('Error', result.message || 'Submission failed.');
+        Alert.alert('Submission Error', result.message || 'Failed to submit overtime request.');
       }
     } catch (err) {
-      console.error("Submit overtime error:", err);
-      Alert.alert('Error', 'Network error.');
+      Alert.alert('Network Error', 'Server connection failed.');
     } finally {
       setSubmittingOvertime(false);
     }
@@ -474,7 +498,7 @@ export default function RequestsScreen({ navigation, route }) {
     return (
       <View style={styles.calendarModal}>
         <View style={styles.calendarHeader}>
-          <Text style={styles.calendarTitle}>Select Date</Text>
+          <Text style={styles.calendarTitle}>Select Date (PH)</Text>
           <TouchableOpacity onPress={() => setShow(false)}><X size={20} color={colors.textSecondary} /></TouchableOpacity>
         </View>
         <Calendar
@@ -564,7 +588,7 @@ export default function RequestsScreen({ navigation, route }) {
                 ))}
               </View>
 
-              <Text style={styles.label}>Reason</Text>
+              <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
               <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain reason..." placeholderTextColor={colors.textSecondary} value={leaveReason} onChangeText={setLeaveReason} />
 
               <Text style={styles.label}>Attachment (optional)</Text>
@@ -591,7 +615,7 @@ export default function RequestsScreen({ navigation, route }) {
                 <CalendarIcon size={20} color="#00897B" />
                 <Text style={styles.dateText}>{scheduleDate || 'Select date'}</Text>
               </TouchableOpacity>
-              {renderCalendar(showScheduleCalendar, setShowScheduleCalendar, scheduleDate, setScheduleDate)}
+              {renderCalendar(showScheduleCalendar, setShowScheduleCalendar, scheduleDate, setScheduleDate, todayStr)}
 
               <Text style={styles.label}>Start Time</Text>
               <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('scheduleStart'); setShowTimePicker(true); }}>
@@ -658,7 +682,7 @@ export default function RequestsScreen({ navigation, route }) {
                 <Text style={styles.dateText}>{appealTimeOut ? formatTo12Hour(appealTimeOut) : 'Select time out'}</Text>
               </TouchableOpacity>
 
-              <Text style={styles.label}>Reason</Text>
+              <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
               <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain why you couldn't clock in/out..." placeholderTextColor={colors.textSecondary} value={appealReason} onChangeText={setAppealReason} />
 
               <Text style={styles.label}>Proof (optional)</Text>
@@ -733,7 +757,7 @@ export default function RequestsScreen({ navigation, route }) {
                 <CalendarIcon size={20} color="#00897B" />
                 <Text style={styles.dateText}>{overtimeDate || 'Select date'}</Text>
               </TouchableOpacity>
-              {renderCalendar(showOvertimeCalendar, setShowOvertimeCalendar, overtimeDate, setOvertimeDate)}
+              {renderCalendar(showOvertimeCalendar, setShowOvertimeCalendar, overtimeDate, setOvertimeDate, todayStr)}
 
               <Text style={styles.label}>Scenario Type</Text>
               <View style={styles.typeGroup}>
@@ -766,7 +790,7 @@ export default function RequestsScreen({ navigation, route }) {
                 <Text style={styles.dateText}>{overtimeEnd ? formatTo12Hour(overtimeEnd) : 'Select end time'}</Text>
               </TouchableOpacity>
 
-              <Text style={styles.label}>Reason / Task</Text>
+              <Text style={styles.label}>Reason / Task (Minimum 5 characters)</Text>
               <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why is overtime needed?" placeholderTextColor={colors.textSecondary} value={overtimeReason} onChangeText={setOvertimeReason} />
 
               <Text style={styles.label}>Attachment (optional)</Text>
@@ -788,7 +812,7 @@ export default function RequestsScreen({ navigation, route }) {
             mode="time"
             is24Hour={false}
             display="default"
-            onValueChange={handleTimeChange}
+            onChange={handleTimeChange}
             onDismiss={() => setShowTimePicker(false)}
           />
         )}

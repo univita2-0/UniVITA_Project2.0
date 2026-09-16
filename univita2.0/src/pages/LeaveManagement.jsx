@@ -16,30 +16,26 @@ const LeaveManagement = () => {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
-  // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Modal States
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [showRemarksModal, setShowRemarksModal] = useState(false);
   const [actionType, setActionType] = useState('');
   const [remarks, setRemarks] = useState('');
   const [processing, setProcessing] = useState(false);
 
-  // Reset pagination when search or view changes
   useEffect(() => { setCurrentPage(1); }, [searchTerm, view]);
 
   const fetchGroups = useCallback(async () => {
     setLoading(true);
     try {
       const res = await axios.get(`${API_BASE}/leave-requests/grouped`, getAuthHeaders());
-      // Sort to show newest first
       const all = (res.data || []).sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
       setGroups(all);
     } catch (err) {
       console.error(err);
-      toast.error('Failed to load leave requests');
+      toast.error(err.response?.data?.message || 'Failed to load leave requests');
       setGroups([]);
     } finally {
       setLoading(false);
@@ -75,13 +71,12 @@ const LeaveManagement = () => {
       fetchGroups();
     } catch (err) {
       console.error(err);
-      toast.error('Action failed');
+      toast.error(err.response?.data?.message || 'Action failed');
     } finally {
       setProcessing(false);
     }
   };
 
-  // FIXED: Strictly grab only the first 10 characters (YYYY-MM-DD) to strip any " 00:00:00"
   const formatDateOnly = (dateString) => {
     if (!dateString) return '';
     return String(dateString).trim().substring(0, 10);
@@ -95,7 +90,6 @@ const LeaveManagement = () => {
     return `${startStr} – ${endStr}`;
   };
 
-  // Filtering Logic
   const filteredGroups = groups
     .filter(group => view === 'pending' ? group.status === 'Pending' : group.status !== 'Pending')
     .filter(group =>
@@ -104,7 +98,6 @@ const LeaveManagement = () => {
       group.employee_id?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-  // Pagination Logic
   const totalPages = Math.ceil(filteredGroups.length / itemsPerPage);
   const currentGroups = filteredGroups.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
@@ -113,10 +106,10 @@ const LeaveManagement = () => {
 
   return (
     <div className="expert-container">
-      {/* Header Section */}
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
+            <h2>Leave Management</h2>
             <p className="expert-subtitle">Review and manage employee leave and absence requests.</p>
           </div>
         </div>
@@ -125,7 +118,6 @@ const LeaveManagement = () => {
         </button>
       </div>
 
-      {/* Control Panel: Tabs & Search */}
       <div className="expert-search-card" style={{ padding: '0', overflow: 'hidden' }}>
         <div className="lm-controls-wrapper">
           <div className="lm-tabs">
@@ -153,7 +145,6 @@ const LeaveManagement = () => {
         </div>
       </div>
 
-      {/* Main Table Card */}
       <div className="expert-card">
         {loading ? (
           <div className="expert-loading">Loading requests...</div>
@@ -218,7 +209,6 @@ const LeaveManagement = () => {
               </table>
             </div>
 
-            {/* Pagination Controls */}
             {totalPages > 1 && (
               <div className="expert-pagination">
                 <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredGroups.length)} of {filteredGroups.length} entries</span>
@@ -233,7 +223,6 @@ const LeaveManagement = () => {
         )}
       </div>
 
-      {/* Batch Action Modal */}
       <FormalModal
         show={showRemarksModal}
         onClose={() => setShowRemarksModal(false)}

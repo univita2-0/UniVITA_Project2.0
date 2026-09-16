@@ -2,7 +2,9 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// Set this to true to use the ngrok tunnel
+
+const LOCAL_IP = " 192.168.86.5"; 
+
 const USE_REMOTE = true;
 const REMOTE_URL = "https://api.univitahct.tech"; 
 
@@ -26,7 +28,7 @@ const handleResponse = async (response) => {
   } else {
     const errorText = await response.text();
     console.error("Server Error (non-JSON):", errorText.substring(0, 200));
-    return { success: false, message: "Server returned an error page. Check backend connection." };
+    return { success: false, message: "Server connection failed. Please check your network." };
   }
 };
 
@@ -39,6 +41,7 @@ const queueOfflineAction = async (action, payload) => {
     const queue = existing ? JSON.parse(existing) : [];
     queue.push({ action, payload, timestamp: Date.now() });
     await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    console.log(`[Offline] Action '${action}' queued for sync.`);
   } catch (e) {
     console.error("Failed to queue offline action", e);
   }
@@ -51,34 +54,56 @@ export const syncOfflineQueue = async () => {
     const queue = JSON.parse(existing);
     if (queue.length === 0) return 0;
 
-    const headers = await getAuthHeaders();
+    const token = await AsyncStorage.getItem('auth_token');
+    const headers = {}; 
+    // IMPORTANT: Do not set Content-Type to application/json for FormData
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
     let synced = 0;
     const remaining = [];
+    
     for (const item of queue) {
       let response;
       try {
-        if (item.action === 'clock-in') {
-          response = await fetch(`${API_URL}/clock-in`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(item.payload)
-          });
-        } else if (item.action === 'clock-out') {
-          response = await fetch(`${API_URL}/clock-out`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(item.payload)
-          });
+        // Reconstruct FormData so the server can process the offline selfie
+        const formData = new FormData();
+        const data = item.payload;
+        
+        if (data.employee_id) formData.append('employee_id', String(data.employee_id));
+        if (data.latitude) formData.append('latitude', String(data.latitude));
+        if (data.longitude) formData.append('longitude', String(data.longitude));
+        if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
+
+        if (data.selfie) {
+          const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
+          if (selfieUri) {
+            formData.append('selfie', {
+              uri: selfieUri,
+              name: 'offline_selfie.jpg',
+              type: 'image/jpeg',
+            });
+          }
         }
+
+        // Point to the correct /attendance/ endpoints
+        const endpoint = item.action === 'clock-in' ? '/attendance/clock-in' : '/attendance/clock-out';
+
+        response = await fetch(`${API_URL}${endpoint}`, {
+          method: 'POST',
+          headers,
+          body: formData
+        });
+
         if (response && response.ok) {
           synced++;
-          continue;
+          continue; // Successfully synced, do not add to remaining queue
         }
       } catch (err) {
         console.error(`Sync failed for ${item.action}:`, err);
       }
       remaining.push(item);
     }
+    
     await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
     return synced;
   } catch (e) {
@@ -334,7 +359,9 @@ export const clockIn = async (data) => {
     return await handleResponse(response);
   } catch (error) {
     console.error("Clock In API Error:", error.message);
-    return { success: false, message: "Network error: " + error.message };
+    // FIXED: Push to offline queue when the network connection fails
+    await queueOfflineAction('clock-in', data);
+    return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
   }
 };
 
@@ -370,7 +397,9 @@ export const clockOut = async (data) => {
     return await handleResponse(response);
   } catch (error) {
     console.error("Clock Out API Error:", error.message);
-    return { success: false, message: "Network error: " + error.message };
+    // FIXED: Push to offline queue when the network connection fails
+    await queueOfflineAction('clock-out', data);
+    return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
   }
 };
 

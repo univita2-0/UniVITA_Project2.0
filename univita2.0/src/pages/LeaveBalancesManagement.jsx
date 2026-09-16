@@ -17,11 +17,9 @@ const LeaveBalancesManagement = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
-  // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Modal state
   const [showBalanceModal, setShowBalanceModal] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [balances, setBalances] = useState([]);
@@ -31,7 +29,6 @@ const LeaveBalancesManagement = () => {
   const [modalLoading, setModalLoading] = useState(false);
   const modalYearRef = useRef(selectedYear);
 
-  // Reset page on search or year change
   useEffect(() => { setCurrentPage(1); }, [searchQuery, selectedYear]);
 
   const loadEmployees = useCallback(async () => {
@@ -42,7 +39,7 @@ const LeaveBalancesManagement = () => {
       setEmployees(instructors);
     } catch (err) {
       console.error('Failed to load employees:', err);
-      toast.error('Failed to load employees');
+      toast.error(err.response?.data?.message || 'Failed to load employees');
     } finally {
       setLoading(false);
     }
@@ -54,7 +51,7 @@ const LeaveBalancesManagement = () => {
       setLeaveTypes(res.data);
     } catch (err) {
       console.error('Failed to load leave types:', err);
-      toast.error('Failed to load leave types');
+      toast.error(err.response?.data?.message || 'Failed to load leave types');
     }
   }, []);
 
@@ -82,7 +79,7 @@ const LeaveBalancesManagement = () => {
       modalYearRef.current = year;
     } catch (err) {
       console.error('Failed to fetch balances:', err);
-      toast.error('Failed to load leave balances');
+      toast.error(err.response?.data?.message || 'Failed to load leave balances');
       setBalances([]);
     } finally {
       setModalLoading(false);
@@ -130,7 +127,7 @@ const LeaveBalancesManagement = () => {
       toast.success('Balance updated successfully');
     } catch (err) {
       console.error(err);
-      toast.error('Failed to update balance');
+      toast.error(err.response?.data?.message || 'Failed to update balance');
     } finally {
       setSaving(false);
     }
@@ -141,25 +138,21 @@ const LeaveBalancesManagement = () => {
     setTempValue('');
   };
 
-  // Client-side filtering
   const filteredEmployees = employees.filter(emp =>
     !searchQuery || 
     emp.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     emp.employee_id.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Pagination Logic
   const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage);
   const currentEmployees = filteredEmployees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
     <div className="expert-container">
-      {/* Header Section */}
       <div className="expert-header">
         <div className="expert-title-group">
-          
           <div>
-            
+            <h2>Leave Balances</h2>
             <p className="expert-subtitle">Monitor and manually adjust employee leave quotas.</p>
           </div>
         </div>
@@ -178,7 +171,6 @@ const LeaveBalancesManagement = () => {
         </div>
       </div>
 
-      {/* Search Bar */}
       <div className="expert-search-card" style={{ padding: '12px 20px' }}>
         <div className="expert-search-row">
           <div className="expert-search-input-group" style={{ maxWidth: '500px' }}>
@@ -198,7 +190,6 @@ const LeaveBalancesManagement = () => {
         </div>
       </div>
 
-      {/* Main Table Card */}
       <div className="expert-card">
         {loading ? (
           <div className="expert-loading">Loading employees...</div>
@@ -239,7 +230,6 @@ const LeaveBalancesManagement = () => {
               </table>
             </div>
 
-            {/* Pagination Controls */}
             {totalPages > 1 && (
               <div className="expert-pagination">
                 <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredEmployees.length)} of {filteredEmployees.length} entries</span>
@@ -254,7 +244,6 @@ const LeaveBalancesManagement = () => {
         )}
       </div>
 
-      {/* Leave Balances Modal */}
       <FormalModal
         show={showBalanceModal}
         onClose={() => {

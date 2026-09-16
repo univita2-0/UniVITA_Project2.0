@@ -5,6 +5,8 @@ import { login, requestPasswordReset, resetPassword, API_BASE } from '../api';
 import { ArrowLeft, ShieldCheck, Mail, Lock, KeyRound } from 'lucide-react';
 import './Login.css';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const Login = ({ onBack }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,6 +32,10 @@ const Login = ({ onBack }) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
       toast.error('Please enter both email and password.');
+      return;
+    }
+    if (!EMAIL_REGEX.test(email.trim())) {
+      toast.error('Please enter a valid email address.');
       return;
     }
 
@@ -60,13 +66,14 @@ const Login = ({ onBack }) => {
           toast.error(otpData?.message || 'Failed to send OTP verification code.');
         }
       } else {
-        // Strict exact-string matching based on backend res.json() messages
-        if (result?.message === 'Password incorrect') {
-          toast.error('Incorrect password');
-        } else if (result?.message === 'Email invalid') {
-          toast.error('Email invalid');
+        // Exact validation message mapping
+        const serverMsg = result?.message || '';
+        if (serverMsg.toLowerCase().includes('password') || serverMsg === 'Invalid credentials.') {
+          toast.error('Password incorrect');
+        } else if (serverMsg.toLowerCase().includes('email') || serverMsg.toLowerCase().includes('not found')) {
+          toast.error('Email invalid or account not found');
         } else {
-          toast.error(result?.message || 'Incorrect email or password. Please try again.');
+          toast.error(serverMsg || 'Incorrect email or password. Please try again.');
         }
       }
     } catch (err) {
@@ -84,12 +91,12 @@ const Login = ({ onBack }) => {
       return;
     }
 
-    setOtpLoading(true); // Locks the submit process
+    setOtpLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp }),
+        body: JSON.stringify({ email: email.trim(), otp }),
       });
       const data = await res.json();
 
@@ -113,24 +120,28 @@ const Login = ({ onBack }) => {
           window.location.href = '/';
         }, 800);
       } else {
-        // Backend returned failure - Halt and stay on OTP screen
         toast.error(data?.message || 'Invalid or expired OTP code.');
       }
     } catch (err) {
       console.error(err);
       toast.error('Connection error during verification.');
     } finally {
-      setOtpLoading(false); // Unlocks form only after failure (or right before redirect)
+      setOtpLoading(false);
     }
   };
 
   const handleResendOtp = async () => {
+    if (!email.trim() || !EMAIL_REGEX.test(email.trim())) {
+      toast.error('Valid email is required to resend code.');
+      return;
+    }
+
     setOtpLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: email.trim() }),
       });
       const data = await res.json();
       if (data && data.success) {
@@ -148,8 +159,8 @@ const Login = ({ onBack }) => {
 
   const handleForgotPasswordSubmit = async (e) => {
     e.preventDefault();
-    if (!email.trim()) {
-      toast.error('Please enter your account email address.');
+    if (!email.trim() || !EMAIL_REGEX.test(email.trim())) {
+      toast.error('Please enter a valid account email address.');
       return;
     }
 
@@ -161,7 +172,7 @@ const Login = ({ onBack }) => {
         setStep('reset-password');
         startResendTimer();
       } else {
-        toast.error(res?.message || 'No account found with this email address.');
+        toast.error(res?.message || 'No active account found with this email address.');
       }
     } catch (err) {
       toast.error('Connection error. Please try again.');
@@ -172,14 +183,18 @@ const Login = ({ onBack }) => {
 
   const handleResetPasswordSubmit = async (e) => {
     e.preventDefault();
-    if (!otp || otp.length < 6 || !newPassword || newPassword.length < 6) {
-      toast.error('Please provide a valid 6-digit code and a new password (min. 6 characters).');
+    if (!otp || otp.length < 6) {
+      toast.error('Please enter a valid 6-digit reset code.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      toast.error('For security, your password must be at least 8 characters long.');
       return;
     }
 
     setOtpLoading(true);
     try {
-      const res = await resetPassword({ email, otp, newPassword });
+      const res = await resetPassword({ email: email.trim(), otp, newPassword });
       if (res && res.success) {
         toast.success('Password reset successfully. You can now log in.');
         setStep('login');
@@ -210,7 +225,7 @@ const Login = ({ onBack }) => {
       </button>
 
       <div className="glass-login-card">
-        {/* Brand Header: Strictly rendered ONLY on initial login step */}
+        {/* Brand Header */}
         {step === 'login' && (
           <div className="gl-brand-header gl-stagger-1">
             <div className="gl-brand-icon">
@@ -360,14 +375,14 @@ const Login = ({ onBack }) => {
                 <input
                   type="password"
                   className="gl-input"
-                  placeholder="New Password (min. 6 chars)"
+                  placeholder="New Password (min. 8 chars)"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  minLength={6}
+                  minLength={8}
                   required
                 />
               </div>
-              <button type="submit" className="btn-gl-primary gl-stagger-5" disabled={otpLoading || otp.length < 6 || newPassword.length < 6}>
+              <button type="submit" className="btn-gl-primary gl-stagger-5" disabled={otpLoading || otp.length < 6 || newPassword.length < 8}>
                 {otpLoading ? 'Updating System...' : 'Update Password'}
               </button>
             </form>

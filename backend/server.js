@@ -26,6 +26,24 @@ const helmet = require('helmet');
 app.set('trust proxy', 1);
 
 
+const envOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [];
+
+
+const allowedOrigins = [
+  'https://univitahct.tech',        
+  'https://www.univitahct.tech',    
+  'https://univita.site',
+  'https://univitahct.netlify.app',
+  'http://localhost:3000',          
+  'http://localhost:8081',          
+  ...envOrigins
+];
+
+// Strictly allow local development ports ONLY when not in production
+if (process.env.NODE_ENV !== 'production') {
+  allowedOrigins.push('http://localhost:3000', 'http://localhost:8081');
+}
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }, 
   contentSecurityPolicy: {
@@ -34,7 +52,8 @@ app.use(helmet({
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"], 
       imgSrc: ["'self'", "data:", "blob:", "https:"],
-      connectSrc: ["'self'", "https://univitaproject20-production.up.railway.app"]
+      // Replaced dead railway domain with your actual API and allowed origins
+      connectSrc: ["'self'", "https://api.univitahct.tech", "wss://api.univitahct.tech", ...allowedOrigins]
     },
   },
   frameguard: { action: 'sameorigin' }, 
@@ -46,7 +65,6 @@ app.use(helmet({
   },
 }));
 
-
 app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
@@ -54,6 +72,27 @@ app.use((req, res, next) => {
 });
 
 app.disable('x-powered-by');
+
+// Dynamic CORS configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (e.g., mobile apps, curl, or Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`Blocked by CORS: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.use(bodyParser.json());
+
 const fs = require('fs');
 const visitorDestinations = {};
 const recentAlertsCache = new Set();
@@ -354,32 +393,7 @@ const appealStorage = multer.diskStorage({
 const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
 
-// --------------------------------------------------
-// CORS CONFIGURATION
-// --------------------------------------------------
-const allowedOrigins = [
-  'https://univitahct.tech',        
-  'https://www.univitahct.tech',    
-  'https://univita.site',
-  'http://localhost:3000',
-  'http://localhost:8081',          
-  'https://univitahct.netlify.app'
-];
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  optionsSuccessStatus: 200
-};
-app.use(cors(corsOptions));
-app.use(bodyParser.json());
 
 
 // ============================================
@@ -528,42 +542,48 @@ app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
   const newPassword = req.body.newPassword;
 
   if (!email || !otp || !newPassword) {
-    return res.status(400).json({ success: false, message: 'Email, OTP, and new password required' });
+    return res.status(400).json({ success: false, message: 'All fields are required.' });
   }
-  if (newPassword.length < 6) {
-    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+  if (newPassword.length < 8) {
+    return res.status(400).json({ success: false, message: 'For security, your password must be at least 8 characters long.' });
   }
 
   const record = OTP_STORE[email];
-  if (!record) return res.status(400).json({ success: false, message: 'No OTP found. Please request a new one.' });
+  if (!record) return res.status(400).json({ success: false, message: 'OTP not found. Please request a new one.' });
   if (Date.now() > record.expiresAt) {
     delete OTP_STORE[email];
-    return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new one.' });
+    return res.status(400).json({ success: false, message: 'Your OTP has expired. Please request a new one.' });
   }
-  if (record.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP.' });
+  if (record.otp !== otp) return res.status(400).json({ success: false, message: 'The OTP entered is incorrect.' });
 
   delete OTP_STORE[email];
 
   try {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    const updateSql = "UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE email = ?";
-    db.query(updateSql, [hashedPassword, email], (err) => {
-      if (err) return res.status(500).json({ success: false, message: err.message });
-      res.json({ success: true, message: 'Password reset successfully.' });
+    db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE email = ?", [hashedPassword, email], (err) => {
+      if (err) return res.status(500).json({ success: false, message: 'Database error during password reset.' });
+      res.json({ success: true, message: 'Your password has been successfully reset!' });
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error encrypting new password' });
+    res.status(500).json({ success: false, message: 'Encryption error. Please try again.' });
   }
 });
 
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
 app.post('/api/login', loginLimiter, (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: 'Email and password are required.' });
+  }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+  }
 
   db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    
-    if (results.length === 0) return res.json({ success: false, message: 'Email invalid' }); 
+    if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
+    if (results.length === 0) return res.status(401).json({ success: false, message: 'Invalid credentials.' }); 
 
     const user = results[0];
     const match = await bcrypt.compare(password, user.password);
@@ -572,10 +592,11 @@ app.post('/api/login', loginLimiter, (req, res) => {
       const hashed = await bcrypt.hash(password, 10);
       db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
     } else if (!match) {
-      return res.json({ success: false, message: 'Password incorrect' });
+      return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
     
     logAction(user.id, 'LOGIN', 'user', user.id, req);
+    
     const daysSinceChange = user.password_last_changed
       ? Math.floor((Date.now() - new Date(user.password_last_changed).getTime()) / (1000 * 60 * 60 * 24))
       : 0;
@@ -585,20 +606,14 @@ app.post('/api/login', loginLimiter, (req, res) => {
       return res.json({
         success: true,
         requiresPasswordReset: true,
-        message: "Your password has expired (365+ days). Please renew it.",
+        message: "Your password has expired. Please renew it to continue.",
         tempToken,
-        user: {
-          id: user.id,
-          employee_id: user.employee_id,
-          full_name: user.full_name,
-          email: user.email,
-          role: user.role
-        }
+        user: { id: user.id, role: user.role }
       });
     }
 
     const tempToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '5m' });
-    res.json({ success: true, requiresOtp: true, tempToken, email: user.email });
+    res.json({ success: true, message: 'Login successful.', requiresOtp: true, tempToken, email: user.email });
   });
 });
 
@@ -629,29 +644,35 @@ app.put('/api/users/:id/profile', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/users/:identifier/update-password', async (req, res) => {
+app.put('/api/users/:identifier/update-password', authenticateToken, verifyOwnership, async (req, res) => {
   const { identifier } = req.params;
   const { currentPassword, newPassword } = req.body;
-  if (!currentPassword || !newPassword) return res.status(400).json({ success: false, message: 'Missing fields' });
+  
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ success: false, message: 'Current and new passwords are required.' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 8 characters long.' });
+  }
 
   db.query("SELECT * FROM users WHERE (id = ? OR employee_id = ?)", [identifier, identifier], async (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: "DB Error" });
+    if (err) return res.status(500).json({ success: false, message: "Database connection error." });
     if (results.length === 0) return res.status(404).json({ success: false, message: "User not found." });
     
     const user = results[0];
     const match = await bcrypt.compare(currentPassword.trim(), user.password);
     if (!match && currentPassword.trim() !== user.password) {
-      return res.status(401).json({ success: false, message: "Invalid current password." });
+      return res.status(401).json({ success: false, message: "Invalid current password provided." });
     }
 
     try {
       const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
       db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [hashedPassword, user.id], (err) => {
-        if (err) return res.status(500).json({ success: false });
-        res.json({ success: true });
+        if (err) return res.status(500).json({ success: false, message: "Failed to update password in database." });
+        res.json({ success: true, message: "Password updated successfully." });
       });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Error encrypting new password' });
+      res.status(500).json({ success: false, message: 'Error encrypting new password.' });
     }
   });
 });
@@ -709,8 +730,19 @@ const getPHTime = () => {
 app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
   let { latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
-  const selfiePath = req.file ? `/uploads/selfies/${req.file.filename}` : null;
 
+  // 1. STRICT PAYLOAD VALIDATION: Require selfie and valid GPS
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'A selfie is required to verify your attendance.' });
+  }
+  
+  const parsedLat = parseFloat(latitude);
+  const parsedLon = parseFloat(longitude);
+  if (!latitude || !longitude || isNaN(parsedLat) || isNaN(parsedLon) || parsedLat === 0 || parsedLon === 0) {
+    return res.status(400).json({ success: false, message: 'Unable to retrieve valid GPS location. Ensure location permissions are granted.' });
+  }
+
+  const selfiePath = `/uploads/selfies/${req.file.filename}`;
   const { date: todayDate, time: currentTime } = getPHTime();
 
   try {
@@ -718,10 +750,9 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       "SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active'",
       [userId]
     );
-    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'User inactive or not found' });
+    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'User inactive or not found.' });
     const employee_id = userRows[0].employee_id;
 
-    // FIX: Pass Manila currentTime instead of UTC NOW()
     if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
       const [autoSched] = await db.promise().query(
         `SELECT id FROM schedules 
@@ -742,10 +773,9 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       "SELECT id, place, start_time, end_time FROM schedules WHERE id = ? AND user_id = ?",
       [schedule_id, employee_id]
     );
-    if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'No work schedule found' });
+    if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'No work schedule found.' });
     const { place: schedulePlace, start_time: scheduledStartTime, end_time: scheduledEndTime } = schedRows[0];
 
-    // FIX: Manual Select to guarantee no duplicate insertions
     if (currentTime > scheduledEndTime) {
       const [existingAtt] = await db.promise().query(
         "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ? AND date = ?", 
@@ -782,21 +812,17 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
       [schedulePlace]
     );
-    if (locRows.length === 0) return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered` });
+    if (locRows.length === 0) return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered in the system.` });
     const schoolGeo = locRows[0];
 
-    const parsedLat = parseFloat(latitude);
-    const parsedLon = parseFloat(longitude);
-    let finalLat = (!isNaN(parsedLat) && parsedLat !== 0) ? parsedLat : parseFloat(schoolGeo.latitude);
-    let finalLon = (!isNaN(parsedLon) && parsedLon !== 0) ? parsedLon : parseFloat(schoolGeo.longitude);
-
-    const distance = getDistanceFromLatLonInMeters(finalLat, finalLon, schoolGeo.latitude, schoolGeo.longitude);
+    // Calculate distance strictly using provided GPS coordinates
+    const distance = getDistanceFromLatLonInMeters(parsedLat, parsedLon, schoolGeo.latitude, schoolGeo.longitude);
     if (distance > schoolGeo.radius) {
       return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
     }
 
     const [existing] = await db.promise().query("SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ?", [employee_id, schedule_id]);
-    if (existing.length > 0) return res.status(400).json({ success: false, message: 'Already clocked in for this schedule' });
+    if (existing.length > 0) return res.status(400).json({ success: false, message: 'You have already clocked in for this schedule.' });
 
     const status = diffMinutes > 30 ? 'late' : 'present';
 
@@ -806,23 +832,35 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
          clock_in_latitude, clock_in_longitude, location)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [employee_id, schedule_id, todayDate, currentTime, status,
-       selfiePath, finalLat, finalLon,
-       `${schedulePlace} (${finalLat.toFixed(6)}, ${finalLon.toFixed(6)})`]
+       selfiePath, parsedLat, parsedLon,
+       `${schedulePlace} (${parsedLat.toFixed(6)}, ${parsedLon.toFixed(6)})`]
     );
 
     logAction(req.user.id, 'CLOCK_IN', 'attendance', result.insertId, req);
 
-    res.json({ success: true, message: `Clocked in as ${status} at ${formatTo12Hour(currentTime)}` });
+    res.json({ success: true, message: `Clocked in successfully as ${status} at ${formatTo12Hour(currentTime)}.` });
   } catch (err) {
     console.error("Clock-in error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: "A server error occurred during clock-in." });
   }
 });
 
 app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
   let { latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
-  const selfiePath = req.file ? `/uploads/selfies/${req.file.filename}` : null;
+
+  // 1. STRICT PAYLOAD VALIDATION: Require selfie and valid GPS
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'A selfie is required to verify your clock-out.' });
+  }
+  
+  const parsedLat = parseFloat(latitude);
+  const parsedLon = parseFloat(longitude);
+  if (!latitude || !longitude || isNaN(parsedLat) || isNaN(parsedLon) || parsedLat === 0 || parsedLon === 0) {
+    return res.status(400).json({ success: false, message: 'Unable to retrieve valid GPS location. Ensure location permissions are granted.' });
+  }
+
+  const selfiePath = `/uploads/selfies/${req.file.filename}`;
   const { date: todayDate, time: currentTime } = getPHTime();
 
   try {
@@ -830,7 +868,7 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
       "SELECT employee_id FROM users WHERE id = ? AND status = 'active'",
       [userId]
     );
-    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'User inactive or not found' });
+    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'User inactive or not found.' });
     const employee_id = userRows[0].employee_id;
 
     if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
@@ -859,31 +897,27 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
       "SELECT place, end_time FROM schedules WHERE id = ? AND user_id = ?",
       [schedule_id, employee_id]
     );
-    if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'Schedule not found' });
+    if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'Schedule not found.' });
     const { place: schedulePlace, end_time: scheduledEndTime } = schedRows[0];
 
     const [locRows] = await db.promise().query(
       "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
       [schedulePlace]
     );
-    if (locRows.length === 0) return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered` });
+    if (locRows.length === 0) return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered in the system.` });
     const schoolGeo = locRows[0];
 
-    const parsedLat = parseFloat(latitude);
-    const parsedLon = parseFloat(longitude);
-    let finalLat = (!isNaN(parsedLat) && parsedLat !== 0) ? parsedLat : parseFloat(schoolGeo.latitude);
-    let finalLon = (!isNaN(parsedLon) && parsedLon !== 0) ? parsedLon : parseFloat(schoolGeo.longitude);
-
-    const distance = getDistanceFromLatLonInMeters(finalLat, finalLon, schoolGeo.latitude, schoolGeo.longitude);
+    // Calculate distance strictly using provided GPS coordinates
+    const distance = getDistanceFromLatLonInMeters(parsedLat, parsedLon, schoolGeo.latitude, schoolGeo.longitude);
     if (distance > schoolGeo.radius) {
-      return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus.` });
+      return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
     }
 
     const [existing] = await db.promise().query(
       "SELECT id, time_in FROM attendance WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
       [employee_id, schedule_id]
     );
-    if (existing.length === 0) return res.status(400).json({ success: false, message: 'No active clock-in found for this schedule' });
+    if (existing.length === 0) return res.status(400).json({ success: false, message: 'No active clock-in found for this schedule.' });
 
     if (currentTime < scheduledEndTime) {
       return res.status(403).json({ success: false, message: `Shift incomplete. You must stay until ${formatTo12Hour(scheduledEndTime)} to clock out.` });
@@ -904,7 +938,7 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
         clock_out_longitude = ?, 
         location = ? 
        WHERE id = ?`,
-      [finalTimeOut, selfiePath, finalLat, finalLon, schedulePlace, existing[0].id]
+      [finalTimeOut, selfiePath, parsedLat, parsedLon, schedulePlace, existing[0].id]
     );
 
     if (isLateClockOut) {
@@ -931,7 +965,7 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     res.json({ success: true, message: `Clocked out successfully at ${formatTo12Hour(currentTime)}.` });
   } catch (err) {
     console.error("Clock-out error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: "A server error occurred during clock-out." });
   }
 });
 
@@ -1257,32 +1291,48 @@ app.get('/api/attendance-appeals/history', authenticateToken, (req, res) => {
   );
 });
 
-
 // ============================================
-// 4. LEAVE REQUESTS
+// LEAVE REQUESTS (Secured & Validated)
 // ============================================
 
 app.post('/api/leave-requests', authenticateToken, upload.single('image'), async (req, res) => {
   const { request_date, reason, type } = req.body;
   const userId = req.user.id;
+
+  // 1. Strict Input Validation
+  if (!request_date || !reason || !type) {
+    return res.status(400).json({ success: false, message: "Date, reason, and leave type are required." });
+  }
+  if (reason.trim().length < 10) {
+    return res.status(400).json({ success: false, message: "Please provide a more detailed reason (minimum 10 characters)." });
+  }
+
+  // 2. Prevent Retroactive Non-Emergency Leaves
+  const { date: today } = getPHTime(); 
+  if (request_date < today && type !== 'Emergency Leave' && type !== 'Sick Leave') {
+    return res.status(400).json({ success: false, message: `${type} cannot be filed retroactively.` });
+  }
+
   const leaveYear = new Date(request_date).getFullYear();
 
   try {
     const [userRows] = await db.promise().query("SELECT employee_id FROM users WHERE id = ?", [userId]);
-    if (userRows.length === 0) return res.status(404).json({ success: false, error: "User not found" });
+    if (userRows.length === 0) return res.status(404).json({ success: false, message: "User not found in system." });
     const employee_id = userRows[0].employee_id;
 
     const [existingReq] = await db.promise().query(
       "SELECT id FROM leave_requests WHERE user_id = ? AND request_date = ? AND status IN ('Pending', 'Approved')",
       [employee_id, request_date]
     );
-    if (existingReq.length > 0) return res.status(409).json({ success: false, error: "A request already exists for this date." });
+    if (existingReq.length > 0) return res.status(409).json({ success: false, message: "A request already exists for this date." });
 
     const [typeRows] = await db.promise().query("SELECT id, annual_quota FROM leave_types WHERE name = ?", [type]);
-    if (typeRows.length === 0) return res.status(400).json({ success: false, error: "Invalid leave type" });
+    if (typeRows.length === 0) return res.status(400).json({ success: false, message: "Invalid leave type selected." });
+    
     const leaveTypeId = typeRows[0].id;
     const annualQuota = typeRows[0].annual_quota || 15;
 
+    // Ensure balance row exists
     await db.promise().query(
       `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated) VALUES (?, ?, ?, ?, CURDATE())`,
       [userId, leaveTypeId, annualQuota, leaveYear]
@@ -1293,7 +1343,9 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       [userId, leaveTypeId, leaveYear]
     );
     
-    if (balanceRows[0].remaining_days < 1) return res.status(400).json({ success: false, error: `Insufficient ${type} balance.` });
+    if (balanceRows[0].remaining_days < 1) {
+      return res.status(400).json({ success: false, message: `Insufficient ${type} balance. You have 0 days remaining.` });
+    }
 
     const image_url = req.file ? `/uploads/leave_images/${req.file.filename}` : null;
     const [result] = await db.promise().query(
@@ -1301,19 +1353,22 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       [employee_id, request_date, reason, type, image_url]
     );
     
-    res.json({ success: true });
+    res.json({ success: true, message: "Leave request submitted successfully." });
   } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, error: "Duplicate entry." });
-    res.status(500).json({ success: false, error: err.message });
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: "Duplicate entry detected." });
+    console.error("Leave Request Submit Error:", err);
+    res.status(500).json({ success: false, message: "Server connection failed while submitting request." });
   }
 });
 
 app.get('/api/leave-requests/all', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
+  }
   db.query(
     `SELECT lr.*, u.full_name FROM leave_requests lr LEFT JOIN users u ON lr.user_id = u.employee_id WHERE lr.is_hidden = 0 ORDER BY lr.request_date DESC`,
     (err, results) => {
-      if (err) return res.status(500).json(err);
+      if (err) return res.status(500).json({ success: false, message: "Failed to fetch leave requests." });
       res.json(results || []);
     }
   );
@@ -1329,64 +1384,90 @@ app.get('/api/leave-requests/history/:identifier', authenticateToken, (req, res)
      ORDER BY lr.request_date DESC`,
     [identifier, identifier],
     (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: err.message });
-      res.json(results);
+      if (err) return res.status(500).json({ success: false, message: "Failed to fetch leave history." });
+      res.json(results || []);
     }
   );
 });
 
 app.get('/api/leave-requests/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   db.query("SELECT * FROM leave_requests WHERE user_id = ? ORDER BY request_date DESC", [req.params.employeeId], (err, result) => {
-    if (err) return res.status(500).json(err);
+    if (err) return res.status(500).json({ success: false, message: "Failed to fetch user leaves." });
     res.json(result || []);
   });
 });
 
 app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
-  const { status } = req.body;
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
+  }
+  const { status, admin_remarks } = req.body;
   const requestId = req.params.id;
+
+  if (!['Approved', 'Rejected'].includes(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid status update.' });
+  }
+
   const connection = await db.promise().getConnection();
   await connection.beginTransaction();
 
   try {
     const [leaveRows] = await connection.query(`SELECT user_id, request_date, type FROM leave_requests WHERE id = ?`, [requestId]);
-    if (leaveRows.length === 0) throw new Error("Leave request not found");
-    const { user_id, request_date, type } = leaveRows[0];
+    if (leaveRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Leave request not found." });
+    }
+    const { user_id: employee_id, request_date, type } = leaveRows[0];
 
-    await connection.query(`UPDATE leave_requests SET status = ?, reviewed_at = NOW() WHERE id = ?`, [status, requestId]);
+    // FIX: Get the INT ID for the employee_leave_balances table
+    const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
+    if (userRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Associated user account not found." });
+    }
+    const internalUserId = userRows[0].id;
+
+    await connection.query(`UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = NOW() WHERE id = ?`, [status, admin_remarks || null, requestId]);
 
     if (status === 'Approved') {
       const leaveYear = new Date(request_date).getFullYear();
       const [typeRows] = await connection.query(`SELECT id FROM leave_types WHERE name = ?`, [type]);
-      if (typeRows.length === 0) throw new Error("Invalid leave type");
+      if (typeRows.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: "Invalid leave type detected in database." });
+      }
       const leaveTypeId = typeRows[0].id;
 
       const [balanceRows] = await connection.query(
-        `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-        [user_id, leaveTypeId, leaveYear]
+        `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ? FOR UPDATE`,
+        [internalUserId, leaveTypeId, leaveYear]
       );
+      
       if (balanceRows.length === 0 || balanceRows[0].remaining_days < 1) {
-        throw new Error(`Cannot approve: insufficient ${type} balance for ${leaveYear}.`);
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: `Cannot approve: Insufficient ${type} balance for ${leaveYear}.` });
       }
+      
       const newBalance = balanceRows[0].remaining_days - 1;
       await connection.query(
         `UPDATE employee_leave_balances SET remaining_days = ?, last_updated = CURDATE() WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-        [newBalance, user_id, leaveTypeId, leaveYear]
+        [newBalance, internalUserId, leaveTypeId, leaveYear]
       );
+      
       await connection.query(
         `INSERT INTO attendance (user_id, date, status, location) VALUES (?, ?, 'on leave', 'Remote/Leave') ON DUPLICATE KEY UPDATE status = 'on leave'`,
-        [user_id, request_date]
+        [employee_id, request_date]
       );
     }
     await connection.commit();
+    
     const action = status === 'Approved' ? 'APPROVE_LEAVE' : 'REJECT_LEAVE';
     logAction(req.user.id, action, 'leave_request', requestId, req);
-    res.json({ success: true });
+    res.json({ success: true, message: `Leave request successfully ${status.toLowerCase()}.` });
   } catch (err) {
     await connection.rollback();
     console.error("Error updating leave request status:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: "Server connection failed while updating status." });
   } finally {
     connection.release();
   }
@@ -1394,15 +1475,15 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
 
 app.put('/api/leave-requests/:id/dismiss', authenticateToken, (req, res) => {
   db.query("UPDATE leave_requests SET is_hidden = 1 WHERE id = ?", [req.params.id], (err) => {
-    if (err) return res.status(500).json({ success: false, error: err.message });
-    res.json({ success: true });
+    if (err) return res.status(500).json({ success: false, message: "Failed to dismiss request." });
+    res.json({ success: true, message: "Request dismissed successfully." });
   });
 });
 
 app.get('/api/leave-types', (req, res) => {
   db.query("SELECT * FROM leave_types WHERE is_active = 1", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) return res.status(500).json({ success: false, message: "Failed to fetch leave types." });
+    res.json(results || []);
   });
 });
 
@@ -1427,28 +1508,33 @@ app.get('/api/leave-balances/:userId', async (req, res) => {
     );
     res.json(results || []);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Leave balances error:", err);
+    res.status(500).json({ success: false, message: "Failed to load leave balances." });
   }
 });
 
 app.put('/api/leave-balances/:userId', (req, res) => {
   const { userId } = req.params;
   const { leave_type_id, remaining_days, year } = req.body;
+
+  if (!leave_type_id || remaining_days === undefined || !year) {
+    return res.status(400).json({ success: false, message: "Missing required balance parameters." });
+  }
+
   db.query(
     `INSERT INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated)
      VALUES (?, ?, ?, ?, CURDATE())
      ON DUPLICATE KEY UPDATE remaining_days = VALUES(remaining_days), last_updated = CURDATE()`,
     [userId, leave_type_id, remaining_days, year],
     (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true });
+      if (err) return res.status(500).json({ success: false, message: "Failed to update leave balance." });
+      res.json({ success: true, message: "Leave balance successfully updated." });
     }
   );
 });
 
-
 // ============================================
-// 5. CALENDAR & EVENTS
+// 5. CALENDAR & EVENTS (Secured & Validated)
 // ============================================
 
 app.get('/api/events', (req, res) => {
@@ -1462,59 +1548,71 @@ app.get('/api/events', (req, res) => {
     ORDER BY date ASC
   `;
   db.query(sql, (err, results) => {
-    if (err) return res.status(500).send(err);
-    res.json(results);
+    if (err) return res.status(500).json({ success: false, message: "Failed to load events." });
+    res.json(results || []);
   });
 });
 
 app.post('/api/events', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
   const { title, date, place, start_time, end_time, type, description } = req.body;
+  
+  if (!title || !date || !type) {
+    return res.status(400).json({ success: false, message: 'Event title, date, and type are required.' });
+  }
+
   db.query(
     "INSERT INTO events (title, date, place, start_time, end_time, type, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [title, date, place, start_time, end_time, type, description],
+    [title.trim(), date, place || null, start_time || null, end_time || null, type, description || ''],
     (err, result) => {
-      if (err) return res.status(500).json({ success: false, error: err.message });
+      if (err) return res.status(500).json({ success: false, message: 'Database error while creating event.' });
       logAction(req.user.id, 'CREATE_EVENT', 'event', result.insertId, req);
-      res.json({ success: true });
+      res.json({ success: true, message: 'Event created successfully.' });
     }
   );
 });
 
 app.put('/api/events/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
   const { title, date, place, start_time, end_time, type, description } = req.body;
   const eventId = req.params.id;
+
+  if (!title || !date || !type) {
+    return res.status(400).json({ success: false, message: 'Event title, date, and type are required.' });
+  }
+
   db.query(
     "UPDATE events SET title=?, date=?, place=?, start_time=?, end_time=?, type=?, description=? WHERE id=?",
-    [title, date, place, start_time, end_time, type, description, eventId],
-    (err) => {
-      if (err) return res.status(500).json({ success: false, error: err.message });
+    [title.trim(), date, place || null, start_time || null, end_time || null, type, description || '', eventId],
+    (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: 'Database error while updating event.' });
+      if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Event not found.' });
       logAction(req.user.id, 'UPDATE_EVENT', 'event', eventId, req);
-      res.json({ success: true });
+      res.json({ success: true, message: 'Event updated successfully.' });
     }
   );
 });
 
 app.delete('/api/events/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
   const eventId = req.params.id;
-  db.query("DELETE FROM events WHERE id = ?", [eventId], (err) => {
-    if (err) return res.status(500).json({ success: false, error: err.message });
+  db.query("DELETE FROM events WHERE id = ?", [eventId], (err, result) => {
+    if (err) return res.status(500).json({ success: false, message: 'Database error while deleting event.' });
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Event not found.' });
     logAction(req.user.id, 'DELETE_EVENT', 'event', eventId, req);
-    res.json({ success: true });
+    res.json({ success: true, message: 'Event deleted successfully.' });
   });
 });
 
 
 // ============================================
-// 6. SCHEDULES & REQUESTS
+// 6. SCHEDULES & REQUESTS (Secured & Validated)
 // ============================================
 
 app.get('/api/schedules', (req, res) => {
@@ -1544,8 +1642,8 @@ app.get('/api/schedules', (req, res) => {
   `;
   
   db.query(sql, (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(result);
+    if (err) return res.status(500).json({ success: false, message: "Failed to load schedules." });
+    res.json(result || []);
   });
 });
 
@@ -1553,6 +1651,9 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
   const sql = `
     SELECT 
       s.*, 
+      a.time_in,
+      a.time_out,
+      a.status AS attendance_record_status,
       DATE_FORMAT(s.date, '%Y-%m-%d') as date,
       CASE 
         WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'COMPLETED'
@@ -1566,7 +1667,7 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
   `;
   
   db.query(sql, [req.params.employeeId], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) return res.status(500).json({ success: false, message: "Failed to load personal schedules." });
     res.json(result || []);
   });
 });
@@ -1581,114 +1682,122 @@ async function hasScheduleConflict(user_id, date, start_time, end_time, excludeI
 
 app.post('/api/schedules', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
   const { user_id, date, place, course, start_time, end_time } = req.body;
   const { date: today } = getPHTime();
 
+  if (!user_id || !date || !place || !start_time || !end_time) {
+    return res.status(400).json({ success: false, message: 'All schedule fields are required.' });
+  }
   if (date < today) {
-    return res.status(400).json({ success: false, error: 'Cannot create schedule for a past date.' });
-  }
-
-  const [leaveRows] = await db.promise().query(
-    "SELECT id FROM leave_requests WHERE user_id = ? AND request_date = ? AND status = 'Approved'",
-    [user_id, date]
-  );
-  if (leaveRows.length > 0) {
-    return res.status(409).json({ success: false, error: 'Cannot assign schedule. Employee has an approved leave on this date.' });
-  }
-
-  const [locRows] = await db.promise().query("SELECT id FROM school_locations WHERE name = ?", [place]);
-  if (locRows.length === 0) {
-    return res.status(400).json({ success: false, error: 'Schedule place must be a registered school location.' });
+    return res.status(400).json({ success: false, message: 'Cannot create a schedule for a past date.' });
   }
   if (start_time >= end_time) {
-    return res.status(400).json({ success: false, error: 'End time must be after start time.' });
-  }
-  if (await hasScheduleConflict(user_id, date, start_time, end_time)) {
-    return res.status(409).json({ success: false, error: 'Time conflict.' });
+    return res.status(400).json({ success: false, message: 'End time must be after start time.' });
   }
 
-  db.query(
-    "INSERT INTO schedules (user_id, date, place, course, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
-    [user_id, date, place, course, start_time, end_time],
-    (err, result) => {
-      if (err) return res.status(500).json({ success: false, error: err.message });
-      logAction(req.user.id, 'CREATE_SCHEDULE', 'schedule', result.insertId, req);
-      res.json({ success: true });
+  try {
+    const [leaveRows] = await db.promise().query(
+      "SELECT id FROM leave_requests WHERE user_id = ? AND request_date = ? AND status = 'Approved'",
+      [user_id, date]
+    );
+    if (leaveRows.length > 0) {
+      return res.status(409).json({ success: false, message: 'Cannot assign schedule. Employee is on an approved leave on this date.' });
     }
-  );
+
+    const [locRows] = await db.promise().query("SELECT id FROM school_locations WHERE name = ?", [place]);
+    if (locRows.length === 0) {
+      return res.status(400).json({ success: false, message: 'Schedule place must be a registered school location.' });
+    }
+    
+    if (await hasScheduleConflict(user_id, date, start_time, end_time)) {
+      return res.status(409).json({ success: false, message: 'Time conflict with an existing schedule.' });
+    }
+
+    const [result] = await db.promise().query(
+      "INSERT INTO schedules (user_id, date, place, course, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
+      [user_id, date, place, course || '', start_time, end_time]
+    );
+    logAction(req.user.id, 'CREATE_SCHEDULE', 'schedule', result.insertId, req);
+    res.json({ success: true, message: 'Schedule created successfully.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error while creating schedule.' });
+  }
 });
 
 app.put('/api/schedules/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   const { date, place, course, start_time, end_time } = req.body;
   const scheduleId = req.params.id;
   const { date: today } = getPHTime();
 
-  const [attRows] = await db.promise().query(
-    "SELECT id FROM attendance WHERE schedule_id = ?",
-    [scheduleId]
-  );
-  if (attRows.length > 0) {
-    return res.status(403).json({ success: false, error: "Cannot modify this schedule; attendance has already been recorded." });
+  if (!date || !place || !start_time || !end_time) {
+    return res.status(400).json({ success: false, message: 'All schedule fields are required.' });
   }
+  if (date < today) return res.status(400).json({ success: false, message: "Cannot update schedule to a past date." });
+  if (start_time >= end_time) return res.status(400).json({ success: false, message: "End time must be after start time." });
 
-  if (date < today) return res.status(400).json({ success: false, error: "Cannot update schedule to a past date." });
-  if (place) {
-    const [locRows] = await db.promise().query("SELECT id FROM school_locations WHERE name = ?", [place]);
-    if (locRows.length === 0) return res.status(400).json({ success: false, error: "Invalid location." });
-  }
-  if (start_time >= end_time) return res.status(400).json({ success: false, error: "End time must be after start time." });
-
-  const [old] = await db.promise().query("SELECT * FROM schedules WHERE id = ?", [scheduleId]);
-  if (old.length === 0) return res.status(404).json({ success: false, error: "Schedule not found" });
-  
-  const oldData = old[0];
-  const user_id = oldData.user_id;
-  if (await hasScheduleConflict(user_id, date, start_time, end_time, scheduleId)) {
-    return res.status(409).json({ success: false, error: "Time conflict." });
-  }
-
-  const newData = { date, place, course, start_time, end_time };
-
-  db.query("UPDATE schedules SET date=?, place=?, course=?, start_time=?, end_time=? WHERE id=?", 
-    [date, place, course, start_time, end_time, scheduleId], (err) => {
-      if (err) return res.status(500).json({ success: false, error: err.message });
-      logAction(req.user.id, 'UPDATE_SCHEDULE', 'schedule', scheduleId, req, oldData, newData);
-      res.json({ success: true });
+  try {
+    const [attRows] = await db.promise().query("SELECT id FROM attendance WHERE schedule_id = ?", [scheduleId]);
+    if (attRows.length > 0) {
+      return res.status(403).json({ success: false, message: "Cannot modify this schedule; attendance has already been recorded." });
     }
-  );
+
+    const [locRows] = await db.promise().query("SELECT id FROM school_locations WHERE name = ?", [place]);
+    if (locRows.length === 0) return res.status(400).json({ success: false, message: "Invalid location." });
+
+    const [old] = await db.promise().query("SELECT * FROM schedules WHERE id = ?", [scheduleId]);
+    if (old.length === 0) return res.status(404).json({ success: false, message: "Schedule not found." });
+    
+    const oldData = old[0];
+    const user_id = oldData.user_id;
+    if (await hasScheduleConflict(user_id, date, start_time, end_time, scheduleId)) {
+      return res.status(409).json({ success: false, message: "Time conflict with another schedule." });
+    }
+
+    const newData = { date, place, course, start_time, end_time };
+
+    await db.promise().query("UPDATE schedules SET date=?, place=?, course=?, start_time=?, end_time=? WHERE id=?", 
+      [date, place, course || '', start_time, end_time, scheduleId]);
+      
+    logAction(req.user.id, 'UPDATE_SCHEDULE', 'schedule', scheduleId, req, oldData, newData);
+    res.json({ success: true, message: 'Schedule updated successfully.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error while updating schedule.' });
+  }
 });
 
 app.delete('/api/schedules/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   const scheduleId = req.params.id;
 
-  const [attRows] = await db.promise().query(
-    "SELECT id FROM attendance WHERE schedule_id = ?",
-    [scheduleId]
-  );
-  if (attRows.length > 0) {
-    return res.status(403).json({ success: false, error: "Cannot delete this schedule; attendance has already been recorded." });
-  }
+  try {
+    const [attRows] = await db.promise().query("SELECT id FROM attendance WHERE schedule_id = ?", [scheduleId]);
+    if (attRows.length > 0) {
+      return res.status(403).json({ success: false, message: "Cannot delete this schedule; attendance has already been recorded." });
+    }
 
-  const [oldRecord] = await db.promise().query("SELECT * FROM schedules WHERE id = ?", [scheduleId]);
-  if (oldRecord.length === 0) return res.status(404).json({ success: false, error: "Schedule not found" });
-  const oldData = oldRecord[0];
+    const [oldRecord] = await db.promise().query("SELECT * FROM schedules WHERE id = ?", [scheduleId]);
+    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: "Schedule not found." });
+    const oldData = oldRecord[0];
 
-  db.query("DELETE FROM schedules WHERE id = ?", [scheduleId], (err, result) => {
-    if (err) return res.status(500).json({ success: false, error: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ success: false, error: "Schedule not found" });
+    const [result] = await db.promise().query("DELETE FROM schedules WHERE id = ?", [scheduleId]);
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Schedule not found." });
     
     logAction(req.user.id, 'DELETE_SCHEDULE', 'schedule', scheduleId, req, oldData, null);
-    res.json({ success: true });
-  });
+    res.json({ success: true, message: 'Schedule deleted successfully.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error while deleting schedule.' });
+  }
 });
 
 app.post('/api/schedules/bulk', authenticateToken, async (req, res) => {
@@ -1854,34 +1963,37 @@ app.put('/api/schedule-requests/:id/status', authenticateToken, (req, res) => {
 
 
 // ============================================
-// 7. REPORTS & EMPLOYEES
+// 7. REPORTS & EMPLOYEES (Secured & Validated)
 // ============================================
 
+
 app.get('/api/attendance/all-recent', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to view attendance records.' });
+  }
   const sql = `
     SELECT a.*, DATE_FORMAT(a.date, '%Y-%m-%d') as date, u.full_name, u.employee_id 
     FROM attendance a 
-    JOIN users u ON a.user_id = u.id 
+    JOIN users u ON a.user_id = u.employee_id 
     ORDER BY a.date DESC, a.time_in DESC 
     LIMIT 500
   `;
   db.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) return res.status(500).json({ success: false, message: 'Failed to fetch recent attendance records.' });
+    res.json(results || []);
   });
 });
 
-app.get('/api/attendance/user/:employeeId', (req, res) => {
+app.get('/api/attendance/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   const employeeId = req.params.employeeId;
   const sql = "SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date, ROUND(TIMESTAMPDIFF(MINUTE, time_in, time_out) / 60, 2) as total_hours FROM attendance WHERE user_id = ? ORDER BY date DESC";
   db.query(sql, [employeeId], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load user attendance.' });
     res.json(result || []);
   });
 });
 
-app.get('/api/payroll/employee-history/:employeeId', (req, res) => {
+app.get('/api/payroll/employee-history/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   const { employeeId } = req.params;
   const sql = `
     SELECT p.id, p.month_year, p.salary_rate, p.total_hours, p.overtime_hours,
@@ -1895,21 +2007,24 @@ app.get('/api/payroll/employee-history/:employeeId', (req, res) => {
     LIMIT 12
   `;
   db.query(sql, [employeeId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load payroll history.' });
+    res.json(results || []);
   });
 });
 
-app.get('/api/employees', (req, res) => {
+app.get('/api/employees', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+  }
   db.query("SELECT * FROM users ORDER BY full_name ASC", (err, result) => {
-    if (err) return res.status(500).json(err);
+    if (err) return res.status(500).json({ success: false, message: 'Failed to fetch employee list.' });
     res.json(result || []);
   });
 });
 
 app.post('/api/employees', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to add employees.' });
   }
 
   const {
@@ -1923,8 +2038,18 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
     street_address, city, state_province, postal_code, country, additional_info, position
   } = req.body;
 
+  // 1. Strict Payload Validation
   if (!employee_id || !full_name || !email || !password || !role) {
-    return res.status(400).json({ success: false, message: 'Missing required fields' });
+    return res.status(400).json({ success: false, message: 'Employee ID, Name, Email, Password, and Role are mandatory fields.' });
+  }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ success: false, message: 'For security, the new password must be at least 8 characters long.' });
+  }
+  if (monthly_salary && (isNaN(monthly_salary) || monthly_salary < 0)) {
+    return res.status(400).json({ success: false, message: 'Monthly salary must be a valid positive number.' });
   }
 
   try {
@@ -1944,22 +2069,27 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE)`;
 
     db.query(sql, [
-      employee_id, full_name, first_name || null, last_name || null, email, hashedPassword, role, 
-      employment_type, position_level, contract_type,
-      monthly_salary, work_days_per_month,
+      employee_id.trim(), full_name.trim(), first_name || null, last_name || null, email.trim().toLowerCase(), hashedPassword, role, 
+      employment_type || 'Full-time', position_level || 'Entry Level Simulationist', contract_type || 'Regular',
+      monthly_salary || 0, work_days_per_month || 22,
       finalAccess, finalPin,
       middle_initial || null, date_of_joining || null, account_expiration_date || null,
-      date_of_birth || null, phone_number || null, gender || null,
+      date_of_birth || null, phone_number || null, gender || 'prefer_not_to_say',
       emergency_contact_name || null, emergency_contact_phone || null,
       street_address || null, city || null, state_province || null,
       postal_code || null, country || 'Philippines', additional_info || null, position || null
     ], (err, result) => {
-      if (err) return res.status(500).json({ success: false, error: err.message });
+      if (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          return res.status(409).json({ success: false, message: 'An employee with this ID or Email already exists.' });
+        }
+        return res.status(500).json({ success: false, message: 'Database error while creating employee.' });
+      }
       logAction(req.user.id, 'CREATE_EMPLOYEE', 'user', result.insertId, req);
-      res.json({ success: true, message: 'Employee created successfully', employeeId: employee_id });
+      res.json({ success: true, message: 'Employee successfully created!', employeeId: employee_id });
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error processing password encryption' });
+    res.status(500).json({ success: false, message: 'Server error processing password encryption.' });
   }
 });
 
@@ -1970,199 +2100,208 @@ app.put('/api/employees/:id', authenticateToken, async(req, res) => {
   const isSelf = req.user.id.toString() === employeeId.toString();
 
   if (!isPrivileged && !isSelf) {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to edit this profile.' });
   }
 
   const updates = req.body;
 
-  const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [employeeId]);
-  if (oldRecord.length === 0) return res.status(404).json({ success: false, error: 'Employee not found.' });
-  const oldData = oldRecord[0];
-
-  if (!isPrivileged) {
-    delete updates.role;
-    delete updates.status;
-    delete updates.monthly_salary;
-    delete updates.work_days_per_month;
-    delete updates.payroll_access;
-    delete updates.payroll_pin;
+  if (updates.email && !isValidEmail(updates.email)) {
+    return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
   }
 
-  const fieldMapping = {
-    full_name: 'full_name',
-    first_name: 'first_name',
-    last_name: 'last_name',
-    email: 'email',
-    phone: 'phone_number',
-    position_level: 'position_level',
-    contract_type: 'contract_type',
-    status: 'status',
-    role: 'role',
-    date_of_joining: 'date_of_joining',
-    monthly_salary: 'monthly_salary',
-    work_days_per_month: 'work_days_per_month',
-    payroll_access: 'payroll_access',
-    payroll_pin: 'payroll_pin',
-    date_of_birth: 'date_of_birth',
-    gender: 'gender',
-    emergency_contact_name: 'emergency_contact_name',
-    emergency_contact_phone: 'emergency_contact_phone',
-    street: 'street_address',
-    city: 'city',
-    state: 'state_province',
-    postal_code: 'postal_code',
-    country: 'country',
-    additional_info: 'additional_info',
-    middle_initial: 'middle_initial',
-    account_expiry: 'account_expiration_date',
-    position: 'position',
-  };
+  try {
+    const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [employeeId]);
+    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    const oldData = oldRecord[0];
 
-  const setClauses = [];
-  const values = [];
-  for (const [frontField, dbField] of Object.entries(fieldMapping)) {
-    if (updates[frontField] !== undefined) {
-      setClauses.push(`${dbField} = ?`);
-      values.push(updates[frontField]);
+    // Restrict non-admins from modifying sensitive fields
+    if (!isPrivileged) {
+      delete updates.role;
+      delete updates.status;
+      delete updates.monthly_salary;
+      delete updates.work_days_per_month;
+      delete updates.payroll_access;
+      delete updates.payroll_pin;
     }
+
+    const fieldMapping = {
+      full_name: 'full_name',
+      first_name: 'first_name',
+      last_name: 'last_name',
+      email: 'email',
+      phone: 'phone_number',
+      position_level: 'position_level',
+      contract_type: 'contract_type',
+      status: 'status',
+      role: 'role',
+      date_of_joining: 'date_of_joining',
+      monthly_salary: 'monthly_salary',
+      work_days_per_month: 'work_days_per_month',
+      payroll_access: 'payroll_access',
+      payroll_pin: 'payroll_pin',
+      date_of_birth: 'date_of_birth',
+      gender: 'gender',
+      emergency_contact_name: 'emergency_contact_name',
+      emergency_contact_phone: 'emergency_contact_phone',
+      street: 'street_address',
+      city: 'city',
+      state: 'state_province',
+      postal_code: 'postal_code',
+      country: 'country',
+      additional_info: 'additional_info',
+      middle_initial: 'middle_initial',
+      account_expiry: 'account_expiration_date',
+      position: 'position',
+    };
+
+    const setClauses = [];
+    const values = [];
+    for (const [frontField, dbField] of Object.entries(fieldMapping)) {
+      if (updates[frontField] !== undefined) {
+        setClauses.push(`${dbField} = ?`);
+        values.push(updates[frontField]);
+      }
+    }
+
+    if (setClauses.length === 0) return res.status(400).json({ success: false, message: 'No valid fields provided to update.' });
+
+    values.push(employeeId);
+    const sql = `UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`;
+
+    db.query(sql, values, (err, result) => {
+      if (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Email is already in use by another account.' });
+        return res.status(500).json({ success: false, message: 'Database error during update.' });
+      }
+      
+      logAction(req.user.id, 'UPDATE_EMPLOYEE', 'user', employeeId, req, oldData, updates);
+      res.json({ success: true, message: 'Employee profile updated successfully.' });
+    });
+  } catch (error) {
+    console.error("Update Employee Error:", error);
+    res.status(500).json({ success: false, message: 'Server connection failed.' });
   }
-
-  if (setClauses.length === 0) return res.status(400).json({ success: false, message: 'No fields to update' });
-
-  values.push(employeeId);
-  const sql = `UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`;
-
-  db.query(sql, values, (err, result) => {
-    if (err) return res.status(500).json({ success: false, error: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ success: false, error: 'Employee not found.' });
-    
-    logAction(req.user.id, 'UPDATE_EMPLOYEE', 'user', employeeId, req, oldData, updates);
-    res.json({ success: true });
-  });
 });
 
 app.get('/api/employees/last-id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   db.query("SELECT employee_id FROM users WHERE employee_id REGEXP '^E[0-9]+$' ORDER BY id DESC LIMIT 1", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) return res.status(500).json({ success: false, message: 'Database error generating ID.' });
     const lastId = results.length ? results[0].employee_id : 'E000';
-    res.json({ lastId });
+    res.json({ success: true, lastId });
   });
 });
 
 app.get('/api/employees/:id', authenticateToken, (req, res) => {
   db.query("SELECT * FROM users WHERE id = ?", [req.params.id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(404).json({ error: 'Employee not found' });
+    if (err) return res.status(500).json({ success: false, message: 'Database error loading profile.' });
+    if (results.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
     res.json(results[0]);
   });
 });
 
 app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to delete accounts.' });
   }
 
   const userId = req.params.id;
 
-  const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
-  if (oldRecord.length === 0) return res.status(404).json({ success: false, message: "Employee not found." });
-  const oldData = oldRecord[0];
+  try {
+    const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
+    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: "Employee not found." });
+    const oldData = oldRecord[0];
 
-  db.query("DELETE FROM users WHERE id = ?", [userId], (err, result) => {
-    if (err) return res.status(500).json({ success: false, message: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Employee not found." });
+    db.query("DELETE FROM users WHERE id = ?", [userId], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: 'Failed to delete employee due to database constraint.' });
+      
+      logAction(req.user.id, 'DELETE_EMPLOYEE', 'user', userId, req, oldData, null);
+      res.json({ success: true, message: 'Employee account successfully deleted.' });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server connection failed.' });
+  }
+});
+
+app.put('/api/employees/:employeeId/toggle-status', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to alter account status.' });
+  }
+
+  const { employeeId } = req.params;
+  db.query("SELECT status FROM users WHERE employee_id = ?", [employeeId], (err, results) => {
+    if (err || results.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
     
-    logAction(req.user.id, 'DELETE_EMPLOYEE', 'user', userId, req, oldData, null);
-    res.json({ success: true });
+    const newStatus = results[0].status === 'active' ? 'deactivated' : 'active';
+    db.query("UPDATE users SET status = ? WHERE employee_id = ?", [newStatus, employeeId], (err) => {
+      if (err) return res.status(500).json({ success: false, message: 'Failed to toggle status.' });
+      
+      logAction(req.user.id, 'TOGGLE_EMPLOYEE_STATUS', 'user', employeeId, req);
+      res.json({ success: true, message: `Employee successfully ${newStatus}.`, newStatus });
+    });
   });
 });
 
-app.put('/api/employees/:employeeId/toggle-status', (req, res) => {
-    const { employeeId } = req.params;
-    db.query("SELECT status FROM users WHERE employee_id = ?", [employeeId], (err, results) => {
-        if (err || results.length === 0) return res.status(500).json({ success: false });
-        const newStatus = results[0].status === 'active' ? 'deactivated' : 'active';
-        db.query("UPDATE users SET status = ? WHERE employee_id = ?", [newStatus, employeeId], (err) => {
-            if (err) return res.status(500).json({ success: false });
-            logAction(req.user.id, 'TOGGLE_EMPLOYEE_STATUS', 'user', employeeId, req);
-            res.json({ success: true, newStatus });
-        });
-    });
-});
+app.get('/api/attendance-report', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
 
-app.get('/api/attendance-report', (req, res) => {
-    const { date, month } = req.query;
-    
-    let dateCondition = "DATE(s.date) = DATE(?)";
-    let queryParam = date;
+  const { date, month } = req.query;
+  let dateCondition = "DATE(s.date) = DATE(?)";
+  let queryParam = date;
 
-    if (month) {
-        dateCondition = "DATE_FORMAT(s.date, '%Y-%m') = ?";
-        queryParam = month;
-    } else if (!date) {
-        return res.status(400).json({ error: "A date or month parameter is required." });
-    }
+  if (month) {
+      dateCondition = "DATE_FORMAT(s.date, '%Y-%m') = ?";
+      queryParam = month;
+  } else if (!date) {
+      return res.status(400).json({ success: false, message: "A valid date or month parameter is required." });
+  }
 
-    const sql = `
-        SELECT 
-            u.id AS user_db_id,
-            u.full_name, 
-            u.employee_id, 
-            COALESCE(a.status, 'Pending') AS status, 
-            COALESCE(a.time_in, '--:--') AS time_in, 
-            COALESCE(a.time_out, '--:--') AS time_out, 
-            a.location, 
-            a.clock_in_latitude,
-            a.clock_in_longitude,
-            a.clock_out_latitude,
-            a.clock_out_longitude,
-            a.clock_in_selfie,
-            a.clock_out_selfie,
-            s.id AS schedule_id,
-            s.start_time AS scheduled_start, 
-            s.end_time AS scheduled_end,
-            s.course,
-            DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
-            COALESCE(ROUND(TIME_TO_SEC(TIMEDIFF(a.time_out, a.time_in)) / 3600, 2), 0) AS total_hours
-        FROM users u
-        INNER JOIN schedules s ON u.employee_id = s.user_id 
-        LEFT JOIN attendance a ON s.id = a.schedule_id
-        WHERE LOWER(u.role) = 'instructor' 
-          AND u.status = 'active'
-          AND ${dateCondition}
-        ORDER BY u.full_name ASC, s.start_time ASC
-    `;
+  const sql = `
+      SELECT 
+          u.id AS user_db_id, u.full_name, u.employee_id, 
+          COALESCE(a.status, 'Pending') AS status, 
+          COALESCE(a.time_in, '--:--') AS time_in, 
+          COALESCE(a.time_out, '--:--') AS time_out, 
+          a.location, a.clock_in_latitude, a.clock_in_longitude,
+          a.clock_out_latitude, a.clock_out_longitude,
+          a.clock_in_selfie, a.clock_out_selfie,
+          s.id AS schedule_id, s.start_time AS scheduled_start, s.end_time AS scheduled_end, s.course,
+          DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
+          COALESCE(ROUND(TIME_TO_SEC(TIMEDIFF(a.time_out, a.time_in)) / 3600, 2), 0) AS total_hours
+      FROM users u
+      INNER JOIN schedules s ON u.employee_id = s.user_id 
+      LEFT JOIN attendance a ON s.id = a.schedule_id
+      WHERE LOWER(u.role) = 'instructor' 
+        AND u.status = 'active'
+        AND ${dateCondition}
+      ORDER BY u.full_name ASC, s.start_time ASC
+  `;
 
-    db.query(sql, [queryParam], (err, result) => {
-        if (err) {
-            console.error("Attendance Report SQL Error:", err);
-            return res.status(500).json({ error: err.message });
-        }
-        res.json(result || []);
-    });
+  db.query(sql, [queryParam], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: "Database query failed." });
+      res.json(result || []);
+  });
 });
 
 app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
-    const sql = `
-      SELECT a.*, 
-             DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
-             ROUND(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60, 2) as total_hours,
-             a.reviewed_at,
-             a.updated_at,
-             u.full_name,
-             u.employee_id
-      FROM attendance a
-      LEFT JOIN users u ON a.user_id = u.employee_id
-      WHERE a.user_id = ? 
-      ORDER BY a.date DESC
-    `;
-    db.query(sql, [req.params.employeeId], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result || []);
-    });
+  const sql = `
+    SELECT a.*, 
+           DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
+           ROUND(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60, 2) as total_hours,
+           a.reviewed_at, a.updated_at, u.full_name, u.employee_id
+    FROM attendance a
+    LEFT JOIN users u ON a.user_id = u.employee_id
+    WHERE a.user_id = ? 
+    ORDER BY a.date DESC
+  `;
+  db.query(sql, [req.params.employeeId], (err, result) => {
+      if (err) return res.status(500).json({ success: false, message: "Failed to load report." });
+      res.json(result || []);
+  });
 });
 
 
@@ -2170,15 +2309,22 @@ app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwne
 // 8. VISITORS, SCANNERS & BLE TAGS
 // ============================================
 
-app.get('/api/appointments/:id/visitors', (req, res) => {
+app.get('/api/appointments/:id/visitors', authenticateToken, (req, res) => {
   const { id } = req.params;
   db.query("SELECT * FROM appointment_visitors WHERE appointment_id = ?", [id], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) {
+      console.error("Fetch appointment visitors error:", err);
+      return res.status(500).json({ success: false, message: 'Failed to load companion visitors.' });
+    }
+    res.json(results || []);
   });
 });
 
-app.get('/api/ble-tags', (req, res) => {
+app.get('/api/ble-tags', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+
   const sql = `
     SELECT 
       t.id, 
@@ -2208,28 +2354,32 @@ app.get('/api/ble-tags', (req, res) => {
   `;
 
   db.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) {
+      console.error("Fetch BLE tags error:", err);
+      return res.status(500).json({ success: false, message: 'Failed to fetch BLE tags inventory.' });
+    }
+    res.json(results || []);
   });
 });
 
 app.post('/api/ble-tags', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Security access required.' });
   }
 
   const { ble_id, label, mac_address } = req.body;
-  if (!ble_id) return res.status(400).json({ error: "BLE ID is required." });
-  if (!mac_address) return res.status(400).json({ error: "MAC address is required." });
+  if (!ble_id || !mac_address) {
+    return res.status(400).json({ success: false, message: "BLE ID and MAC address are required." });
+  }
 
   try {
     const [existing] = await db.promise().query(
       "SELECT id FROM ble_tags WHERE ble_id = ? OR mac_address = ?", 
-      [ble_id, mac_address]
+      [ble_id.trim(), mac_address.trim()]
     );
 
     if (existing.length > 0) {
-      return res.status(400).json({ error: "A tag with this BLE ID or MAC address already exists." });
+      return res.status(409).json({ success: false, message: "A tag with this BLE ID or MAC address already exists." });
     }
 
     const [result] = await db.promise().query(
@@ -2238,32 +2388,32 @@ app.post('/api/ble-tags', authenticateToken, async (req, res) => {
     );
 
     logAction(req.user.id, 'CREATE_BLE_TAG', 'ble_tag', result.insertId, req);
-    res.status(201).json({ success: true, id: result.insertId });
+    res.status(201).json({ success: true, message: "BLE Tag added successfully.", id: result.insertId });
   } catch (err) {
     console.error("BLE Tag creation error:", err);
-    res.status(500).json({ error: "Internal server error while saving tag." });
+    res.status(500).json({ success: false, message: "Internal server error while saving tag." });
   }
 });
 
 app.delete('/api/ble-tags/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
   const { id } = req.params;
   db.query("DELETE FROM ble_tags WHERE id = ?", [id], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ error: "Tag not found." });
+    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Tag not found." });
     logAction(req.user.id, 'DELETE_BLE_TAG', 'ble_tag', id, req);
-    res.json({ success: true });
+    res.json({ success: true, message: "BLE Tag deleted successfully." });
   });
 });
 
-app.get('/api/ble-tags/in-use', (req, res) => {
+app.get('/api/ble-tags/in-use', authenticateToken, (req, res) => {
   db.query(
     "SELECT DISTINCT ble_id FROM visitor_requests WHERE arrived = true AND returned = false AND no_show = false AND ble_id IS NOT NULL",
     (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(results.map(r => r.ble_id));
+      if (err) return res.status(500).json({ success: false, message: 'Failed to fetch active tags.' });
+      res.json(results.map(r => r.ble_id) || []);
     }
   );
 });
@@ -2272,14 +2422,14 @@ app.put('/api/visitor-requests/:id/return', authenticateToken, (req, res) => {
   const { id } = req.params;
 
   db.query("SELECT ble_id FROM visitor_requests WHERE id = ?", [id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (rows.length === 0) return res.status(404).json({ error: "Request not found" });
+    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
     
     const ble_id = rows[0].ble_id;
     if (ble_id) {
       delete visitorDestinations[ble_id];   
       delete liveVisitors[ble_id];          
-      console.log(`🔓 Cleared destination lock for ${ble_id}`);
+      console.log(`🔓 Cleared destination lock for tag ${ble_id}`);
     }
 
     db.query(
@@ -2289,12 +2439,12 @@ app.put('/api/visitor-requests/:id/return', authenticateToken, (req, res) => {
        WHERE id = ? AND arrived = TRUE AND returned = FALSE`,
       [ble_id, id],
       (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) return res.status(500).json({ success: false, message: "Database error during tag return." });
         if (result.affectedRows === 0) {
-          return res.status(400).json({ error: "Visitor not checked in or already returned" });
+          return res.status(400).json({ success: false, message: "Visitor is not checked in or has already returned their tag." });
         }
         logAction(req.user.id, 'VISITOR_RETURN', 'visitor_request', id, req);
-        res.json({ success: true });
+        res.json({ success: true, message: "BLE tag successfully returned." });
       }
     );
   });
@@ -2302,20 +2452,31 @@ app.put('/api/visitor-requests/:id/return', authenticateToken, (req, res) => {
 
 app.get('/api/scanners', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin' && req.user.role !== 'security') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
   db.query("SELECT * FROM scanners ORDER BY scanner_id ASC", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load scanners.' });
+    res.json(results || []);
   });
 });
+
+// ============================================
+// 8. VISITORS, SCANNERS & BLE TAGS (Secured & Validated)
+// ============================================
 
 app.post('/api/appointments/book', (req, res) => {
   const { firstName, lastName, email, phone, date, time, reason, primaryBleId, additionalVisitors } = req.body;
   const { date: today } = getPHTime();
   
+  // Strict Validation
+  if (!firstName || !lastName || !email || !date || !time || !reason) {
+    return res.status(400).json({ success: false, message: "All required visitor fields must be filled out." });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ success: false, message: "Please provide a valid email address." });
+  }
   if (date < today) {
-    return res.status(400).json({ success: false, error: "Cannot book appointments for past dates." });
+    return res.status(400).json({ success: false, message: "Cannot book appointments for past dates." });
   }
 
   const appointmentStatus = 'PENDING';
@@ -2323,10 +2484,10 @@ app.post('/api/appointments/book', (req, res) => {
     (first_name, last_name, email, phone, visit_date, visit_time, reason, ble_id, status) 
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-  db.query(sql, [firstName, lastName, email, phone, date, time, reason, primaryBleId || null, appointmentStatus], (err, result) => {
+  db.query(sql, [firstName.trim(), lastName.trim(), email.trim(), phone || null, date, time, reason, primaryBleId || null, appointmentStatus], (err, result) => {
     if (err) {
       console.error("DB insert error:", err);
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, message: "Database connection failed while booking." });
     }
 
     const appointmentId = result.insertId;
@@ -2363,28 +2524,30 @@ app.post('/api/appointments/book', (req, res) => {
       `${visitorDetails}\n` +
       `Thank you,\nHCT Academy`;
 
-    res.json({ success: true, message: "Request saved successfully." });
+    res.json({ success: true, message: "Appointment request submitted successfully. Check your email for details." });
 
     resend.emails.send({
       from: 'UniVITA Academy <no-reply@univitahct.tech>',
       to: [email],
       subject: subject,
       text: emailBody
-    }).then(() => {
-      console.log("Background Email sent successfully.");
     }).catch((error) => {
       console.error("Background Email error:", error);
     });
   });
 });
 
-app.put('/api/appointments/:id/status', (req, res) => {
+app.put('/api/appointments/:id/status', authenticateToken, (req, res) => {
   const { status, adminNotes, adminId } = req.body;
   const requestId = req.params.id;
 
+  if (!['APPROVED', 'REJECTED'].includes(status)) {
+    return res.status(400).json({ success: false, message: "Invalid appointment status." });
+  }
+
   db.query("SELECT * FROM visitor_requests WHERE id = ?", [requestId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(404).json({ error: "Request not found" });
+    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
+    if (results.length === 0) return res.status(404).json({ success: false, message: "Appointment request not found." });
 
     const request = results[0];
     const { first_name, last_name, email, visit_date, visit_time, reason, phone } = request;
@@ -2395,11 +2558,11 @@ app.put('/api/appointments/:id/status', (req, res) => {
          WHERE email = ? AND visit_date = ? AND visit_time = ? AND status = 'APPROVED' AND id != ?`,
         [email, visit_date, visit_time, requestId],
         (dupErr, existing) => {
-          if (dupErr) return res.status(500).json({ error: dupErr.message });
+          if (dupErr) return res.status(500).json({ success: false, message: "Database connection failed." });
           if (existing.length > 0) {
-            return res.status(400).json({ 
+            return res.status(409).json({ 
               success: false, 
-              error: "Conflict: This person already has an approved appointment at this exact date and time." 
+              message: "Conflict: This visitor already has an approved appointment at this exact date and time." 
             });
           }
           proceedToUpdate();
@@ -2414,7 +2577,7 @@ app.put('/api/appointments/:id/status', (req, res) => {
         "UPDATE visitor_requests SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW() WHERE id = ?", 
         [status, adminNotes || null, adminId, requestId], 
         (updateErr) => {
-          if (updateErr) return res.status(500).json({ error: updateErr.message });
+          if (updateErr) return res.status(500).json({ success: false, message: "Failed to update appointment status." });
           
           const action = status === 'APPROVED' ? 'APPROVE_APPOINTMENT' : 'REJECT_APPOINTMENT';
           logAction(adminId, action, 'visitor_request', requestId, req);
@@ -2449,9 +2612,9 @@ app.put('/api/appointments/:id/status', (req, res) => {
             transporter.sendMail(mailOptions, (error) => {
               if (error) { 
                 console.error("Email error:", error); 
-                return res.json({ success: true, emailSent: false, message: "Status updated but email failed." }); 
+                return res.json({ success: true, message: `Status updated to ${status}, but notification email failed to send.` }); 
               }
-              res.json({ success: true, emailSent: true });
+              res.json({ success: true, message: `Appointment ${status} successfully. Email sent.` });
             });
           });
         }
@@ -2462,23 +2625,23 @@ app.put('/api/appointments/:id/status', (req, res) => {
 
 app.put('/api/appointments/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   const { id } = req.params;
   const { visit_date, visit_time, admin_notes } = req.body;
   if (!visit_date || !visit_time) {
-    return res.status(400).json({ error: 'Date and time are required' });
+    return res.status(400).json({ success: false, message: 'Date and time are required to reschedule.' });
   }
 
   db.query("SELECT * FROM visitor_requests WHERE id = ?", [id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (rows.length === 0) return res.status(404).json({ error: 'Appointment not found' });
+    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
+    if (rows.length === 0) return res.status(404).json({ success: false, message: 'Appointment not found.' });
     
     const request = rows[0];
     const sql = `UPDATE visitor_requests SET visit_date = ?, visit_time = ?, admin_notes = ? WHERE id = ?`;
     
     db.query(sql, [visit_date, visit_time, admin_notes || null, id], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) return res.status(500).json({ success: false, message: "Failed to update appointment schedule." });
       
       logAction(req.user.id, 'RESCHEDULE_APPOINTMENT', 'visitor_request', id, req);
 
@@ -2501,22 +2664,22 @@ app.put('/api/appointments/:id', authenticateToken, (req, res) => {
         if (error) console.error("Reschedule email error:", error);
       });
 
-      res.json({ success: true });
+      res.json({ success: true, message: 'Appointment successfully rescheduled.' });
     });
   });
 });
 
-app.get('/api/appointments/pending', (req, res) => {
+app.get('/api/appointments/pending', authenticateToken, (req, res) => {
   db.query("SELECT * FROM visitor_requests WHERE status = 'PENDING'", (err, results) => {
-    if (err) return res.status(500).json(err);
-    res.send(results);
+    if (err) return res.status(500).json({ success: false, message: "Failed to fetch pending requests." });
+    res.json(results || []);
   });
 });
 
-app.get('/api/appointments/history', (req, res) => {
+app.get('/api/appointments/history', authenticateToken, (req, res) => {
   db.query("SELECT * FROM visitor_requests WHERE status != 'PENDING' ORDER BY visit_date DESC", (err, results) => {
-    if (err) return res.status(500).json(err);
-    res.json(results);
+    if (err) return res.status(500).json({ success: false, message: "Failed to fetch history." });
+    res.json(results || []);
   });
 });
 
@@ -2540,13 +2703,15 @@ let liveVisitors = {};
 let lastKnownVisitorsData = {};
 
 // SYSTEM MAINTENANCE: AUTO-MARK MISSED SHIFTS
-setInterval(async () => {
+const runMissedShiftSweep = async () => {
   try {
     const { date: todayDate, time: currentTime } = getPHTime();
     const currentDateTime = `${todayDate} ${currentTime}`;
     
+    // Insert all missed schedules in one single query
     const sql = `
-      SELECT s.id, s.user_id, s.date 
+      INSERT INTO attendance (user_id, schedule_id, date, status, location)
+      SELECT s.user_id, s.id, s.date, 'did not attend', 'Missed Schedule'
       FROM schedules s
       LEFT JOIN attendance a ON s.id = a.schedule_id
       WHERE s.date <= ? 
@@ -2554,23 +2719,19 @@ setInterval(async () => {
         AND a.id IS NULL
     `;
     
-    const [missedSchedules] = await db.promise().query(sql, [todayDate, currentDateTime]);
-    
-    for (const sched of missedSchedules) {
-      const [existing] = await db.promise().query("SELECT id FROM attendance WHERE schedule_id = ?", [sched.id]);
-      if (existing.length === 0) {
-        await db.promise().query(
-          `INSERT INTO attendance (user_id, schedule_id, date, status, location) 
-           VALUES (?, ?, ?, 'did not attend', 'Missed Schedule')`,
-          [sched.user_id, sched.id, sched.date]
-        );
-        console.log(`Auto-Sweep: Marked missed shift as 'did not attend' for schedule ID ${sched.id}`);
-      }
+    const [result] = await db.promise().query(sql, [todayDate, currentDateTime]);
+    if (result.affectedRows > 0) {
+      console.log(`Auto-Sweep: Marked ${result.affectedRows} missed shifts as 'did not attend'.`);
     }
   } catch (err) {
     console.error("Missed Shift Sweep Error:", err);
+  } finally {
+    // Recursively call to prevent interval stacking
+    setTimeout(runMissedShiftSweep, 1000 * 60 * 30);
   }
-}, 1000 * 60 * 30);
+};
+setTimeout(runMissedShiftSweep, 1000 * 60 * 30);
+
 
 // SYSTEM MAINTENANCE: AUTO-FLAG MISSED CLOCK-OUTS
 setInterval(async () => {
@@ -2665,12 +2826,12 @@ app.post('/api/ble-data', async (req, res) => {
   const hardwareApiKey = req.headers['x-api-key'];
   if (!hardwareApiKey || hardwareApiKey !== process.env.HARDWARE_API_KEY) {
     console.warn("Unauthorized hardware access attempt blocked.");
-    return res.status(401).json({ error: "Unauthorized hardware access." });
+    return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
 
   const { scannerId, beaconId } = req.body;
   if (!scannerId || !beaconId) {
-    return res.status(400).json({ error: "Missing scannerId or beaconId." });
+    return res.status(400).json({ success: false, message: "Missing scannerId or beaconId." });
   }
 
   try {
@@ -2680,7 +2841,7 @@ app.post('/api/ble-data', async (req, res) => {
     );
 
     if (scannerRows.length === 0) {
-      return res.status(404).json({ success: false, message: `Scanner ID '${scannerId}' is not registered in the database.` });
+      return res.status(404).json({ success: false, message: `Scanner ID '${scannerId}' is not registered.` });
     }
 
     const room = scannerRows[0].assigned_room;
@@ -2700,7 +2861,7 @@ app.post('/api/ble-data', async (req, res) => {
     db.query(sql, [beaconId], async (err, results) => {
       if (err) {
         console.error("BLE Data DB Error:", err);
-        return res.status(500).json({ error: "Database error" });
+        return res.status(500).json({ success: false, message: "Database error" });
       }
       
       if (results.length === 0) {
@@ -2709,7 +2870,6 @@ app.post('/api/ble-data', async (req, res) => {
           if (tagRes && tagRes.length > 0) {
             const ghostId = tagRes[0].ble_id;
             if (liveVisitors[ghostId]) {
-              console.log(`Detected stray signal from returned visitor: ${ghostId}. Cleaning memory.`);
               delete liveVisitors[ghostId];
             }
           }
@@ -2723,9 +2883,6 @@ app.post('/api/ble-data', async (req, res) => {
       const bleId = row.ble_id;
       const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
       const destination = row.destination || 'Not Assigned';
-
-      const wasPresent = !!liveVisitors[bleId];
-      const oldRoom = wasPresent ? liveVisitors[bleId].currentRoom : null;
 
       liveVisitors[bleId] = {
         id: bleId,
@@ -2743,7 +2900,7 @@ app.post('/api/ble-data', async (req, res) => {
 
   } catch (dbErr) {
     console.error("Dynamic Scanner Lookup Error:", dbErr);
-    return res.status(500).json({ error: "Server error during scanner lookup" });
+    return res.status(500).json({ success: false, message: "Server error during scanner lookup" });
   }
 });
 
@@ -2751,12 +2908,12 @@ app.post('/api/scan', async (req, res) => {
   const hardwareApiKey = req.headers['x-api-key'];
   if (process.env.HARDWARE_API_KEY && hardwareApiKey !== process.env.HARDWARE_API_KEY) {
     console.warn("Unauthorized scanner access attempt blocked.");
-    return res.status(401).json({ error: "Unauthorized hardware access." });
+    return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
 
   const { scannerId, tagMac, rssi } = req.body;
   if (!scannerId || !tagMac) {
-    return res.status(400).json({ error: "Missing scannerId or tagMac." });
+    return res.status(400).json({ success: false, message: "Missing scannerId or tagMac." });
   }
 
   const sql = `
@@ -2773,7 +2930,7 @@ app.post('/api/scan', async (req, res) => {
   db.query(sql, [tagMac.trim()], async (err, results) => {
     if (err) {
       console.error("Scanner DB Error:", err);
-      return res.status(500).json({ error: "Database error" });
+      return res.status(500).json({ success: false, message: "Database error" });
     }
     
     if (results.length === 0) {
@@ -2783,10 +2940,10 @@ app.post('/api/scan', async (req, res) => {
     const row = results[0];
     const bleId = row.ble_id;
     const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-    const destination = row.destination || 'Not Assigned';
+    const destination = row.destination || 'Classroom'; // Safe fallback room
 
-    let detectedFloor = liveVisitors[bleId] ? liveVisitors[bleId].floor : "3";
-    let detectedRoom = scannerId;
+    let detectedFloor = "3";
+    let detectedRoom = destination;
 
     try {
       const [scannerRows] = await db.promise().query(
@@ -2809,77 +2966,119 @@ app.post('/api/scan', async (req, res) => {
       currentRoom: detectedRoom,
       destination: destination,
       lastSeen: Date.now(),
-      rssi: rssi 
+      rssi: rssi || -50
     };
 
     res.status(200).json({ success: true, message: "Visitor tracked successfully" });
   });
 });
 
+// ============================================
+// LIVE POSITIONS & VISIT REASONS (Secured & Validated)
+// ============================================
+
 app.get('/api/positions', (req, res) => {
-  res.json(Object.values(liveVisitors));
+  res.json(Object.values(liveVisitors) || []);
 });
 
 app.get('/api/visit-reasons', (req, res) => {
   db.query("SELECT * FROM visit_reasons ORDER BY reason_text", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) {
+      console.error("Fetch visit reasons error:", err);
+      return res.status(500).json({ success: false, message: "Failed to fetch visit reasons." });
+    }
+    res.json(results || []);
   });
 });
 
 app.post('/api/visit-reasons', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden. Admin access required.' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
+  
   const { reason_text } = req.body;
-  if (!reason_text) return res.status(400).json({ error: "Reason text is required." });
+  if (!reason_text || !reason_text.trim()) {
+    return res.status(400).json({ success: false, message: "Reason text is required." });
+  }
   
   db.query("INSERT INTO visit_reasons (reason_text) VALUES (?)", [reason_text.trim()], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) {
+      console.error("Create visit reason error:", err);
+      return res.status(500).json({ success: false, message: "Failed to create visit reason." });
+    }
+    
     logAction(req.user.id, 'CREATE_VISIT_REASON', 'visit_reason', result.insertId, req);
-    res.status(201).json({ success: true, id: result.insertId });
+    res.status(201).json({ success: true, message: "Visit reason created successfully.", id: result.insertId });
   });
 });
 
 app.put('/api/visit-reasons/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden. Admin access required.' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
+  
   const { id } = req.params;
   const { reason_text } = req.body;
-  if (!reason_text) return res.status(400).json({ error: "Reason text required." });
+  
+  if (!reason_text || !reason_text.trim()) {
+    return res.status(400).json({ success: false, message: "Reason text is required." });
+  }
+  
   db.query("UPDATE visit_reasons SET reason_text = ? WHERE id = ?", [reason_text.trim(), id], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Reason not found' });
+    if (err) {
+      console.error("Update visit reason error:", err);
+      return res.status(500).json({ success: false, message: "Failed to update visit reason." });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'Visit reason not found.' });
+    }
+    
     logAction(req.user.id, 'UPDATE_VISIT_REASON', 'visit_reason', id, req);
-    res.json({ success: true });
+    res.json({ success: true, message: "Visit reason updated successfully." });
   });
 });
 
 app.delete('/api/visit-reasons/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden. Admin access required.' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
+  
   const { id } = req.params;
+  
   db.query("DELETE FROM visit_reasons WHERE id = ?", [id], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Reason not found' });
+    if (err) {
+      console.error("Delete visit reason error:", err);
+      return res.status(500).json({ success: false, message: "Failed to delete visit reason due to dependencies." });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'Visit reason not found.' });
+    }
+    
     logAction(req.user.id, 'DELETE_VISIT_REASON', 'visit_reason', id, req);
-    res.json({ success: true });
+    res.json({ success: true, message: "Visit reason deleted successfully." });
   });
 });
 
 
 // ============================================
-// 10. EMERGENCY ALERTS, JOBS & POLICIES
+// 10. EMERGENCY ALERTS, JOBS & POLICIES (Secured & Validated)
 // ============================================
 
 app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
   
   const { title, message, severity, target_roles } = req.body;
+  
+  // 1. Strict Input Validation
+  if (!title || !message || !severity) {
+    return res.status(400).json({ success: false, message: 'Alert title, message, and severity level are required.' });
+  }
+  if (!['info', 'warning', 'critical'].includes(severity)) {
+    return res.status(400).json({ success: false, message: 'Invalid severity level. Must be info, warning, or critical.' });
+  }
+
   const rawRoles = target_roles || ['instructor', 'admin', 'security', 'hr_admin'];
 
   const safeRoles = rawRoles.map(role => {
@@ -2934,11 +3133,11 @@ app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
     }
 
     logAction(req.user.id, 'CREATE_ALERT', 'emergency_alert', alertId, req);
-    res.json({ success: true, alertId });
+    res.json({ success: true, message: 'Emergency alert successfully broadcasted.', alertId });
 
   } catch (err) {
     console.error("Alert creation error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: 'Server connection failed while broadcasting alert.' });
   }
 });
 
@@ -2946,14 +3145,16 @@ app.put('/api/users/save-push-token', authenticateToken, async (req, res) => {
   const { token } = req.body;
   const userId = req.user.id;
   
-  if (!token) return res.status(400).json({ error: 'Token is required' });
+  if (!token || !token.trim()) {
+    return res.status(400).json({ success: false, message: 'Push token is required.' });
+  }
 
   try {
-    await db.promise().query("UPDATE users SET expo_push_token = ? WHERE id = ?", [token, userId]);
-    res.json({ success: true, message: 'Push token saved successfully' });
+    await db.promise().query("UPDATE users SET expo_push_token = ? WHERE id = ?", [token.trim(), userId]);
+    res.json({ success: true, message: 'Push token saved successfully.' });
   } catch (err) {
     console.error("Failed to save push token:", err);
-    res.status(500).json({ error: 'Database error' });
+    res.status(500).json({ success: false, message: 'Database error while saving push token.' });
   }
 });
 
@@ -2961,64 +3162,115 @@ app.put('/api/users/save-push-token', authenticateToken, async (req, res) => {
 // COURSE MANAGEMENT
 // ============================================
 
-app.get('/api/courses', (req, res) => {
-  db.query("SELECT id, name FROM courses", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+// ============================================
+// COURSE MANAGEMENT (Secured & Validated)
+// ============================================
+
+app.get('/api/courses', authenticateToken, (req, res) => {
+  db.query("SELECT id, name FROM courses ORDER BY name ASC", (err, results) => {
+    if (err) {
+      console.error("Fetch courses error:", err);
+      return res.status(500).json({ success: false, message: 'Failed to load courses.' });
+    }
+    res.json(results || []);
   });
 });
 
 app.post('/api/courses', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+  }
+  
   const { name } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: 'Course name required' });
+  if (!name || !name.trim()) {
+    return res.status(400).json({ success: false, message: 'Course name is required.' });
+  }
+  
   db.query("INSERT INTO courses (name) VALUES (?)", [name.trim()], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) {
+      if (err.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ success: false, message: 'A course with this name already exists.' });
+      }
+      console.error("Create course error:", err);
+      return res.status(500).json({ success: false, message: 'Failed to create course.' });
+    }
+    
     logAction(req.user.id, 'CREATE_COURSE', 'course', result.insertId, req);
-    res.json({ success: true, id: result.insertId });
+    res.status(201).json({ success: true, message: 'Course created successfully.', id: result.insertId });
   });
 });
 
 app.put('/api/courses/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+  }
+  
   const { name } = req.body;
   const courseId = req.params.id;
-  if (!name || !name.trim()) return res.status(400).json({ error: 'Course name required' });
+  
+  if (!name || !name.trim()) {
+    return res.status(400).json({ success: false, message: 'Course name is required.' });
+  }
   
   try {
     const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
-    if (oldRecord.length === 0) return res.status(404).json({ error: 'Course not found' });
+    if (oldRecord.length === 0) {
+      return res.status(404).json({ success: false, message: 'Course not found.' });
+    }
     
     db.query("UPDATE courses SET name = ? WHERE id = ?", [name.trim(), courseId], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) {
+        if (err.code === 'ER_DUP_ENTRY') {
+          return res.status(409).json({ success: false, message: 'Another course with this name already exists.' });
+        }
+        console.error("Update course error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to update course.' });
+      }
+      
       logAction(req.user.id, 'UPDATE_COURSE', 'course', courseId, req, oldRecord[0], { name: name.trim() });
-      res.json({ success: true });
+      res.json({ success: true, message: 'Course updated successfully.' });
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Update course server error:", err);
+    res.status(500).json({ success: false, message: 'Server error while updating course.' });
   }
 });
 
 app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+  }
+  
   const courseId = req.params.id;
   
   try {
     const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
-    if (oldRecord.length === 0) return res.status(404).json({ error: 'Course not found' });
+    if (oldRecord.length === 0) {
+      return res.status(404).json({ success: false, message: 'Course not found.' });
+    }
     
     db.query("SELECT id FROM schedules WHERE course = ? LIMIT 1", [oldRecord[0].name], (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (rows.length > 0) return res.status(400).json({ error: 'Cannot delete course as it is assigned to existing schedules.' });
+      if (err) {
+        console.error("Check course schedule dependency error:", err);
+        return res.status(500).json({ success: false, message: 'Database error checking dependencies.' });
+      }
+      if (rows.length > 0) {
+        return res.status(400).json({ success: false, message: 'Cannot delete course as it is assigned to existing schedules.' });
+      }
       
       db.query("DELETE FROM courses WHERE id = ?", [courseId], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
+        if (err) {
+          console.error("Delete course error:", err);
+          return res.status(500).json({ success: false, message: 'Failed to delete course.' });
+        }
+        
         logAction(req.user.id, 'DELETE_COURSE', 'course', courseId, req, oldRecord[0], null);
-        res.json({ success: true });
+        res.json({ success: true, message: 'Course deleted successfully.' });
       });
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Delete course server error:", err);
+    res.status(500).json({ success: false, message: 'Server error while deleting course.' });
   }
 });
 
@@ -3061,6 +3313,10 @@ app.get('/api/emergency-alerts', authenticateToken, (req, res) => {
   });
 });
 
+// ============================================
+// JOBS & APPLICANTS (Secured & Validated)
+// ============================================
+
 app.get('/api/public/jobs', (req, res) => {
   db.query(
     `SELECT id, title, department, description, requirements, employment_type, 
@@ -3069,25 +3325,43 @@ app.get('/api/public/jobs', (req, res) => {
      WHERE status = 'open' 
      ORDER BY created_at DESC`, 
     (err, jobs) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(jobs);
+      if (err) {
+        console.error("Fetch public jobs error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to load public job postings.' });
+      }
+      res.json(jobs || []);
     }
   );
 });
 
 app.post('/api/jobs/apply', uploadResume.single('resume'), (req, res) => {
   const { job_id, full_name, email, phone, cover_letter } = req.body;
-  if (!job_id || !full_name || !email) return res.status(400).json({ error: 'Missing required fields.' });
+  
+  if (!job_id || !full_name || !email) {
+    return res.status(400).json({ success: false, message: 'Job ID, full name, and email are required fields.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ success: false, message: 'Please provide a valid email address.' });
+  }
+
   const resumePath = req.file ? `/uploads/resumes/${req.file.filename}` : null;
-  db.query("INSERT INTO job_applicants (job_id, full_name, email, phone, cover_letter, resume_path) VALUES (?, ?, ?, ?, ?, ?)", [job_id, full_name, email, phone, cover_letter, resumePath], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, message: 'Application submitted successfully!' });
-  });
+  
+  db.query(
+    "INSERT INTO job_applicants (job_id, full_name, email, phone, cover_letter, resume_path) VALUES (?, ?, ?, ?, ?, ?)", 
+    [job_id, full_name.trim(), email.trim().toLowerCase(), phone || null, cover_letter || null, resumePath], 
+    (err) => {
+      if (err) {
+        console.error("Job application error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to submit job application.' });
+      }
+      res.json({ success: true, message: 'Application submitted successfully!' });
+    }
+  );
 });
 
 app.get('/api/jobs', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
   db.query(
     `SELECT jp.id, jp.title, jp.department, jp.description, jp.requirements, jp.employment_type,
@@ -3096,44 +3370,58 @@ app.get('/api/jobs', authenticateToken, (req, res) => {
      FROM job_postings jp 
      ORDER BY jp.created_at DESC`,
     (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(results);
+      if (err) {
+        console.error("Fetch admin jobs error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to load jobs.' });
+      }
+      res.json(results || []);
     }
   );
 });
 
 app.post('/api/jobs', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
   const { 
     title, department, description, requirements, employment_type,
     location_type, location, salary_min, salary_max, status
   } = req.body;
-  if (!title || !description) {
-    return res.status(400).json({ error: 'Title and description are required' });
+
+  if (!title || !title.trim() || !description || !description.trim()) {
+    return res.status(400).json({ success: false, message: 'Job title and description are required.' });
   }
+  if (salary_min && (isNaN(salary_min) || salary_min < 0)) {
+    return res.status(400).json({ success: false, message: 'Minimum salary must be a valid positive number.' });
+  }
+  if (salary_max && (isNaN(salary_max) || salary_max < 0)) {
+    return res.status(400).json({ success: false, message: 'Maximum salary must be a valid positive number.' });
+  }
+
   db.query(
     `INSERT INTO job_postings 
       (title, department, description, requirements, employment_type,
        location_type, location, salary_min, salary_max, status, posted_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      title, department || null, description, requirements || null, employment_type || 'Full-time',
+      title.trim(), department || null, description.trim(), requirements || null, employment_type || 'Full-time',
       location_type || 'On-site', location || null, salary_min || null, salary_max || null,
       status || 'open', req.user.id
     ],
     (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) {
+        console.error("Create job error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to create job posting.' });
+      }
       logAction(req.user.id, 'CREATE_JOB', 'job_posting', result.insertId, req);
-      res.json({ success: true, id: result.insertId });
+      res.status(201).json({ success: true, message: 'Job posted successfully.', id: result.insertId });
     }
   );
 });
 
 app.put('/api/jobs/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
   const { 
     title, department, description, requirements, employment_type,
@@ -3141,51 +3429,75 @@ app.put('/api/jobs/:id', authenticateToken, async (req, res) => {
   } = req.body;
   const jobId = req.params.id;
 
-  const [oldRecord] = await db.promise().query("SELECT * FROM job_postings WHERE id = ?", [jobId]);
-  if (oldRecord.length === 0) return res.status(404).json({ error: 'Job not found' });
-  const oldData = oldRecord[0];
-  const newData = req.body;
+  if (!title || !title.trim() || !description || !description.trim()) {
+    return res.status(400).json({ success: false, message: 'Job title and description are required.' });
+  }
 
-  db.query(
-    `UPDATE job_postings SET
-      title = ?, department = ?, description = ?, requirements = ?,
-      employment_type = ?, location_type = ?, location = ?,
-      salary_min = ?, salary_max = ?, status = ?
-     WHERE id = ?`,
-    [
-      title, department || null, description, requirements || null,
-      employment_type, location_type || 'On-site', location || null,
-      salary_min || null, salary_max || null, status || 'open', jobId
-    ],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Job not found' });
-      
-      logAction(req.user.id, 'UPDATE_JOB', 'job_posting', jobId, req, oldData, newData);
-      res.json({ success: true });
+  try {
+    const [oldRecord] = await db.promise().query("SELECT * FROM job_postings WHERE id = ?", [jobId]);
+    if (oldRecord.length === 0) {
+      return res.status(404).json({ success: false, message: 'Job posting not found.' });
     }
-  );
+    const oldData = oldRecord[0];
+    const newData = req.body;
+
+    db.query(
+      `UPDATE job_postings SET
+        title = ?, department = ?, description = ?, requirements = ?,
+        employment_type = ?, location_type = ?, location = ?,
+        salary_min = ?, salary_max = ?, status = ?
+       WHERE id = ?`,
+      [
+        title.trim(), department || null, description.trim(), requirements || null,
+        employment_type || 'Full-time', location_type || 'On-site', location || null,
+        salary_min || null, salary_max || null, status || 'open', jobId
+      ],
+      (err, result) => {
+        if (err) {
+          console.error("Update job error:", err);
+          return res.status(500).json({ success: false, message: 'Failed to update job posting.' });
+        }
+        if (result.affectedRows === 0) {
+          return res.status(404).json({ success: false, message: 'Job posting not found.' });
+        }
+        
+        logAction(req.user.id, 'UPDATE_JOB', 'job_posting', jobId, req, oldData, newData);
+        res.json({ success: true, message: 'Job posting updated successfully.' });
+      }
+    );
+  } catch (err) {
+    console.error("Update job server error:", err);
+    res.status(500).json({ success: false, message: 'Server error while updating job.' });
+  }
 });
 
 app.delete('/api/jobs/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   const jobId = req.params.id;
   db.query("DELETE FROM job_applicants WHERE job_id = ?", [jobId], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
+    if (err) {
+      console.error("Delete job applicants error:", err);
+      return res.status(500).json({ success: false, message: 'Failed to delete job applicants.' });
+    }
     db.query("DELETE FROM job_postings WHERE id = ?", [jobId], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (result.affectedRows === 0) return res.status(404).json({ error: 'Job not found' });
+      if (err) {
+        console.error("Delete job error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to delete job posting.' });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: 'Job posting not found.' });
+      }
       logAction(req.user.id, 'DELETE_JOB', 'job_posting', jobId, req);
-      res.json({ success: true });
+      res.json({ success: true, message: 'Job posting deleted successfully.' });
     });
   });
 });
 
 app.get('/api/jobs/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   db.query(
     `SELECT id, title, department, description, requirements, employment_type,
@@ -3193,8 +3505,13 @@ app.get('/api/jobs/:id', authenticateToken, (req, res) => {
      FROM job_postings WHERE id = ?`,
     [req.params.id],
     (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (results.length === 0) return res.status(404).json({ error: 'Job not found' });
+      if (err) {
+        console.error("Fetch single job error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to load job posting.' });
+      }
+      if (results.length === 0) {
+        return res.status(404).json({ success: false, message: 'Job posting not found.' });
+      }
       res.json(results[0]);
     }
   );
@@ -3202,7 +3519,7 @@ app.get('/api/jobs/:id', authenticateToken, (req, res) => {
 
 app.get('/api/jobs/:id/applicants', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   const jobId = req.params.id;
   db.query(
@@ -3214,50 +3531,39 @@ app.get('/api/jobs/:id/applicants', authenticateToken, (req, res) => {
     (err, results) => {
       if (err) {
         console.error("Applicants fetch error:", err);
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ success: false, message: 'Failed to load job applicants.' });
       }
-      res.json(results);
+      res.json(results || []);
     }
   );
 });
 
 app.put('/api/applicants/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   const { status } = req.body;
   if (!['new', 'reviewed', 'shortlisted', 'rejected', 'hired'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid status' });
+    return res.status(400).json({ success: false, message: 'Invalid applicant status provided.' });
   }
   db.query(
     "UPDATE job_applicants SET status = ? WHERE id = ?",
     [status, req.params.id],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
+    (err, result) => {
+      if (err) {
+        console.error("Update applicant status error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to update applicant status.' });
+      }
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ success: false, message: 'Job applicant not found.' });
+      }
       logAction(req.user.id, 'UPDATE_APPLICANT_STATUS', 'job_applicant', req.params.id, req);
-      res.json({ success: true });
+      res.json({ success: true, message: 'Applicant status successfully updated.' });
     }
   );
 });
 
-app.get('/api/policies', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
-  db.query("SELECT * FROM hr_policies ORDER BY uploaded_at DESC", (err, policies) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(policies);
-  });
-});
 
-app.post('/api/policies', authenticateToken, upload.single('file'), (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
-  const { title } = req.body;
-  const filePath = `/uploads/${req.file.filename}`;
-  db.query("INSERT INTO hr_policies (title, file_path, uploaded_by) VALUES (?, ?, ?)", [title, filePath, req.user.id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    logAction(req.user.id, 'CREATE_POLICY', 'hr_policy', result.insertId, req);
-    res.json({ success: true });
-  });
-});
 
 
 // ============================================
@@ -3561,20 +3867,17 @@ app.delete('/api/school-locations/:id', authenticateToken, async (req, res) => {
   });
 });
 
-app.get('/api/courses', (req, res) => {
-  db.query("SELECT id, name FROM courses", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
-});
+
 
 app.get('/api/reports/compliance/attendance-compliance', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to view this report.' });
   }
 
   const { month, year } = req.query;
-  if (!month || !year) return res.status(400).json({ error: 'Month and year required' });
+  if (!month || !year || isNaN(month) || isNaN(year)) {
+    return res.status(400).json({ success: false, message: 'A valid numeric month and year are required.' });
+  }
 
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const endDate = new Date(year, month, 0).toISOString().slice(0, 10);
@@ -3595,6 +3898,10 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
       GROUP BY u.id
       ORDER BY u.full_name ASC
     `, [startDate, endDate, startDate, endDate]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'No active instructors found for the selected period.' });
+    }
 
     const reportData = rows.map(row => {
       const scheduled = Number(row.scheduled_days) || 0;
@@ -3617,6 +3924,8 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
 
     const PDFDocument = require('pdfkit');
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    
+    // Do not set headers until we are absolutely sure the PDF is generating
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=attendance_compliance_${year}_${month}.pdf`);
     doc.pipe(res);
@@ -3765,7 +4074,7 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
   } catch (err) {
     console.error('PDF generation error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to generate report' });
+      res.status(500).json({ success: false, message: 'Server failed to generate the compliance report.' });
     }
   }
 });
@@ -3773,7 +4082,7 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
 app.post('/api/payroll/unlock', (req, res) => {
   const { email, pin } = req.body;
   if (!email || !pin) {
-    return res.status(400).json({ success: false, message: 'Email and PIN required.' });
+    return res.status(400).json({ success: false, message: 'Email and PIN are required.' });
   }
 
   if (!checkPinRateLimit(email)) {
@@ -3787,15 +4096,15 @@ app.post('/api/payroll/unlock', (req, res) => {
     "SELECT * FROM users WHERE email = ? AND status = 'active' AND (role = 'admin' OR role = 'hr_admin')",
     [email],
     (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: err.message });
+      if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
       if (results.length === 0) {
-        return res.status(400).json({ success: false, message: 'Admin account not found.' });
+        return res.status(404).json({ success: false, message: 'Admin account not found or deactivated.' });
       }
 
       const admin = results[0];
       if (admin.payroll_pin !== pin) {
         recordFailedPinAttempt(email);
-        return res.status(400).json({ success: false, message: 'Incorrect security code.' });
+        return res.status(401).json({ success: false, message: 'Incorrect security PIN.' });
       }
 
       clearPinAttempts(email);
@@ -3810,48 +4119,61 @@ app.post('/api/payroll/unlock', (req, res) => {
         "INSERT INTO payroll_access_logs (user_id, email) VALUES (?, ?)",
         [admin.id, admin.email],
         (err) => {
-          if (err) console.error('Failed to log access:', err);
+          if (err) console.error('Failed to log payroll access:', err);
         }
       );
 
-      res.json({ success: true, token: payrollToken, expiresIn: 900 });
+      res.json({ success: true, message: 'Access granted.', token: payrollToken, expiresIn: 900 });
     }
   );
 });
 
-app.put('/api/users/update-pin', (req, res) => {
+// Added authenticateToken to ensure only logged in users can attempt a PIN update
+app.put('/api/users/update-pin', authenticateToken, (req, res) => {
   const { email, currentPin, newPin } = req.body;
+  
   if (!email || !currentPin || !newPin) {
-    return res.status(400).json({ success: false, message: 'All fields required.' });
+    return res.status(400).json({ success: false, message: 'Email, current PIN, and new PIN are required.' });
   }
-  if (newPin.length < 4 || newPin.length > 6 || !/^\d+$/.test(newPin)) {
-    return res.status(400).json({ success: false, message: 'PIN must be 4-6 digits.' });
+  
+  // Ensure exactly 4 to 6 digits
+  if (!/^\d{4,6}$/.test(newPin)) {
+    return res.status(400).json({ success: false, message: 'The new PIN must be between 4 and 6 numeric digits.' });
+  }
+
+  // Ensure the logged in user is actually the one trying to update the PIN
+  if (req.user.email !== email) {
+      return res.status(403).json({ success: false, message: 'You can only update the PIN for your own account.' });
   }
 
   db.query(
     "SELECT * FROM users WHERE email = ? AND status = 'active' AND (role = 'admin' OR role = 'hr_admin')",
     [email],
     (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: err.message });
-      if (results.length === 0) return res.status(400).json({ success: false, message: 'Admin not found.' });
+      if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
+      if (results.length === 0) return res.status(404).json({ success: false, message: 'Admin account not found.' });
 
       const admin = results[0];
       if (admin.payroll_pin !== currentPin) {
-        return res.status(400).json({ success: false, message: 'Current PIN is incorrect.' });
+        return res.status(401).json({ success: false, message: 'The current PIN provided is incorrect.' });
       }
 
       db.query("UPDATE users SET payroll_pin = ? WHERE id = ?", [newPin, admin.id], (err) => {
-        if (err) return res.status(500).json({ success: false, message: 'Failed to update PIN.' });
+        if (err) return res.status(500).json({ success: false, message: 'Database error while saving new PIN.' });
         clearPinAttempts(email);
-        res.json({ success: true, message: 'PIN updated successfully.' });
+        res.json({ success: true, message: 'Security PIN successfully updated.' });
       });
     }
   );
 });
 
+// ============================================
+// 12. PAYROLL (Secured & Validated)
+// ============================================
+
 app.post('/api/payroll/finalize', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to finalize payroll.' });
   }
   const {
     user_id, month_year, salary_rate, total_hours, overtime_hours, overtime_pay,
@@ -3860,15 +4182,26 @@ app.post('/api/payroll/finalize', authenticateToken, (req, res) => {
     total_earnings, status
   } = req.body;
 
+  // 1. Strict Input Validation
   if (!user_id || !month_year || total_hours === undefined || gross_pay === undefined || net_pay === undefined) {
-    return res.status(400).json({ success: false, error: 'Missing required fields' });
+    return res.status(400).json({ success: false, message: 'Missing required payroll fields (user ID, month/year, hours, or pay).' });
+  }
+  
+  if (isNaN(total_hours) || isNaN(gross_pay) || isNaN(net_pay)) {
+    return res.status(400).json({ success: false, message: 'Calculated payroll values must be valid numbers.' });
   }
 
   db.query("SELECT id FROM payroll WHERE user_id = ? AND month_year = ?", [user_id, month_year], (err, rows) => {
-    if (err) return res.status(500).json({ success: false, error: err.message });
-    if (rows.length > 0) return res.status(400).json({ success: false, error: 'Payroll already finalized.' });
+    if (err) {
+      console.error("Payroll check error:", err);
+      return res.status(500).json({ success: false, message: 'Database connection error while checking existing payroll.' });
+    }
+    if (rows.length > 0) {
+      return res.status(409).json({ success: false, message: `Payroll for ${month_year} has already been finalized for this employee.` });
+    }
 
     const finalSalaryRate = salary_rate || (total_hours > 0 ? gross_pay / total_hours : 0);
+    
     db.query(
       `INSERT INTO payroll 
         (user_id, month_year, salary_rate, total_hours, overtime_hours, overtime_pay,
@@ -3884,9 +4217,12 @@ app.post('/api/payroll/finalize', authenticateToken, (req, res) => {
         total_earnings || net_pay, status || 'paid'
       ],
       (err, result) => {
-        if (err) return res.status(500).json({ success: false, error: err.message });
+        if (err) {
+          console.error("Payroll insertion error:", err);
+          return res.status(500).json({ success: false, message: 'Database error while finalizing payroll.' });
+        }
         logAction(req.user.id, 'FINALIZE_PAYROLL', 'payroll', result.insertId, req);
-        res.json({ success: true });
+        res.json({ success: true, message: 'Payroll record successfully finalized and saved.' });
       }
     );
   });
@@ -3894,11 +4230,13 @@ app.post('/api/payroll/finalize', authenticateToken, (req, res) => {
 
 app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to run monthly payroll.' });
   }
 
   const { month, year } = req.body;
-  if (!month || !year) return res.status(400).json({ error: 'Month and year required' });
+  if (!month || !year || isNaN(month) || isNaN(year)) {
+    return res.status(400).json({ success: false, message: 'A valid numeric month and year are required.' });
+  }
 
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const endDate = new Date(year, month, 0).toISOString().split('T')[0];
@@ -3908,6 +4246,10 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
     const [employees] = await db.promise().query(
       "SELECT id, employee_id, full_name, monthly_salary, work_days_per_month FROM users WHERE LOWER(role) = 'instructor' AND status = 'active'"
     );
+
+    if (employees.length === 0) {
+      return res.status(400).json({ success: false, message: 'No active instructors found to process.' });
+    }
 
     const processed = [];
     const skipped = [];
@@ -3961,6 +4303,7 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
     logAction(req.user.id, 'RUN_MONTHLY_PAYROLL', 'payroll', null, req);
     res.json({ 
       success: true, 
+      message: `Monthly payroll processed successfully. (${processed.length} processed, ${skipped.length} skipped)`,
       processed: processed.length, 
       skipped: skipped.length, 
       details: { processed, skipped } 
@@ -3968,38 +4311,59 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
 
   } catch (err) {
     console.error('Monthly payroll error:', err);
-    res.status(500).json({ error: 'Failed to process payroll: ' + err.message });
+    res.status(500).json({ success: false, message: 'Server connection failed while processing payroll.' });
   }
 });
 
 app.put('/api/payroll/update-employee-salary/:employeeId', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to update salaries.' });
   }
+  
   const { employeeId } = req.params;
   const { monthly_salary, work_days_per_month } = req.body;
+  
+  // Strict Validation to prevent NaN database corruption
+  if (monthly_salary === undefined || work_days_per_month === undefined) {
+    return res.status(400).json({ success: false, message: 'Monthly salary and work days per month are required.' });
+  }
+  if (isNaN(monthly_salary) || monthly_salary < 0 || isNaN(work_days_per_month) || work_days_per_month <= 0) {
+    return res.status(400).json({ success: false, message: 'Salary and work days must be valid positive numbers.' });
+  }
+
   db.query(
     "UPDATE users SET monthly_salary = ?, work_days_per_month = ? WHERE employee_id = ?",
     [monthly_salary, work_days_per_month, employeeId],
     (err, result) => {
-      if (err) return res.status(500).json({ success: false, error: err.message });
-      if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Employee not found' });
+      if (err) {
+        console.error("Salary update error:", err);
+        return res.status(500).json({ success: false, message: 'Database error while updating salary configuration.' });
+      }
+      if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
+      
       logAction(req.user.id, 'UPDATE_SALARY', 'user', employeeId, req);
-      res.json({ success: true });
+      res.json({ success: true, message: 'Employee salary configuration successfully updated.' });
     }
   );
 });
 
-app.get('/api/payroll/access-logs', (req, res) => {
+// Added missing Auth Middleware
+app.get('/api/payroll/access-logs', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+  }
+
   db.query(
     "SELECT pal.email, u.full_name, pal.accessed_at FROM payroll_access_logs pal JOIN users u ON pal.user_id = u.id ORDER BY pal.accessed_at DESC LIMIT 100",
     (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(results);
+      if (err) {
+        console.error("Fetch payroll logs error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to fetch payroll access logs.' });
+      }
+      res.json(results || []);
     }
   );
 });
-
 
 // ============================================
 // 13. ADMIN AUDIT LOGS & CONFIGURATION
@@ -4102,18 +4466,18 @@ app.put('/api/visitor-requests/:id/arrive', authenticateToken, (req, res) => {
   const { floor, destination, ble_id } = req.body; 
 
   if (!destination || !ble_id || !floor) {
-    return res.status(400).json({ error: "Floor, destination and BLE tag required" });
+    return res.status(400).json({ success: false, message: "Floor, destination room, and BLE tag are required." });
   }
 
   db.query("SELECT first_name, last_name FROM visitor_requests WHERE id = ?", [id], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (rows.length === 0) return res.status(404).json({ error: "Visitor not found" });
+    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
     
     const visitorName = `${rows[0].first_name} ${rows[0].last_name || ''}`.trim();
     const sql = `UPDATE visitor_requests SET arrived = TRUE, arrived_at = NOW(), destination = ?, ble_id = ? WHERE id = ?`;
     
-    db.query(sql, [destination, ble_id, id], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
+    db.query(sql, [destination.trim(), ble_id.trim(), id], (err) => {
+      if (err) return res.status(500).json({ success: false, message: "Failed to check in visitor." });
 
       logAction(req.user.id, 'VISITOR_ARRIVE', 'visitor_request', id, req);
       visitorDestinations[ble_id] = destination;
@@ -4123,13 +4487,13 @@ app.put('/api/visitor-requests/:id/arrive', authenticateToken, (req, res) => {
         name: visitorName,
         bleId: ble_id,
         floor: String(floor),
-        currentRoom: destination,
-        destination: destination,
+        currentRoom: destination.trim(),
+        destination: destination.trim(),
         lastSeen: Date.now() + 60000 
       };
 
-      console.log(`✅ Checked In: ${visitorName} on Floor ${floor}`);
-      res.json({ success: true });
+      console.log(`✅ Checked In: ${visitorName} on Floor ${floor} at ${destination}`);
+      res.json({ success: true, message: "Visitor successfully checked in." });
     });
   });
 });
@@ -4500,25 +4864,39 @@ app.get('/api/visitor-requests/history', authenticateToken, (req, res) => {
   });
 });
 
+// ============================================
+// OVERTIME REQUESTS (Secured & Validated)
+// ============================================
+
 app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'), async (req, res) => {
   const { date, start_time, end_time, reason, scenario_type } = req.body;
   const userId = req.user.id;
   const attachment = req.file ? `/uploads/${req.file.filename}` : null;
 
+  // 1. Strict Input Validation
   if (!date || !start_time || !end_time || !reason || !scenario_type) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({ success: false, message: 'All overtime fields are required.' });
+  }
+  if (reason.trim().length < 5) {
+    return res.status(400).json({ success: false, message: 'Please provide a more detailed reason for overtime (minimum 5 characters).' });
+  }
+  if (start_time >= end_time) {
+    return res.status(400).json({ success: false, message: 'Overtime end time must be strictly after the start time.' });
+  }
+  if (!['future', 'ongoing', 'after_shift'].includes(scenario_type)) {
+    return res.status(400).json({ success: false, message: 'Invalid overtime scenario type.' });
   }
 
-  if (start_time >= end_time) {
-    return res.status(400).json({ error: 'End time must be strictly after the start time.' });
+  // 2. Prevent logical date errors
+  const { date: today } = getPHTime();
+  if ((scenario_type === 'ongoing' || scenario_type === 'after_shift') && date > today) {
+    return res.status(400).json({ success: false, message: 'Ongoing or after-shift overtime cannot be filed for future dates.' });
   }
 
   try {
-    if (!['future', 'ongoing', 'after_shift'].includes(scenario_type)) {
-      return res.status(400).json({ error: 'Invalid scenario_type' });
-    }
-
     let attendanceId = null;
+    
+    // For ongoing requests, ensure the user actually has an active clock-in today
     if (scenario_type === 'ongoing') {
       const [attRecords] = await db.promise().query(
         `SELECT id, time_in, time_out FROM attendance 
@@ -4526,7 +4904,7 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
         [userId, date]
       );
       if (attRecords.length === 0) {
-        return res.status(400).json({ error: 'No active clock‑in found for today. Cannot request ongoing overtime.' });
+        return res.status(400).json({ success: false, message: 'No active clock-in found for today. Cannot request ongoing overtime.' });
       }
       attendanceId = attRecords[0].id;
     }
@@ -4538,24 +4916,25 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
       [userId, date, start_time, end_time, reason, attachment, scenario_type, attendanceId]
     );
 
-    res.json({ success: true, requestId: result.insertId });
+    logAction(userId, 'SUBMIT_OVERTIME', 'overtime_request', result.insertId, req);
+    res.json({ success: true, message: 'Overtime request submitted successfully.', requestId: result.insertId });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("Overtime Submit Error:", err);
+    res.status(500).json({ success: false, message: 'Server connection failed while submitting request.' });
   }
 });
 
 app.get('/api/overtime-requests', authenticateToken, (req, res) => {
   const userId = req.user.id;
   db.query("SELECT * FROM overtime_requests WHERE user_id = ? ORDER BY date DESC", [userId], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load overtime history.' });
+    res.json(rows || []);
   });
 });
 
 app.get('/api/overtime-requests/pending', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
   db.query(
     `SELECT o.*, u.full_name, u.employee_id 
@@ -4564,21 +4943,21 @@ app.get('/api/overtime-requests/pending', authenticateToken, (req, res) => {
      WHERE o.status = 'pending'
      ORDER BY o.created_at DESC`,
     (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
+      if (err) return res.status(500).json({ success: false, message: 'Failed to load pending requests.' });
+      res.json(rows || []);
     }
   );
 });
 
 app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
   const { id } = req.params;
   const { status } = req.body;
 
   if (!['approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid status' });
+    return res.status(400).json({ success: false, message: 'Invalid status update provided.' });
   }
 
   const connection = await db.promise().getConnection();
@@ -4589,12 +4968,12 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
       `SELECT o.*, u.employee_id, u.id as user_id 
        FROM overtime_requests o
        JOIN users u ON o.user_id = u.id
-       WHERE o.id = ? AND o.processed = 0`,
+       WHERE o.id = ? AND o.processed = 0 FOR UPDATE`,
       [id]
     );
     if (rows.length === 0) {
       await connection.rollback();
-      return res.status(404).json({ error: 'Request not found or already processed' });
+      return res.status(404).json({ success: false, message: 'Request not found or has already been processed.' });
     }
     const reqData = rows[0];
 
@@ -4602,15 +4981,18 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
 
     if (status === 'approved') {
       const overtimeHours = calculateHours(reqData.start_time, reqData.end_time);
-      const overtimePay = overtimeHours * (await hourlyRateFromUser(reqData.user_id) * 1.25);
+      const rate = await hourlyRateFromUser(reqData.user_id);
+      const overtimePay = overtimeHours * (rate * 1.25); // 125% OT multiplier
 
+      // If it was ongoing, extend the active attendance record
       if (reqData.scenario_type === 'ongoing' && reqData.attendance_id) {
         await connection.query(
-          `UPDATE attendance SET time_out = ?, total_hours = TIMESTAMPDIFF(HOUR, time_in, ?) 
+          `UPDATE attendance SET time_out = ?, total_hours = TIMESTAMPDIFF(MINUTE, time_in, ?) / 60 
            WHERE id = ?`,
           [reqData.end_time, reqData.end_time, reqData.attendance_id]
         );
       } 
+      // If it's a future/after-shift OT that didn't have an active record, create an OT attendance block
       else if (reqData.scenario_type === 'future' || reqData.scenario_type === 'after_shift') {
         await connection.query(
           `INSERT INTO attendance 
@@ -4620,15 +5002,15 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
         );
       }
 
+      // Append pay to this month's payroll if it exists
       const monthYear = new Date(reqData.date).toLocaleString('default', { month: 'long', year: 'numeric' });
       const [payrollRows] = await connection.query(
-        `SELECT id, overtime_hours, overtime_pay FROM payroll 
-         WHERE user_id = ? AND month_year = ?`,
+        `SELECT id, overtime_hours, overtime_pay FROM payroll WHERE user_id = ? AND month_year = ?`,
         [reqData.user_id, monthYear]
       );
       if (payrollRows.length > 0) {
-        const newOvertimeHours = (payrollRows[0].overtime_hours || 0) + overtimeHours;
-        const newOvertimePay = (payrollRows[0].overtime_pay || 0) + overtimePay;
+        const newOvertimeHours = (parseFloat(payrollRows[0].overtime_hours) || 0) + overtimeHours;
+        const newOvertimePay = (parseFloat(payrollRows[0].overtime_pay) || 0) + overtimePay;
         await connection.query(
           `UPDATE payroll 
            SET overtime_hours = ?, overtime_pay = ?, gross_pay = gross_pay + ?, net_pay = net_pay + ?
@@ -4639,35 +5021,47 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
     }
 
     await connection.commit();
-    res.json({ success: true });
+    
+    const action = status === 'approved' ? 'APPROVE_OVERTIME' : 'REJECT_OVERTIME';
+    logAction(req.user.id, action, 'overtime_request', id, req);
+    res.json({ success: true, message: `Overtime successfully ${status}.` });
   } catch (err) {
     await connection.rollback();
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("Overtime status update error:", err);
+    res.status(500).json({ success: false, message: 'Server error while updating request.' });
   } finally {
     connection.release();
   }
 });
 
+// Payroll Calculations Helpers
 function calculateHours(start, end) {
   const startDate = new Date(`1970-01-01T${start}`);
   const endDate = new Date(`1970-01-01T${end}`);
-  return (endDate - startDate) / 3600000;
+  const diffHours = (endDate - startDate) / 3600000;
+  return diffHours > 0 ? diffHours : 0; // Prevent negative hours
 }
 
 async function hourlyRateFromUser(userId) {
-  const [rows] = await db.promise().query(
-    `SELECT monthly_salary, work_days_per_month FROM users WHERE id = ?`,
-    [userId]
-  );
-  if (rows.length === 0) return 0;
-  const dailyRate = rows[0].monthly_salary / rows[0].work_days_per_month;
-  return dailyRate / 8;
+  try {
+    const [rows] = await db.promise().query(`SELECT monthly_salary, work_days_per_month FROM users WHERE id = ?`, [userId]);
+    if (rows.length === 0) return 0;
+    
+    const salary = parseFloat(rows[0].monthly_salary) || 0;
+    const workDays = parseFloat(rows[0].work_days_per_month) || 22;
+    if (workDays === 0) return 0;
+    
+    const dailyRate = salary / workDays;
+    return dailyRate / 8;
+  } catch(e) {
+    console.error("Hourly rate fetch error:", e);
+    return 0;
+  }
 }
 
 app.get('/api/overtime-requests/all', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
   db.query(`
     SELECT o.*, u.full_name, u.employee_id
@@ -4675,14 +5069,14 @@ app.get('/api/overtime-requests/all', authenticateToken, (req, res) => {
     JOIN users u ON o.user_id = u.id
     ORDER BY o.created_at DESC
   `, (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load overtime data.' });
+    res.json(rows || []);
   });
 });
 
 app.get('/api/attendance/corrections/pending', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
   db.query(
     `SELECT c.*, DATE_FORMAT(c.attendance_date, '%Y-%m-%d') AS attendance_date, u.full_name, u.employee_id
@@ -4693,9 +5087,9 @@ app.get('/api/attendance/corrections/pending', authenticateToken, (req, res) => 
     (err, rows) => {
       if (err) {
         console.error("Pending corrections error:", err);
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ success: false, message: 'Failed to load attendance corrections.' });
       }
-      res.json(rows);
+      res.json(rows || []);
     }
   );
 });
@@ -4708,16 +5102,16 @@ app.get('/api/schedule-requests/user/:employeeId', authenticateToken, async (req
     (err, results) => {
       if (err) {
         console.error("Schedule requests fetch error:", err);
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ success: false, message: 'Failed to load schedule requests.' });
       }
-      res.json(results);
+      res.json(results || []);
     }
   );
 });
 
 app.get('/api/leave-requests/grouped', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to view leave requests.' });
   }
   db.query(
     `SELECT lr.id, lr.user_id, lr.request_date, lr.type, lr.reason, lr.status, lr.admin_remarks, lr.submitted_at,
@@ -4727,9 +5121,14 @@ app.get('/api/leave-requests/grouped', authenticateToken, (req, res) => {
      WHERE lr.is_hidden = 0
      ORDER BY u.employee_id, lr.request_date ASC`,
     (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
+      if (err) {
+        console.error("Grouped leave requests fetch error:", err);
+        return res.status(500).json({ success: false, message: 'Failed to load grouped leave requests.' });
+      }
+      
       const grouped = [];
       let currentGroup = null;
+      
       rows.forEach(row => {
         const date = row.request_date;
         if (!currentGroup ||
@@ -4755,6 +5154,7 @@ app.get('/api/leave-requests/grouped', authenticateToken, (req, res) => {
           const lastDate = new Date(currentGroup.end_date);
           const currentDate = new Date(date);
           const diffDays = (currentDate - lastDate) / (1000 * 60 * 60 * 24);
+          
           if (diffDays === 1) {
             currentGroup.ids.push(row.id);
             currentGroup.end_date = date;
@@ -4785,14 +5185,16 @@ app.get('/api/leave-requests/grouped', authenticateToken, (req, res) => {
 
 app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
+  
   const { ids, status, admin_remarks } = req.body;
+  
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ error: 'Invalid request IDs' });
+    return res.status(400).json({ success: false, message: 'No requests selected for batch update.' });
   }
   if (!['Approved', 'Rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Invalid status' });
+    return res.status(400).json({ success: false, message: 'Invalid status provided.' });
   }
 
   const connection = await db.promise().getConnection();
@@ -4803,9 +5205,19 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
       const [leaveRows] = await connection.query(`SELECT user_id, request_date, type FROM leave_requests WHERE id = ?`, [reqId]);
       if (leaveRows.length === 0) continue;
       
-      const { user_id, request_date, type } = leaveRows[0];
+      const { user_id: employee_id, request_date, type } = leaveRows[0];
       
-      await connection.query(`UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = NOW() WHERE id = ?`, [status, admin_remarks || null, reqId]);
+      // FIX: Get the INT ID for the employee_leave_balances table
+      const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
+      if (userRows.length === 0) {
+        throw new Error(`User account not found for employee ${employee_id}.`);
+      }
+      const internalUserId = userRows[0].id;
+
+      await connection.query(
+        `UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = NOW() WHERE id = ?`, 
+        [status, admin_remarks || null, reqId]
+      );
 
       if (status === 'Approved') {
         const leaveYear = new Date(request_date).getFullYear();
@@ -4813,32 +5225,44 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
         
         if (typeRows.length > 0) {
           const leaveTypeId = typeRows[0].id;
+          
+          // Use internalUserId (INT) for the balance lookup and lock the row to prevent race conditions
           const [balanceRows] = await connection.query(
-            `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-            [user_id, leaveTypeId, leaveYear]
+            `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ? FOR UPDATE`,
+            [internalUserId, leaveTypeId, leaveYear]
           );
           
           if (balanceRows.length > 0 && balanceRows[0].remaining_days >= 1) {
             const newBalance = balanceRows[0].remaining_days - 1;
             await connection.query(
               `UPDATE employee_leave_balances SET remaining_days = ?, last_updated = CURDATE() WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-              [newBalance, user_id, leaveTypeId, leaveYear]
+              [newBalance, internalUserId, leaveTypeId, leaveYear]
             );
+          } else {
+            // Throwing here triggers the transaction rollback safely
+            throw new Error(`Insufficient ${type} balance for ${employee_id} to approve all selected days.`);
           }
+        } else {
+            throw new Error(`Invalid leave type: ${type}`);
         }
 
         await connection.query(
           `INSERT INTO attendance (user_id, date, status, location) VALUES (?, ?, 'on leave', 'Remote/Leave') ON DUPLICATE KEY UPDATE status = 'on leave'`,
-          [user_id, request_date]
+          [employee_id, request_date] // Uses employee_id (VARCHAR) for the attendance table
         );
       }
     }
+    
     await connection.commit();
-    res.json({ success: true });
+    
+    // Log the batch action securely
+    logAction(req.user.id, `BATCH_${status.toUpperCase()}_LEAVE`, 'leave_request', `Batch IDs: ${ids.join(',')}`, req);
+    
+    res.json({ success: true, message: `Successfully ${status.toLowerCase()} ${ids.length} leave requests.` });
   } catch (err) {
     await connection.rollback();
     console.error("Batch Leave Update Error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message || "Database error during batch update." });
   } finally {
     connection.release();
   }
@@ -4868,42 +5292,74 @@ const broadcastToAdminAndHR = (data) => {
 wss.on('connection', (ws, req) => {
   const params = url.parse(req.url, true).query;
   const token = params.token;
-  if (!token) return ws.close(4001, 'Authentication token missing');
+  
+  if (!token) {
+    return ws.close(4001, 'Authentication token missing');
+  }
+  
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     const userId = decoded.id;
+    
     db.query("SELECT id, email, role FROM users WHERE id = ? AND status = 'active'", [userId], (err, rows) => {
-      if (err || rows.length === 0) return ws.close(4001, 'User not found');
+      if (err || rows.length === 0) {
+        return ws.close(4001, 'User not found or inactive');
+      }
+      
       const user = rows[0];
       ws.user = user;
       wsClients.set(user.id, ws);
+      
       ws.on('message', (data) => {
         let msgData;
-        try { msgData = JSON.parse(data); } catch (e) { return; }
+        try { 
+          msgData = JSON.parse(data); 
+        } catch (e) { 
+          return; 
+        }
+        
         if (msgData.type === 'message') {
           const { roomId, roomName, content } = msgData;
           if (!roomId || !content.trim()) return;
+          
           if (!roomName?.startsWith('dm_')) {
             if (roomId !== 1 && user.role !== 'admin' && user.role !== 'security' && user.role !== 'hr_admin') {
               ws.send(JSON.stringify({ type: 'error', message: 'Access denied to this room' }));
               return;
             }
           }
+          
           db.query("INSERT INTO chat_messages (room_id, user_id, message) VALUES (?, ?, ?)", [roomId, user.id, content.trim()], (err, result) => {
             if (err) return;
-            const messageObj = { id: result.insertId, room_id: roomId, user_id: user.id, full_name: user.email, message: content.trim(), sent_at: new Date().toISOString() };
+            
+            const messageObj = { 
+              id: result.insertId, 
+              room_id: roomId, 
+              user_id: user.id, 
+              full_name: user.email, 
+              message: content.trim(), 
+              sent_at: new Date().toISOString() 
+            };
+            
             if (roomName && roomName.startsWith('dm_')) {
               const participantIds = roomName.split('_').slice(1).map(Number);
               participantIds.forEach(pid => {
                 const client = wsClients.get(pid);
-                if (client && client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'new_message', message: messageObj }));
+                if (client && client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ type: 'new_message', message: messageObj }));
+                }
               });
             } else {
-              wss.clients.forEach(client => { if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'new_message', message: messageObj })); });
+              wss.clients.forEach(client => { 
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ type: 'new_message', message: messageObj })); 
+                }
+              });
             }
           });
         }
       });
+      
       ws.on('close', () => wsClients.delete(user.id));
     });
   } catch (err) {

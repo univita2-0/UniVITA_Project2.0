@@ -2,17 +2,17 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
-  ActivityIndicator, RefreshControl, StatusBar
+  ActivityIndicator, RefreshControl, StatusBar, Modal
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  Clock, MapPin, BookOpen, ChevronLeft, ChevronRight, Calendar as CalIcon
+  Clock, MapPin, BookOpen, ChevronLeft, ChevronRight, Calendar as CalIcon, X
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchUserSchedule } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 
-// Helper function to format time
+// Helper function to format time in 12-hour AM/PM format
 const formatTo12H = (timeStr) => {
   if (!timeStr) return '';
   const parts = timeStr.substring(0, 5).split(':');
@@ -24,15 +24,26 @@ const formatTo12H = (timeStr) => {
   return `${hours}:${minutes} ${ampm}`;
 };
 
+// Helper to get accurate Philippine date string (YYYY-MM-DD)
+const getPHDateString = (date = new Date()) => {
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+};
+
+// Helper to parse time string into minutes from midnight
+const parseMins = (ts) => {
+  if (!ts) return 0;
+  let cs = String(ts).split('.')[0].replace(',', ':');
+  const [h, m] = cs.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
+
 export default function ScheduleScreen() {
   const insets = useSafeAreaInsets();
   
-  // Connect to global Theme
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
   
-  // Dynamically generate styles based on theme
   const styles = React.useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
 
   const [schedules, setSchedules] = useState([]);
@@ -40,16 +51,22 @@ export default function ScheduleScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
 
+  // Modal states for multiple schedules on a single day
+  const [modalVisible, setModalVisible] = useState(false);
+  const [activeDaySchedules, setActiveDaySchedules] = useState([]);
+  const [activeDayTitle, setActiveDayTitle] = useState('');
+
   const fetchSchedules = useCallback(async () => {
     try {
       const userData = await AsyncStorage.getItem('user');
       if (userData) {
         const user = JSON.parse(userData);
         const data = await fetchUserSchedule(user.employee_id);
-        setSchedules(data);
+        setSchedules(Array.isArray(data) ? data : []);
       }
     } catch (err) {
       console.error('Fetch schedule error:', err);
+      setSchedules([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -76,10 +93,9 @@ export default function ScheduleScreen() {
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
     
-    // Formats strictly as "Aug 24 – Aug 30, 2026"
-    const startMonth = start.toLocaleDateString('en-US', { month: 'short' });
+    const startMonth = start.toLocaleDateString('en-US', { month: 'short', timeZone: 'Asia/Manila' });
     const startDay = start.getDate();
-    const endMonth = end.toLocaleDateString('en-US', { month: 'short' });
+    const endMonth = end.toLocaleDateString('en-US', { month: 'short', timeZone: 'Asia/Manila' });
     const endDay = end.getDate();
     const year = start.getFullYear();
 
@@ -93,26 +109,65 @@ export default function ScheduleScreen() {
     fetchSchedules();
   };
 
-  const getStatusBadge = (status, course) => {
-    // Special override for leave status
-    if (course === 'On Leave' || status === 'on leave') {
-      return { label: 'ON LEAVE', color: isLight ? '#4F46E5' : '#818CF8', bg: isLight ? '#EEF2FF' : 'rgba(99, 102, 241, 0.15)', border: isLight ? '#E0E7FF' : 'rgba(99, 102, 241, 0.3)' };
+  // Robust status evaluation matching web dashboard logic
+  const evaluateScheduleStatus = (schedule, targetDateStr) => {
+    if (schedule.course === 'On Leave' || schedule.attendance_status === 'on leave') {
+      return 'ON LEAVE';
     }
-    
-    switch (status ? String(status).toUpperCase() : '') {
+
+    const nowPH = new Date();
+    const todayStr = getPHDateString(nowPH);
+    const phTimeStr = nowPH.toLocaleTimeString('en-GB', { timeZone: 'Asia/Manila', hour12: false });
+    const [currH, currM] = phTimeStr.split(':').map(Number);
+    const currentMinutes = currH * 60 + currM;
+
+    const startMins = parseMins(schedule.start_time);
+    const endMins = parseMins(schedule.end_time);
+
+    const hasClockIn = schedule.time_in && schedule.time_in !== '--:--' && schedule.time_in !== null;
+    const hasClockOut = schedule.time_out && schedule.time_out !== '--:--' && schedule.time_out !== null;
+
+    const isPassed = (targetDateStr < todayStr) || (targetDateStr === todayStr && currentMinutes > endMins);
+    const isActive = (targetDateStr === todayStr) && (currentMinutes >= (startMins - 30) && currentMinutes <= endMins);
+
+    if (isPassed) {
+      if (hasClockIn && !hasClockOut) {
+        return 'MISSING CLOCK-OUT';
+      } else if (hasClockIn && hasClockOut) {
+        return 'COMPLETED';
+      } else {
+        return 'MISSED SCHEDULE';
+      }
+    }
+
+    if (isActive) {
+      return hasClockIn ? 'IN PROGRESS' : 'SCHEDULED';
+    }
+
+    return 'SCHEDULED';
+  };
+
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'ON LEAVE':
+        return { label: 'ON LEAVE', color: isLight ? '#4F46E5' : '#818CF8', bg: isLight ? '#EEF2FF' : 'rgba(99, 102, 241, 0.15)', border: isLight ? '#E0E7FF' : 'rgba(99, 102, 241, 0.3)' };
       case 'IN PROGRESS':
         return { label: 'IN PROGRESS', color: isLight ? '#059669' : '#34D399', bg: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)', border: isLight ? '#A7F3D0' : 'rgba(52, 211, 153, 0.3)' };
       case 'COMPLETED':
-      case 'PRESENT':
-      case 'LATE':
         return { label: 'COMPLETED', color: isLight ? '#2563EB' : '#60A5FA', bg: isLight ? '#DBEAFE' : 'rgba(96, 165, 250, 0.15)', border: isLight ? '#BFDBFE' : 'rgba(96, 165, 250, 0.3)' };
+      case 'MISSING CLOCK-OUT':
+        return { label: 'MISSING CLOCK-OUT', color: isLight ? '#DC2626' : '#F87171', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', border: isLight ? '#FECACA' : 'rgba(248, 113, 113, 0.3)' };
       case 'MISSED SCHEDULE':
-      case 'DID NOT ATTEND':
-      case 'ABSENT':
         return { label: 'MISSED SCHEDULE', color: isLight ? '#DC2626' : '#F87171', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', border: isLight ? '#FECACA' : 'rgba(248, 113, 113, 0.3)' };
       default:
         return { label: 'SCHEDULED', color: isLight ? '#475569' : colors.textSecondary, bg: isLight ? '#F1F5F9' : colors.iconBg, border: isLight ? '#E2E8F0' : colors.border };
     }
+  };
+
+  const openDayModal = (dayName, dateStr, daySchedulesList) => {
+    setActiveDayTitle(`${dayName.toUpperCase()} (${dateStr})`);
+    setActiveDaySchedules(daySchedulesList);
+    setModalVisible(true);
   };
 
   if (loading) {
@@ -161,25 +216,13 @@ export default function ScheduleScreen() {
             const startOfWeek = getStartOfWeek(currentDate);
             const targetDate = new Date(startOfWeek);
             targetDate.setDate(startOfWeek.getDate() + index);
-            const targetDateStr = targetDate.toLocaleDateString('en-CA');
-            const daySchedule = schedules.find(s => s.date === targetDateStr);
+            const targetDateStr = getPHDateString(targetDate);
             
-            let status = daySchedule?.attendance_status || 'SCHEDULED';
-
-            // Dynamic live status calculation for today's shifts that haven't been completed yet
-            const now = new Date();
-            const todayStr = now.toLocaleDateString('en-CA');
-            if (daySchedule && targetDateStr === todayStr && status.toUpperCase() === 'SCHEDULED') {
-              const startTime = new Date(`${targetDateStr}T${daySchedule.start_time}`);
-              const endTime = new Date(`${targetDateStr}T${daySchedule.end_time}`);
-              if (now >= startTime && now <= endTime) {
-                status = 'IN PROGRESS';
-              } else if (now > endTime) {
-                status = 'MISSED SCHEDULE';
-              }
-            }
-
-            const badge = getStatusBadge(status, daySchedule?.course);
+            const daySchedules = schedules.filter(s => String(s.date).startsWith(targetDateStr));
+            const primarySchedule = daySchedules.length > 0 ? daySchedules[0] : null;
+            
+            const evaluatedStatus = primarySchedule ? evaluateScheduleStatus(primarySchedule, targetDateStr) : 'SCHEDULED';
+            const badge = getStatusBadge(evaluatedStatus);
 
             return (
               <View key={dayName} style={styles.dayCard}>
@@ -188,27 +231,38 @@ export default function ScheduleScreen() {
                   <Text style={styles.dayDate}>{targetDate.getDate()}</Text>
                 </View>
                 <View style={styles.dayContent}>
-                  {daySchedule ? (
+                  {primarySchedule ? (
                     <View style={styles.scheduleItem}>
                       <View style={styles.courseHeader}>
                         <BookOpen size={16} color={colors.primary} />
-                        <Text style={styles.courseText}>{daySchedule.course}</Text>
+                        <Text style={styles.courseText}>{primarySchedule.course}</Text>
                       </View>
                       <View style={styles.detailsGrid}>
                         <View style={styles.infoRow}>
                           <Clock size={14} color={isLight ? "#64748B" : colors.textSecondary} />
                           <Text style={styles.infoText}>
-                            {formatTo12H(daySchedule.start_time)} – {formatTo12H(daySchedule.end_time)}
+                            {formatTo12H(primarySchedule.start_time)} – {formatTo12H(primarySchedule.end_time)}
                           </Text>
                         </View>
                         <View style={styles.infoRow}>
                           <MapPin size={14} color={isLight ? "#64748B" : colors.textSecondary} />
-                          <Text style={styles.infoText}>{daySchedule.place || 'Main Campus'}</Text>
+                          <Text style={styles.infoText}>{primarySchedule.place || 'Main Campus'}</Text>
                         </View>
                       </View>
                       <View style={[styles.statusBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
                         <Text style={[styles.statusText, { color: badge.color }]}>{badge.label}</Text>
                       </View>
+
+                      {/* See More Button if 2 or more schedules exist on the same day */}
+                      {daySchedules.length > 1 && (
+                        <TouchableOpacity 
+                          style={styles.seeMoreButton} 
+                          onPress={() => openDayModal(dayName, targetDateStr, daySchedules)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.seeMoreText}>See More (+{daySchedules.length - 1} more session{daySchedules.length > 2 ? 's' : ''})</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   ) : (
                     <Text style={styles.noSchedule}>No classes scheduled</Text>
@@ -218,6 +272,55 @@ export default function ScheduleScreen() {
             );
           })}
         </ScrollView>
+
+        {/* Modal for Multiple Schedules on Same Day */}
+        <Modal visible={modalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalHeaderTitle}>{activeDayTitle}</Text>
+                <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseBtn}>
+                  <X size={20} color={isLight ? "#0F172A" : colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView contentContainerStyle={styles.modalScrollBody} showsVerticalScrollIndicator={false}>
+                {activeDaySchedules.map((item, idx) => {
+                  const itemStatus = evaluateScheduleStatus(item, item.date);
+                  const badge = getStatusBadge(itemStatus);
+                  return (
+                    <View key={item.id || idx} style={styles.modalScheduleItem}>
+                      <View style={styles.courseHeader}>
+                        <BookOpen size={16} color={colors.primary} />
+                        <Text style={styles.courseText}>{item.course}</Text>
+                      </View>
+                      <View style={styles.detailsGrid}>
+                        <View style={styles.infoRow}>
+                          <Clock size={14} color={isLight ? "#64748B" : colors.textSecondary} />
+                          <Text style={styles.infoText}>
+                            {formatTo12H(item.start_time)} – {formatTo12H(item.end_time)}
+                          </Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                          <MapPin size={14} color={isLight ? "#64748B" : colors.textSecondary} />
+                          <Text style={styles.infoText}>{item.place || 'Main Campus'}</Text>
+                        </View>
+                      </View>
+                      <View style={[styles.statusBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                        <Text style={[styles.statusText, { color: badge.color }]}>{badge.label}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+
+              <TouchableOpacity style={styles.modalCloseBottomBtn} onPress={() => setModalVisible(false)}>
+                <Text style={styles.modalCloseBottomText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
       </SafeAreaView>
     </>
   );
@@ -290,4 +393,76 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
     marginTop: 6,
   },
   statusText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, letterSpacing: 0.5 },
+
+  // See More Button
+  seeMoreButton: {
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: isLight ? '#F1F5F9' : colors.iconBg,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border
+  },
+  seeMoreText: {
+    fontFamily: 'Inter_18pt-Bold',
+    fontSize: 12,
+    color: '#00897B',
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    width: '100%',
+    maxHeight: '80%',
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+    overflow: 'hidden',
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: isLight ? '#F1F5F9' : colors.border,
+  },
+  modalHeaderTitle: {
+    fontFamily: 'Inter_18pt-Bold',
+    fontSize: 16,
+    color: isLight ? '#0F172A' : colors.textPrimary,
+  },
+  modalCloseBtn: { padding: 4 },
+  modalScrollBody: {
+    paddingVertical: 16,
+    gap: 20,
+  },
+  modalScheduleItem: {
+    gap: 12,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: isLight ? '#F1F5F9' : colors.border,
+  },
+  modalCloseBottomBtn: {
+    marginTop: 10,
+    backgroundColor: '#00897B',
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  modalCloseBottomText: {
+    fontFamily: 'Inter_18pt-Bold',
+    color: '#FFFFFF',
+    fontSize: 14,
+  },
 });

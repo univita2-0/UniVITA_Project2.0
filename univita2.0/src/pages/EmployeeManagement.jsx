@@ -82,7 +82,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       setEmployees(res.data);
     } catch (err) {
       console.error('Error loading data:', err);
-      toast.error('Failed to load employees');
+      toast.error(err.response?.data?.message || 'Failed to load employees');
     } finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
@@ -120,7 +120,6 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
   const openEditModal = (emp) => {
     setSelectedEmployee(emp);
     
-    // Parse additional_info JSON to extract onboarding & document details safely
     let appDate = '', intDate = '', resLink = '', parsedNotes = emp.additional_info || '';
     try {
       if (emp.additional_info && emp.additional_info.startsWith('{')) {
@@ -130,7 +129,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
         resLink = parsed.resume_link || '';
         parsedNotes = parsed.notes || '';
       }
-    } catch(e) { /* fallback to standard string if not JSON */ }
+    } catch(e) {}
 
     setFormData({
       employee_id: emp.employee_id || '',
@@ -217,7 +216,6 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       setActiveTabModal('profile'); return;
     }
 
-    // Sequence Validation for Dates
     if (formData.application_date && formData.interview_date && formData.interview_date < formData.application_date) {
       toast.warning('Interview date cannot be before the application date.');
       setActiveTabModal('onboarding'); return;
@@ -261,20 +259,20 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       setShowEditModal(false);
       await loadEmployees();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Update failed.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Update failed.');
     }
   };
 
   const handleChangePassword = async () => {
-    if (!newPassword || newPassword.length < 6) return setPasswordError('Password must be at least 6 characters.');
+    if (!newPassword || newPassword.length < 8) return setPasswordError('Password must be at least 8 characters.');
     if (newPassword !== confirmPassword) return setPasswordError('Passwords do not match.');
     try {
       await axios.put(`${API_BASE}/users/${selectedEmployee.id}/reset-password`, { newPassword: newPassword.trim() }, getAuthHeaders());
       toast.success('Password changed successfully!');
       setShowChangePassword(false); setNewPassword(''); setConfirmPassword(''); setPasswordError('');
     } catch (err) {
-      setPasswordError('Network error.');
-      toast.error('Failed to change password');
+      setPasswordError(err.response?.data?.message || 'Failed to change password');
+      toast.error(err.response?.data?.message || 'Failed to change password');
     }
   };
 
@@ -330,7 +328,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
         additional_info: advancedInfoJSON
       }, getAuthHeaders());
 
-      toast.success(`Employee added! ID: ${generatedEmpId}`);
+      toast.success(`Employee added successfully! ID: ${generatedEmpId}`);
       setShowAddModal(false);
       setNewEmployeeData({
         first_name: '', last_name: '', middle_initial: '', full_name: '', email: '', phone: '',
@@ -340,7 +338,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       setGeneratedEmpId(''); setGeneratedPassword('');
       loadEmployees();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Error adding employee');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Error adding employee');
     }
   };
 
@@ -350,7 +348,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     try {
       await axios.put(`${API_BASE}/employees/${softDeleteTarget.id}`, { status: 'deleted' }, getAuthHeaders());
       toast.info('Employee moved to deleted accounts.'); loadEmployees();
-    } catch (err) { toast.error('Failed to move to deleted accounts.'); } 
+    } catch (err) { toast.error(err.response?.data?.message || 'Failed to move to deleted accounts.'); } 
     finally { setShowSoftDeleteModal(false); setSoftDeleteTarget(null); }
   };
 
@@ -360,7 +358,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     try {
       await axios.delete(`${API_BASE}/employees/${permanentDeleteTarget.id}`, getAuthHeaders());
       toast.success('Employee permanently deleted.'); loadEmployees();
-    } catch (err) { toast.error('Delete failed.'); } 
+    } catch (err) { toast.error(err.response?.data?.message || 'Delete failed.'); } 
     finally { setShowPermanentDeleteModal(false); setPermanentDeleteTarget(null); }
   };
 
@@ -399,6 +397,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     <div className="em-container">
       <div className="em-header">
         <div>
+          <h2>Employee Directory</h2>
           <p>Oversee directory, manage system roles, and configure employee profiles.</p>
         </div>
         <button className="btn-add" onClick={() => { generateNewEmployeeId(); setShowAddModal(true); }}>
