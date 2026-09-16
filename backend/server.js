@@ -488,6 +488,10 @@ app.post('/api/auth/verify-otp', otpLimiter, (req, res) => {
   });
 });
 
+// ============================================
+// PASSWORD RECOVERY & OTP VERIFICATION ROUTES
+// ============================================
+
 app.post('/api/auth/forgot-password', async (req, res) => {
   const email = req.body.email?.trim().toLowerCase();
   const isMobile = req.body.isMobile;
@@ -499,13 +503,20 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(500).json({ success: false, message: err.message });
     }
     if (results.length === 0) {
-      return res.status(404).json({ success: false, message: 'No active account with that email.' });
+      // Random or non-existent email entered
+      return res.status(404).json({ success: false, message: 'No active account found with that email.' });
     }
 
     const user = results[0];
-    // RESTRICTION: Block mobile password recovery for non-instructors
+    
+    // 🔴 MOBILE RESTRICTION: Only instructors can use mobile recovery
     if (isMobile && user.role !== 'instructor') {
-      return res.status(403).json({ success: false, message: 'This account doesn\'t have access to mobile.' });
+      return res.status(403).json({ success: false, message: 'This account does not have access to mobile.' });
+    }
+
+    // 🔴 WEB PORTAL RESTRICTION: Instructors cannot recover passwords on the web portal
+    if (!isMobile && user.role === 'instructor') {
+      return res.status(403).json({ success: false, message: 'This account does not have access to web portal.' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
