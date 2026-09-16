@@ -505,7 +505,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const user = results[0];
     // RESTRICTION: Block mobile password recovery for non-instructors
     if (isMobile && user.role !== 'instructor') {
-      return res.status(403).json({ success: false, message: 'Mobile access is restricted to instructors only. Admin, HR, and Security accounts are for web access only.' });
+      return res.status(403).json({ success: false, message: 'This account doesn\'t have access to mobile.' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -595,7 +595,7 @@ app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 app.post('/api/login', loginLimiter, (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, isMobile } = req.body;
   
   if (!email || !password) {
     return res.status(400).json({ success: false, message: 'Email and password are required.' });
@@ -616,6 +616,14 @@ app.post('/api/login', loginLimiter, (req, res) => {
       db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
     } else if (!match) {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+    }
+
+    // 🔴 STRICT MOBILE ROLE RESTRICTION: Block non-instructors instantly on login click
+    if (isMobile && user.role !== 'instructor') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'This account does not have access to the mobile application.' 
+      });
     }
     
     logAction(user.id, 'LOGIN', 'user', user.id, req);
@@ -3355,12 +3363,27 @@ app.post('/api/emergency-alerts/:id/read', (req, res) => {
   const alertId = req.params.id;
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: 'userId required' });
-  db.query("UPDATE alert_receipts SET read_at = NOW() WHERE alert_id = ? AND user_id = ?", [alertId, userId], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true });
-  });
+  
+  db.query(
+    "UPDATE alert_receipts SET read_at = NOW() WHERE alert_id = ? AND user_id = ?", 
+    [alertId, userId], 
+    (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      // If no receipt row existed for this user/alert yet, insert one marked as read
+      if (result.affectedRows === 0) {
+        db.query(
+          "INSERT INTO alert_receipts (alert_id, user_id, read_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE read_at = NOW()",
+          [alertId, userId],
+          (insertErr) => {
+            if (insertErr) console.error("Failed to insert alert receipt:", insertErr);
+          }
+        );
+      }
+      res.json({ success: true });
+    }
+  );
 });
-
 app.get('/api/emergency-alerts', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
   db.query("SELECT * FROM emergency_alerts ORDER BY sent_at DESC", (err, results) => {

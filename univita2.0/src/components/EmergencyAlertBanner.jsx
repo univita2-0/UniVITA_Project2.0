@@ -22,7 +22,6 @@ const EmergencyAlertBanner = () => {
 
   const isAudioUnlocked = useRef(false);
 
-
   useEffect(() => {
     const unlockAudio = () => {
       if (isAudioUnlocked.current) return;
@@ -59,14 +58,17 @@ const EmergencyAlertBanner = () => {
           headers: { Authorization: `Bearer ${token}` }
         });
 
-        const activeAlerts = res.data || [];
-        setAlerts(activeAlerts);
+        const allAlerts = res.data || [];
+        
+        // FIX: Only display alerts that are unread (!alert.read_at)
+        const activeUnreadAlerts = allAlerts.filter(a => !a.read_at);
+        setAlerts(activeUnreadAlerts);
 
         // Retrieve already-heard alerts from this session
         const heardAlerts = JSON.parse(sessionStorage.getItem('heard_alerts') || '[]');
 
         // Check if there is any unread alert that hasn't made a sound yet
-        const unplayed = activeAlerts.filter(a => !heardAlerts.includes(a.id));
+        const unplayed = activeUnreadAlerts.filter(a => !heardAlerts.includes(a.id));
 
         if (unplayed.length > 0) {
           // Play the sound of the most critical alert
@@ -98,7 +100,7 @@ const EmergencyAlertBanner = () => {
       await axios.post(`${API_BASE}/emergency-alerts/${alertId}/read`, { userId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      // Remove immediately from UI
+      // Remove immediately from UI state
       setAlerts(prev => prev.filter(a => a.id !== alertId));
     } catch (err) {
       console.error('Failed to mark alert as read', err);
