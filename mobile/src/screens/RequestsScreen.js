@@ -76,9 +76,13 @@ export default function RequestsScreen({ navigation, route }) {
   const [timePickerMode, setTimePickerMode] = useState('');
   const [tempDate, setTempDate] = useState(new Date());
 
-  // Dynamic dropdown lists from database
-  const [locationList, setLocationList] = useState([]);
-  const [courseList, setCourseList] = useState([]);
+  // Dynamic dropdown lists from database with fallback defaults
+  const [locationList, setLocationList] = useState(['HCT Academy Pasig', 'National University - Manila', 'S Residence Tower 3']);
+  const [courseList, setCourseList] = useState(['Allied Health', 'Healthcare101', 'Information Technology']);
+
+  // Dropdown modal pickers state
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showCourseModal, setShowCourseModal] = useState(false);
 
   // Leave
   const [leaveDateFrom, setLeaveDateFrom] = useState('');
@@ -98,8 +102,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleStart, setScheduleStart] = useState('09:00');
   const [scheduleEnd, setScheduleEnd] = useState('17:00');
-  const [schedulePlace, setSchedulePlace] = useState('');
-  const [scheduleCourse, setScheduleCourse] = useState('');
+  const [schedulePlace, setSchedulePlace] = useState('HCT Academy Pasig');
+  const [scheduleCourse, setScheduleCourse] = useState('Allied Health');
   const [scheduleReason, setScheduleReason] = useState('');
   const [submittingSchedule, setSubmittingSchedule] = useState(false);
   const [showScheduleCalendar, setShowScheduleCalendar] = useState(false);
@@ -134,21 +138,24 @@ export default function RequestsScreen({ navigation, route }) {
 
   const todayStr = getPHNowString();
 
-  // Fetch locations and courses from DB on mount
+  // Fetch locations and courses from DB on mount with proper error guarding
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
         const [locRes, courseRes] = await Promise.all([
-          axios.get(`${API_URL}/school-locations`),
-          axios.get(`${API_URL}/courses`)
+          axios.get(`${API_URL}/school-locations`).catch(() => ({ data: [] })),
+          axios.get(`${API_URL}/courses`).catch(() => ({ data: [] }))
         ]);
-        if (locRes.data && Array.isArray(locRes.data)) {
-          setLocationList(locRes.data.map(l => l.name));
-          if (locRes.data.length > 0) setSchedulePlace(locRes.data[0].name);
+
+        if (locRes.data && Array.isArray(locRes.data) && locRes.data.length > 0) {
+          const names = locRes.data.map(l => l.name);
+          setLocationList(names);
+          setSchedulePlace(names[0]);
         }
-        if (courseRes.data && Array.isArray(courseRes.data)) {
-          setCourseList(courseRes.data.map(c => c.name));
-          if (courseRes.data.length > 0) setScheduleCourse(courseRes.data[0].name);
+        if (courseRes.data && Array.isArray(courseRes.data) && courseRes.data.length > 0) {
+          const names = courseRes.data.map(c => c.name);
+          setCourseList(names);
+          setScheduleCourse(names[0]);
         }
       } catch (err) {
         console.error("Failed to fetch dropdown options:", err);
@@ -629,23 +636,21 @@ export default function RequestsScreen({ navigation, route }) {
                 <Text style={styles.dateText}>{scheduleEnd ? formatTo12Hour(scheduleEnd) : 'Select end time'}</Text>
               </TouchableOpacity>
 
+              {/* Location / Campus Dropdown */}
               <Text style={styles.label}>Location / Campus</Text>
-              <View style={styles.typeGroup}>
-                {locationList.map(loc => (
-                  <TouchableOpacity key={loc} style={[styles.typeChip, schedulePlace === loc && styles.typeChipActive]} onPress={() => setSchedulePlace(loc)}>
-                    <Text style={[styles.typeChipText, schedulePlace === loc && styles.typeChipTextActive]}>{loc}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <TouchableOpacity style={styles.datePicker} onPress={() => setShowLocationModal(true)}>
+                <MapPin size={20} color="#00897B" />
+                <Text style={styles.dateText}>{schedulePlace || 'Select location...'}</Text>
+                <ChevronDown size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
 
+              {/* Course Name Dropdown */}
               <Text style={styles.label}>Course Name</Text>
-              <View style={styles.typeGroup}>
-                {courseList.map(c => (
-                  <TouchableOpacity key={c} style={[styles.typeChip, scheduleCourse === c && styles.typeChipActive]} onPress={() => setScheduleCourse(c)}>
-                    <Text style={[styles.typeChipText, scheduleCourse === c && styles.typeChipTextActive]}>{c}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <TouchableOpacity style={styles.datePicker} onPress={() => setShowCourseModal(true)}>
+                <BookOpen size={20} color="#00897B" />
+                <Text style={styles.dateText}>{scheduleCourse || 'Select course...'}</Text>
+                <ChevronDown size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
 
               <Text style={styles.label}>Reason for Request</Text>
               <TextInput style={[styles.input, styles.textArea]} multiline placeholder="e.g., Need to cover a shift..." placeholderTextColor={colors.textSecondary} value={scheduleReason} onChangeText={setScheduleReason} />
@@ -817,6 +822,44 @@ export default function RequestsScreen({ navigation, route }) {
           />
         )}
 
+        {/* Location Dropdown Modal */}
+        <RNModal visible={showLocationModal} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.balancesModal}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>Select Location</Text>
+                <TouchableOpacity onPress={() => setShowLocationModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
+              </View>
+              <ScrollView style={{ maxHeight: 250 }}>
+                {locationList.map((loc, idx) => (
+                  <TouchableOpacity key={idx} style={styles.dropdownOption} onPress={() => { setSchedulePlace(loc); setShowLocationModal(false); }}>
+                    <Text style={styles.dropdownOptionText}>{loc}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </RNModal>
+
+        {/* Course Dropdown Modal */}
+        <RNModal visible={showCourseModal} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.balancesModal}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>Select Course</Text>
+                <TouchableOpacity onPress={() => setShowCourseModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
+              </View>
+              <ScrollView style={{ maxHeight: 250 }}>
+                {courseList.map((c, idx) => (
+                  <TouchableOpacity key={idx} style={styles.dropdownOption} onPress={() => { setScheduleCourse(c); setShowCourseModal(false); }}>
+                    <Text style={styles.dropdownOptionText}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </RNModal>
+
         {/* Leave Balances Modal */}
         <RNModal visible={showBalancesModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -898,7 +941,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   calendarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   calendarTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary },
 
-  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   balancesModal: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, padding: 20, width: '85%', alignSelf: 'center', borderWidth: 1, borderColor: colors.border },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },
@@ -907,4 +950,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   balanceDays: { fontFamily: 'Inter_18pt-Medium', color: '#00897B', textAlign: 'right' },
   closeBalancesBtn: { marginTop: 20, alignItems: 'center', paddingVertical: 10 },
   emptyText: { fontFamily: 'Inter_18pt-Medium', textAlign: 'center', color: isLight ? '#94A3B8' : colors.textSecondary, marginTop: 20 },
+
+  dropdownOption: { paddingVertical: 14, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
+  dropdownOptionText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary }
 });

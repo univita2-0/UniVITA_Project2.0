@@ -3166,12 +3166,9 @@ app.put('/api/users/save-push-token', authenticateToken, async (req, res) => {
 // COURSE MANAGEMENT (Secured & Validated)
 // ============================================
 
-app.get('/api/courses', authenticateToken, (req, res) => {
+app.get('/api/courses', (req, res) => {
   db.query("SELECT id, name FROM courses ORDER BY name ASC", (err, results) => {
-    if (err) {
-      console.error("Fetch courses error:", err);
-      return res.status(500).json({ success: false, message: 'Failed to load courses.' });
-    }
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load courses.' });
     res.json(results || []);
   });
 });
@@ -3768,8 +3765,8 @@ app.get('/api/payroll/history', (req, res) => {
 
 app.get('/api/school-locations', (req, res) => {
   db.query("SELECT id, name, latitude, longitude, radius FROM school_locations ORDER BY name", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    if (err) return res.status(500).json({ success: false, message: err.message });
+    res.json(results || []);
   });
 });
 
