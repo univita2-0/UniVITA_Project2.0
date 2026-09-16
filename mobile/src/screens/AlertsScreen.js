@@ -122,20 +122,31 @@ export default function AlertsScreen({ navigation }) {
             ) : null
           }
           ListEmptyComponent={
-            !error && <Text style={styles.emptyText}>No active emergency alerts</Text>
+            !error && <Text style={styles.emptyText}>No emergency alerts in history</Text>
           }
           renderItem={({ item }) => {
             const accentColor = getSeverityAccent(item.severity);
+            const isUnread = !item.read_at;
             return (
               <TouchableOpacity
-                style={[styles.alertCard, { borderLeftColor: accentColor }, !item.read_at && styles.unread]}
-                onPress={() => !item.read_at && markAsRead(item.id)}
+                style={[
+                  styles.alertCard, 
+                  { borderLeftColor: accentColor }, 
+                  isUnread ? styles.unread : styles.readCard
+                ]}
+                onPress={() => isUnread && markAsRead(item.id)}
                 activeOpacity={0.8}
               >
                 <View style={styles.alertHeader}>
                   <AlertCircle size={20} color={accentColor} />
                   <Text style={styles.alertTitle}>{item.title}</Text>
-                  {!item.read_at && <View style={styles.unreadDot} />}
+                  {isUnread ? (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeText}>NEW</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.readStatusText}>Read</Text>
+                  )}
                 </View>
                 <Text style={styles.alertMessage}>{item.message}</Text>
                 <View style={styles.alertFooter}>
@@ -171,10 +182,14 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
     elevation: 2,
   },
   unread: { backgroundColor: isLight ? '#FFFBEB' : 'rgba(251, 191, 36, 0.08)' },
+  readCard: { opacity: 0.8 },
   
   alertHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   alertTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginLeft: 10, flex: 1 },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', marginLeft: 8 },
+  
+  unreadBadge: { backgroundColor: '#EF4444', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  unreadBadgeText: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 10 },
+  readStatusText: { fontFamily: 'Inter_18pt-Medium', color: isLight ? '#94A3B8' : colors.textSecondary, fontSize: 12 },
   
   alertMessage: { fontFamily: 'Inter_18pt-Regular', fontSize: 14, color: isLight ? '#334155' : colors.textSecondary, marginBottom: 14, lineHeight: 22 },
   

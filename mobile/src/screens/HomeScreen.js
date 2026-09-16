@@ -1,5 +1,5 @@
 // src/screens/HomeScreen.js
-import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useContext, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
   Alert, RefreshControl, Modal, TextInput, Image, Dimensions, Platform, StatusBar, AppState
@@ -26,7 +26,7 @@ import { ThemeContext, themeColors } from '../context/ThemeContext';
 
 import {
   Clock, MapPin, X, MessageCircle, CheckCircle, XCircle,
-  AlertCircle, TrendingUp, FileText, Camera, Calendar, Sparkles, ArrowUpRight
+  AlertCircle, TrendingUp, FileText, Camera, Calendar, Sparkles, ArrowUpRight, Eye, Filter
 } from 'lucide-react-native';
 
 const LOCATION_TASK_NAME = 'background-location-task';
@@ -39,7 +39,86 @@ const disableBatteryOptimization = async () => {
   }
 };
 
-const getTodayString = () => new Date().toISOString().split('T')[0];
+const getTodayString = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+
+const getInitialMonthString = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const parseDateOnly = (dateInput) => {
+  if (!dateInput) return null;
+  const dStr = String(dateInput).split('T')[0];
+  const [y, m, d] = dStr.split('-').map(Number);
+  if (!y || !m || !d) return new Date(dateInput);
+  const dateObj = new Date(y, m - 1, d);
+  dateObj.setHours(0, 0, 0, 0);
+  return dateObj;
+};
+
+// UNIFIED ATTENDANCE CALCULATION HELPER (Precise Multi-Shift & Date Matching)
+const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
+  let present = 0;
+  let late = 0;
+  let absent = 0;
+  let overtime = 0;
+
+  const currentDateVal = new Date();
+  currentDateVal.setHours(0, 0, 0, 0);
+
+  const monthSchedules = (scheduleList || []).filter(s => {
+    const sDateStr = String(s.date || '').split('T')[0];
+    return monthStr ? sDateStr.startsWith(monthStr) : true;
+  });
+
+  const usedAttendanceIds = new Set();
+
+  monthSchedules.forEach(s => {
+    const sDateStr = String(s.date || '').split('T')[0];
+    const schedDateVal = parseDateOnly(sDateStr);
+    if (!schedDateVal) return;
+
+    if (schedDateVal <= currentDateVal) {
+      // 1. Try exact schedule_id match first
+      let record = (historyList || []).find(r => r.schedule_id === s.id && !usedAttendanceIds.has(r.id));
+      
+      // 2. Fallback to date match if no exact schedule_id match exists
+      if (!record) {
+        record = (historyList || []).find(r => {
+          const rDateStr = String(r.date || r.attendance_date || '').split('T')[0];
+          return rDateStr === sDateStr && !usedAttendanceIds.has(r.id);
+        });
+      }
+
+      if (record) {
+        if (record.id) usedAttendanceIds.add(record.id);
+        const status = (record.status || '').toLowerCase();
+        
+        if (status === 'late') {
+          late++;
+        } else if (status === 'present' || status === 'completed') {
+          present++;
+        } else if (['absent', 'missed schedule', 'did not attend', 'missed shift', 'did_not_attend', 'absent today'].includes(status)) {
+          absent++;
+        } else {
+          if (record.time_in && record.time_in !== '--:--') {
+            present++;
+          } else {
+            absent++;
+          }
+        }
+
+        if (parseFloat(record.total_hours) > 8) {
+          overtime++;
+        }
+      } else {
+        absent++;
+      }
+    }
+  });
+
+  return { present, absent, late, overtime };
+};
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -53,6 +132,11 @@ export default function HomeScreen({ navigation }) {
   const [user, setUser] = useState({ id: null, name: "Employee", employeeId: "", full_name: "" });
   const [refreshing, setRefreshing] = useState(false);
   
+  // Raw Data Storage for Monthly Cycle Filtering
+  const [rawHistory, setRawHistory] = useState([]);
+  const [rawSchedule, setRawSchedule] = useState([]);
+  const [selectedMonth, setSelectedMonth] = useState(getInitialMonthString()); // 'YYYY-MM'
+
   // States for Multiple Schedules
   const [allTodaySchedules, setAllTodaySchedules] = useState([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -60,20 +144,17 @@ export default function HomeScreen({ navigation }) {
   const [todaySchedule, setTodaySchedule] = useState(null);
   const [attendanceStatus, setAttendanceStatus] = useState({ canClockIn: true, canClockOut: false, todayRecord: null });
   const [stats, setStats] = useState({ present: 0, absent: 0, late: 0, overtime: 0 });
-  const [showCorrectionModal, setShowCorrectionModal] = useState(false);
-  const [correctionDate, setCorrectionDate] = useState('');
-  const [correctionType, setCorrectionType] = useState('clock_in');
-  const [correctionTime, setCorrectionTime] = useState('');
-  const [correctionReason, setCorrectionReason] = useState('');
-  const [correctionSelfie, setCorrectionSelfie] = useState(null);
-  const [submittingCorrection, setSubmittingCorrection] = useState(false);
+  
+  // Monthly History Summary Modal States
+  const [showMonthlyModal, setShowMonthlyModal] = useState(false);
+  const [modalDateFilter, setModalDateFilter] = useState('');
+
   const [showChat, setShowChat] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [currentAlert, setCurrentAlert] = useState(null);
   const [alertQueue, setAlertQueue] = useState([]);
   
-  const hasSynced = useRef(false);
   const alertSound = useRef(null); 
   const activeAlertId = useRef(null);
 
@@ -147,6 +228,11 @@ export default function HomeScreen({ navigation }) {
     return !result.canceled ? result.assets[0].uri : null;
   };
 
+  const computeMonthlyStats = useCallback((historyList, scheduleList, monthStr) => {
+    const result = calculateStatsForMonth(historyList, scheduleList, monthStr);
+    setStats(result);
+  }, []);
+
   const loadData = useCallback(async () => {
     try {
       const rawUser = await AsyncStorage.getItem('user');
@@ -157,21 +243,25 @@ export default function HomeScreen({ navigation }) {
         const schedule = await fetchUserSchedule(empId);
         const history = await fetchAttendanceHistory(empId);
         
-        const todayStr = new Date().toLocaleDateString('en-CA');
+        setRawHistory(history || []);
+        setRawSchedule(schedule || []);
+        computeMonthlyStats(history || [], schedule || [], selectedMonth);
+
+        const todayStr = getTodayString();
         const now = new Date();
         const currentMinutes = now.getHours() * 60 + now.getMinutes();
         
         const parseMins = (ts) => {
-  if (!ts) return 0;
-  let cs = String(ts).split('.')[0].replace(',', ':');
-  const [h, m] = cs.split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
-};
+          if (!ts) return 0;
+          let cs = String(ts).split('.')[0].replace(',', ':');
+          const [h, m] = cs.split(':').map(Number);
+          return (h || 0) * 60 + (m || 0);
+        };
 
-const todaySchedules = schedule
+        const todaySchedules = (schedule || [])
           .filter(s => String(s.date).startsWith(todayStr))
           .map(s => {
-            const record = history.find(r => r.schedule_id === s.id);
+            const record = (history || []).find(r => r.schedule_id === s.id);
             const startMins = parseMins(s.start_time);
             const endMins = parseMins(s.end_time);
             const isPassed = currentMinutes > endMins;
@@ -209,27 +299,25 @@ const todaySchedules = schedule
 
         setAllTodaySchedules(todaySchedules);
 
-        // 1. Find currently active shift (with 30 min grace before start, through end)
         let activeSchedule = todaySchedules.find(s => currentMinutes >= (s.startMins - 30) && currentMinutes <= s.endMins);
-        
-        // 2. Fallback: Find next upcoming shift that hasn't started yet
         if (!activeSchedule) {
           activeSchedule = todaySchedules.find(s => s.startMins > currentMinutes);
         }
-        
-        // 3. Fallback: Select latest past shift of the day if all are finished
         if (!activeSchedule && todaySchedules.length > 0) {
           activeSchedule = todaySchedules[todaySchedules.length - 1];
         }
         
         setTodaySchedule(activeSchedule || null);
-        calculateStats(history);
-        checkTodayStatus(history, activeSchedule);
+        checkTodayStatus(history || [], activeSchedule);
       }
     } catch (error) {
       console.error("LoadData error:", error);
     }
-  }, []);
+  }, [selectedMonth, computeMonthlyStats]);
+
+  useEffect(() => {
+    computeMonthlyStats(rawHistory, rawSchedule, selectedMonth);
+  }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
 
   const checkTodayStatus = (history, activeSchedule) => {
     if (!activeSchedule) { setAttendanceStatus({ canClockIn: false, canClockOut: false, todayRecord: null }); return; }
@@ -239,19 +327,6 @@ const todaySchedules = schedule
       const isClockedOut = todayRecord.time_out && todayRecord.time_out !== '--:--';
       setAttendanceStatus({ canClockIn: false, canClockOut: isClockedIn && !isClockedOut, todayRecord: { ...todayRecord, time_in: todayRecord.time_in || '--:--', time_out: todayRecord.time_out || '--:--' } });
     } else setAttendanceStatus({ canClockIn: true, canClockOut: false, todayRecord: null });
-  };
-
-  const calculateStats = (history) => {
-    let counts = { present: 0, absent: 0, late: 0, overtime: 0 };
-    history.forEach(r => {
-      const status = r.status ? r.status.toLowerCase() : '';
-      if (status === 'present') counts.present++;
-      else if (status === 'late') counts.late++;
-      else if (status === 'absent' || status === 'missed schedule' || status === 'did not attend') counts.absent++;
-      
-      if (parseFloat(r.total_hours) > 8) counts.overtime++;
-    });
-    setStats(counts);
   };
 
   const handleClockIn = async () => {
@@ -392,19 +467,54 @@ const todaySchedules = schedule
   };
 
   const formatTo12H = (timeStr) => {
-  if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr == null) return '—';
-  const timePart = String(timeStr).includes('T') ? String(timeStr).split('T').split('Z')[0] : String(timeStr);
-  const cleanTime = timePart.split('.')[0].replace(',', ':');
-  const [rawH, rawM] = cleanTime.split(':');
-  
-  const h = parseInt(rawH, 10);
-  const m = parseInt(rawM, 10) || 0;
-  if (isNaN(h)) return timeStr;
-  
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const hour12 = h % 12 || 12;
-  return `${hour12}:${String(m).padStart(2, '0')} ${ampm}`;
-};
+    if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr == null) return '—';
+    const timePart = String(timeStr).includes('T') ? String(timeStr).split('T').split('Z')[0] : String(timeStr);
+    const cleanTime = timePart.split('.')[0].replace(',', ':');
+    const [rawH, rawM] = cleanTime.split(':');
+    
+    const h = parseInt(rawH, 10);
+    const m = parseInt(rawM, 10) || 0;
+    if (isNaN(h)) return timeStr;
+    
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const hour12 = h % 12 || 12;
+    return `${hour12}:${String(m).padStart(2, '0')} ${ampm}`;
+  };
+
+  const formatMonthDisplay = (yyyyMm) => {
+    if (!yyyyMm || !yyyyMm.includes('-')) return yyyyMm;
+    const [y, m] = yyyyMm.split('-');
+    const dateObj = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
+    return dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  };
+
+  // Group raw schedules and history into every month's summary using the shared calculation function
+  const monthlySummaries = useMemo(() => {
+    const map = {};
+    const allMonths = new Set();
+    rawSchedule.forEach(s => {
+      if (s.date) allMonths.add(String(s.date).substring(0, 7));
+    });
+    rawHistory.forEach(r => {
+      const d = r.date || r.attendance_date;
+      if (d) allMonths.add(String(d).substring(0, 7));
+    });
+
+    Array.from(allMonths).forEach(mKey => {
+      map[mKey] = { monthYear: mKey, ...calculateStatsForMonth(rawHistory, rawSchedule, mKey) };
+    });
+
+    return Object.values(map).sort((a, b) => b.monthYear.localeCompare(a.monthYear));
+  }, [rawSchedule, rawHistory]);
+
+  const filteredMonthlySummaries = useMemo(() => {
+    if (!modalDateFilter.trim()) return monthlySummaries;
+    const query = modalDateFilter.trim().toLowerCase();
+    return monthlySummaries.filter(item => {
+      const fullDisplay = formatMonthDisplay(item.monthYear).toLowerCase();
+      return item.monthYear.toLowerCase().includes(query) || fullDisplay.includes(query);
+    });
+  }, [monthlySummaries, modalDateFilter]);
 
   const getModalStatusStyle = (sched) => {
     const status = (sched.computedStatus || sched.attendance_status || '').toUpperCase();
@@ -559,9 +669,22 @@ const todaySchedules = schedule
             </TouchableOpacity>
           </View>
 
-          {/* Performance Overview */}
+          {/* Performance Overview Header with Month Selector & Eye Modal Button */}
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Performance Overview</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Text style={styles.sectionTitle}>Performance Overview</Text>
+              <TouchableOpacity onPress={() => setShowMonthlyModal(true)} style={styles.eyeIconBtn} activeOpacity={0.7}>
+                <Eye size={18} color={isLight ? "#0D9488" : colors.primary} />
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={styles.monthCycleInput}
+              value={selectedMonth}
+              onChangeText={setSelectedMonth}
+              placeholder="YYYY-MM"
+              placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
+              maxLength={7}
+            />
           </View>
           
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsScroll} contentContainerStyle={{ gap: 12 }}>
@@ -626,6 +749,66 @@ const todaySchedules = schedule
           <MessageCircle size={24} color={isLight ? "#FFFFFF" : colors.background} />
           {unreadCount > 0 && <View style={styles.fabBadge}><Text style={styles.fabBadgeText}>{unreadCount}</Text></View>}
         </TouchableOpacity>
+
+        {/* Monthly Summary History Modal with Date Filter */}
+        <Modal visible={showMonthlyModal} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.schedModal}>
+              <View style={styles.schedModalHeader}>
+                <Text style={styles.schedModalTitle}>Monthly Performance History</Text>
+                <TouchableOpacity onPress={() => setShowMonthlyModal(false)}>
+                  <X size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.modalFilterRow}>
+                <Filter size={16} color={isLight ? "#64748B" : colors.textSecondary} />
+                <TextInput
+                  style={styles.modalDateFilterInput}
+                  placeholder="Filter by Year or Month (e.g. August, 2026)"
+                  placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
+                  value={modalDateFilter}
+                  onChangeText={setModalDateFilter}
+                />
+                {modalDateFilter ? (
+                  <TouchableOpacity onPress={() => setModalDateFilter('')}>
+                    <X size={16} color={isLight ? "#64748B" : colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 10 }}>
+                {filteredMonthlySummaries.length === 0 ? (
+                  <Text style={styles.emptyStateText}>No monthly history found.</Text>
+                ) : (
+                  filteredMonthlySummaries.map((item) => (
+                    <TouchableOpacity 
+                      key={item.monthYear} 
+                      style={[styles.monthlySummaryCard, selectedMonth === item.monthYear && styles.monthlySummaryCardActive]}
+                      onPress={() => { setSelectedMonth(item.monthYear); setShowMonthlyModal(false); }}
+                      activeOpacity={0.8}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <Text style={styles.monthlySummaryTitle}>{formatMonthDisplay(item.monthYear)}</Text>
+                        <Text style={styles.selectMonthHintText}>{selectedMonth === item.monthYear ? 'Active Cycle' : 'Tap to View'}</Text>
+                      </View>
+                      <View style={styles.monthlySummaryGrid}>
+                        <Text style={styles.monthlySummaryStat}>Present: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#059669' }}>{item.present}</Text></Text>
+                        <Text style={styles.monthlySummaryStat}>Absent: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#DC2626' }}>{item.absent}</Text></Text>
+                        <Text style={styles.monthlySummaryStat}>Late: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#D97706' }}>{item.late}</Text></Text>
+                        <Text style={styles.monthlySummaryStat}>Overtime: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#2563EB' }}>{item.overtime}</Text></Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
+
+              <TouchableOpacity style={styles.btnCloseModal} onPress={() => setShowMonthlyModal(false)}>
+                <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary, fontSize: 13 }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {/* Schedule List Modal */}
         <Modal visible={showScheduleModal} transparent animationType="fade">
@@ -752,7 +935,9 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },
-  sectionActionText: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
+  
+  eyeIconBtn: { padding: 4, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 8, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  monthCycleInput: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#CBD5E1' : colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, width: 105, textAlign: 'center' },
   
   statsScroll: { flexDirection: 'row', marginBottom: 32 },
   statCard: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, paddingVertical: 20, paddingHorizontal: 16, width: 110, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, alignItems: 'center' },
@@ -777,10 +962,21 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
   
-  // Schedule Modal
+  // Schedule Modal / Monthly Modal
   schedModal: { width: '100%', borderRadius: 24, padding: 24, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, maxHeight: '80%' },
-  schedModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  schedModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   schedModalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary },
+  
+  modalFilterRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: isLight ? '#F8FAFC' : colors.background, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 14 },
+  modalDateFilterInput: { flex: 1, fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary },
+
+  monthlySummaryCard: { backgroundColor: isLight ? '#F8FAFC' : colors.background, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  monthlySummaryCardActive: { borderColor: '#0D9488', backgroundColor: isLight ? '#F0FDFA' : 'rgba(13, 148, 136, 0.1)' },
+  monthlySummaryTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
+  selectMonthHintText: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: '#0D9488' },
+  monthlySummaryGrid: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  monthlySummaryStat: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#475569' : colors.textSecondary },
+
   schedItem: { borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border, paddingVertical: 16 },
   schedItemTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   schedItemTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },

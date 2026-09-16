@@ -87,7 +87,7 @@ export default function SecurityScreen({ navigation }) {
           >
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
               <View style={styles.introBox}>
-                <ShieldCheck size={36} color={colors.primary} strokeWidth={1.5} />
+                
                 <Text style={styles.introHeading}>Change Password</Text>
                 <Text style={styles.introSub}>Ensure your account uses a secure password (min. 8 characters).</Text>
               </View>

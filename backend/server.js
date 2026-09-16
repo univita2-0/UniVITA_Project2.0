@@ -490,15 +490,22 @@ app.post('/api/auth/verify-otp', otpLimiter, (req, res) => {
 
 app.post('/api/auth/forgot-password', async (req, res) => {
   const email = req.body.email?.trim().toLowerCase();
+  const isMobile = req.body.isMobile;
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
-  db.query("SELECT id FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
+  db.query("SELECT id, role FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
     if (err) {
       console.error("DB error:", err);
       return res.status(500).json({ success: false, message: err.message });
     }
     if (results.length === 0) {
       return res.status(404).json({ success: false, message: 'No active account with that email.' });
+    }
+
+    const user = results[0];
+    // RESTRICTION: Block mobile password recovery for non-instructors
+    if (isMobile && user.role !== 'instructor') {
+      return res.status(403).json({ success: false, message: 'Mobile access is restricted to instructors only. Admin, HR, and Security accounts are for web access only.' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -534,6 +541,22 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(500).json({ success: false, message: 'Server error while sending reset OTP.' });
     }
   });
+});
+
+app.post('/api/auth/verify-reset-otp', otpLimiter, (req, res) => {
+  const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
+  const otp = req.body.otp;
+  if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
+
+  const record = OTP_STORE[email];
+  if (!record) return res.status(400).json({ success: false, message: 'No OTP found. Please request a new one.' });
+  if (Date.now() > record.expiresAt) {
+    delete OTP_STORE[email];
+    return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new one.' });
+  }
+  if (record.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP.' });
+
+  res.json({ success: true, message: 'OTP verified successfully.' });
 });
 
 app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
@@ -2708,11 +2731,12 @@ const runMissedShiftSweep = async () => {
     const { date: todayDate, time: currentTime } = getPHTime();
     const currentDateTime = `${todayDate} ${currentTime}`;
     
-    // Insert all missed schedules in one single query
+    // FIXED: Added INNER JOIN users u ON s.user_id = u.employee_id to filter out orphaned schedules
     const sql = `
       INSERT INTO attendance (user_id, schedule_id, date, status, location)
       SELECT s.user_id, s.id, s.date, 'did not attend', 'Missed Schedule'
       FROM schedules s
+      INNER JOIN users u ON s.user_id = u.employee_id
       LEFT JOIN attendance a ON s.id = a.schedule_id
       WHERE s.date <= ? 
         AND CONCAT(s.date, ' ', s.end_time) < ?
@@ -3272,12 +3296,10 @@ app.get('/api/emergency-alerts/active', async (req, res) => {
   if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
 
   try {
-    // 1. Get user's role
     const [userRows] = await db.promise().query("SELECT role FROM users WHERE id = ?", [userId]);
     if (userRows.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
     const userRole = userRows[0].role.toLowerCase().trim();
 
-    // 2. Fetch all currently active broadcasts
     const [activeAlerts] = await db.promise().query(`
       SELECT id, title, message, severity, sent_at, target_roles, is_active, expires_at 
       FROM emergency_alerts 
@@ -3295,17 +3317,14 @@ app.get('/api/emergency-alerts/active', async (req, res) => {
         targetRoles = ['instructor', 'admin', 'security', 'hr_admin'];
       }
 
-      // Check if this alert targets the user's role
       const isTargeted = targetRoles.map(r => r.toLowerCase().trim()).includes(userRole) || targetRoles.length === 0;
 
       if (isTargeted) {
-        // Ensure a receipt record exists for tracking read status
         await db.promise().query(
           `INSERT IGNORE INTO alert_receipts (alert_id, user_id) VALUES (?, ?)`,
           [alert.id, userId]
         );
 
-        // Check read status for this user
         const [receiptRows] = await db.promise().query(
           `SELECT read_at FROM alert_receipts WHERE alert_id = ? AND user_id = ?`,
           [alert.id, userId]
@@ -3313,23 +3332,21 @@ app.get('/api/emergency-alerts/active', async (req, res) => {
 
         const readAt = receiptRows.length > 0 ? receiptRows[0].read_at : null;
 
-        // Only include if unread
-        if (!readAt) {
-          validAlerts.push({
-            id: alert.id,
-            title: alert.title,
-            message: alert.message,
-            severity: alert.severity,
-            sent_at: alert.sent_at,
-            read_at: null
-          });
-        }
+        // Include all targeted alerts (both read and unread) for history view
+        validAlerts.push({
+          id: alert.id,
+          title: alert.title,
+          message: alert.message,
+          severity: alert.severity,
+          sent_at: alert.sent_at,
+          read_at: readAt
+        });
       }
     }
 
     res.json(validAlerts);
   } catch (err) {
-    console.error("Fetch active alerts error:", err);
+    console.error("Fetch alerts error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

@@ -9,12 +9,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import axios from 'axios';
-import { loginUser, sendOtp, verifyOtp, forgotPassword, resetPassword, API_URL } from './api';
-import { AlertCircle, CheckCircle2 } from 'lucide-react-native';
+import { loginUser, sendOtp, verifyOtp, verifyResetOtp, forgotPassword, resetPassword, API_URL } from './api';
+import { AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react-native';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // --- Custom Animated Toast State ---
@@ -29,9 +30,10 @@ export default function LoginScreen({ navigation }) {
   const [sendingOtpResend, setSendingOtpResend] = useState(false);
   const timerRef = useRef(null);
 
+  // --- Password Recovery Flow States (3-Step Sequential Flow) ---
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
-  const [resetStep, setResetStep] = useState('email'); 
+  const [resetStep, setResetStep] = useState('email'); // 'email' -> 'otp' -> 'new-password'
   const [resetOtp, setResetOtp] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
@@ -178,6 +180,13 @@ export default function LoginScreen({ navigation }) {
     try {
       const result = await verifyOtp(email, otp);
       if (result.success && result.user) {
+        // STRICT MOBILE ROLE VALIDATION: Only instructors allowed on mobile
+        if (result.user.role !== 'instructor') {
+          showToast('Mobile access is restricted to instructors only. Admin, HR, and Security accounts are for web access only.', 'error');
+          setVerifyingOtp(false);
+          return;
+        }
+
         await saveSession(result.user, result.token);
         setShowOtpModal(false);
         navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
@@ -203,6 +212,7 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // --- PASSWORD RECOVERY STEP 1: Submit Recovery Email ---
   const handleForgotPassword = async () => {
     if (!resetEmail.trim()) {
       showToast('Email is required', 'error');
@@ -217,11 +227,11 @@ export default function LoginScreen({ navigation }) {
     try {
       const result = await forgotPassword(resetEmail.trim().toLowerCase());
       if (result.success) {
-        setResetStep('reset-password'); // Unified step enforces explicit verification
+        setResetStep('otp'); // Move to OTP Modal input
         startResendTimer(setResetTimer);
-        showToast(`An OTP has been sent`, 'success');
+        showToast('Verification code sent to your email', 'success');
       } else {
-        showToast(result.message || 'Email invalid', 'error');
+        showToast(result.message || 'No account found with this email', 'error');
       }
     } catch (err) {
       showToast('Network error. Please try again.', 'error');
@@ -230,11 +240,29 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const handleResetPassword = async () => {
+  const handleVerifyRecoveryOtp = async () => {
     if (!resetOtp || resetOtp.length !== 6) {
       showToast('Please enter the 6-digit OTP code', 'error');
       return;
     }
+
+    setResetLoading(true);
+    try {
+      const result = await verifyResetOtp(resetEmail, resetOtp);
+      if (result.success) {
+        setResetStep('new-password'); // Proceed to New Password modal input
+        showToast('OTP verified successfully', 'success');
+      } else {
+        showToast(result.message || 'Invalid OTP', 'error');
+      }
+    } catch (err) {
+      showToast('Invalid OTP or network error', 'error');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+  // --- PASSWORD RECOVERY STEP 3: Submit New Password ---
+  const handleResetPassword = async () => {
     if (!resetNewPassword || resetNewPassword.length < 6) {
       showToast('Password must be at least 6 characters', 'error');
       return;
@@ -250,7 +278,6 @@ export default function LoginScreen({ navigation }) {
         showToast('Password reset successfully!', 'success');
         closeForgotModal();
       } else {
-        // Backend actively blocks execution if OTP is invalid
         showToast(result.message || 'Password reset failed', 'error');
       }
     } catch (err) {
@@ -277,7 +304,7 @@ export default function LoginScreen({ navigation }) {
       const result = await forgotPassword(resetEmail);
       if (result.success) {
         startResendTimer(setResetTimer);
-        showToast(`A new OTP was sent`, 'success');
+        showToast('A new OTP was sent', 'success');
       } else {
         showToast(result.message, 'error');
       }
@@ -326,15 +353,18 @@ export default function LoginScreen({ navigation }) {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Password</Text>
-              <View style={styles.inputWrapper}>
+              <View style={[styles.inputWrapper, { flexDirection: 'row', alignItems: 'center' }]}>
                 <TextInput
-                  style={styles.input}
-                  secureTextEntry
+                  style={[styles.input, { flex: 1, height: 50, borderWidth: 0, backgroundColor: 'transparent' }]}
+                  secureTextEntry={!showPassword}
                   placeholder="******"
                   placeholderTextColor="#475569"
                   value={password}
                   onChangeText={setPassword}
                 />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{ paddingRight: 14 }} activeOpacity={0.7}>
+                  {showPassword ? <EyeOff size={20} color="#64748B" /> : <Eye size={20} color="#64748B" />}
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -398,17 +428,18 @@ export default function LoginScreen({ navigation }) {
         </View>
       </Modal>
 
-      {/* Forgot Password Modal */}
+      {/* Password Recovery Modal: Sequential 3-Step Flow */}
       <Modal visible={showForgotModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           {renderToast()}
 
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Password Recovery</Text>
-
+            
+            {/* STEP 1: Recovery Email Input */}
             {resetStep === 'email' && (
               <>
-                <Text style={styles.modalSubtitle}>Enter your registered email address to receive a recovery code.</Text>
+                <Text style={styles.modalTitle}>Password Recovery</Text>
+                <Text style={styles.modalSubtitle}>Enter your registered instructor email address.</Text>
                 <TextInput
                   style={styles.resetInput}
                   placeholder="Enter your Email"
@@ -417,6 +448,7 @@ export default function LoginScreen({ navigation }) {
                   onChangeText={(text) => setResetEmail(text.trim())}
                   autoCapitalize="none"
                   keyboardType="email-address"
+                  autoFocus
                 />
                 <TouchableOpacity style={styles.modalButton} onPress={handleForgotPassword} disabled={resetLoading} activeOpacity={0.8}>
                   <Text style={styles.modalButtonText}>{resetLoading ? 'Sending...' : 'Send Code'}</Text>
@@ -424,10 +456,13 @@ export default function LoginScreen({ navigation }) {
               </>
             )}
 
-            {/* Combined Step strictly forces server verification */}
-            {resetStep === 'reset-password' && (
+            {/* STEP 2: OTP Modal Input */}
+            {resetStep === 'otp' && (
               <>
-                <Text style={styles.modalSubtitle}>Enter the 6‑digit code sent to your email alongside your new password.</Text>
+                <Text style={styles.modalTitle}>Enter OTP Code</Text>
+                <Text style={styles.modalSubtitle}>
+                  Enter the 6-digit code sent to <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF' }}>{resetEmail}</Text>.
+                </Text>
                 <TextInput
                   style={styles.otpInput}
                   placeholder="000000"
@@ -436,8 +471,30 @@ export default function LoginScreen({ navigation }) {
                   maxLength={6}
                   value={resetOtp}
                   onChangeText={setResetOtp}
+                  autoFocus
                   textAlign="center"
                 />
+                <TouchableOpacity style={styles.modalButton} onPress={handleVerifyRecoveryOtp} disabled={resetLoading} activeOpacity={0.8}>
+                  <Text style={styles.modalButtonText}>{resetLoading ? 'Validating...' : 'Verify Code'}</Text>
+                </TouchableOpacity>
+
+                <View style={styles.modalFooterActions}>
+                  {resetTimer > 0 ? (
+                    <Text style={styles.timerText}>Resend in {resetTimer}s</Text>
+                  ) : (
+                    <TouchableOpacity onPress={resendResetOtp} activeOpacity={0.8}>
+                      <Text style={styles.resendLink}>Resend code</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            )}
+
+            {/* STEP 3: New Password Modal Input */}
+            {resetStep === 'new-password' && (
+              <>
+                <Text style={styles.modalTitle}>Create New Password</Text>
+                <Text style={styles.modalSubtitle}>Enter and confirm your new secure password.</Text>
                 <TextInput
                   style={styles.resetInput}
                   secureTextEntry
@@ -445,6 +502,7 @@ export default function LoginScreen({ navigation }) {
                   placeholderTextColor="#64748B"
                   value={resetNewPassword}
                   onChangeText={setResetNewPassword}
+                  autoFocus
                 />
                 <TextInput
                   style={styles.resetInput}
@@ -457,16 +515,6 @@ export default function LoginScreen({ navigation }) {
                 <TouchableOpacity style={styles.modalButton} onPress={handleResetPassword} disabled={resetLoading} activeOpacity={0.8}>
                   <Text style={styles.modalButtonText}>{resetLoading ? 'Updating System...' : 'Update Password'}</Text>
                 </TouchableOpacity>
-                
-                <View style={styles.modalFooterActions}>
-                  {resetTimer > 0 ? (
-                    <Text style={styles.timerText}>Resend in {resetTimer}s</Text>
-                  ) : (
-                    <TouchableOpacity onPress={resendResetOtp} activeOpacity={0.8}>
-                      <Text style={styles.resendLink}>Resend code</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
               </>
             )}
 

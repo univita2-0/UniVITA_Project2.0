@@ -201,11 +201,25 @@ export const forgotPassword = async (email) => {
     const response = await fetch(`${API_URL}/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email, isMobile: true })
     });
     return await handleResponse(response);
   } catch (error) {
     console.error("Forgot Password Error:", error.message);
+    return { success: false, message: 'Network error' };
+  }
+};
+
+export const verifyResetOtp = async (email, otp) => {
+  try {
+    const response = await fetch(`${API_URL}/auth/verify-reset-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, otp })
+    });
+    return await handleResponse(response);
+  } catch (error) {
+    console.error("Verify Reset OTP Error:", error.message);
     return { success: false, message: 'Network error' };
   }
 };
