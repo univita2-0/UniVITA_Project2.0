@@ -63,6 +63,8 @@ const getPHNowString = () => {
 
 export default function RequestsScreen({ navigation, route }) {
   const prefill = route.params || {};
+
+  const [correctionScheduleId, setCorrectionScheduleId] = useState(prefill.prefillScheduleId || null);
   const insets = useSafeAreaInsets();
   
   const { isDark } = useContext(ThemeContext);
@@ -428,17 +430,14 @@ export default function RequestsScreen({ navigation, route }) {
       const formattedTime = formatTimeForDB(correctionTime);
 
       const payload = {
-        employee_id: employeeId,
-        date: correctionDate,
-        type: dbType,
-        time: formattedTime,
-        reason: finalReason,
-        selfie: { 
-          uri: selfieUri, 
-          name: 'correction.jpg', 
-          type: 'image/jpeg' 
-        }
-      };
+  employee_id: employeeId,
+  date: correctionDate,
+  type: dbType,
+  time: formattedTime,
+  reason: finalReason,
+  schedule_id: correctionScheduleId, 
+  selfie: { uri: selfieUri, name: 'correction.jpg', type: 'image/jpeg' }
+};
       
       const res = await requestAttendanceCorrection(payload);
       if (res && res.success) {

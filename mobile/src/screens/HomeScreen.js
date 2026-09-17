@@ -379,9 +379,19 @@ export default function HomeScreen({ navigation }) {
     
     if (currentTimeStr < scheduledEndTime.slice(0, 5)) {
       Alert.alert("Early Check-Out", `Your shift ends at ${formatTo12H(scheduledEndTime)}. Do you wish to request a correction for an early check-out?`, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Request", onPress: () => navigation.navigate("Requests", { prefillTab: "correction", prefillDate: getTodayString(), prefillType: "clock_out", prefillTime: currentTimeStr, prefillReason: "Early departure requested" }) }
-      ]);
+  { text: "Cancel", style: "cancel" },
+  { 
+    text: "Request", 
+    onPress: () => navigation.navigate("Requests", { 
+      prefillTab: "correction", 
+      prefillDate: getTodayString(), 
+      prefillType: "clock_out", 
+      prefillTime: currentTimeStr, 
+      prefillReason: "Early departure requested",
+      prefillScheduleId: todaySchedule?.id 
+    }) 
+  }
+]);
       return;
     }
     

@@ -1053,7 +1053,7 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/attendance/correction-request', authenticateToken, multerCorrection.single('selfie'), async (req, res) => {
-  const { employee_id, date, type, time, reason } = req.body;
+  let { employee_id, date, type, time, reason, schedule_id } = req.body;
   const userId = req.user.id;
   const selfiePath = req.file ? `/uploads/corrections/${req.file.filename}` : null;
 
@@ -1073,33 +1073,51 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
     );
     if (userRows.length === 0) return res.status(403).json({ success: false, message: 'Invalid user' });
 
-    const schedule = await scheduleExistsForDate(employee_id, date);
-    if (!schedule) {
-      return res.status(400).json({ success: false, message: "No schedule found for this date. Correction not allowed." });
+    // 1. Resolve or validate the specific schedule_id
+    if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
+      const [schedRows] = await db.promise().query(
+        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC",
+        [employee_id, date]
+      );
+      if (schedRows.length === 0) {
+        return res.status(400).json({ success: false, message: "No schedule found for this date. Correction not allowed." });
+      }
+      schedule_id = schedRows[0].id;
+    } else {
+      const [schedVerify] = await db.promise().query(
+        "SELECT id FROM schedules WHERE id = ? AND user_id = ? AND date = ?",
+        [schedule_id, employee_id, date]
+      );
+      if (schedVerify.length === 0) {
+        return res.status(400).json({ success: false, message: "Invalid schedule selected for this date." });
+      }
     }
 
+    // 2. Check for duplicate pending/approved requests scoped strictly to this specific shift
     const [existingCorr] = await db.promise().query(
       `SELECT id FROM attendance_corrections 
-       WHERE user_id = ? AND attendance_date = ? AND status IN ('pending', 'approved') 
+       WHERE user_id = ? AND attendance_date = ? AND schedule_id = ? AND status IN ('pending', 'approved') 
        AND ${type === 'clock_in' ? 'requested_clock_in IS NOT NULL' : 'requested_clock_out IS NOT NULL'}`,
-      [userId, date]
+      [userId, date, schedule_id]
     );
 
     if (existingCorr.length > 0) {
-      return res.status(409).json({ success: false, message: `You already have a pending or approved ${type.replace('_', ' ')} request for this date.` });
+      return res.status(409).json({ success: false, message: `You already have a pending or approved ${type.replace('_', ' ')} request for this specific shift.` });
     }
 
+    // 3. Insert correction record including the schedule_id
     await db.promise().query(
       `INSERT INTO attendance_corrections 
-        (user_id, attendance_date, requested_clock_in, requested_clock_out, reason, selfie_url, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-      [userId, date, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason, selfiePath]
+        (user_id, attendance_date, schedule_id, requested_clock_in, requested_clock_out, reason, selfie_url, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      [userId, date, schedule_id, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason, selfiePath]
     );
 
+    // 4. Update attendance specifically for this schedule_id if clock_out / early_out
     if (type === 'clock_out') {
       await db.promise().query(
         "UPDATE attendance SET time_out = ?, status = 'early departure' WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
-        [time, employee_id, schedule.id]
+        [time, employee_id, schedule_id]
       );
       await db.promise().query(
         "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
@@ -1159,16 +1177,30 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
     if (status === 'approved') {
       const record = corr[0];
       const empIdString = record.employee_id; 
+      let targetScheduleId = record.schedule_id;
 
+      // Fallback lookup if schedule_id wasn't stored in older correction records
+      if (!targetScheduleId) {
+        const [schedRows] = await db.promise().query(
+          "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
+          [empIdString, record.attendance_date]
+        );
+        if (schedRows.length > 0) {
+          targetScheduleId = schedRows[0].id;
+        }
+      }
+
+      // Check for existing attendance record scoped strictly to this specific schedule_id
       const [existing] = await db.promise().query(
-        "SELECT id FROM attendance WHERE user_id = ? AND date = ?",
-        [empIdString, record.attendance_date]
+        "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ?",
+        [empIdString, targetScheduleId]
       );
+
       if (existing.length === 0) {
         await db.promise().query(
-          `INSERT INTO attendance (user_id, date, time_in, time_out, status, correction_requested, correction_status)
-           VALUES (?, ?, ?, ?, 'present', 1, 'approved')`,
-          [empIdString, record.attendance_date, record.requested_clock_in, record.requested_clock_out]
+          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out, status, correction_requested, correction_status)
+           VALUES (?, ?, ?, ?, ?, 'present', 1, 'approved')`,
+          [empIdString, targetScheduleId, record.attendance_date, record.requested_clock_in, record.requested_clock_out]
         );
       } else {
         const updates = [];
