@@ -498,25 +498,19 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
   db.query("SELECT id, role FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
-    if (err) {
-      console.error("DB error:", err);
-      return res.status(500).json({ success: false, message: err.message });
-    }
+    if (err) return res.status(500).json({ success: false, message: err.message });
     if (results.length === 0) {
-      // Random or non-existent email entered
       return res.status(404).json({ success: false, message: 'No active account found with that email.' });
     }
 
     const user = results[0];
     
-    // 🔴 MOBILE RESTRICTION: Only instructors can use mobile recovery
+    // 🔴 STRICT ROLE RESTRICTIONS FOR RECOVERY
     if (isMobile && user.role !== 'instructor') {
-      return res.status(403).json({ success: false, message: 'This account does not have access to mobile.' });
+      return res.status(403).json({ success: false, message: 'This account does not have access.' });
     }
-
-    // 🔴 WEB PORTAL RESTRICTION: Instructors cannot recover passwords on the web portal
     if (!isMobile && user.role === 'instructor') {
-      return res.status(403).json({ success: false, message: 'This account does not have access to web portal.' });
+      return res.status(403).json({ success: false, message: 'This account does not have access.' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -611,13 +605,10 @@ app.post('/api/login', loginLimiter, (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ success: false, message: 'Email and password are required.' });
   }
-  if (!isValidEmail(email)) {
-    return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
-  }
 
   db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
-    if (results.length === 0) return res.status(401).json({ success: false, message: 'Invalid credentials.' }); 
+    if (results.length === 0) return res.status(401).json({ success: false, message: 'Incorrect password.' }); 
 
     const user = results[0];
     const match = await bcrypt.compare(password, user.password);
@@ -626,23 +617,17 @@ app.post('/api/login', loginLimiter, (req, res) => {
       const hashed = await bcrypt.hash(password, 10);
       db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
     } else if (!match) {
-      return res.status(401).json({ success: false, message: 'Invalid password.' });
+      return res.status(401).json({ success: false, message: 'Incorrect password.' });
     }
 
-    // 🔴 MOBILE ROLE RESTRICTION
+    // 🔴 MOBILE APP ROLE RESTRICTION: Block Admin/HR/Security from Mobile
     if (isMobile && user.role !== 'instructor') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This account does not have access to login.' 
-      });
+      return res.status(403).json({ success: false, message: 'This account does not have access.' });
     }
 
-    // 🔴 WEB PORTAL ROLE RESTRICTION: Instructors cannot access web portal
+    // 🔴 WEB PORTAL ROLE RESTRICTION: Block Instructors from Web
     if (!isMobile && user.role === 'instructor') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This account does not have access to login.' 
-      });
+      return res.status(403).json({ success: false, message: 'This account does not have access.' });
     }
     
     logAction(user.id, 'LOGIN', 'user', user.id, req);

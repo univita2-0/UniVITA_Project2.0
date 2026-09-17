@@ -11,7 +11,10 @@ const Login = ({ onBack }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  
+  // New Password State
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   
   // Steps: 'login' | 'otp' | 'forgot-password' | 'reset-otp' | 'reset-new-password'
@@ -75,9 +78,9 @@ const Login = ({ onBack }) => {
         if (serverMsg.includes("does not have access")) {
           toast.error("This account does not have access.");
         } else if (serverMsg.toLowerCase().includes('password') || serverMsg === 'Invalid credentials.') {
-          toast.error('Password incorrect');
+          toast.error('Incorrect password.');
         } else if (serverMsg.toLowerCase().includes('email') || serverMsg.toLowerCase().includes('not found')) {
-          toast.error('Email invalid or account not found');
+          toast.error('Email invalid or account not found.');
         } else {
           toast.error(serverMsg || 'Incorrect email or password. Please try again.');
         }
@@ -126,7 +129,7 @@ const Login = ({ onBack }) => {
           window.location.href = '/';
         }, 800);
       } else {
-        toast.error('Invalid OTP');
+        toast.error(data?.message || 'Invalid OTP');
       }
     } catch (err) {
       console.error(err);
@@ -175,10 +178,15 @@ const Login = ({ onBack }) => {
       const res = await requestPasswordReset(email.trim());
       if (res && res.success) {
         toast.success(res.message || 'Reset code sent to your email.');
-        setStep('reset-otp'); // First show OTP input modal for recovery
+        setStep('reset-otp'); 
         startResendTimer();
       } else {
-        toast.error(res?.message || 'No active account found with this email address.');
+        const serverMsg = res?.message || '';
+        if (serverMsg.includes("does not have access")) {
+          toast.error("This account does not have access.");
+        } else {
+          toast.error(serverMsg || 'No active account found with this email address.');
+        }
       }
     } catch (err) {
       toast.error('Connection error. Please try again.');
@@ -206,12 +214,12 @@ const Login = ({ onBack }) => {
 
       if (data && data.success) {
         toast.success('OTP verified successfully.');
-        setStep('reset-new-password'); // Now proceed to new password & confirmation modal
+        setStep('reset-new-password'); 
       } else {
-        toast.error('Invalid OTP');
+        toast.error(data?.message || 'Invalid OTP code.');
       }
     } catch (err) {
-      toast.error('Invalid OTP');
+      toast.error('Invalid OTP code.');
     } finally {
       setOtpLoading(false);
     }
@@ -224,6 +232,10 @@ const Login = ({ onBack }) => {
       toast.error('For security, your password must be at least 8 characters long.');
       return;
     }
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match.');
+      return;
+    }
 
     setOtpLoading(true);
     try {
@@ -233,6 +245,7 @@ const Login = ({ onBack }) => {
         setStep('login');
         setResetOtp('');
         setNewPassword('');
+        setConfirmPassword('');
         setPassword('');
       } else {
         toast.error(res?.message || 'Failed to reset password.');
@@ -373,7 +386,7 @@ const Login = ({ onBack }) => {
           <div className="gl-auth-container gl-fade-in-up">
             <div className="gl-instruction gl-stagger-2">
               <h4>Reset Password</h4>
-              <p>Enter your registered email address to receive a secure reset code.</p>
+              <p>Enter your registered admin/HR email to receive a secure reset code.</p>
             </div>
 
             <form onSubmit={handleForgotPasswordSubmit}>
@@ -446,7 +459,7 @@ const Login = ({ onBack }) => {
           <div className="gl-auth-container gl-fade-in-up">
             <div className="gl-instruction gl-stagger-2">
               <h4>Create New Password</h4>
-              <p>Enter your new secure password below.</p>
+              <p>Enter and confirm your new secure password below.</p>
             </div>
 
             <form onSubmit={handleResetPasswordSubmit}>
@@ -482,12 +495,25 @@ const Login = ({ onBack }) => {
                 </button>
               </div>
 
-              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={otpLoading || newPassword.length < 8}>
+              <div className="gl-input-group gl-stagger-4" style={{ position: 'relative' }}>
+                <KeyRound size={18} className="gl-input-icon" />
+                <input
+                  type={showNewPassword ? "text" : "password"}
+                  className="gl-input"
+                  placeholder="Confirm New Password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  minLength={8}
+                  required
+                />
+              </div>
+
+              <button type="submit" className="btn-gl-primary gl-stagger-5" disabled={otpLoading || newPassword.length < 8 || confirmPassword.length < 8}>
                 {otpLoading ? 'Updating System...' : 'Update Password'}
               </button>
             </form>
 
-            <button className="btn-gl-secondary mt-3 gl-stagger-5" onClick={() => { setStep('login'); setResetOtp(''); setNewPassword(''); }}>
+            <button className="btn-gl-secondary mt-3 gl-stagger-6" onClick={() => { setStep('login'); setResetOtp(''); setNewPassword(''); setConfirmPassword(''); }}>
               Cancel
             </button>
           </div>
