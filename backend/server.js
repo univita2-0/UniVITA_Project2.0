@@ -330,10 +330,9 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
 // --------------------------------------------------
 
 const imageFilter = (req, file, cb) => {
-  console.log("📸 Incoming file upload intercepted:", file);
+  console.log("Incoming file upload intercepted:", file);
   cb(null, true);
 };
-
 
 const pdfFilter = (req, file, cb) => {
   if (file.mimetype === 'application/pdf') {
@@ -343,7 +342,8 @@ const pdfFilter = (req, file, cb) => {
   }
 };
 
-const uploadDir = path.join(__dirname, 'uploads', 'leave_images');
+// 1. LEAVE IMAGES
+const uploadDir = path.join(uploadsPath, 'leave_images');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
@@ -355,7 +355,8 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
-const resumeDir = path.join(__dirname, 'uploads', 'resumes');
+// 2. RESUMES
+const resumeDir = path.join(uploadsPath, 'resumes');
 if (!fs.existsSync(resumeDir)) fs.mkdirSync(resumeDir, { recursive: true });
 const resumeStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, resumeDir),
@@ -366,10 +367,11 @@ const resumeStorage = multer.diskStorage({
 });
 const uploadResume = multer({ storage: resumeStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: pdfFilter });
 
+// 3. SELFIES
+const selfieDir = path.join(uploadsPath, 'selfies');
+if (!fs.existsSync(selfieDir)) fs.mkdirSync(selfieDir, { recursive: true });
 const selfieStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/selfies/');
-  },
+  destination: (req, file, cb) => cb(null, selfieDir),
   filename: (req, file, cb) => {
     const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, unique + '.jpg');
@@ -377,9 +379,20 @@ const selfieStorage = multer.diskStorage({
 });
 const multerSelfie = multer({ storage: selfieStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
-const multerCorrection = multer({ dest: 'uploads/corrections/', limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
+// 4. CORRECTIONS
+const correctionDir = path.join(uploadsPath, 'corrections');
+if (!fs.existsSync(correctionDir)) fs.mkdirSync(correctionDir, { recursive: true });
+const correctionStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, correctionDir),
+  filename: (req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, unique + '.jpg');
+  }
+});
+const multerCorrection = multer({ storage: correctionStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
-const appealUploadDir = path.join(__dirname, 'uploads', 'attendance_appeals');
+// 5. APPEALS
+const appealUploadDir = path.join(uploadsPath, 'attendance_appeals');
 if (!fs.existsSync(appealUploadDir)) fs.mkdirSync(appealUploadDir, { recursive: true });
 const appealStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, appealUploadDir),

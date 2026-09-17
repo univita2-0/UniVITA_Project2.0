@@ -3,16 +3,10 @@
     "name": "UniVITA",
     "slug": "mobile",
     "version": "1.0.0",
-    "newArchEnabled": true,
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#020817"
-    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -27,6 +21,7 @@
     },
     "android": {
       "package": "com.anonymous.mobile",
+      "ndkVersion": "27.1.12297006",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -34,7 +29,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "ACCESS_FINE_LOCATION",
@@ -53,6 +47,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/withCustomAndroidBuild.js",
       [
         "expo-splash-screen",
         {
@@ -80,7 +75,8 @@
       "expo-image",
       "expo-status-bar",
       "expo-web-browser",
-      "expo-audio"
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "reactCompiler": true
