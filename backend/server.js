@@ -330,14 +330,10 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
 // --------------------------------------------------
 
 const imageFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/octet-stream', 'image/webp'];
-  
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Please ensure you are taking a standard photo.'));
-  }
+  console.log("📸 Incoming file upload intercepted:", file);
+  cb(null, true);
 };
+
 
 const pdfFilter = (req, file, cb) => {
   if (file.mimetype === 'application/pdf') {
