@@ -330,10 +330,12 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
 // --------------------------------------------------
 
 const imageFilter = (req, file, cb) => {
-  if (['image/jpeg', 'image/jpg', 'image/png'].includes(file.mimetype)) {
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/octet-stream', 'image/webp'];
+  
+  if (allowedTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only JPG and PNG are allowed.'));
+    cb(new Error('Invalid file type. Please ensure you are taking a standard photo.'));
   }
 };
 
@@ -5355,6 +5357,15 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
 // ============================================
 // WEBSOCKET SERVER & SERVER INITIALIZATION
 // ============================================
+
+
+app.use((err, req, res, next) => {
+  if (err) {
+    console.error("Middleware Error:", err.message);
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  next();
+});
 
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, '0.0.0.0', () => {
