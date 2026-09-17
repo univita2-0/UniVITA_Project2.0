@@ -144,17 +144,11 @@ const hasExistingRequest = async (employeeId, dateStr, type) => {
 };
 
 
-// Serve uploaded files (selfies, resumes, etc.) – works both locally and on Hostinger
-const uploadsPath = process.env.NODE_ENV === 'production'
-  ? '/home/u558958395/public_html/uploads'
-  : path.join(__dirname, 'uploads');
+const uploadsPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'uploads');
 
-// Ensure directory exists locally
-if (!fs.existsSync(path.join(__dirname, 'uploads'))) {
-  fs.mkdirSync(path.join(__dirname, 'uploads'), { recursive: true });
-}
-if (!fs.existsSync(path.join(__dirname, 'uploads/selfies'))) {
-  fs.mkdirSync(path.join(__dirname, 'uploads/selfies'), { recursive: true });
+// Ensure base upload directory exists
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
 }
 
 app.use('/uploads', express.static(uploadsPath));
@@ -330,7 +324,6 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
 // --------------------------------------------------
 
 const imageFilter = (req, file, cb) => {
-  console.log("Incoming file upload intercepted:", file);
   cb(null, true);
 };
 
@@ -349,8 +342,7 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
     const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `leave_${unique}${ext}`);
+    cb(null, `leave_${unique}${path.extname(file.originalname)}`);
   }
 });
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
