@@ -1,9 +1,9 @@
+// src/pages/OvertimeRequests.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { Clock, CheckCircle, XCircle, ClipboardList, ChevronLeft, ChevronRight, Paperclip, Search, X } from 'lucide-react';
 import { API_BASE } from '../api';
-import FormalModal from '../components/FormalModal';
 import './OvertimeRequests.css';
 
 const getAuthHeaders = () => ({
@@ -16,7 +16,6 @@ const formatDate = (dateStr) => {
   return dateStr.split('T')[0];
 };
 
-// Updated to force strict 12-hour AM/PM formatting
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr.includes('--')) return '—';
   const parts = timeStr.substring(0, 5).split(':');
@@ -210,83 +209,95 @@ const OvertimeRequests = () => {
         )}
       </div>
 
-      <FormalModal show={showPendingModal} onClose={() => setShowPendingModal(false)} title="Pending Overtime Requests" wide footer={<button className="ot-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>}>
-        {loadingPending ? (
-          <div className="ot-loading">Loading pending requests...</div>
-        ) : (
-          <div className="ot-modal-content">
-            <div className="ot-search-input-group border" style={{ marginBottom: '16px' }}>
-              <Search size={18} className="text-muted" />
-              <input type="text" placeholder="Search Name or Employee ID..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="ot-clean-input" />
-              {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+      {/* CUSTOMIZED PENDING OVERTIME REQUESTS MODAL (No FormalModal) */}
+      {showPendingModal && (
+        <div className="ot-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
+          <div className="ot-custom-modal" onClick={e => e.stopPropagation()}>
+            <div className="ot-custom-modal-header">
+              <h3>Pending Overtime Requests</h3>
+              <button className="ot-custom-close-btn" onClick={() => setShowPendingModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="ot-custom-modal-body">
+              <div className="ot-search-input-group border" style={{ marginBottom: '1.25rem', maxWidth: '100%' }}>
+                <Search size={18} className="text-muted" />
+                <input type="text" placeholder="Search Name or Employee ID..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="ot-clean-input" />
+                {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+              </div>
+
+              {loadingPending ? (
+                <div className="ot-loading">Loading pending requests...</div>
+              ) : filteredPending.length === 0 ? (
+                <div className="ot-empty">No pending overtime requests match your criteria.</div>
+              ) : (
+                <div className="ot-custom-requests-list">
+                  {currentPending.map(req => (
+                    <div key={req.id} className="ot-custom-request-card">
+                      <div className="ot-custom-req-top">
+                        <div>
+                          <span className="ot-custom-name">{req.full_name}</span>
+                          <span className="ot-custom-id-tag">{req.employee_id}</span>
+                        </div>
+                        <span className="ot-custom-scenario-pill">{getScenarioLabel(req.scenario_type)}</span>
+                      </div>
+                      
+                      <div className="ot-custom-details-grid">
+                        <div className="ot-custom-prop">
+                          <label>Date</label>
+                          <span className="nowrap">{formatDate(req.date)}</span>
+                        </div>
+                        <div className="ot-custom-prop">
+                          <label>Time Period</label>
+                          <span className="nowrap">{formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</span>
+                        </div>
+                        <div className="ot-custom-prop full-width">
+                          <label>Reason for Overtime</label>
+                          <span className="reason-text">{req.reason}</span>
+                        </div>
+                        {req.attachment && (
+                          <div className="ot-custom-prop full-width">
+                            <label>Attached Document</label>
+                            <span>
+                              <a href={`${API_BASE.replace(/\/api$/, '')}${req.attachment}`} target="_blank" rel="noopener noreferrer" className="ot-link">
+                                <Paperclip size={14} /> View Document Proof
+                              </a>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="ot-custom-req-actions">
+                        <button className="ot-btn-reject-custom" onClick={() => handleAction(req.id, 'rejected')}>
+                          <XCircle size={16} /> Reject Request
+                        </button>
+                        <button className="ot-btn-approve-custom" onClick={() => handleAction(req.id, 'approved')}>
+                          <CheckCircle size={16} /> Approve Overtime
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {filteredPending.length === 0 ? (
-              <div className="ot-empty">No pending overtime requests match your criteria.</div>
-            ) : (
-              <>
-                <div className="ot-table-wrapper" style={{ maxHeight: '55vh', overflowY: 'auto' }}>
-                  <table className="ot-table">
-                    <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                      <tr>
-                        <th>Employee</th>
-                        <th>Date</th>
-                        <th>Scenario</th>
-                        <th>Time Period</th>
-                        <th>Reason</th>
-                        <th className="text-center">Proof</th>
-                        <th className="text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentPending.map(req => (
-                        <tr key={req.id}>
-                          <td className="whitespace-nowrap">
-                            <div className="ot-emp-name">{req.full_name}</div>
-                            <div className="ot-emp-id">{req.employee_id}</div>
-                          </td>
-                          <td className="font-medium text-dark whitespace-nowrap">{formatDate(req.date)}</td>
-                          <td className="whitespace-nowrap"><span className="ot-chip default">{getScenarioLabel(req.scenario_type)}</span></td>
-                          <td className="whitespace-nowrap">{formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</td>
-                          <td className="max-w-xs truncate" title={req.reason}>{req.reason}</td>
-                          <td className="text-center">
-                            {req.attachment ? (
-                              <a href={`${API_BASE.replace(/\/api$/, '')}${req.attachment}`} target="_blank" rel="noopener noreferrer" className="ot-link">
-                                <Paperclip size={14} /> View
-                              </a>
-                            ) : <span className="text-muted">—</span>}
-                          </td>
-                          <td className="whitespace-nowrap">
-                            <div className="ot-action-group right">
-                              <button className="ot-btn-icon success" onClick={() => handleAction(req.id, 'approved')} title="Approve">
-                                <CheckCircle size={18} color="#059669" />
-                              </button>
-                              <button className="ot-btn-icon danger" onClick={() => handleAction(req.id, 'rejected')} title="Reject">
-                                <XCircle size={18} color="#DC2626" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {pendingTotalPages > 1 && (
+              <div className="ot-custom-modal-pagination">
+                <span className="ot-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
+                <div className="ot-page-controls">
+                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="ot-page-btn"><ChevronLeft size={16} /></button>
+                  <span className="ot-page-current">{pendingPage} / {pendingTotalPages}</span>
+                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="ot-page-btn"><ChevronRight size={16} /></button>
                 </div>
-                
-                {pendingTotalPages > 1 && (
-                  <div className="ot-pagination">
-                    <span className="ot-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
-                    <div className="ot-page-controls">
-                      <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="ot-page-btn"><ChevronLeft size={16} /></button>
-                      <span className="ot-page-current">{pendingPage} / {pendingTotalPages}</span>
-                      <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="ot-page-btn"><ChevronRight size={16} /></button>
-                    </div>
-                  </div>
-                )}
-              </>
+              </div>
             )}
+
+            <div className="ot-custom-modal-footer">
+              <button className="ot-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>
+            </div>
           </div>
-        )}
-      </FormalModal>
+        </div>
+      )}
     </div>
   );
 };

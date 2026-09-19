@@ -16,7 +16,15 @@ const RoleManagement = () => {
   const [updating, setUpdating] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
-  const currentUserId = parseInt(localStorage.getItem('user_id') || '0');
+  const currentUserId = useMemo(() => {
+    try {
+      const userStr = localStorage.getItem('user');
+      if (userStr) return JSON.parse(userStr).id;
+      return parseInt(localStorage.getItem('user_id') || '0');
+    } catch (e) {
+      return 0;
+    }
+  }, []);
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -43,14 +51,21 @@ const RoleManagement = () => {
       toast.error('You cannot change your own role.');
       return;
     }
+    
     setUpdating(userId);
+    
     try {
-      await axios.put(`${API_BASE}/users/${userId}/role`, { role: newRole }, getAuthHeaders());
-      setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
-      toast.success(`Role updated for ${users.find(u => u.id === userId)?.full_name}`);
+      const res = await axios.put(`${API_BASE}/users/${userId}/role`, { role: newRole }, getAuthHeaders());
+      
+      if (res.data.success || res.status === 200) {
+        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+        toast.success(`Role updated for ${users.find(u => u.id === userId)?.full_name}`);
+      }
     } catch (err) {
-      const errorMsg = err.response?.data?.error || 'Update failed.';
+      const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Role update failed.';
       toast.error(errorMsg);
+      
+      setUsers([...users]); 
     } finally {
       setUpdating(null);
     }

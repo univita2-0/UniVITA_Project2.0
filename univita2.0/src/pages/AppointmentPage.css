@@ -538,6 +538,151 @@ html { scroll-behavior: smooth; }
 .ap-toast.success { background: var(--success-green); }
 .ap-toast.error { background: var(--danger-red); }
 
+/* ---------- INTERACTIVE COURSES CAROUSEL ---------- */
+.ap-courses-carousel-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.ap-carousel-arrow {
+  background: var(--white);
+  border: 1px solid var(--border-color);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-dark);
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+
+.ap-carousel-arrow:hover {
+  background: var(--primary-teal);
+  color: var(--white);
+  border-color: var(--primary-teal);
+  transform: scale(1.05);
+}
+
+.ap-carousel-card {
+  flex: 1;
+  max-width: 600px;
+  background: var(--white);
+  border: 2px solid var(--border-color);
+  border-radius: 28px;
+  padding: 3.5rem 3rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+}
+
+.ap-carousel-card:hover {
+  border-color: var(--primary-teal);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0, 137, 123, 0.1);
+}
+
+.ap-carousel-icon {
+  color: var(--primary-teal);
+  margin-bottom: 1.25rem;
+}
+
+.ap-carousel-card h3 {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--text-dark);
+  margin: 0 0 0.75rem 0;
+  letter-spacing: -0.02em;
+}
+
+.ap-carousel-subtitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--primary-teal);
+  margin: 0 0 1rem 0;
+}
+
+.ap-carousel-desc {
+  font-size: 1.05rem;
+  color: var(--text-gray);
+  line-height: 1.6;
+  margin: 0 0 1.75rem 0;
+}
+
+.ap-carousel-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--primary-teal);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ap-carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.ap-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: none;
+  background: var(--border-color);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ap-dot.active {
+  background: var(--primary-teal);
+  width: 28px;
+  border-radius: 6px;
+}
+
+/* Subcourses list inside modal */
+.ap-subcourses-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 350px;
+  overflow-y: auto;
+}
+
+.ap-subcourse-item {
+  background: var(--bg-light);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.ap-subcourse-icon {
+  color: var(--primary-teal);
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .ap-courses-carousel-wrapper { gap: 0.75rem; }
+  .ap-carousel-arrow { width: 42px; height: 42px; }
+  .ap-carousel-card { padding: 2.5rem 1.5rem; }
+  .ap-carousel-card h3 { font-size: 1.5rem; }
+}
+
 /* ---------- RESPONSIVE FINETUNING ---------- */
 @media (max-width: 1024px) {
   .ap-footer-grid { grid-template-columns: repeat(2, 1fr); gap: 3rem; }

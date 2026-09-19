@@ -1,3 +1,4 @@
+// src/pages/AttendanceCorrection.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -10,7 +11,6 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Ensures strict 12-hour AM/PM formatting identically across files
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr.includes('--')) return '—';
   const parts = timeStr.substring(0, 5).split(':');
@@ -191,7 +191,6 @@ const AttendanceCorrection = () => {
       <div className="ac-header">
         <div className="ac-title-group">
           <div>
-            <h3 className="ac-title">Attendance Correction</h3>
             <p className="ac-subtitle">Manually adjust records and review employee requests.</p>
           </div>
         </div>
@@ -213,7 +212,7 @@ const AttendanceCorrection = () => {
               onChange={e => { setEmployeeId(e.target.value); setCurrentPage(1); }}
               className="ac-input-search"
             />
-            {employeeId && <X size={16} className="ac-clear-icon" onClick={() => setEmployeeId('')} />}
+            {employeeId && <X size={16} className="ac-clear-icon cursor-pointer" onClick={() => setEmployeeId('')} />}
           </div>
           <div className="ac-search-input-wrapper date-picker">
             <Calendar size={16} className="ac-search-icon" />
@@ -224,7 +223,7 @@ const AttendanceCorrection = () => {
               className="ac-input-search"
               style={{ color: searchDate ? '#0F172A' : '#94A3B8' }}
             />
-            {searchDate && <X size={16} className="ac-clear-icon" onClick={() => setSearchDate('')} />}
+            {searchDate && <X size={16} className="ac-clear-icon cursor-pointer" onClick={() => setSearchDate('')} />}
           </div>
           <button className="ac-search-btn" onClick={fetchRecords}>
             Search Records
@@ -374,58 +373,74 @@ const AttendanceCorrection = () => {
         </div>
       </FormalModal>
 
-      <FormalModal show={showPendingModal} onClose={() => setShowPendingModal(false)} title="Pending Correction Requests" wide footer={<button className="btn-modal-cancel" onClick={() => setShowPendingModal(false)}>Close Window</button>}>
-        {loadingPending ? <div className="ac-loading-state">Loading requests...</div> : pendingCorrections.length === 0 ? <div className="ac-empty-state">No pending correction requests at this time.</div> : (
-          <div className="ac-modal-content">
-            <div className="ac-table-wrapper">
-              <table className="ac-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Date</th>
-                    <th>Type</th>
-                    <th>Requested Time</th>
-                    <th>Reason</th>
-                    <th className="text-center">Proof</th>
-                    <th className="text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
+      {/* CUSTOMIZED PENDING CORRECTION REQUESTS MODAL (No FormalModal) */}
+      {showPendingModal && (
+        <div className="ac-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
+          <div className="ac-custom-modal" onClick={e => e.stopPropagation()}>
+            <div className="ac-custom-modal-header">
+              <h3>Pending Correction Requests</h3>
+              <button className="ac-custom-close-btn" onClick={() => setShowPendingModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="ac-custom-modal-body">
+              {loadingPending ? (
+                <div className="ac-loading-state">Loading pending corrections...</div>
+              ) : pendingCorrections.length === 0 ? (
+                <div className="ac-empty-state">No pending correction requests at this time.</div>
+              ) : (
+                <div className="ac-custom-requests-list">
                   {currentPending.map(c => (
-                    <tr key={c.id}>
-                      <td className="whitespace-nowrap">
-                        <div className="ac-emp-name">{c.full_name}</div>
-                        <div className="ac-emp-id">{c.employee_id}</div>
-                      </td>
-                      <td className="font-medium text-gray-900 whitespace-nowrap">{formatDate(c.attendance_date)}</td>
-                      <td className="whitespace-nowrap"><span className="ac-status-badge default">{c.requested_clock_in ? 'Clock In' : 'Clock Out'}</span></td>
-                      <td className="font-medium whitespace-nowrap">{formatTo12Hour(c.requested_clock_in || c.requested_clock_out)}</td>
-                      <td className="ac-reason-cell" style={{ maxWidth: '350px', whiteSpace: 'normal' }} title={c.reason}>{c.reason}</td>
-                      <td className="text-center">
-                        {c.selfie_url ? (
-                          <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${c.selfie_url}`)} style={{ border: 'none', cursor: 'pointer', background: 'transparent' }} title="View Selfie">
-                            <Eye size={16} color="#0D9488" />
-                          </button>
-                        ) : <span className="ac-text-muted">—</span>}
-                      </td>
-                      <td className="whitespace-nowrap">
-                        <div className="ac-action-group right">
-                          <button className="ac-btn-icon success" onClick={() => handleCorrectionAction(c.id, 'approved')} title="Approve">
-                            <CheckCircle size={18} color="#059669" />
-                          </button>
-                          <button className="ac-btn-icon danger" onClick={() => handleCorrectionAction(c.id, 'rejected')} title="Reject">
-                            <XCircle size={18} color="#DC2626" />
-                          </button>
+                    <div key={c.id} className="ac-custom-request-card">
+                      <div className="ac-custom-req-top">
+                        <div>
+                          <span className="ac-custom-name">{c.full_name}</span>
+                          <span className="ac-custom-id-tag">{c.employee_id}</span>
                         </div>
-                      </td>
-                    </tr>
+                        <span className="ac-custom-type-pill">{c.requested_clock_in ? 'Clock In Correction' : 'Clock Out Correction'}</span>
+                      </div>
+
+                      <div className="ac-custom-details-grid">
+                        <div className="ac-custom-prop">
+                          <label>Attendance Date</label>
+                          <span className="nowrap">{formatDate(c.attendance_date)}</span>
+                        </div>
+                        <div className="ac-custom-prop">
+                          <label>Requested Time</label>
+                          <span className="nowrap">{formatTo12Hour(c.requested_clock_in || c.requested_clock_out)}</span>
+                        </div>
+                        <div className="ac-custom-prop full-width">
+                          <label>Reason for Correction</label>
+                          <span className="reason-text">{c.reason}</span>
+                        </div>
+                        {c.selfie_url && (
+                          <div className="ac-custom-prop full-width">
+                            <label>Attached Verification Proof</label>
+                            <span>
+                              <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${c.selfie_url}`)} className="ac-link-btn" style={{ border: 'none', cursor: 'pointer' }}>
+                                <Eye size={14} /> View Selfie Verification
+                              </button>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="ac-custom-req-actions">
+                        <button className="ac-btn-reject-custom" onClick={() => handleCorrectionAction(c.id, 'rejected')}>
+                          <XCircle size={16} /> Reject Correction
+                        </button>
+                        <button className="ac-btn-approve-custom" onClick={() => handleCorrectionAction(c.id, 'approved')}>
+                          <CheckCircle size={16} /> Approve Correction
+                        </button>
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
 
             {pendingTotalPages > 1 && (
-              <div className="ac-pagination">
+              <div className="ac-custom-modal-pagination">
                 <span className="ac-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, pendingCorrections.length)} of {pendingCorrections.length}</span>
                 <div className="ac-page-controls">
                   <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="ac-page-btn"><ChevronLeft size={16} /></button>
@@ -434,9 +449,13 @@ const AttendanceCorrection = () => {
                 </div>
               </div>
             )}
+
+            <div className="ac-custom-modal-footer">
+              <button className="ac-pending-btn" onClick={() => setShowPendingModal(false)}>Close Window</button>
+            </div>
           </div>
-        )}
-      </FormalModal>
+        </div>
+      )}
 
       {previewImage && (
         <div className="ac-image-preview-overlay" onClick={() => setPreviewImage(null)}>

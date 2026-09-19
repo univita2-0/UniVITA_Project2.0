@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Users, FileText, Clock, AlertCircle, Calendar, Zap, ChevronRight,
-  UserCheck, CheckCircle
+  UserCheck, CheckCircle, Clock3, FileSpreadsheet
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './Dashboard.css';
@@ -18,7 +18,9 @@ const HRDashboard = ({ setView }) => {
     pendingLeaves: 0,
     presentToday: 0,
     pendingAppeals: 0,
-    pendingScheduleRequests: 0
+    pendingScheduleRequests: 0,
+    pendingOvertime: 0,
+    pendingCorrections: 0
   });
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -32,50 +34,95 @@ const HRDashboard = ({ setView }) => {
     setLoading(true);
     setError(null);
     try {
-      const empRes = await axios.get(`${API_BASE}/employees`, getAuthHeaders());
-      const activeInstructors = empRes.data.filter(u => u.role === 'instructor' && u.status === 'active');
+      // Fetch all HR-related data in parallel
+      const [
+        empRes, 
+        leaveRes, 
+        attRes, 
+        appealsRes, 
+        schedReqRes, 
+        overtimeRes, 
+        correctionsRes
+      ] = await Promise.allSettled([
+        axios.get(`${API_BASE}/employees`, getAuthHeaders()),
+        axios.get(`${API_BASE}/leave-requests/all`, getAuthHeaders()),
+        axios.get(`${API_BASE}/attendance-report?date=${new Date().toISOString().split('T')[0]}`, getAuthHeaders()),
+        axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders()),
+        axios.get(`${API_BASE}/schedule-requests/pending`, getAuthHeaders()),
+        axios.get(`${API_BASE}/overtime-requests/pending`, getAuthHeaders()),
+        axios.get(`${API_BASE}/attendance/corrections/pending`, getAuthHeaders())
+      ]);
+
+      const activeInstructors = empRes.status === 'fulfilled' ? (empRes.value.data || []).filter(u => u.role === 'instructor' && u.status === 'active') : [];
       const totalEmployees = activeInstructors.length;
 
-      const leaveRes = await axios.get(`${API_BASE}/leave-requests/all`, getAuthHeaders());
-      const pendingLeavesList = leaveRes.data.filter(l => l.status === 'Pending');
+      const allLeaves = leaveRes.status === 'fulfilled' ? leaveRes.value.data || [] : [];
+      const pendingLeavesList = allLeaves.filter(l => l.status === 'Pending');
       const pendingLeaves = pendingLeavesList.length;
-      const recentLeaves = pendingLeavesList.slice(0, 5);
 
-      const today = new Date().toISOString().split('T')[0];
-      const attRes = await axios.get(`${API_BASE}/attendance-report?date=${today}`, getAuthHeaders());
-      const presentToday = attRes.data.filter(a => a.status === 'Present' || a.status === 'present').length;
+      const presentToday = attRes.status === 'fulfilled' ? (attRes.value.data || []).filter(a => a.status?.toLowerCase() === 'present' || a.status?.toLowerCase() === 'late').length : 0;
 
-      const appealsRes = await axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders());
-      const pendingAppeals = appealsRes.data.length;
-      const recentAppeals = appealsRes.data.slice(0, 3);
+      const pendingAppealsList = appealsRes.status === 'fulfilled' ? appealsRes.value.data || [] : [];
+      const pendingAppeals = pendingAppealsList.length;
 
-      const schedReqRes = await axios.get(`${API_BASE}/schedule-requests/pending`, getAuthHeaders());
-      const pendingScheduleRequests = schedReqRes.data.length;
+      const pendingScheduleList = schedReqRes.status === 'fulfilled' ? schedReqRes.value.data || [] : [];
+      const pendingScheduleRequests = pendingScheduleList.length;
+
+      const pendingOvertimeList = overtimeRes.status === 'fulfilled' ? overtimeRes.value.data || [] : [];
+      const pendingOvertime = pendingOvertimeList.length;
+
+      const pendingCorrectionsList = correctionsRes.status === 'fulfilled' ? correctionsRes.value.data || [] : [];
+      const pendingCorrections = pendingCorrectionsList.length;
 
       setStats({
         totalEmployees,
         pendingLeaves,
         presentToday,
         pendingAppeals,
-        pendingScheduleRequests
+        pendingScheduleRequests,
+        pendingOvertime,
+        pendingCorrections
       });
 
+      // Compile tasks summary for the review list
       const taskItems = [
-        ...recentLeaves.map(l => ({
+        ...pendingLeavesList.slice(0, 3).map(l => ({
           id: `leave-${l.id}`,
           type: 'Leave Request',
           title: `${l.full_name || l.user_id} requested ${l.type}`,
           date: l.request_date,
           action: 'leave-management'
         })),
-        ...recentAppeals.map(a => ({
+        ...pendingAppealsList.slice(0, 3).map(a => ({
           id: `appeal-${a.id}`,
           type: 'Attendance Appeal',
-          title: `${a.full_name} submitted an appeal for ${a.date}`,
+          title: `${a.full_name || a.employee_id} submitted an appeal for ${a.date}`,
           date: a.date,
           action: 'attendance-appeals'
+        })),
+        ...pendingOvertimeList.slice(0, 3).map(ot => ({
+          id: `ot-${ot.id}`,
+          type: 'Overtime Request',
+          title: `${ot.full_name || ot.employee_id} requested overtime (${ot.start_time} - ${ot.end_time})`,
+          date: ot.date,
+          action: 'overtime-requests'
+        })),
+        ...pendingCorrectionsList.slice(0, 3).map(c => ({
+          id: `corr-${c.id}`,
+          type: 'Correction Request',
+          title: `${c.full_name || c.employee_id} submitted time correction for ${c.attendance_date}`,
+          date: c.attendance_date,
+          action: 'attendance-correction'
+        })),
+        ...pendingScheduleList.slice(0, 3).map(s => ({
+          id: `sched-${s.id}`,
+          type: 'Schedule Request',
+          title: `${s.full_name} submitted a schedule change request`,
+          date: s.date,
+          action: 'schedule'
         }))
       ];
+
       setTasks(taskItems);
     } catch (err) {
       console.error('HR Dashboard error:', err);
@@ -108,15 +155,15 @@ const HRDashboard = ({ setView }) => {
     );
   }
 
+  const totalPendingActions = stats.pendingLeaves + stats.pendingAppeals + stats.pendingScheduleRequests + stats.pendingOvertime + stats.pendingCorrections;
+
   return (
     <div className="expert-container">
       {/* Header Section */}
       <div className="expert-header">
         <div className="expert-title-group">
-          
           <div>
-            
-            <p className="expert-subtitle">Monitor staff attendance, leave applications, and personnel schedule adjustments.</p>
+            <p className="expert-subtitle">Monitor staff attendance, leave applications, overtime, and personnel schedule adjustments.</p>
           </div>
         </div>
       </div>
@@ -133,48 +180,56 @@ const HRDashboard = ({ setView }) => {
         </div>
         <div className="expert-banner-item">
           <AlertCircle size={18} className="text-muted" />
-          <span>Pending Actions: <strong>{stats.pendingLeaves + stats.pendingAppeals + stats.pendingScheduleRequests}</strong></span>
+          <span>Total Pending Actions: <strong>{totalPendingActions}</strong></span>
         </div>
       </section>
 
       {/* Key Metrics Grid */}
-      <section className="expert-stats-grid grid-5">
+      <section className="expert-stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <div className="expert-stat-card" onClick={() => handleNavigate('employee-management')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Users size={20} /></div>
-            <span className="expert-stat-label">Active Instructors</span>
+            <div className="expert-stat-icon bg-slate text-muted"><Users size={18} /></div>
+            <span className="expert-stat-label">Instructors</span>
           </div>
           <div className="expert-stat-value">{stats.totalEmployees}</div>
         </div>
 
         <div className="expert-stat-card" onClick={() => handleNavigate('leave-management')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><FileText size={20} /></div>
-            <span className="expert-stat-label">Pending Leaves</span>
+            <div className="expert-stat-icon bg-slate text-muted"><FileText size={18} /></div>
+            <span className="expert-stat-label">Leaves</span>
           </div>
           <div className="expert-stat-value">{stats.pendingLeaves}</div>
         </div>
 
-        <div className="expert-stat-card" onClick={() => handleNavigate('attendance-report')}>
+        <div className="expert-stat-card" onClick={() => handleNavigate('overtime-requests')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><UserCheck size={20} /></div>
-            <span className="expert-stat-label">Present Today</span>
+            <div className="expert-stat-icon bg-slate text-muted"><Clock3 size={18} /></div>
+            <span className="expert-stat-label">Overtime</span>
           </div>
-          <div className="expert-stat-value">{stats.presentToday}</div>
+          <div className="expert-stat-value">{stats.pendingOvertime}</div>
+        </div>
+
+        <div className="expert-stat-card" onClick={() => handleNavigate('attendance-correction')}>
+          <div className="expert-stat-header">
+            <div className="expert-stat-icon bg-slate text-muted"><FileSpreadsheet size={18} /></div>
+            <span className="expert-stat-label">Corrections</span>
+          </div>
+          <div className="expert-stat-value">{stats.pendingCorrections}</div>
         </div>
 
         <div className="expert-stat-card" onClick={() => handleNavigate('attendance-appeals')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><AlertCircle size={20} /></div>
+            <div className="expert-stat-icon bg-slate text-muted"><AlertCircle size={18} /></div>
             <span className="expert-stat-label">Appeals</span>
           </div>
           <div className="expert-stat-value">{stats.pendingAppeals}</div>
         </div>
 
-        <div className="expert-stat-card" onClick={() => handleNavigate('schedule-requests')}>
+        <div className="expert-stat-card" onClick={() => handleNavigate('schedule')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Calendar size={20} /></div>
-            <span className="expert-stat-label">Schedule Changes</span>
+            <div className="expert-stat-icon bg-slate text-muted"><Calendar size={18} /></div>
+            <span className="expert-stat-label">Schedules</span>
           </div>
           <div className="expert-stat-value">{stats.pendingScheduleRequests}</div>
         </div>
@@ -226,16 +281,20 @@ const HRDashboard = ({ setView }) => {
               <span>Manage Leave Requests</span>
               <ChevronRight size={16} />
             </button>
+            <button className="expert-action-btn" onClick={() => handleNavigate('overtime-requests')}>
+              <span>Review Overtime Requests</span>
+              <ChevronRight size={16} />
+            </button>
+            <button className="expert-action-btn" onClick={() => handleNavigate('attendance-correction')}>
+              <span>Review Attendance Corrections</span>
+              <ChevronRight size={16} />
+            </button>
             <button className="expert-action-btn" onClick={() => handleNavigate('attendance-appeals')}>
               <span>Review Attendance Appeals</span>
               <ChevronRight size={16} />
             </button>
             <button className="expert-action-btn" onClick={() => handleNavigate('employee-management')}>
               <span>Add New Employee</span>
-              <ChevronRight size={16} />
-            </button>
-            <button className="expert-action-btn" onClick={() => handleNavigate('schedule')}>
-              <span>Manage Schedules</span>
               <ChevronRight size={16} />
             </button>
           </div>

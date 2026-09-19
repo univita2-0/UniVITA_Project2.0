@@ -5,7 +5,7 @@ import {
   Mail, Phone, MapPin, Clock, Calendar, User, MessageSquare,
   Award, Users, Plus, Trash2, ShieldCheck, X,
   Stethoscope, GraduationCap, Building2, Check, ArrowRight,
-  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, AlertCircle, Download
+  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, AlertCircle, Download, ChevronLeft, ChevronRight, Sparkles
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AppointmentPage.css';
@@ -14,6 +14,9 @@ import simulation2 from '../assets/images/simulation2.png';
 import simulation3 from '../assets/images/simulation3.png';
 import simulation4 from '../assets/images/simulation4.png';
 import classroom1 from '../assets/images/classroom1.png';
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
 
 // Helper to reliably get local YYYY-MM-DD instead of UTC
 const getLocalTodayString = () => {
@@ -27,15 +30,19 @@ const getLocalTodayString = () => {
 const AppointmentPage = ({ onAdminLogin }) => {
   const [activePage, setActivePage] = useState('home');
 
+  // ---- Courses Carousel & Modal State ----
+  const [currentCourseIndex, setCurrentCourseIndex] = useState(0);
+  const [selectedCourseModal, setSelectedCourseModal] = useState(null);
+
   // ---- Appointment booking state ----
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
-  const [showTimeModal, setShowTimeModal] = useState(false); // Time selection modal
+  const [showTimeModal, setShowTimeModal] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', date: '', time: '', message: '' });
   const [isMultipleVisitors, setIsMultipleVisitors] = useState(false);
   const [additionalVisitors, setAdditionalVisitors] = useState([]);
   const [visitReasons, setVisitReasons] = useState([]);
-  const [bookedSlots, setBookedSlots] = useState([]); // Track approved booked times per date
+  const [bookedSlots, setBookedSlots] = useState([]);
   const [toastMessage, setToastMessage] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -96,6 +103,15 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setMobileMenuOpen(false);
   };
 
+  // ---- Course Carousel Handlers ----
+  const nextCourse = () => {
+    setCurrentCourseIndex(prev => (prev + 1) % courseCategories.length);
+  };
+
+  const prevCourse = () => {
+    setCurrentCourseIndex(prev => (prev - 1 + courseCategories.length) % courseCategories.length);
+  };
+
   const addVisitorRow = () => {
     if (additionalVisitors.length >= 5) {
       showToast('Maximum of 5 companions allowed manually. For more than 5, please use the CSV upload.', true);
@@ -138,7 +154,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       
       let startIndex = 0;
       if (rows[0].toLowerCase().includes('name')) {
-        startIndex = 1; // Skip header
+        startIndex = 1;
       }
       for (let i = startIndex; i < rows.length; i++) {
         const cols = rows[i].split(',');
@@ -153,12 +169,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
       } else {
         showToast(`No valid companions found in CSV.`, true);
       }
-      e.target.value = null; // reset input to allow re-upload
+      e.target.value = null;
     };
     reader.readAsText(file);
   };
 
-  // Available Time Slots Grid (8:00 AM to 5:00 PM)
   const availableTimeSlots = [
     { label: '8:00 AM', value: '08:00' },
     { label: '9:00 AM', value: '09:00' },
@@ -176,20 +191,14 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setShowTimeModal(false);
   };
 
-  // Helper function to check if a specific time slot has already passed today
   const isPastSlot = (slotTimeStr) => {
     if (!formData.date) return false;
-    
     const localToday = getLocalTodayString();
-    
-    // Only block times if the selected date is today
     if (formData.date === localToday) {
       const now = new Date();
       const [slotHour, slotMinute] = slotTimeStr.split(':').map(Number);
       const currentHour = now.getHours();
       const currentMinute = now.getMinutes();
-      
-      // If the current hour is greater, OR it's the same hour but current minute is past
       if (currentHour > slotHour || (currentHour === slotHour && currentMinute >= slotMinute)) {
         return true;
       }
@@ -197,40 +206,51 @@ const AppointmentPage = ({ onAdminLogin }) => {
     return false;
   };
 
+  // ---- IMPROVED APPOINTMENT VALIDATION FLOW ----
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.email.trim() || !formData.date || !formData.time || !formData.message) {
-      showToast('Please fill in all required fields.', true);
+    const { name, email, phone, date, time, message } = formData;
+
+    if (!name.trim() || !email.trim() || !phone.trim() || !date || !time || !message) {
+      showToast('Please fill out all required appointment fields.', true);
       return;
     }
 
-    //const hour = parseInt(formData.time.split(':')[0], 10);
-    //if (hour < 8 || hour >= 17) {
-      //showToast('Please select a time within office hours (8:00 AM - 5:00 PM).', true);
-      //return;
-    //}
+    if (!EMAIL_REGEX.test(email.trim())) {
+      showToast('Please provide a valid email address.', true);
+      return;
+    }
 
-    
+    if (!PHONE_REGEX.test(phone.trim())) {
+      showToast('Please provide a valid phone number.', true);
+      return;
+    }
+
     const localToday = getLocalTodayString();
     const now = new Date();
     const currentTimeStr = now.toTimeString().substring(0, 5); 
 
-    if (formData.date < localToday) {
+    if (date < localToday) {
       showToast('You cannot book an appointment for a past date.', true);
       return;
     }
 
-    if (formData.date === localToday && formData.time < currentTimeStr) {
+    if (date === localToday && time < currentTimeStr) {
       showToast('You cannot book an appointment for a time that has already passed today.', true);
       return;
     }
 
-  
+    const hour = parseInt(time.split(':')[0], 10);
+    if (hour < 8 || hour > 17) {
+      showToast('Please select a time within office hours (8:00 AM - 5:00 PM).', true);
+      return;
+    }
+
     const isConflict = bookedSlots.some(slot => {
       const slotDate = slot.visit_date ? slot.visit_date.split('T')[0] : '';
       const slotTime = slot.visit_time ? slot.visit_time.substring(0, 5) : '';
-      const formTime = formData.time.substring(0, 5);
-      return slotDate === formData.date && slotTime === formTime;
+      const formTime = time.substring(0, 5);
+      return slotDate === date && slotTime === formTime;
     });
 
     if (isConflict) {
@@ -238,34 +258,42 @@ const AppointmentPage = ({ onAdminLogin }) => {
       return;
     }
 
-    if (isMultipleVisitors && additionalVisitors.some(v => !v.name.trim())) {
-      showToast('Please provide names for all additional companions.', true);
-      return;
+    if (isMultipleVisitors) {
+      if (additionalVisitors.length === 0) {
+        showToast('Please add at least one companion or uncheck the companion option.', true);
+        return;
+      }
+      if (additionalVisitors.some(v => !v.name.trim())) {
+        showToast('Please provide names for all additional companions.', true);
+        return;
+      }
     }
 
     setIsSubmitting(true);
     try {
-      const nameParts = formData.name.trim().split(' ');
+      const nameParts = name.trim().split(' ');
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       
       const payload = {
         firstName, lastName,
-        email: formData.email.trim(), phone: formData.phone.trim(),
-        date: formData.date, time: formData.time,
-        reason: formData.message, 
+        email: email.trim().toLowerCase(), 
+        phone: phone.trim(),
+        date, 
+        time,
+        reason: message, 
         additionalVisitors: isMultipleVisitors ? additionalVisitors.filter(v => v.name.trim()) : []
       };
       
       await axios.post(`${API_BASE}/appointments/book`, payload);
-      showToast('Appointment request submitted! Check your email for confirmation.');
+      showToast('Appointment request submitted successfully! Check your email for confirmation.');
       setFormData({ name: '', email: '', phone: '', date: '', time: '', message: '' });
       setIsMultipleVisitors(false);
       setAdditionalVisitors([]);
       setShowAppointmentModal(false);
     } catch (err) {
       console.error(err);
-      showToast('Submission failed. Please try again later.', true);
+      showToast(err.response?.data?.message || 'Submission failed. Please try again later.', true);
     } finally {
       setIsSubmitting(false);
     }
@@ -303,21 +331,35 @@ const AppointmentPage = ({ onAdminLogin }) => {
     }
   };
 
+  // ---- IMPROVED JOB APPLICATION VALIDATION FLOW ----
   const submitApplication = async (e) => {
     e.preventDefault();
-    if (!applicationForm.full_name.trim() || !applicationForm.email.trim() || !applicationForm.resume) {
-      showToast('Please fill all required fields and attach a resume.', true);
+    const { full_name, email, phone, resume } = applicationForm;
+
+    if (!full_name.trim() || !email.trim() || !phone.trim() || !resume) {
+      showToast('Please fill in all required fields and attach your resume.', true);
       return;
     }
+
+    if (!EMAIL_REGEX.test(email.trim())) {
+      showToast('Please provide a valid email address.', true);
+      return;
+    }
+
+    if (!PHONE_REGEX.test(phone.trim())) {
+      showToast('Please provide a valid phone number.', true);
+      return;
+    }
+
     setSubmittingApplication(true);
     try {
       const fd = new FormData();
       fd.append('job_id', selectedJob.id);
-      fd.append('full_name', applicationForm.full_name.trim());
-      fd.append('email', applicationForm.email.trim());
-      fd.append('phone', applicationForm.phone.trim());
-      fd.append('cover_letter', applicationForm.cover_letter.trim());
-      fd.append('resume', applicationForm.resume);
+      fd.append('full_name', full_name.trim());
+      fd.append('email', email.trim().toLowerCase());
+      fd.append('phone', phone.trim());
+      fd.append('cover_letter', applicationForm.cover_letter ? applicationForm.cover_letter.trim() : '');
+      fd.append('resume', resume);
 
       const res = await axios.post(`${API_BASE}/jobs/apply`, fd);
 
@@ -339,6 +381,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const courseCategories = [
     {
       title: "Enhancement Courses (E-Learning)",
+      subtitle: "Self-paced digital modules designed for modern healthcare professionals.",
+      description: "Enhance your clinical expertise with comprehensive online lectures, interactive case studies, and evidence-based practice guidelines.",
       courses: [
         "Nursing", "Disease Epidemiology", "Sexual and Reproductive Health Education",
         "Statistics and Data Analysis Simplified", "Emergency Preparedness and Response",
@@ -348,6 +392,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
     },
     {
       title: "AHA BLS & ACLS Training",
+      subtitle: "American Heart Association certified life support programs.",
+      description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and official AHA certification upon completion.",
       courses: [
         "AHA HeartCode Basic Life Support (BLS)",
         "AHA Traditional Advanced Cardiovascular Life Support (ACLS)",
@@ -356,6 +402,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
     },
     {
       title: "AHA Heartsaver | First Aid Training",
+      subtitle: "Emergency response and life-saving first aid certification.",
+      description: "Equip yourself or your team with essential first aid, CPR, and AED response skills certified by the American Heart Association.",
       courses: [
         "AHA Heartsaver First Aid & CPR with AED (HS-CPRFA)",
         "AHA Heartsaver Basic Life Support (HS-BLS)",
@@ -364,6 +412,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
     },
     {
       title: "PRC - CPD Courses",
+      subtitle: "Continuing professional development for licensed medical practitioners.",
+      description: "Fulfill your professional regulatory commission requirements with accredited CPD units and advanced clinical seminars.",
       courses: [
         "Early Recognition of Patient Deterioration",
         "Patient Safety Systems & Error Prevention in Acute Care",
@@ -371,6 +421,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
       ]
     }
   ];
+
+  const activeCourse = courseCategories[currentCourseIndex];
 
   const facilities = [
     { name: 'Simulation Lab', thumbnail: simulation1, images: [simulation1, simulation2, simulation3, simulation4] },
@@ -389,7 +441,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <span className="ap-brand-name">HCT Academy</span>
           </div>
           
-          {/* Main Nav Links (Desktop) */}
           <nav className="ap-nav-desktop">
             <a className="ap-nav-link" onClick={() => { setActivePage('home'); window.scrollTo(0,0); }}>Home</a>
             <a className="ap-nav-link" onClick={() => scrollToSection('about')}>About</a>
@@ -398,7 +449,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <a className="ap-nav-link" onClick={() => setActivePage('careers')}>Careers</a>
           </nav>
           
-          {/* Actions (Desktop) & Mobile Toggle */}
           <div className="ap-header-actions">
             <div className="ap-header-actions-desktop">
               <button className="btn-ap-nav-primary" onClick={() => setShowAppointmentModal(true)}>Book Visit</button>
@@ -413,7 +463,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       </header>
 
-      {/* MOBILE MENU DRAWER (SIDE BAR) */}
+      {/* MOBILE MENU DRAWER */}
       <div className={`ap-mobile-menu ${mobileMenuOpen ? 'open' : ''}`} onClick={() => setMobileMenuOpen(false)}>
         <nav className="ap-mobile-nav" onClick={(e) => e.stopPropagation()}>
           <div className="ap-nav-header">
@@ -513,28 +563,43 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
-          {/* COURSES */}
+          {/* COURSES (INTERACTIVE CAROUSEL MATCHING REFERENCE) */}
           <section id="courses" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Our Programs</span>
-                <h2>Comprehensive Healthcare Courses</h2>
-                <p>We offer a wide range of accredited programs designed to prepare you for a successful and impactful career in the healthcare industry.</p>
+                <h2>Interactive Course Catalog</h2>
+                <p>Browse through our training categories using the arrows below and click any card to view available sub-courses.</p>
               </div>
-              
-              <div className="ap-course-grid">
-                {courseCategories.map((category, idx) => (
-                  <div key={idx} className={`ap-course-group stagger-${(idx % 4) + 1}`}>
-                    <h3 className="ap-category-title">{category.title}</h3>
-                    <ul className="ap-course-list">
-                      {category.courses.map((course, cIdx) => (
-                        <li key={cIdx} className="ap-course-item">
-                          <BookOpen size={18} className="ap-course-icon" />
-                          <span>{course}</span>
-                        </li>
-                      ))}
-                    </ul>
+
+              <div className="ap-courses-carousel-wrapper">
+                <button className="ap-carousel-arrow" onClick={prevCourse} aria-label="Previous Course">
+                  <ChevronLeft size={36} />
+                </button>
+
+                <div className="ap-carousel-card" onClick={() => setSelectedCourseModal(activeCourse)} role="button">
+                  <div className="ap-carousel-card-content">
+                    <GraduationCap size={48} className="ap-carousel-icon" />
+                    <h3>{activeCourse.title}</h3>
+                    <p className="ap-carousel-subtitle">{activeCourse.subtitle}</p>
+                    <p className="ap-carousel-desc">{activeCourse.description}</p>
+                    <span className="ap-carousel-hint">Click card to view available courses <ArrowRight size={14} /></span>
                   </div>
+                </div>
+
+                <button className="ap-carousel-arrow" onClick={nextCourse} aria-label="Next Course">
+                  <ChevronRight size={36} />
+                </button>
+              </div>
+
+              <div className="ap-carousel-dots">
+                {courseCategories.map((_, idx) => (
+                  <button 
+                    key={idx} 
+                    className={`ap-dot ${idx === currentCourseIndex ? 'active' : ''}`}
+                    onClick={() => setCurrentCourseIndex(idx)}
+                    aria-label={`Slide ${idx + 1}`}
+                  />
                 ))}
               </div>
             </div>
@@ -688,6 +753,30 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       </footer>
 
+      {/* COURSE SUB-COURSES MODAL */}
+      {selectedCourseModal && (
+        <div className="ap-modal-overlay" onClick={() => setSelectedCourseModal(null)}>
+          <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
+            <div className="ap-modal-header">
+              <h2>{selectedCourseModal.title}</h2>
+              <button className="ap-btn-close" onClick={() => setSelectedCourseModal(null)}><X size={24} /></button>
+            </div>
+            <p className="ap-time-modal-subtitle">{selectedCourseModal.description}</p>
+            <div className="ap-subcourses-list">
+              {selectedCourseModal.courses.map((course, i) => (
+                <div key={i} className="ap-subcourse-item">
+                  <BookOpen size={18} className="ap-subcourse-icon" />
+                  <span>{course}</span>
+                </div>
+              ))}
+            </div>
+            <div className="ap-modal-footer" style={{ marginTop: '2rem' }}>
+              <button type="button" className="btn-ap-cancel" onClick={() => setSelectedCourseModal(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* APPOINTMENT BOOKING MODAL */}
       {showAppointmentModal && (
         <div className="ap-modal-overlay" onClick={() => setShowAppointmentModal(false)}>
@@ -709,8 +798,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
               </div>
               <div className="ap-form-row">
                 <div className="ap-form-group">
-                  <label>Phone Number</label>
-                  <input type="tel" name="phone" placeholder="e.g. +63 912 345 6789" value={formData.phone} onChange={handleChange} />
+                  <label>Phone Number <span className="text-danger">*</span></label>
+                  <input type="tel" name="phone" placeholder="e.g. +63 912 345 6789" value={formData.phone} onChange={handleChange} required />
                 </div>
                 <div className="ap-form-group">
                   <label>Reason for Visit <span className="text-danger">*</span></label>
@@ -736,14 +825,24 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 </div>
                 <div className="ap-form-group">
                   <label>Preferred Time <span className="text-danger">*</span></label>
-                  <input 
-                    type="time" 
-                    name="time" 
-                    value={formData.time} 
-                    onChange={handleChange} 
-                    disabled={!formData.date}
-                    required 
-                  />
+                  <div className="ap-time-input-wrapper">
+                    <input 
+                      type="text" 
+                      name="time" 
+                      placeholder="Select time slot..." 
+                      value={formData.time ? (availableTimeSlots.find(s => s.value === formData.time)?.label || formData.time) : ''} 
+                      readOnly 
+                      required 
+                    />
+                    <button 
+                      type="button" 
+                      className="btn-ap-choose-time" 
+                      onClick={() => setShowTimeModal(true)}
+                      disabled={!formData.date}
+                    >
+                      Choose Time
+                    </button>
+                  </div>
                   {!formData.date && <span className="ap-input-hint">Please select a date first.</span>}
                 </div>
               </div>
@@ -815,14 +914,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
             
             <div className="ap-time-slots-grid">
               {availableTimeSlots.map((slot) => {
-                // Check if this slot is already booked and approved on this date
                 const isBooked = bookedSlots.some(s => {
                   const sDate = s.visit_date ? s.visit_date.split('T')[0] : '';
                   const sTime = s.visit_time ? s.visit_time.substring(0, 5) : '';
                   return sDate === formData.date && sTime === slot.value;
                 });
 
-                // Check if this slot has already passed on the current day
                 const isPast = isPastSlot(slot.value);
                 const isDisabled = isBooked || isPast;
 
@@ -937,8 +1034,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <input type="email" name="email" value={applicationForm.email} onChange={handleApplicationChange} placeholder="e.g. maria@email.com" required />
                 </div>
                 <div className="ap-form-group">
-                  <label>Phone Number</label>
-                  <input type="tel" name="phone" pattern="[0-9+\-\s()]+" value={applicationForm.phone} onChange={handleApplicationChange} placeholder="e.g. +63 912 345 6789" />
+                  <label>Phone Number <span className="text-danger">*</span></label>
+                  <input type="tel" name="phone" value={applicationForm.phone} onChange={handleApplicationChange} placeholder="e.g. +63 912 345 6789" required />
                 </div>
               </div>
 

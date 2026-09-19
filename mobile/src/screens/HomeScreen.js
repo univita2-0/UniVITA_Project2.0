@@ -2,40 +2,27 @@
 import React, { useState, useEffect, useCallback, useRef, useContext, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
-  Alert, RefreshControl, Modal, TextInput, Image, Dimensions, Platform, StatusBar, AppState
+  Alert, RefreshControl, Modal, TextInput, Platform, StatusBar, AppState
 } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import * as Notifications from 'expo-notifications';
-import axios from 'axios';
-
 import {
-  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule,
-  syncOfflineQueue, fetchEmergencyAlerts, markAlertAsRead, requestAttendanceCorrection,
-  setTrackingEnabled, API_URL
+  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled
 } from './api';
-import ChatScreen from './ChatScreen';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
-
 import {
-  Clock, MapPin, X, MessageCircle, CheckCircle, XCircle,
-  AlertCircle, TrendingUp, FileText, Camera, Calendar, Sparkles, ArrowUpRight, Eye, Filter
+  Clock, MapPin, X, CheckCircle, XCircle, AlertCircle, TrendingUp, FileText, Calendar, ArrowUpRight, Eye, Filter
 } from 'lucide-react-native';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 
 const disableBatteryOptimization = async () => {
   if (Platform.OS === 'android') {
-    try {
-      await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
-    } catch (err) {}
+    try { await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS); } catch (err) {}
   }
 };
 
@@ -56,13 +43,8 @@ const parseDateOnly = (dateInput) => {
   return dateObj;
 };
 
-// UNIFIED ATTENDANCE CALCULATION HELPER (Precise Multi-Shift & Date Matching)
 const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
-  let present = 0;
-  let late = 0;
-  let absent = 0;
-  let overtime = 0;
-
+  let present = 0, late = 0, absent = 0, overtime = 0;
   const currentDateVal = new Date();
   currentDateVal.setHours(0, 0, 0, 0);
 
@@ -79,10 +61,7 @@ const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
     if (!schedDateVal) return;
 
     if (schedDateVal <= currentDateVal) {
-      // 1. Try exact schedule_id match first
       let record = (historyList || []).find(r => r.schedule_id === s.id && !usedAttendanceIds.has(r.id));
-      
-      // 2. Fallback to date match if no exact schedule_id match exists
       if (!record) {
         record = (historyList || []).find(r => {
           const rDateStr = String(r.date || r.attendance_date || '').split('T')[0];
@@ -94,23 +73,15 @@ const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
         if (record.id) usedAttendanceIds.add(record.id);
         const status = (record.status || '').toLowerCase();
         
-        if (status === 'late') {
-          late++;
-        } else if (status === 'present' || status === 'completed') {
-          present++;
-        } else if (['absent', 'missed schedule', 'did not attend', 'missed shift', 'did_not_attend', 'absent today'].includes(status)) {
-          absent++;
-        } else {
-          if (record.time_in && record.time_in !== '--:--') {
-            present++;
-          } else {
-            absent++;
-          }
+        if (status === 'late') late++;
+        else if (status === 'present' || status === 'completed') present++;
+        else if (['absent', 'missed schedule', 'did not attend', 'missed shift', 'did_not_attend', 'absent today'].includes(status)) absent++;
+        else {
+          if (record.time_in && record.time_in !== '--:--') present++;
+          else absent++;
         }
 
-        if (parseFloat(record.total_hours) > 8) {
-          overtime++;
-        }
+        if (parseFloat(record.total_hours) > 8) overtime++;
       } else {
         absent++;
       }
@@ -122,7 +93,6 @@ const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
@@ -132,31 +102,18 @@ export default function HomeScreen({ navigation }) {
   const [user, setUser] = useState({ id: null, name: "Employee", employeeId: "", full_name: "" });
   const [refreshing, setRefreshing] = useState(false);
   
-  // Raw Data Storage for Monthly Cycle Filtering
   const [rawHistory, setRawHistory] = useState([]);
   const [rawSchedule, setRawSchedule] = useState([]);
-  const [selectedMonth, setSelectedMonth] = useState(getInitialMonthString()); // 'YYYY-MM'
+  const [selectedMonth, setSelectedMonth] = useState(getInitialMonthString());
 
-  // States for Multiple Schedules
   const [allTodaySchedules, setAllTodaySchedules] = useState([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  
   const [todaySchedule, setTodaySchedule] = useState(null);
   const [attendanceStatus, setAttendanceStatus] = useState({ canClockIn: true, canClockOut: false, todayRecord: null });
   const [stats, setStats] = useState({ present: 0, absent: 0, late: 0, overtime: 0 });
   
-  // Monthly History Summary Modal States
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
   const [modalDateFilter, setModalDateFilter] = useState('');
-
-  const [showChat, setShowChat] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [showAlertModal, setShowAlertModal] = useState(false);
-  const [currentAlert, setCurrentAlert] = useState(null);
-  const [alertQueue, setAlertQueue] = useState([]);
-  
-  const alertSound = useRef(null); 
-  const activeAlertId = useRef(null);
 
   const getGreeting = () => {
     const hour = currentTime.getHours();
@@ -164,10 +121,6 @@ export default function HomeScreen({ navigation }) {
     if (hour < 18) return "GOOD AFTERNOON";
     return "GOOD EVENING";
   };
-
-  useEffect(() => {
-    return () => { if (alertSound.current) alertSound.current.unloadAsync(); };
-  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -203,7 +156,6 @@ export default function HomeScreen({ navigation }) {
             if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
             
             if (!isRegistered || forceRestart) {
-              // SAFELY WRAPPED TO PREVENT CRASHES IF ANDROID BLOCKS THE SERVICE
               try {
                 await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
                   accuracy: Location.Accuracy.High, 
@@ -211,20 +163,12 @@ export default function HomeScreen({ navigation }) {
                   distanceInterval: 0,
                   deferredUpdatesInterval: 20000, 
                   showsBackgroundLocationIndicator: true,
-                  foregroundService: { 
-                    notificationTitle: "Tracking Active", 
-                    notificationBody: "Monitoring location for active shift", 
-                    notificationColor: colors.primary 
-                  },
+                  foregroundService: { notificationTitle: "Tracking Active", notificationBody: "Monitoring location for active shift", notificationColor: colors.primary },
                 });
-              } catch (foregroundErr) {
-                console.log("Foreground service start deferred or restricted:", foregroundErr.message);
-              }
+              } catch (foregroundErr) {}
             }
           }
-        } catch (e) {
-          console.log("Tracking initialization error:", e.message);
-        }
+        } catch (e) {}
       } else if (willStartSoon) {
         const timer = setTimeout(() => checkAndEnableTracking(true), startTime - now);
         return () => clearTimeout(timer);
@@ -286,13 +230,21 @@ export default function HomeScreen({ navigation }) {
             const hasClockOut = record && record.time_out && record.time_out !== '--:--' && record.time_out !== null;
 
             let computedStatus = 'SCHEDULED';
-            if (isPassed) {
+            
+            if (hasClockOut) {
+              const dbStatus = (record?.status || '').toLowerCase();
+              if (dbStatus.includes('early') || dbStatus.includes('clock out') || dbStatus.includes('departure')) {
+                computedStatus = 'COMPLETED - EARLY CLOCK OUT';
+              } else {
+                computedStatus = record?.status ? record.status.toUpperCase() : 'COMPLETED';
+              }
+            } else if (isPassed) {
               if (hasClockIn && !hasClockOut) {
                 computedStatus = 'MISSING CLOCK-OUT';
               } else if (hasClockIn && hasClockOut) {
                 computedStatus = record.status ? record.status.toUpperCase() : 'COMPLETED';
               } else {
-                computedStatus = 'MISSED SHIFT';
+                computedStatus = 'MISSED SCHEDULE';
               }
             } else if (isActive) {
               computedStatus = hasClockIn ? 'IN PROGRESS' : 'SCHEDULED';
@@ -315,24 +267,16 @@ export default function HomeScreen({ navigation }) {
         setAllTodaySchedules(todaySchedules);
 
         let activeSchedule = todaySchedules.find(s => currentMinutes >= (s.startMins - 30) && currentMinutes <= s.endMins);
-        if (!activeSchedule) {
-          activeSchedule = todaySchedules.find(s => s.startMins > currentMinutes);
-        }
-        if (!activeSchedule && todaySchedules.length > 0) {
-          activeSchedule = todaySchedules[todaySchedules.length - 1];
-        }
+        if (!activeSchedule) activeSchedule = todaySchedules.find(s => s.startMins > currentMinutes);
+        if (!activeSchedule && todaySchedules.length > 0) activeSchedule = todaySchedules[todaySchedules.length - 1];
         
         setTodaySchedule(activeSchedule || null);
         checkTodayStatus(history || [], activeSchedule);
       }
-    } catch (error) {
-      console.error("LoadData error:", error);
-    }
+    } catch (error) { console.error("LoadData error:", error); }
   }, [selectedMonth, computeMonthlyStats]);
 
-  useEffect(() => {
-    computeMonthlyStats(rawHistory, rawSchedule, selectedMonth);
-  }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
+  useEffect(() => { computeMonthlyStats(rawHistory, rawSchedule, selectedMonth); }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
 
   const checkTodayStatus = (history, activeSchedule) => {
     if (!activeSchedule) { setAttendanceStatus({ canClockIn: false, canClockOut: false, todayRecord: null }); return; }
@@ -351,24 +295,9 @@ export default function HomeScreen({ navigation }) {
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     
     try {
-      const result = await clockIn({
-        employee_id: String(user.employeeId || ''),
-        latitude: String(location.coords.latitude),
-        longitude: String(location.coords.longitude),
-        location_enabled: 'true',
-        schedule_id: String(todaySchedule.id),
-        selfie: selfieUri
-      });
-
-      if (result.success) { 
-        Alert.alert('Success', result.message); 
-        await loadData(); 
-      } else {
-        Alert.alert('Check-In Error', result.message);
-      }
-    } catch (error) { 
-      Alert.alert('Network Error', 'Connection failed.'); 
-    }
+      const result = await clockIn({ employee_id: String(user.employeeId || ''), latitude: String(location.coords.latitude), longitude: String(location.coords.longitude), location_enabled: 'true', schedule_id: String(todaySchedule.id), selfie: selfieUri });
+      if (result.success) { Alert.alert('Success', result.message); await loadData(); } else { Alert.alert('Check-In Error', result.message); }
+    } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
   };
 
   const handleClockOut = async () => {
@@ -379,19 +308,9 @@ export default function HomeScreen({ navigation }) {
     
     if (currentTimeStr < scheduledEndTime.slice(0, 5)) {
       Alert.alert("Early Check-Out", `Your shift ends at ${formatTo12H(scheduledEndTime)}. Do you wish to request a correction for an early check-out?`, [
-  { text: "Cancel", style: "cancel" },
-  { 
-    text: "Request", 
-    onPress: () => navigation.navigate("Requests", { 
-      prefillTab: "correction", 
-      prefillDate: getTodayString(), 
-      prefillType: "clock_out", 
-      prefillTime: currentTimeStr, 
-      prefillReason: "Early departure requested",
-      prefillScheduleId: todaySchedule?.id 
-    }) 
-  }
-]);
+        { text: "Cancel", style: "cancel" },
+        { text: "Request", onPress: () => navigation.navigate("Requests", { prefillTab: "correction", prefillDate: getTodayString(), prefillType: "clock_out", prefillTime: currentTimeStr, prefillReason: "Early departure requested", prefillScheduleId: todaySchedule?.id }) }
+      ]);
       return;
     }
     
@@ -400,71 +319,13 @@ export default function HomeScreen({ navigation }) {
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     
     try {
-      const result = await clockOut({
-        employee_id: String(user.employeeId || ''),
-        latitude: String(location.coords.latitude),
-        longitude: String(location.coords.longitude),
-        location_enabled: 'false',
-        schedule_id: String(todaySchedule.id),
-        selfie: selfieUri
-      });
-
+      const result = await clockOut({ employee_id: String(user.employeeId || ''), latitude: String(location.coords.latitude), longitude: String(location.coords.longitude), location_enabled: 'false', schedule_id: String(todaySchedule.id), selfie: selfieUri });
       if (result.success) {
         Alert.alert('Success', result.message);
-        try { 
-          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME); 
-          if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); 
-        } catch (e) {}
+        try { const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME); if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); } catch (e) {}
         await loadData();
-      } else {
-        Alert.alert('Check-Out Error', result.message);
-      }
-    } catch (error) { 
-      Alert.alert('Network Error', 'Connection failed.'); 
-    }
-  };
-
-  useEffect(() => {
-    const loadAlerts = async () => {
-      if (!user.id) return;
-      try {
-        const alerts = await fetchEmergencyAlerts(user.id);
-        const unreadAlerts = alerts.filter(a => !a.read_at);
-        if (unreadAlerts.length > 0 && activeAlertId.current !== unreadAlerts[0].id) {
-          setAlertQueue(unreadAlerts);
-          showNextAlert(unreadAlerts[0]);
-        }
-      } catch (err) {}
-    };
-    loadAlerts(); 
-    const intervalId = setInterval(loadAlerts, 10000);
-    return () => clearInterval(intervalId);
-  }, [user.id]);
-
-  const showNextAlert = async (alert) => {
-    activeAlertId.current = alert.id; 
-    setCurrentAlert(alert);
-    setShowAlertModal(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    try {
-      if (alertSound.current) { await alertSound.current.stopAsync(); await alertSound.current.unloadAsync(); }
-      const soundSource = alert.severity === 'critical' ? require('../../assets/critical.mp3') : require('../../assets/info.mp3'); 
-      const { sound } = await Audio.Sound.createAsync(soundSource);
-      alertSound.current = sound;
-      await sound.setIsLoopingAsync(true);
-      await sound.playAsync();
-    } catch (error) {}
-  };
-
-  const dismissAlert = async () => {
-    if (alertSound.current) { try { await alertSound.current.stopAsync(); await alertSound.current.unloadAsync(); alertSound.current = null; } catch (error) {} }
-    if (currentAlert) {
-      await markAlertAsRead(currentAlert.id, user.id);
-      const newQueue = alertQueue.filter(a => a.id !== currentAlert.id);
-      setAlertQueue(newQueue);
-      setShowAlertModal(false);
-      if (newQueue.length > 0) showNextAlert(newQueue[0]); else activeAlertId.current = null;
-    } else { setShowAlertModal(false); activeAlertId.current = null; }
+      } else { Alert.alert('Check-Out Error', result.message); }
+    } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
   };
 
   useEffect(() => { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }, []);
@@ -477,9 +338,7 @@ export default function HomeScreen({ navigation }) {
   const formatNameForDisplay = (name) => {
     if (!name) return "";
     const parts = name.split(" ");
-    if (parts.length > 2) {
-      return `${parts.slice(0, parts.length - 1).join(" ")}\n${parts[parts.length - 1]}`;
-    }
+    if (parts.length > 2) return `${parts.slice(0, parts.length - 1).join(" ")}\n${parts[parts.length - 1]}`;
     return name;
   };
 
@@ -488,11 +347,9 @@ export default function HomeScreen({ navigation }) {
     const timePart = String(timeStr).includes('T') ? String(timeStr).split('T').split('Z')[0] : String(timeStr);
     const cleanTime = timePart.split('.')[0].replace(',', ':');
     const [rawH, rawM] = cleanTime.split(':');
-    
     const h = parseInt(rawH, 10);
     const m = parseInt(rawM, 10) || 0;
     if (isNaN(h)) return timeStr;
-    
     const ampm = h >= 12 ? 'PM' : 'AM';
     const hour12 = h % 12 || 12;
     return `${hour12}:${String(m).padStart(2, '0')} ${ampm}`;
@@ -505,22 +362,13 @@ export default function HomeScreen({ navigation }) {
     return dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   };
 
-  // Group raw schedules and history into every month's summary using the shared calculation function
   const monthlySummaries = useMemo(() => {
     const map = {};
     const allMonths = new Set();
-    rawSchedule.forEach(s => {
-      if (s.date) allMonths.add(String(s.date).substring(0, 7));
-    });
-    rawHistory.forEach(r => {
-      const d = r.date || r.attendance_date;
-      if (d) allMonths.add(String(d).substring(0, 7));
-    });
+    rawSchedule.forEach(s => { if (s.date) allMonths.add(String(s.date).substring(0, 7)); });
+    rawHistory.forEach(r => { const d = r.date || r.attendance_date; if (d) allMonths.add(String(d).substring(0, 7)); });
 
-    Array.from(allMonths).forEach(mKey => {
-      map[mKey] = { monthYear: mKey, ...calculateStatsForMonth(rawHistory, rawSchedule, mKey) };
-    });
-
+    Array.from(allMonths).forEach(mKey => { map[mKey] = { monthYear: mKey, ...calculateStatsForMonth(rawHistory, rawSchedule, mKey) }; });
     return Object.values(map).sort((a, b) => b.monthYear.localeCompare(a.monthYear));
   }, [rawSchedule, rawHistory]);
 
@@ -535,17 +383,11 @@ export default function HomeScreen({ navigation }) {
 
   const getModalStatusStyle = (sched) => {
     const status = (sched.computedStatus || sched.attendance_status || '').toUpperCase();
-    if (status.includes('MISSING CLOCK-OUT')) {
-      return { label: 'MISSING CLOCK-OUT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
-    } else if (status.includes('MISSED SHIFT') || status.includes('ABSENT') || status.includes('DID NOT ATTEND')) {
-      return { label: 'MISSED SHIFT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
-    } else if (status.includes('COMPLETED') || status.includes('PRESENT')) {
-      return { label: 'COMPLETED', bg: isLight ? '#F1F5F9' : '#334155', text: isLight ? '#64748B' : '#94A3B8' };
-    } else if (status.includes('IN PROGRESS') || status.includes('LATE')) {
-      return { label: status, bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
-    } else {
-      return { label: 'SCHEDULED', bg: isLight ? '#EFF6FF' : 'rgba(37, 99, 235, 0.15)', text: isLight ? '#2563EB' : '#60A5FA' };
-    }
+    if (status.includes('MISSING CLOCK-OUT')) return { label: 'MISSING CLOCK-OUT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+    else if (status.includes('MISSED SHIFT') || status.includes('ABSENT') || status.includes('DID NOT ATTEND')) return { label: 'MISSED SHIFT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+    else if (status.includes('COMPLETED') || status.includes('PRESENT')) return { label: 'COMPLETED', bg: isLight ? '#F1F5F9' : '#334155', text: isLight ? '#64748B' : '#94A3B8' };
+    else if (status.includes('IN PROGRESS') || status.includes('LATE')) return { label: status, bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
+    else return { label: 'SCHEDULED', bg: isLight ? '#EFF6FF' : 'rgba(37, 99, 235, 0.15)', text: isLight ? '#2563EB' : '#60A5FA' };
   };
 
   const finalCanClockIn = todaySchedule !== null && attendanceStatus.canClockIn;
@@ -555,51 +397,29 @@ export default function HomeScreen({ navigation }) {
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
       <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Top Hero Header */}
+        <ScrollView contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />} showsVerticalScrollIndicator={false}>
+          
           <View style={styles.heroHeaderRow}>
             <Text style={styles.greeting}>{getGreeting()}</Text>
-            <View style={styles.liveBadgeContainer}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveBadgeText}>ONLINE</Text>
-            </View>
+            <View style={styles.liveBadgeContainer}><View style={styles.liveDot} /><Text style={styles.liveBadgeText}>ONLINE</Text></View>
           </View>
           <Text style={styles.userName}>{formatNameForDisplay(user.full_name || user.name)}</Text>
 
-          {/* Time & Date Banner */}
           <View style={styles.glassBanner}>
             <View style={styles.bannerContentLeft}>
-              <View style={styles.calendarIconWrapper}>
-                <Calendar size={22} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={1.5} />
-              </View>
-              <View>
-                <Text style={styles.bannerLabel}>TODAY'S SCHEDULE</Text>
-                <Text style={styles.bannerDateText}>{formattedDate}</Text>
-              </View>
+              <View style={styles.calendarIconWrapper}><Calendar size={22} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={1.5} /></View>
+              <View><Text style={styles.bannerLabel}>TODAY'S SCHEDULE</Text><Text style={styles.bannerDateText}>{formattedDate}</Text></View>
             </View>
             <Text style={styles.bannerTimeText}>{formattedTime}</Text>
           </View>
 
-          {/* Shift Details Card */}
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={styles.cardTitle}>ACTIVE SHIFT ASSIGNMENT</Text>
-                {allTodaySchedules.length > 1 && (
-                  <View style={styles.shiftBadge}>
-                    <Text style={styles.shiftBadgeText}>{allTodaySchedules.length}</Text>
-                  </View>
-                )}
+                {allTodaySchedules.length > 1 && <View style={styles.shiftBadge}><Text style={styles.shiftBadgeText}>{allTodaySchedules.length}</Text></View>}
               </View>
-              {allTodaySchedules.length > 1 && (
-                <TouchableOpacity onPress={() => setShowScheduleModal(true)}>
-                  <Text style={styles.seeAllText}>See more</Text>
-                </TouchableOpacity>
-              )}
+              {allTodaySchedules.length > 1 && <TouchableOpacity onPress={() => setShowScheduleModal(true)}><Text style={styles.seeAllText}>See more</Text></TouchableOpacity>}
             </View>
             {todaySchedule ? (
               <View style={styles.scheduleBody}>
@@ -614,228 +434,118 @@ export default function HomeScreen({ navigation }) {
                   } else if (shiftStatus.includes('IN PROGRESS') || shiftStatus.includes('LATE')) {
                     statusBadgeStyle = styles.statusInProgress;
                     statusBadgeTextColor = isLight ? '#059669' : '#34D399';
-                  } else if (shiftStatus.includes('COMPLETED') || shiftStatus.includes('PRESENT')) {
-                    shiftStatus = 'COMPLETED'; 
+                  } else if (shiftStatus.includes('COMPLETED') || shiftStatus.includes('PRESENT') || shiftStatus.includes('EARLY') || shiftStatus.includes('CLOCK OUT')) {
                     statusBadgeStyle = styles.statusMissed;
                     statusBadgeTextColor = isLight ? '#64748B' : '#94A3B8';
-                  } else {
-                    shiftStatus = 'SCHEDULED';
-                  }
+                  } else { shiftStatus = 'SCHEDULED'; }
 
                   return (
                     <>
                       <View style={styles.scheduleRow}>
                         <View style={styles.iconBox}><Clock size={16} color={isLight ? "#64748B" : colors.textSecondary} /></View>
-                        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <View>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                             <Text style={styles.scheduleSubLabel}>Time Window</Text>
-                            <Text style={styles.scheduleDataText}>
-                              {formatTo12H(todaySchedule.start_time)} – {formatTo12H(todaySchedule.end_time)}
-                            </Text>
+                            <View style={[styles.statusBadge, statusBadgeStyle]}>
+                              <Text style={[styles.statusBadgeText, { color: statusBadgeTextColor }]}>{shiftStatus}</Text>
+                            </View>
                           </View>
-                          <View style={[styles.statusBadge, statusBadgeStyle]}>
-                            <Text style={[styles.statusBadgeText, { color: statusBadgeTextColor }]}>{shiftStatus}</Text>
-                          </View>
+                          <Text style={styles.scheduleDataText}>{formatTo12H(todaySchedule.start_time)} – {formatTo12H(todaySchedule.end_time)}</Text>
                         </View>
                       </View>
                       <View style={styles.scheduleRow}>
                         <View style={styles.iconBox}><MapPin size={16} color={isLight ? "#64748B" : colors.textSecondary} /></View>
-                        <View>
-                          <Text style={styles.scheduleSubLabel}>Location / Room</Text>
-                          <Text style={styles.scheduleDataText}>{todaySchedule.place}</Text>
-                        </View>
+                        <View><Text style={styles.scheduleSubLabel}>Location / Room</Text><Text style={styles.scheduleDataText}>{todaySchedule.place}</Text></View>
                       </View>
                       <View style={styles.scheduleRow}>
                         <View style={styles.iconBox}><FileText size={16} color={isLight ? "#64748B" : colors.textSecondary} /></View>
-                        <View>
-                          <Text style={styles.scheduleSubLabel}>Course / Department</Text>
-                          <Text style={styles.scheduleDataText}>{todaySchedule.course || "General Assignment"}</Text>
-                        </View>
+                        <View><Text style={styles.scheduleSubLabel}>Course / Department</Text><Text style={styles.scheduleDataText}>{todaySchedule.course || "General Assignment"}</Text></View>
                       </View>
                     </>
                   );
                 })()}
               </View>
-            ) : (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>No active schedule assigned for today.</Text>
-              </View>
-            )}
+            ) : <View style={styles.emptyState}><Text style={styles.emptyStateText}>No active schedule assigned for today.</Text></View>}
           </View>
 
-          {/* Action Buttons */}
           <View style={styles.actionContainer}>
-            <TouchableOpacity 
-              style={[styles.btnPillPrimary, !finalCanClockIn && styles.btnDisabled]} 
-              onPress={handleClockIn} 
-              disabled={!finalCanClockIn} 
-              activeOpacity={0.85}
-            >
+            <TouchableOpacity style={[styles.btnPillPrimary, !finalCanClockIn && styles.btnDisabled]} onPress={handleClockIn} disabled={!finalCanClockIn} activeOpacity={0.85}>
               <Clock size={18} color={!finalCanClockIn ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#FFFFFF" : colors.buttonText)} strokeWidth={2} />
               <Text style={[styles.btnPillPrimaryText, !finalCanClockIn && styles.btnDisabledText]}>CHECK-IN</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={[styles.btnPillOutline, !finalCanClockOut && styles.btnDisabledOutline]} 
-              onPress={handleClockOut} 
-              disabled={!finalCanClockOut} 
-              activeOpacity={0.85}
-            >
+            <TouchableOpacity style={[styles.btnPillOutline, !finalCanClockOut && styles.btnDisabledOutline]} onPress={handleClockOut} disabled={!finalCanClockOut} activeOpacity={0.85}>
               <Clock size={18} color={!finalCanClockOut ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#0F172A" : colors.textPrimary)} strokeWidth={2} />
               <Text style={[styles.btnPillOutlineText, !finalCanClockOut && styles.btnDisabledText]}>CHECK-OUT</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Performance Overview Header with Month Selector & Eye Modal Button */}
           <View style={styles.sectionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <Text style={styles.sectionTitle}>Performance Overview</Text>
-              <TouchableOpacity onPress={() => setShowMonthlyModal(true)} style={styles.eyeIconBtn} activeOpacity={0.7}>
-                <Eye size={18} color={isLight ? "#0D9488" : colors.primary} />
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowMonthlyModal(true)} style={styles.eyeIconBtn} activeOpacity={0.7}><Eye size={18} color={isLight ? "#0D9488" : colors.primary} /></TouchableOpacity>
             </View>
-            <TextInput
-              style={styles.monthCycleInput}
-              value={selectedMonth}
-              onChangeText={setSelectedMonth}
-              placeholder="YYYY-MM"
-              placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
-              maxLength={7}
-            />
+            <TextInput style={styles.monthCycleInput} value={selectedMonth} onChangeText={setSelectedMonth} placeholder="YYYY-MM" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} maxLength={7} />
           </View>
           
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsScroll} contentContainerStyle={{ gap: 12 }}>
-            <View style={styles.statCard}>
-              <View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)' }]}>
-                <CheckCircle size={24} color={isLight ? "#059669" : "#34D399"} strokeWidth={2} />
-              </View>
-              <Text style={styles.statValue}>{stats.present}</Text>
-              <Text style={styles.statLabel}>PRESENT</Text>
-            </View>
-            <View style={styles.statCard}>
-              <View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)' }]}>
-                <XCircle size={24} color={isLight ? "#DC2626" : "#F87171"} strokeWidth={2} />
-              </View>
-              <Text style={styles.statValue}>{stats.absent}</Text>
-              <Text style={styles.statLabel}>ABSENT</Text>
-            </View>
-            <View style={styles.statCard}>
-              <View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)' }]}>
-                <AlertCircle size={24} color={isLight ? "#D97706" : "#FBBF24"} strokeWidth={2} />
-              </View>
-              <Text style={styles.statValue}>{stats.late}</Text>
-              <Text style={styles.statLabel}>LATE</Text>
-            </View>
-            <View style={styles.statCard}>
-              <View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#DBEAFE' : 'rgba(96, 165, 250, 0.15)' }]}>
-                <TrendingUp size={24} color={isLight ? "#2563EB" : "#60A5FA"} strokeWidth={2} />
-              </View>
-              <Text style={styles.statValue}>{stats.overtime}</Text>
-              <Text style={styles.statLabel}>OVERTIME</Text>
-            </View>
+            <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)' }]}><CheckCircle size={24} color={isLight ? "#059669" : "#34D399"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.present}</Text><Text style={styles.statLabel}>PRESENT</Text></View>
+            <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)' }]}><XCircle size={24} color={isLight ? "#DC2626" : "#F87171"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.absent}</Text><Text style={styles.statLabel}>ABSENT</Text></View>
+            <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)' }]}><AlertCircle size={24} color={isLight ? "#D97706" : "#FBBF24"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.late}</Text><Text style={styles.statLabel}>LATE</Text></View>
+            <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#DBEAFE' : 'rgba(96, 165, 250, 0.15)' }]}><TrendingUp size={24} color={isLight ? "#2563EB" : "#60A5FA"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.overtime}</Text><Text style={styles.statLabel}>OVERTIME</Text></View>
           </ScrollView>
 
-          {/* Quick Modules */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Quick Modules</Text>
-          </View>
+          <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Quick Modules</Text></View>
           <View style={styles.modulesGrid}>
             <TouchableOpacity style={styles.moduleCard} onPress={() => navigation.navigate('Requests')} activeOpacity={0.8}>
-              <View style={styles.moduleTopRow}>
-                <View style={styles.moduleIconWrapper}>
-                  <FileText size={22} color={isLight ? "#334155" : colors.textPrimary} strokeWidth={1.5} />
-                </View>
-                <ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} />
-              </View>
+              <View style={styles.moduleTopRow}><View style={styles.moduleIconWrapper}><FileText size={22} color={isLight ? "#334155" : colors.textPrimary} strokeWidth={1.5} /></View><ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} /></View>
               <Text style={styles.moduleText}>System{'\n'}Requests</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.moduleCard} onPress={() => navigation.navigate('MyPayroll')} activeOpacity={0.8}>
-              <View style={styles.moduleTopRow}>
-                <View style={styles.moduleIconWrapper}>
-                  <TrendingUp size={22} color={isLight ? "#334155" : colors.textPrimary} strokeWidth={1.5} />
-                </View>
-                <ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} />
-              </View>
+              <View style={styles.moduleTopRow}><View style={styles.moduleIconWrapper}><TrendingUp size={22} color={isLight ? "#334155" : colors.textPrimary} strokeWidth={1.5} /></View><ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} /></View>
               <Text style={styles.moduleText}>Payroll{'\n'}Details</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
 
-        {/* Floating Chat */}
-        <TouchableOpacity style={styles.fab} onPress={() => setShowChat(true)} activeOpacity={0.85}>
-          <MessageCircle size={24} color={isLight ? "#FFFFFF" : colors.background} />
-          {unreadCount > 0 && <View style={styles.fabBadge}><Text style={styles.fabBadgeText}>{unreadCount}</Text></View>}
-        </TouchableOpacity>
-
-        {/* Monthly Summary History Modal with Date Filter */}
         <Modal visible={showMonthlyModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.schedModal}>
               <View style={styles.schedModalHeader}>
                 <Text style={styles.schedModalTitle}>Monthly Performance History</Text>
-                <TouchableOpacity onPress={() => setShowMonthlyModal(false)}>
-                  <X size={22} color={colors.textSecondary} />
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowMonthlyModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
               </View>
 
               <View style={styles.modalFilterRow}>
                 <Filter size={16} color={isLight ? "#64748B" : colors.textSecondary} />
-                <TextInput
-                  style={styles.modalDateFilterInput}
-                  placeholder="Filter by Year or Month (e.g. August, 2026)"
-                  placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
-                  value={modalDateFilter}
-                  onChangeText={setModalDateFilter}
-                />
-                {modalDateFilter ? (
-                  <TouchableOpacity onPress={() => setModalDateFilter('')}>
-                    <X size={16} color={isLight ? "#64748B" : colors.textSecondary} />
-                  </TouchableOpacity>
-                ) : null}
+                <TextInput style={styles.modalDateFilterInput} placeholder="Filter by Year or Month" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} value={modalDateFilter} onChangeText={setModalDateFilter} />
+                {modalDateFilter ? <TouchableOpacity onPress={() => setModalDateFilter('')}><X size={16} color={isLight ? "#64748B" : colors.textSecondary} /></TouchableOpacity> : null}
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingVertical: 10 }}>
-                {filteredMonthlySummaries.length === 0 ? (
-                  <Text style={styles.emptyStateText}>No monthly history found.</Text>
-                ) : (
-                  filteredMonthlySummaries.map((item) => (
-                    <TouchableOpacity 
-                      key={item.monthYear} 
-                      style={[styles.monthlySummaryCard, selectedMonth === item.monthYear && styles.monthlySummaryCardActive]}
-                      onPress={() => { setSelectedMonth(item.monthYear); setShowMonthlyModal(false); }}
-                      activeOpacity={0.8}
-                    >
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <Text style={styles.monthlySummaryTitle}>{formatMonthDisplay(item.monthYear)}</Text>
-                        <Text style={styles.selectMonthHintText}>{selectedMonth === item.monthYear ? 'Active Cycle' : 'Tap to View'}</Text>
-                      </View>
-                      <View style={styles.monthlySummaryGrid}>
-                        <Text style={styles.monthlySummaryStat}>Present: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#059669' }}>{item.present}</Text></Text>
-                        <Text style={styles.monthlySummaryStat}>Absent: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#DC2626' }}>{item.absent}</Text></Text>
-                        <Text style={styles.monthlySummaryStat}>Late: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#D97706' }}>{item.late}</Text></Text>
-                        <Text style={styles.monthlySummaryStat}>Overtime: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#2563EB' }}>{item.overtime}</Text></Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))
-                )}
+                {filteredMonthlySummaries.length === 0 ? <Text style={styles.emptyStateText}>No monthly history found.</Text> : filteredMonthlySummaries.map((item) => (
+                  <TouchableOpacity key={item.monthYear} style={[styles.monthlySummaryCard, selectedMonth === item.monthYear && styles.monthlySummaryCardActive]} onPress={() => { setSelectedMonth(item.monthYear); setShowMonthlyModal(false); }} activeOpacity={0.8}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}><Text style={styles.monthlySummaryTitle}>{formatMonthDisplay(item.monthYear)}</Text><Text style={styles.selectMonthHintText}>{selectedMonth === item.monthYear ? 'Active Cycle' : 'Tap to View'}</Text></View>
+                    <View style={styles.monthlySummaryGrid}>
+                      <Text style={styles.monthlySummaryStat}>Present: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#059669' }}>{item.present}</Text></Text>
+                      <Text style={styles.monthlySummaryStat}>Absent: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#DC2626' }}>{item.absent}</Text></Text>
+                      <Text style={styles.monthlySummaryStat}>Late: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#D97706' }}>{item.late}</Text></Text>
+                      <Text style={styles.monthlySummaryStat}>Overtime: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#2563EB' }}>{item.overtime}</Text></Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
               </ScrollView>
-
-              <TouchableOpacity style={styles.btnCloseModal} onPress={() => setShowMonthlyModal(false)}>
-                <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary, fontSize: 13 }}>Close</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnCloseModal} onPress={() => setShowMonthlyModal(false)}><Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary, fontSize: 13 }}>Close</Text></TouchableOpacity>
             </View>
           </View>
         </Modal>
 
-        {/* Schedule List Modal */}
         <Modal visible={showScheduleModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.schedModal}>
               <View style={styles.schedModalHeader}>
                 <Text style={styles.schedModalTitle}>Daily Schedule Overview</Text>
-                <TouchableOpacity onPress={() => setShowScheduleModal(false)}>
-                  <X size={22} color={colors.textSecondary} />
-                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowScheduleModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
               </View>
               <ScrollView showsVerticalScrollIndicator={false}>
                 {allTodaySchedules.map((sched, index) => {
@@ -844,56 +554,19 @@ export default function HomeScreen({ navigation }) {
                     <View key={index} style={styles.schedItem}>
                       <View style={styles.schedItemTop}>
                         <Text style={styles.schedItemTitle}>{sched.course || "General Assignment"}</Text>
-                        <View style={[styles.statusBadge, { backgroundColor: statusData.bg }]}>
-                          <Text style={[styles.statusBadgeText, { color: statusData.text }]}>{statusData.label}</Text>
-                        </View>
+                        <View style={[styles.statusBadge, { backgroundColor: statusData.bg }]}><Text style={[styles.statusBadgeText, { color: statusData.text }]}>{statusData.label}</Text></View>
                       </View>
                       <View style={styles.schedItemBottom}>
-                        <View style={styles.schedItemDetail}>
-                          <Clock size={12} color={isLight ? "#64748B" : colors.textSecondary} />
-                          <Text style={styles.schedItemText}>{formatTo12H(sched.start_time)} – {formatTo12H(sched.end_time)}</Text>
-                        </View>
-                        <View style={styles.schedItemDetail}>
-                          <MapPin size={12} color={isLight ? "#64748B" : colors.textSecondary} />
-                          <Text style={styles.schedItemText}>{sched.place}</Text>
-                        </View>
+                        <View style={styles.schedItemDetail}><Clock size={12} color={isLight ? "#64748B" : colors.textSecondary} /><Text style={styles.schedItemText}>{formatTo12H(sched.start_time)} – {formatTo12H(sched.end_time)}</Text></View>
+                        <View style={styles.schedItemDetail}><MapPin size={12} color={isLight ? "#64748B" : colors.textSecondary} /><Text style={styles.schedItemText}>{sched.place}</Text></View>
                       </View>
                     </View>
                   );
                 })}
               </ScrollView>
-              <TouchableOpacity style={styles.btnCloseModal} onPress={() => setShowScheduleModal(false)}>
-                <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary, fontSize: 13 }}>Close</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnCloseModal} onPress={() => setShowScheduleModal(false)}><Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary, fontSize: 13 }}>Close</Text></TouchableOpacity>
             </View>
           </View>
-        </Modal>
-
-        {/* Alert Modal */}
-        <Modal visible={showAlertModal} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={[styles.alertModal, currentAlert?.severity === 'critical' ? styles.alertCritical : styles.alertInfo]}>
-              <View style={{ alignItems: 'center', marginBottom: 16 }}><AlertCircle size={48} color={currentAlert?.severity === 'critical' ? colors.danger : colors.info} /></View>
-              <Text style={styles.alertHeader}>{currentAlert?.severity === 'critical' ? 'CRITICAL ALERT' : 'SYSTEM INFO'}</Text>
-              <Text style={styles.alertTitle}>{currentAlert?.title}</Text>
-              <Text style={styles.alertBody}>{currentAlert?.message}</Text>
-              <TouchableOpacity style={styles.btnAlertDismiss} onPress={dismissAlert}><Text style={styles.btnAlertText}>Acknowledge</Text></TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Chat Modal */}
-        <Modal visible={showChat} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowChat(false)}>
-          <SafeAreaView style={styles.chatContainer}>
-            <View style={styles.chatNavbar}>
-              <TouchableOpacity onPress={() => setShowChat(false)} style={styles.closeBtn}>
-                <X size={24} color={colors.textPrimary} />
-              </TouchableOpacity>
-              <Text style={styles.chatNavbarTitle}>Communications</Text>
-              <View style={{ width: 40 }} />
-            </View>
-            <ChatScreen />
-          </SafeAreaView>
         </Modal>
 
       </SafeAreaView>
@@ -904,29 +577,24 @@ export default function HomeScreen({ navigation }) {
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
   scroll: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 },
-  
   heroHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   greeting: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, letterSpacing: 1.2 },
   userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 28, color: isLight ? '#0F172A' : colors.textPrimary, lineHeight: 34, marginBottom: 28 },
-  
   liveBadgeContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, gap: 5 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: isLight ? '#059669' : '#34D399' },
   liveBadgeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, color: isLight ? '#059669' : '#34D399', letterSpacing: 0.5 },
-  
   glassBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, padding: 20, borderWidth: isLight ? 1 : 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.2, shadowRadius: 10, elevation: 2 },
   bannerContentLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   calendarIconWrapper: { width: 44, height: 44, borderRadius: 22, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },
   bannerLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: isLight ? '#64748B' : colors.textSecondary, letterSpacing: 0.5, marginBottom: 2 },
   bannerDateText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
   bannerTimeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
-  
   card: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 24, overflow: 'hidden' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border, alignItems: 'center' },
   cardTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#0F172A' : colors.textPrimary, letterSpacing: 0.8 },
   shiftBadge: { backgroundColor: '#0D9488', borderRadius: 12, paddingHorizontal: 6, paddingVertical: 2 },
   shiftBadgeText: { color: '#FFFFFF', fontSize: 10, fontFamily: 'Inter_18pt-Bold' },
   seeAllText: { color: '#0D9488', fontSize: 12, fontFamily: 'Inter_18pt-Bold' },
-  
   scheduleBody: { padding: 20, gap: 18 },
   scheduleRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   iconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },
@@ -934,13 +602,11 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   scheduleDataText: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, marginTop: 1 },
   emptyState: { paddingVertical: 36, paddingHorizontal: 20, alignItems: 'center' },
   emptyStateText: { fontFamily: 'Inter_18pt-Medium', color: isLight ? '#64748B' : colors.textSecondary, fontSize: 14 },
-  
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  statusBadgeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, letterSpacing: 0.5 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  statusBadgeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 9, letterSpacing: 0.3, textAlign: 'right' },
   statusScheduled: { backgroundColor: isLight ? '#F1F5F9' : '#334155' },
   statusInProgress: { backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.2)' },
   statusMissed: { backgroundColor: isLight ? '#F1F5F9' : 'rgba(100, 116, 139, 0.2)' },
-
   actionContainer: { flexDirection: 'row', gap: 14, marginBottom: 32 },
   btnPillPrimary: { flex: 1, flexDirection: 'row', backgroundColor: isLight ? '#0F172A' : colors.buttonBg, paddingVertical: 18, borderRadius: 30, alignItems: 'center', justifyContent: 'center', gap: 8 },
   btnPillPrimaryText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText, fontSize: 14, letterSpacing: 0.5 },
@@ -949,51 +615,32 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   btnDisabled: { backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, elevation: 0, shadowOpacity: 0 },
   btnDisabledOutline: { borderColor: isLight ? '#F1F5F9' : colors.border, backgroundColor: isLight ? '#F8FAFC' : colors.background, elevation: 0, shadowOpacity: 0 },
   btnDisabledText: { color: isLight ? '#94A3B8' : colors.textSecondary },
-  
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },
-  
   eyeIconBtn: { padding: 4, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 8, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   monthCycleInput: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#CBD5E1' : colors.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, width: 105, textAlign: 'center' },
-  
   statsScroll: { flexDirection: 'row', marginBottom: 32 },
   statCard: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, paddingVertical: 20, paddingHorizontal: 16, width: 110, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, alignItems: 'center' },
   statIconWrapper: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   statValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 24, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 4 },
   statLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 10, color: isLight ? '#64748B' : colors.textSecondary, letterSpacing: 1 },
-  
   modulesGrid: { flexDirection: 'row', gap: 14, marginBottom: 20 },
   moduleCard: { flex: 1, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, height: 130, justifyContent: 'space-between' },
   moduleTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   moduleIconWrapper: { width: 44, height: 44, borderRadius: 22, backgroundColor: isLight ? '#F8FAFC' : colors.iconBg, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   moduleText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary, lineHeight: 20 },
-  
-  fab: { position: 'absolute', bottom: 24, right: 20, width: 64, height: 64, borderRadius: 32, backgroundColor: isLight ? '#0F172A' : '#FFFFFF', justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8 },
-  fabBadge: { position: 'absolute', top: 0, right: 0, backgroundColor: isLight ? '#EF4444' : colors.danger, borderRadius: 12, minWidth: 24, height: 24, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: isLight ? '#F8FAFC' : colors.background },
-  fabBadgeText: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 10 },
-  
-  chatContainer: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
-  chatNavbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border },
-  closeBtn: { padding: 4 },
-  chatNavbarTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary },
-  
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  
-  // Schedule Modal / Monthly Modal
   schedModal: { width: '100%', borderRadius: 24, padding: 24, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, maxHeight: '80%' },
   schedModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   schedModalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary },
-  
   modalFilterRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: isLight ? '#F8FAFC' : colors.background, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 14 },
   modalDateFilterInput: { flex: 1, fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary },
-
   monthlySummaryCard: { backgroundColor: isLight ? '#F8FAFC' : colors.background, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   monthlySummaryCardActive: { borderColor: '#0D9488', backgroundColor: isLight ? '#F0FDFA' : 'rgba(13, 148, 136, 0.1)' },
   monthlySummaryTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
   selectMonthHintText: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: '#0D9488' },
   monthlySummaryGrid: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   monthlySummaryStat: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#475569' : colors.textSecondary },
-
   schedItem: { borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border, paddingVertical: 16 },
   schedItemTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   schedItemTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
@@ -1001,14 +648,4 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   schedItemDetail: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   schedItemText: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: isLight ? '#64748B' : colors.textSecondary },
   btnCloseModal: { alignSelf: 'flex-end', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginTop: 20 },
-
-  // Alerts
-  alertModal: { width: '100%', borderRadius: 24, padding: 24, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
-  alertCritical: { borderColor: colors.danger },
-  alertInfo: { borderColor: colors.info },
-  alertHeader: { fontFamily: 'Inter_18pt-Bold', textAlign: 'center', fontSize: 12, color: colors.textSecondary, marginBottom: 12, letterSpacing: 1 },
-  alertTitle: { fontFamily: 'Inter_18pt-Bold', textAlign: 'center', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 12 },
-  alertBody: { fontFamily: 'Inter_18pt-Regular', textAlign: 'center', color: isLight ? '#475569' : colors.textPrimary, lineHeight: 22, marginBottom: 24 },
-  btnAlertDismiss: { backgroundColor: isLight ? '#0F172A' : colors.buttonBg, borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
-  btnAlertText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText, fontSize: 15 },
 });

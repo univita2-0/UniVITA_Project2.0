@@ -1,3 +1,4 @@
+// src/pages/AttendanceAppeals.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -16,7 +17,6 @@ const formatDate = (dateStr) => {
   return dateStr.split('T')[0];
 };
 
-// Updated to force strict 12-hour AM/PM formatting
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr.includes('--')) return '—';
   const parts = timeStr.substring(0, 5).split(':');
@@ -226,93 +226,95 @@ const AttendanceAppeals = () => {
         )}
       </div>
 
-      <FormalModal 
-        show={showPendingModal} 
-        onClose={() => setShowPendingModal(false)} 
-        title="Pending Appeal Requests" 
-        wide 
-        footer={<button className="aa-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>}
-      >
-        {loadingPending ? (
-          <div className="aa-loading">Loading pending appeals...</div>
-        ) : (
-          <div className="aa-modal-expand" style={{ maxHeight: '65vh', display: 'flex', flexDirection: 'column' }}>
-            <div className="aa-search-input-group border" style={{ marginBottom: '16px', flexShrink: 0 }}>
-              <Search size={18} className="text-muted" />
-              <input type="text" placeholder="Search Name or Employee ID..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="aa-clean-input" />
-              {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+      {/* CUSTOMIZED PENDING APPEAL REQUESTS MODAL (No FormalModal) */}
+      {showPendingModal && (
+        <div className="aa-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
+          <div className="aa-custom-modal" onClick={e => e.stopPropagation()}>
+            <div className="aa-custom-modal-header">
+              <h3>Pending Appeal Requests</h3>
+              <button className="aa-custom-close-btn" onClick={() => setShowPendingModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="aa-custom-modal-body">
+              <div className="aa-search-input-group border" style={{ marginBottom: '1.25rem', maxWidth: '100%' }}>
+                <Search size={18} className="text-muted" />
+                <input type="text" placeholder="Search Name or Employee ID..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="aa-clean-input" />
+                {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+              </div>
+
+              {loadingPending ? (
+                <div className="aa-loading">Loading pending appeals...</div>
+              ) : filteredPending.length === 0 ? (
+                <div className="aa-empty">No pending appeals match your criteria.</div>
+              ) : (
+                <div className="aa-custom-requests-list">
+                  {currentPending.map(appeal => (
+                    <div key={appeal.id} className="aa-custom-request-card">
+                      <div className="aa-custom-req-top">
+                        <div>
+                          <span className="aa-custom-name">{appeal.full_name}</span>
+                          <span className="aa-custom-id-tag">{appeal.employee_id}</span>
+                        </div>
+                        <span className="aa-custom-date-pill">{formatDate(appeal.date)}</span>
+                      </div>
+
+                      <div className="aa-custom-details-grid">
+                        <div className="aa-custom-prop">
+                          <label>Requested Time In</label>
+                          <span className="nowrap">{formatTo12Hour(appeal.requested_time_in)}</span>
+                        </div>
+                        <div className="aa-custom-prop">
+                          <label>Requested Time Out</label>
+                          <span className="nowrap">{formatTo12Hour(appeal.requested_time_out)}</span>
+                        </div>
+                        <div className="aa-custom-prop full-width">
+                          <label>Dispute Reason</label>
+                          <span className="reason-text">{appeal.reason}</span>
+                        </div>
+                        {appeal.image_url && (
+                          <div className="aa-custom-prop full-width">
+                            <label>Attached Proof</label>
+                            <span>
+                              <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link">
+                                <ExternalLink size={14} /> View Supporting Image
+                              </a>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="aa-custom-req-actions">
+                        <button className="aa-btn-reject-custom" onClick={() => openRemarkModal(appeal, 'rejected')}>
+                          <XCircle size={16} /> Reject Appeal
+                        </button>
+                        <button className="aa-btn-approve-custom" onClick={() => openRemarkModal(appeal, 'approved')}>
+                          <CheckCircle size={16} /> Approve Appeal
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {filteredPending.length === 0 ? (
-              <div className="aa-empty">No pending appeals match your criteria.</div>
-            ) : (
-              <>
-                <div className="aa-table-wrapper" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
-                  <table className="aa-table">
-                    <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#F8FAFC' }}>
-                      <tr>
-                        <th>Employee</th>
-                        <th>Date</th>
-                        <th>Req. In</th>
-                        <th>Req. Out</th>
-                        <th>Reason</th>
-                        <th className="text-center">Proof</th>
-                        <th>Submitted</th>
-                        <th className="text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentPending.map((appeal) => (
-                        <tr key={appeal.id}>
-                          <td className="whitespace-nowrap">
-                            <div className="aa-emp-name">{appeal.full_name}</div>
-                            <div className="aa-emp-id">{appeal.employee_id}</div>
-                          </td>
-                          <td className="font-medium text-dark whitespace-nowrap">{formatDate(appeal.date)}</td>
-                          <td className="whitespace-nowrap">{formatTo12Hour(appeal.requested_time_in)}</td>
-                          <td className="whitespace-nowrap">{formatTo12Hour(appeal.requested_time_out)}</td>
-                          <td style={{ minWidth: '180px', maxWidth: '350px', whiteSpace: 'normal', wordBreak: 'break-word', paddingRight: '15px' }}>
-                            {appeal.reason}
-                          </td>
-                          <td className="text-center">
-                            {appeal.image_url ? (
-                              <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link">
-                                <ExternalLink size={14} /> View
-                              </a>
-                            ) : <span className="text-muted">—</span>}
-                          </td>
-                          <td className="text-xs text-muted whitespace-nowrap">{new Date(appeal.submitted_at).toLocaleString()}</td>
-                          <td className="whitespace-nowrap">
-                            <div className="aa-action-group right">
-                              <button className="aa-btn-icon success" onClick={() => openRemarkModal(appeal, 'approved')} title="Approve">
-                                <CheckCircle size={18} color="#059669" />
-                              </button>
-                              <button className="aa-btn-icon danger" onClick={() => openRemarkModal(appeal, 'rejected')} title="Reject">
-                                <XCircle size={18} color="#DC2626" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {pendingTotalPages > 1 && (
+              <div className="aa-custom-modal-pagination">
+                <span className="aa-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
+                <div className="aa-page-controls">
+                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="aa-page-btn"><ChevronLeft size={16} /></button>
+                  <span className="aa-page-current">{pendingPage} / {pendingTotalPages}</span>
+                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="aa-page-btn"><ChevronRight size={16} /></button>
                 </div>
-
-                {pendingTotalPages > 1 && (
-                  <div className="aa-pagination" style={{ flexShrink: 0 }}>
-                    <span className="aa-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
-                    <div className="aa-page-controls">
-                      <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="aa-page-btn"><ChevronLeft size={16} /></button>
-                      <span className="aa-page-current">{pendingPage} / {pendingTotalPages}</span>
-                      <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="aa-page-btn"><ChevronRight size={16} /></button>
-                    </div>
-                  </div>
-                )}
-              </>
+              </div>
             )}
+
+            <div className="aa-custom-modal-footer">
+              <button className="aa-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>
+            </div>
           </div>
-        )}
-      </FormalModal>
+        </div>
+      )}
 
       <FormalModal show={showRemarkModal} onClose={() => setShowRemarkModal(false)} title={`${actionType === 'approved' ? 'Approve' : 'Reject'} Appeal`} footer={
         <>

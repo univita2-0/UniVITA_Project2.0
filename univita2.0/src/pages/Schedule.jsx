@@ -1,3 +1,4 @@
+// src/pages/Schedule.js
 import React, { useState, useEffect, useCallback } from 'react';
 import './Schedule.css';
 import axios from 'axios';
@@ -174,7 +175,6 @@ const Schedule = () => {
   };
 
   const handleEditClick = (session) => {
-    // PREVENT EDITING OF PAST SCHEDULES
     const now = new Date();
     const currentLocalDate = now.toLocaleDateString('en-CA');
     const currentTimeStr = now.toTimeString().substring(0, 5); 
@@ -283,7 +283,6 @@ const Schedule = () => {
   };
 
   const openDeleteConfirm = (session) => {
-    // PREVENT DELETION OF PAST SCHEDULES
     const now = new Date();
     const currentLocalDate = now.toLocaleDateString('en-CA');
     const currentTimeStr = now.toTimeString().substring(0, 5); 
@@ -360,7 +359,6 @@ const Schedule = () => {
     }
   };
 
-  // --- INTERACTIVE BULK GRID LOGIC ---
   const addManualBulkRow = () => {
     setManualBulkRows([...manualBulkRows, {
       id: Date.now() + Math.random(),
@@ -796,44 +794,66 @@ const Schedule = () => {
         </div>
       </FormalModal>
 
-      <FormalModal
-        show={showScheduleRequests}
-        onClose={() => setShowScheduleRequests(false)}
-        title="Pending Schedule Requests"
-        wide
-        footer={<button className="btn-sch-cancel" onClick={() => setShowScheduleRequests(false)}>Close</button>}
-      >
-        {pendingRequests.length === 0 ? (
-          <div className="sch-empty-state">No pending requests at this time.</div>
-        ) : (
-          <div className="sch-requests-list">
-            {pendingRequests.map(req => (
-              <div key={req.id} className="sch-request-card">
-                <div className="sch-req-header">
-                  <div className="sch-req-info">
-                    <span className="sch-req-name">{req.full_name}</span>
-                    <span className="sch-req-type">{req.request_type === 'new' ? 'New Schedule' : 'Schedule Change'}</span>
-                  </div>
-                  <span className="sch-req-date">{formatDisplayDate(req.date)}</span>
+      {/* CUSTOMIZED PENDING SCHEDULE REQUESTS MODAL (No FormalModal, Strict Unbroken Layout) */}
+      {showScheduleRequests && (
+        <div className="sch-custom-modal-backdrop" onClick={() => setShowScheduleRequests(false)}>
+          <div className="sch-custom-modal" onClick={e => e.stopPropagation()}>
+            <div className="sch-custom-modal-header">
+              <h3>Pending Schedule Requests</h3>
+              <button className="sch-custom-close-btn" onClick={() => setShowScheduleRequests(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="sch-custom-modal-body">
+              {pendingRequests.length === 0 ? (
+                <div className="sch-empty-state">No pending requests at this time.</div>
+              ) : (
+                <div className="sch-custom-requests-list">
+                  {pendingRequests.map(req => (
+                    <div key={req.id} className="sch-custom-request-card">
+                      <div className="sch-custom-req-top">
+                        <span className="sch-custom-name">{req.full_name}</span>
+                        <span className="sch-custom-type-pill">{req.request_type === 'new' ? 'New Schedule' : 'Schedule Change'}</span>
+                      </div>
+                      <div className="sch-custom-details-grid">
+                        <div className="sch-custom-prop">
+                          <label>Date</label>
+                          <span className="nowrap">{formatDisplayDate(req.date)}</span>
+                        </div>
+                        <div className="sch-custom-prop">
+                          <label>Course & Location</label>
+                          <span>{req.course} at {req.place}</span>
+                        </div>
+                        <div className="sch-custom-prop">
+                          <label>Time Period</label>
+                          <span className="nowrap">{formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</span>
+                        </div>
+                        {req.reason && (
+                          <div className="sch-custom-prop full-width">
+                            <label>Reason / Remarks</label>
+                            <span className="reason-text">{req.reason}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="sch-custom-req-actions">
+                        <button className="btn-sch-reject" onClick={() => handleProcessRequest(req.id, 'rejected')}>
+                          <X size={14} /> Reject
+                        </button>
+                        <button className="btn-sch-approve" onClick={() => handleProcessRequest(req.id, 'approved')}>
+                          <Check size={14} /> Approve Request
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="sch-req-body">
-                  <p><strong>Course:</strong> {req.course} at {req.place}</p>
-                  <p><strong>Time:</strong> {formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</p>
-                  {req.reason && <p className="sch-req-reason"><strong>Reason:</strong> {req.reason}</p>}
-                </div>
-                <div className="sch-req-actions">
-                  <button className="btn-sch-reject" onClick={() => handleProcessRequest(req.id, 'rejected')}>
-                    <X size={14} /> Reject
-                  </button>
-                  <button className="btn-sch-approve" onClick={() => handleProcessRequest(req.id, 'approved')}>
-                    <Check size={14} /> Approve Request
-                  </button>
-                </div>
-              </div>
-            ))}
+              )}
+            </div>
+            <div className="sch-custom-modal-footer">
+              <button className="btn-sch-cancel" onClick={() => setShowScheduleRequests(false)}>Close Window</button>
+            </div>
           </div>
-        )}
-      </FormalModal>
+        </div>
+      )}
 
       <FormalModal
         show={showRejectModal}

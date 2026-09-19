@@ -167,8 +167,9 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
           <X size={20} />
         </button>
         
+        {/* Updated Brand matching the mobile login design */}
         <div className="lay-brand">
-          <h1>UniVITA</h1>
+          <h1>Uni<span className="lay-brand-vita">VÍTA</span></h1>
         </div>
         
         <nav className="lay-nav-container">
@@ -201,7 +202,7 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
             </button>
             {showBack && (
               <button className="lay-back-btn" onClick={onBack}>
-                <ArrowLeft size={16} /> <span>Back</span>
+                <ArrowLeft size={16} /> <span className="hide-on-mobile">Back</span>
               </button>
             )}
             <div className="lay-header-info">
@@ -214,7 +215,7 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
               <div className="lay-avatar">
                 <User size={16} color="white" />
               </div>
-              <span>Administrator</span>
+              <span className="lay-profile-name">Administrator</span>
             </div>
           </div>
         </header>

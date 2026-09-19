@@ -10,17 +10,43 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-const FLOOR_3_ROOMS = [
-  'AHA Room', 'Private Room', 'Operating Room', 'Delivery Room', 'NICU', 'ICU',
-  'Classroom', 'Library', 'Breakout Room 1', 'Breakout Room 2', 'Breakout Room 3',
-  'Faculty Office', 'Main Entrance'
-];
-const FLOOR_5_ROOMS = [
-  'Lounge / IV Drip', 'Operating Room', 'Delivery Room', 'ICU', 'Educ. Head',
-  'Executive 1', 'Executive 2', 'Creatives', 'Debrief Room', 'Main El',
-  'ArriA Room', 'Classroom 1', 'Classroom 2', 'HR / Admin Finance', 'Pantry', 'Toilet'
+// Floor 3 Standardized Rooms (Matches 3rd Floor Blueprint)
+export const FLOOR_3_ROOMS = [
+  'Classroom',
+  'AHA Room',
+  'Private Room',
+  'Operating Room',
+  'Delivery Room',
+  'NICU',
+  'ICU',
+  'Library',
+  'Breakout Room 1',
+  'Breakout Room 2',
+  'Breakout Room 3',
+  'Faculty Room',
+  'Main Entrance'
 ];
 
+// Floor 5 Standardized Rooms (Matches 5th Floor Blueprint)
+export const FLOOR_5_ROOMS = [
+  'Lounge / IV Drip',
+  'Operating Room',
+  'Delivery Room',
+  'ICU',
+  'Educ Head',
+  'Executive',
+  'Conference',
+  'Creatives',
+  'Debrief Room',
+  'Lobby',
+  'Entrance',
+  'AHA Room',
+  'Classroom 1',
+  'Classroom 2',
+  'HR / Admin',
+  'Pantry',
+  'Toilet'
+];
 const formatTo12Hour = (timeStr) => {
   if (!timeStr) return '—';
   const [hour, minute] = timeStr.split(':');
@@ -128,36 +154,39 @@ const TodayVisitors = () => {
     });
   };
 
-  const markArrived = async (id, floor, room, bleId) => {
-    if (!floor) {
-      toast.warning('Please select a floor first.');
-      return;
-    }
-    if (!room || !bleId) {
-      toast.warning('Please select both a destination room and a BLE tag.');
-      return;
-    }
-    try {
-      await axios.put(`${API_BASE}/visitor-requests/${id}/arrive`, {
-        floor: floor,       
-        destination: room,
-        ble_id: bleId
-      }, getAuthHeaders());
-      
-      setAssignments(prev => {
-        const newAssigns = { ...prev };
-        delete newAssigns[id];
-        return newAssigns;
-      });
+ 
+const markArrived = async (id, floor, room, bleId) => {
+  if (!floor) {
+    toast.warning('Please select a floor first.');
+    return;
+  }
+  if (!room || !bleId) {
+    toast.warning('Please select both a destination room and a BLE tag.');
+    return;
+  }
 
-      await fetchVisitorsForDate(selectedDate);
-      await fetchBleTags();
-      toast.success('Visitor checked in and BLE tag assigned.');
-    } catch (err) {
-      console.error(err);
-      toast.error('Error marking arrival.');
-    }
-  };
+  try {
+    const res = await axios.put(`${API_BASE}/visitor-requests/${id}/arrive`, {
+      floor: floor,       
+      destination: room,
+      ble_id: bleId
+    }, getAuthHeaders());
+    
+    setAssignments(prev => {
+      const newAssigns = { ...prev };
+      delete newAssigns[id];
+      return newAssigns;
+    });
+
+    await fetchVisitorsForDate(selectedDate);
+    await fetchBleTags();
+    toast.success(res.data.message || 'Visitor checked in and BLE tag assigned.');
+  } catch (err) {
+    console.error(err);
+    const msg = err.response?.data?.message || 'Error marking arrival.';
+    toast.error(msg);
+  }
+};
 
   const confirmNoShow = (id) => {
     setNoShowTargetId(id);

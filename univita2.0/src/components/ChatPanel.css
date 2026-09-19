@@ -1,6 +1,4 @@
 /* src/components/ChatPanel.css - Modern Minimalist Redesign */
-
-/* Toggle Button */
 .cp-toggle {
   position: fixed;
   bottom: 24px;
@@ -39,7 +37,6 @@
   text-align: center;
 }
 
-/* Panel */
 .cp-panel {
   position: fixed;
   bottom: 24px;
@@ -63,7 +60,6 @@
   height: 100%;
 }
 
-/* Header */
 .cp-header {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid #F3F4F6;
@@ -98,7 +94,6 @@
   color: #111827;
 }
 
-/* Search */
 .cp-search {
   position: relative;
   padding: 0.75rem 1.25rem;
@@ -175,7 +170,6 @@
   color: #6B7280;
 }
 
-/* Room List */
 .cp-room-list {
   flex: 1;
   overflow-y: auto;
@@ -279,7 +273,6 @@
   color: #DC2626;
 }
 
-/* Footer / Create Group */
 .cp-footer {
   padding: 1rem 1.25rem;
   background: #FAFAFA;
@@ -309,7 +302,6 @@
   background: #F0FDFA;
 }
 
-/* Active Room */
 .cp-active-info {
   display: flex;
   align-items: center;
@@ -378,7 +370,6 @@
   border-radius: 12px 12px 4px 12px;
 }
 
-/* Input Area */
 .cp-input-area {
   padding: 0.75rem 1rem;
   background: #FFFFFF;
@@ -428,7 +419,6 @@
   cursor: not-allowed;
 }
 
-/* Modals */
 .cp-modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -525,7 +515,7 @@
 
 .cp-member-role {
   font-size: 0.7rem;
-  color: #6B7280;
+  color: #64748B;
 }
 
 .cp-member-item input[type="checkbox"] {

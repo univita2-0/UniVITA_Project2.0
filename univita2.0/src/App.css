@@ -92,3 +92,27 @@ button {
   color: inherit !important;
   opacity: 0.7 !important;
 }
+
+/* ==========================================
+   Global Alerts Overlay (Emergency Banner Fix)
+   ========================================== */
+.global-alerts-overlay {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 800px;
+  z-index: 9999; /* Forces the alerts to sit on top of everything */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none; /* Allows mouse clicks to pass through the invisible gaps to the dashboard below */
+}
+
+/* Target the actual alert boxes inside the wrapper */
+.global-alerts-overlay > * {
+  pointer-events: auto; /* Re-enables clicking on the actual alert boxes (for dismiss buttons) */
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12); /* Adds a drop shadow to make them pop off the page */
+  border-radius: 8px;
+}

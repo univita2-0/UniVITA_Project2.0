@@ -1,6 +1,8 @@
 /* univita2.0/src/api.js */
 
-export const API_BASE = "https://api.univitahct.tech/api";
+//export const API_BASE = "https://api.univitahct.tech/api";
+
+export const API_BASE = 'http://localhost:5000/api';
 
 // Helper to handle JSON parsing safely and prevent dashboard crashes
 const handleWebResponse = async (res) => {

@@ -153,6 +153,56 @@ if (!fs.existsSync(uploadsPath)) {
 
 app.use('/uploads', express.static(uploadsPath));
 
+const ROOM_COORDINATES = {
+  '3': {
+    'Classroom': { x: 37.15, y: 168.5 },
+    'AHA Room': { x: 164.9, y: 291.9 },
+    'Private Room': { x: 188.2, y: 157.5 },
+    'Delivery Room': { x: 254.7, y: 197.1 },
+    'NICU': { x: 320.85, y: 158.25 },
+    'ICU': { x: 365.8, y: 156.1 },
+    'Library': { x: 113.9, y: 98.85 },
+    'Breakout Room 1': { x: 190.3, y: 40.9 },
+    'Breakout Room 2': { x: 210.85, y: 84.75 },
+    'Breakout Room 3': { x: 255.8, y: 85.8 },
+    'Faculty Office': { x: 321.2, y: 6.9 },
+    'Faculty Room': { x: 321.2, y: 6.9 },
+    'Main Entrance': { x: 360.45, y: 50.75 }
+  },
+  '5': {
+    'Lounge / IV Drip': { x: 65.8, y: 200.4 },
+    'Operating Room': { x: 112.1, y: 198.6 },
+    'Delivery Room': { x: 161.0, y: 199.6 },
+    'ICU': { x: 208.75, y: 196.85 },
+    'Educ. Head': { x: 249.75, y: 214.55 },
+    'Educ Head': { x: 249.75, y: 214.55 },
+    'Executive 1': { x: 286.2, y: 197.2 },
+    'Executive': { x: 286.2, y: 197.2 },
+    'Executive 2': { x: 322.95, y: 198.6 },
+    'Conference': { x: 322.95, y: 198.6 },
+    'Creatives': { x: 260.0, y: 141.35 },
+    'Debrief Room': { x: 163.75, y: 123.35 },
+    'Main El': { x: 52.75, y: 132.15 },
+    'Entrance': { x: 52.75, y: 132.15 },
+    'ArriA Room': { x: 108.25, y: 40.9 },
+    'AHA Room': { x: 108.25, y: 40.9 },
+    'Classroom 1': { x: 173.7, y: 43.1 },
+    'Classroom 2': { x: 246.9, y: 40.2 },
+    'HR / Admin Finance': { x: 307.4, y: 41.25 },
+    'Pantry': { x: 348.8, y: 52.6 },
+    'Toilet': { x: 351.65, y: 18.7 }
+  }
+};
+
+const getRoomCoords = (floor, room) => {
+  const f = String(floor).trim();
+  const r = String(room).trim();
+  if (ROOM_COORDINATES[f] && ROOM_COORDINATES[f][r]) {
+    return ROOM_COORDINATES[f][r];
+  }
+  return { x: 100, y: 100 }; 
+};
+
 
 
 // --------------------------------------------------
@@ -334,6 +384,16 @@ const pdfFilter = (req, file, cb) => {
     cb(new Error('Invalid file type. Only PDF is allowed.'));
   }
 };
+
+
+const profilePicDir = path.join(uploadsPath, 'profile_pictures');
+if (!fs.existsSync(profilePicDir)) fs.mkdirSync(profilePicDir, { recursive: true });
+const uploadProfilePic = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, profilePicDir),
+    filename: (req, file, cb) => cb(null, `profile_${Date.now()}${path.extname(file.originalname)}`)
+  })
+});
 
 // 1. LEAVE IMAGES
 const uploadDir = path.join(uploadsPath, 'leave_images');
@@ -575,8 +635,8 @@ app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
   if (!email || !otp || !newPassword) {
     return res.status(400).json({ success: false, message: 'All fields are required.' });
   }
-  if (newPassword.length < 8) {
-    return res.status(400).json({ success: false, message: 'For security, your password must be at least 8 characters long.' });
+  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+    return res.status(400).json({ success: false, message: 'Your password must be at least 8 characters long, contain 1 uppercase letter, and 1 special character.' });
   }
 
   const record = OTP_STORE[email];
@@ -655,29 +715,41 @@ app.post('/api/login', loginLimiter, (req, res) => {
   });
 });
 
-app.put('/api/users/:id/profile', authenticateToken, async (req, res) => {
+app.put('/api/users/:id/profile', authenticateToken, uploadProfilePic.single('profile_picture'), async (req, res) => {
   const userId = req.params.id;
-  
   if (req.user.id.toString() !== userId.toString() && req.user.role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
-  const { full_name, email, phone_number } = req.body;
-
-  if (!full_name || !email) {
-    return res.status(400).json({ success: false, message: 'Name and email are required.' });
-  }
+  const body = req.body || {};
+  const full_name = body.full_name;
+  const email = body.email;
+  const phone_number = body.phone_number;
 
   try {
-    await db.promise().query(
-      "UPDATE users SET full_name = ?, email = ?, phone_number = ? WHERE id = ?",
-      [full_name, email, phone_number || null, userId]
-    );
-    res.json({ success: true, message: 'Profile updated successfully' });
-  } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ success: false, message: 'That email address is already in use.' });
+    const profile_picture = req.file ? `/uploads/profile_pictures/${req.file.filename}` : null;
+
+    if (profile_picture && (!full_name || !email)) {
+      await db.promise().query("UPDATE users SET profile_picture = ? WHERE id = ?", [profile_picture, userId]);
+      return res.json({ success: true, message: 'Profile picture updated successfully', profile_picture });
     }
+
+    if (!full_name || !email) {
+      return res.status(400).json({ success: false, message: 'Name and email are required.' });
+    }
+
+    let sql = "UPDATE users SET full_name = ?, email = ?, phone_number = ? WHERE id = ?";
+    let params = [full_name, email, phone_number || null, userId];
+
+    if (profile_picture) {
+      sql = "UPDATE users SET full_name = ?, email = ?, phone_number = ?, profile_picture = ? WHERE id = ?";
+      params = [full_name, email, phone_number || null, profile_picture, userId];
+    }
+
+    await db.promise().query(sql, params);
+    res.json({ success: true, message: 'Profile updated successfully', profile_picture });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'That email is already in use.' });
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -689,8 +761,9 @@ app.put('/api/users/:identifier/update-password', authenticateToken, verifyOwner
   if (!currentPassword || !newPassword) {
     return res.status(400).json({ success: false, message: 'Current and new passwords are required.' });
   }
-  if (newPassword.length < 8) {
-    return res.status(400).json({ success: false, message: 'New password must be at least 8 characters long.' });
+  
+  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 8 characters, contain 1 uppercase letter, and 1 special character.' });
   }
 
   db.query("SELECT * FROM users WHERE (id = ? OR employee_id = ?)", [identifier, identifier], async (err, results) => {
@@ -723,8 +796,8 @@ app.put('/api/users/:id/reset-password', authenticateToken, async (req, res) => 
   const { newPassword } = req.body;
   const userId = req.params.id;
 
-  if (!newPassword || newPassword.trim().length < 6) {
-    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+  if (!newPassword || newPassword.trim().length < 8 || !/[A-Z]/.test(newPassword) || !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+    return res.status(400).json({ success: false, message: 'Password must be at least 8 characters, contain 1 uppercase letter, and 1 special character.' });
   }
   
   try {
@@ -1116,7 +1189,7 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
     // 4. Update attendance specifically for this schedule_id if clock_out / early_out
     if (type === 'clock_out') {
       await db.promise().query(
-        "UPDATE attendance SET time_out = ?, status = 'early departure' WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
+        "UPDATE attendance SET time_out = ?, status = 'early clock-out' WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
         [time, employee_id, schedule_id]
       );
       await db.promise().query(
@@ -1241,7 +1314,7 @@ app.get('/api/attendance-appeals/user/:employeeId', async (req, res) => {
 });
 
 app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('image'), async (req, res) => {
-  const { date, reason, time_in, time_out } = req.body;
+  const { date, reason, time_in, time_out, schedule_id } = req.body;
   const userId = req.user.id;
 
   const { date: today } = getPHTime();
@@ -1257,13 +1330,35 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
     if (userRows.length === 0) return res.status(500).json({ success: false, error: "User not found" });
     const employee_id = userRows[0].employee_id;
 
-    const schedule = await scheduleExistsForDate(employee_id, date);
-    if (!schedule) {
-      return res.status(400).json({ success: false, error: "No schedule found for this date. Cannot submit appeal." });
+    // Resolve or validate the specific schedule_id
+    let targetScheduleId = schedule_id;
+    if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
+      const [schedRows] = await db.promise().query(
+        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
+        [employee_id, date]
+      );
+      if (schedRows.length === 0) {
+        return res.status(400).json({ success: false, error: "No schedule found for this date. Cannot submit appeal." });
+      }
+      targetScheduleId = schedRows[0].id;
+    } else {
+      const [schedVerify] = await db.promise().query(
+        "SELECT id FROM schedules WHERE id = ? AND user_id = ? AND date = ?",
+        [targetScheduleId, employee_id, date]
+      );
+      if (schedVerify.length === 0) {
+        return res.status(400).json({ success: false, error: "Invalid schedule selected for this date." });
+      }
     }
 
-    if (await hasExistingRequest(employee_id, date, 'appeal')) {
-      return res.status(409).json({ success: false, error: "You already have a pending or approved request for this date." });
+    // Check for existing pending/approved appeal scoped strictly to this specific shift
+    const [existingAppeal] = await db.promise().query(
+      "SELECT id FROM attendance_appeals WHERE user_id = ? AND date = ? AND schedule_id = ? AND status IN ('pending', 'approved')",
+      [employee_id, date, targetScheduleId]
+    );
+
+    if (existingAppeal.length > 0) {
+      return res.status(409).json({ success: false, error: "You already have a pending or approved appeal for this specific shift." });
     }
 
     const image_url = req.file ? `/uploads/attendance_appeals/${req.file.filename}` : null;
@@ -1271,9 +1366,9 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
     const appealTimeOut = time_out || null;
 
     const [result] = await db.promise().query(
-      `INSERT INTO attendance_appeals (user_id, date, reason, image_url, status, requested_time_in, requested_time_out)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
-      [employee_id, date, reason, image_url, appealTimeIn, appealTimeOut]
+      `INSERT INTO attendance_appeals (user_id, date, schedule_id, reason, image_url, status, requested_time_in, requested_time_out)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      [employee_id, date, targetScheduleId, reason, image_url, appealTimeIn, appealTimeOut]
     );
 
     logAction(req.user.id, 'SUBMIT_APPEAL', 'attendance_appeal', result.insertId, req);
@@ -1304,15 +1399,29 @@ app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res
 
   try {
     const [appealRows] = await db.promise().query(
-      "SELECT user_id, date, requested_time_in, requested_time_out FROM attendance_appeals WHERE id = ?",
+      "SELECT user_id, date, schedule_id, requested_time_in, requested_time_out FROM attendance_appeals WHERE id = ?",
       [appealId]
     );
     if (appealRows.length === 0) return res.status(404).json({ error: "Appeal not found" });
-    const { user_id, date, requested_time_in, requested_time_out } = appealRows[0];
+    const { user_id, date, schedule_id, requested_time_in, requested_time_out } = appealRows[0];
 
-    const schedule = await scheduleExistsForDate(user_id, date);
-    let start_time = requested_time_in || (schedule ? schedule.start_time : null);
-    let end_time = requested_time_out || (schedule ? schedule.end_time : null);
+    // Resolve target schedule ID with fallback if legacy record
+    let targetScheduleId = schedule_id;
+    if (!targetScheduleId) {
+      const [schedRows] = await db.promise().query(
+        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
+        [user_id, date]
+      );
+      if (schedRows.length > 0) targetScheduleId = schedRows[0].id;
+    }
+
+    // Fetch specific schedule times if needed
+    const [schedRecord] = targetScheduleId 
+      ? await db.promise().query("SELECT start_time, end_time FROM schedules WHERE id = ?", [targetScheduleId])
+      : [[]];
+
+    let start_time = requested_time_in || (schedRecord.length > 0 ? schedRecord[0].start_time : null);
+    let end_time = requested_time_out || (schedRecord.length > 0 ? schedRecord[0].end_time : null);
     let total_hours = 0;
     if (start_time && end_time) {
       total_hours = (new Date(`1970-01-01T${end_time}`) - new Date(`1970-01-01T${start_time}`)) / 3600000;
@@ -1325,10 +1434,10 @@ app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res
     const action = status === 'approved' ? 'APPROVE_APPEAL' : 'REJECT_APPEAL';
     logAction(req.user.id, action, 'attendance_appeal', appealId, req);
 
-    if (status === 'approved') {
+    if (status === 'approved' && targetScheduleId) {
       const [existingAtt] = await db.promise().query(
-        "SELECT id FROM attendance WHERE user_id = ? AND date = ?",
-        [user_id, date]
+        "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ?",
+        [user_id, targetScheduleId]
       );
       if (existingAtt.length > 0) {
         await db.promise().query(
@@ -1338,9 +1447,9 @@ app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res
         );
       } else {
         await db.promise().query(
-          `INSERT INTO attendance (user_id, date, time_in, time_out, status, location, total_hours)
-           VALUES (?, ?, ?, ?, 'Present', 'Appeal Approved', ?)`,
-          [user_id, date, start_time, end_time, total_hours]
+          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out, status, location, total_hours)
+           VALUES (?, ?, ?, ?, ?, 'Present', 'Appeal Approved', ?)`,
+          [user_id, targetScheduleId, date, start_time, end_time, total_hours]
         );
       }
     }
@@ -1489,7 +1598,7 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
     }
     const { user_id: employee_id, request_date, type } = leaveRows[0];
 
-    // FIX: Get the INT ID for the employee_leave_balances table
+    // Get the INT ID for the employee_leave_balances table
     const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
     if (userRows.length === 0) {
       await connection.rollback();
@@ -1524,10 +1633,29 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
         [newBalance, internalUserId, leaveTypeId, leaveYear]
       );
       
-      await connection.query(
-        `INSERT INTO attendance (user_id, date, status, location) VALUES (?, ?, 'on leave', 'Remote/Leave') ON DUPLICATE KEY UPDATE status = 'on leave'`,
+      // MULTI-SHIFT FIX: Find ALL schedules for this instructor on this leave date and mark each one 'on leave'
+      const [targetSchedules] = await connection.query(
+        `SELECT id FROM schedules WHERE user_id = ? AND date = ?`,
         [employee_id, request_date]
       );
+
+      if (targetSchedules.length > 0) {
+        for (const sched of targetSchedules) {
+          await connection.query(
+            `INSERT INTO attendance (user_id, schedule_id, date, status, location) 
+             VALUES (?, ?, ?, 'on leave', 'Remote/Leave') 
+             ON DUPLICATE KEY UPDATE status = 'on leave'`,
+            [employee_id, sched.id, request_date]
+          );
+        }
+      } else {
+        await connection.query(
+          `INSERT INTO attendance (user_id, date, status, location) 
+           VALUES (?, ?, 'on leave', 'Remote/Leave') 
+           ON DUPLICATE KEY UPDATE status = 'on leave'`,
+          [employee_id, request_date]
+        );
+      }
     }
     await connection.commit();
     
@@ -1971,15 +2099,17 @@ app.get('/api/schedule-requests/my', authenticateToken, (req, res) => {
 });
 
 app.post('/api/schedule-requests', authenticateToken, (req, res) => {
-  const { request_type, date, place, course, start_time, end_time, reason } = req.body;
+  const { request_type, date, place, course, start_time, end_time, reason, schedule_id } = req.body;
   const userId = req.user.id;
+  
   db.query("SELECT employee_id, full_name FROM users WHERE id = ?", [userId], (err, rows) => {
     if (err || rows.length === 0) return res.status(500).json({ success: false, error: 'User not found' });
     const employeeId = rows[0].employee_id;
     const fullName = rows[0].full_name;
+    
     db.query(
-      "INSERT INTO schedule_change_requests (user_id, full_name, request_type, date, place, course, start_time, end_time, reason, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [employeeId, fullName, request_type, date, place, course, start_time, end_time, reason, 'pending'],
+      "INSERT INTO schedule_change_requests (user_id, full_name, request_type, date, place, course, start_time, end_time, reason, schedule_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [employeeId, fullName, request_type, date, place, course, start_time, end_time, reason, schedule_id || null, 'pending'],
       (err, result) => {
         if (err) return res.status(500).json({ success: false, error: err.message });
         logAction(req.user.id, 'SUBMIT_SCHEDULE_REQUEST', 'schedule_request', result.insertId, req);
@@ -2001,22 +2131,37 @@ app.put('/api/schedule-requests/:id/status', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
   const { status, admin_remarks } = req.body;
   const requestId = req.params.id;
+  
   db.query("SELECT * FROM schedule_change_requests WHERE id = ?", [requestId], (err, rows) => {
     if (err || rows.length === 0) return res.status(500).json({ error: 'Request not found' });
     const request = rows[0];
     const newStatus = status.toLowerCase();
+    
     db.query("UPDATE schedule_change_requests SET status = ?, admin_remarks = ?, reviewed_at = NOW() WHERE id = ?", [newStatus, admin_remarks || null, requestId], async (err) => {
       if (err) return res.status(500).json({ error: err.message });
       const action = newStatus === 'approved' ? 'APPROVE_SCHEDULE_REQUEST' : 'REJECT_SCHEDULE_REQUEST';
       logAction(req.user.id, action, 'schedule_request', requestId, req);
+      
       if (newStatus === 'approved') {
         try {
           if (request.request_type === 'new') {
-            await db.promise().query("INSERT INTO schedules (user_id, date, place, course, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
-              [request.user_id, request.date, request.place, request.course, request.start_time, request.end_time]);
+            await db.promise().query(
+              "INSERT INTO schedules (user_id, date, place, course, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
+              [request.user_id, request.date, request.place, request.course, request.start_time, request.end_time]
+            );
           } else if (request.request_type === 'change') {
-            await db.promise().query("UPDATE schedules SET place = ?, course = ?, start_time = ?, end_time = ? WHERE user_id = ? AND date = ?",
-              [request.place, request.course, request.start_time, request.end_time, request.user_id, request.date]);
+            // Target specific schedule_id if available, with a fallback to user_id and date
+            if (request.schedule_id) {
+              await db.promise().query(
+                "UPDATE schedules SET place = ?, course = ?, start_time = ?, end_time = ? WHERE id = ?",
+                [request.place, request.course, request.start_time, request.end_time, request.schedule_id]
+              );
+            } else {
+              await db.promise().query(
+                "UPDATE schedules SET place = ?, course = ?, start_time = ?, end_time = ? WHERE user_id = ? AND date = ?",
+                [request.place, request.course, request.start_time, request.end_time, request.user_id, request.date]
+              );
+            }
           }
           res.json({ success: true, message: 'Request approved and schedule updated.' });
         } catch (updateErr) {
@@ -2082,20 +2227,33 @@ app.get('/api/payroll/employee-history/:employeeId', authenticateToken, verifyOw
   });
 });
 
+// server.js (around line 1010)
 app.get('/api/employees', authenticateToken, (req, res) => {
+  // If not admin or hr_admin, return sanitized public profile list for chat/collaboration
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+    return db.query(
+      "SELECT id, employee_id, full_name, role, email FROM users WHERE status = 'active' ORDER BY full_name ASC",
+      (err, result) => {
+        if (err) return res.status(500).json({ success: false, message: 'Failed to fetch employee directory.' });
+        res.json(result || []);
+      }
+    );
   }
+
+  // Full administrative employee fetch for Admins & HR
   db.query("SELECT * FROM users ORDER BY full_name ASC", (err, result) => {
     if (err) return res.status(500).json({ success: false, message: 'Failed to fetch employee list.' });
     res.json(result || []);
   });
 });
 
-app.post('/api/employees', authenticateToken, async (req, res) => {
+app.post('/api/employees', authenticateToken, uploadResume.single('resume_file'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to add employees.' });
   }
+
+  // CRITICAL FIX: Guarantee body is an object to prevent undefined crashes
+  const data = req.body || {};
 
   const {
     employee_id, full_name, first_name, last_name, email, password, role,
@@ -2106,26 +2264,31 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
     date_of_birth, phone_number, gender,
     emergency_contact_name, emergency_contact_phone,
     street_address, city, state_province, postal_code, country, additional_info, position
-  } = req.body;
+  } = data;
 
-  // 1. Strict Payload Validation
   if (!employee_id || !full_name || !email || !password || !role) {
     return res.status(400).json({ success: false, message: 'Employee ID, Name, Email, Password, and Role are mandatory fields.' });
   }
   if (!isValidEmail(email)) {
     return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
   }
-  if (password.length < 8) {
-    return res.status(400).json({ success: false, message: 'For security, the new password must be at least 8 characters long.' });
-  }
-  if (monthly_salary && (isNaN(monthly_salary) || monthly_salary < 0)) {
-    return res.status(400).json({ success: false, message: 'Monthly salary must be a valid positive number.' });
+  if (!password || password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+    return res.status(400).json({ success: false, message: 'For security, the password must be at least 8 characters, contain 1 uppercase letter, and 1 special character.' });
   }
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     const finalPin = payroll_pin || '1234';
     const finalAccess = payroll_access || 0;
+
+    let infoObj = {};
+    if (additional_info) {
+      try { infoObj = JSON.parse(additional_info); } catch(e) {}
+    }
+    if (req.file) {
+      infoObj.resume_file = `/uploads/resumes/${req.file.filename}`;
+    }
+    const finalAdditionalInfo = Object.keys(infoObj).length > 0 ? JSON.stringify(infoObj) : null;
 
     const sql = `INSERT INTO users 
       (employee_id, full_name, first_name, last_name, email, password, role, status,
@@ -2140,14 +2303,14 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
 
     db.query(sql, [
       employee_id.trim(), full_name.trim(), first_name || null, last_name || null, email.trim().toLowerCase(), hashedPassword, role, 
-      employment_type || 'Full-time', position_level || 'Entry Level Simulationist', contract_type || 'Regular',
+      employment_type || 'Full-time', position_level || 'Entry Level Simulationist', contract_type || employment_type || 'Full-time',
       monthly_salary || 0, work_days_per_month || 22,
       finalAccess, finalPin,
       middle_initial || null, date_of_joining || null, account_expiration_date || null,
       date_of_birth || null, phone_number || null, gender || 'prefer_not_to_say',
       emergency_contact_name || null, emergency_contact_phone || null,
       street_address || null, city || null, state_province || null,
-      postal_code || null, country || 'Philippines', additional_info || null, position || null
+      postal_code || null, country || 'Philippines', finalAdditionalInfo, position || null
     ], (err, result) => {
       if (err) {
         if (err.code === 'ER_DUP_ENTRY') {
@@ -2163,7 +2326,7 @@ app.post('/api/employees', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/employees/:id', authenticateToken, async(req, res) => {
+app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_file'), async(req, res) => {
   const employeeId = req.params.id;
   
   const isPrivileged = req.user.role === 'admin' || req.user.role === 'hr_admin';
@@ -2173,7 +2336,9 @@ app.put('/api/employees/:id', authenticateToken, async(req, res) => {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to edit this profile.' });
   }
 
-  const updates = req.body;
+  // CRITICAL FIX: Guarantee body is an object to prevent undefined crashes
+  const data = req.body ? { ...req.body } : {};
+  const updates = { ...data };
 
   if (updates.email && !isValidEmail(updates.email)) {
     return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
@@ -2184,7 +2349,6 @@ app.put('/api/employees/:id', authenticateToken, async(req, res) => {
     if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
     const oldData = oldRecord[0];
 
-    // Restrict non-admins from modifying sensitive fields
     if (!isPrivileged) {
       delete updates.role;
       delete updates.status;
@@ -2192,6 +2356,23 @@ app.put('/api/employees/:id', authenticateToken, async(req, res) => {
       delete updates.work_days_per_month;
       delete updates.payroll_access;
       delete updates.payroll_pin;
+    }
+
+    if (updates.additional_info !== undefined) {
+      try {
+        let infoObj = JSON.parse(updates.additional_info);
+        if (req.file) {
+          infoObj.resume_file = `/uploads/resumes/${req.file.filename}`;
+        } else {
+          if (oldData.additional_info) {
+            const oldInfo = JSON.parse(oldData.additional_info);
+            infoObj.resume_file = oldInfo.resume_file || '';
+          }
+        }
+        updates.additional_info = JSON.stringify(infoObj);
+      } catch(e) {
+        console.error("Failed to parse additional_info:", e);
+      }
     }
 
     const fieldMapping = {
@@ -2224,12 +2405,25 @@ app.put('/api/employees/:id', authenticateToken, async(req, res) => {
       position: 'position',
     };
 
+    const dateColumns = ['date_of_joining', 'date_of_birth', 'account_expiration_date'];
+    const numColumns = ['monthly_salary', 'work_days_per_month'];
+
     const setClauses = [];
     const values = [];
+    
     for (const [frontField, dbField] of Object.entries(fieldMapping)) {
       if (updates[frontField] !== undefined) {
+        let val = updates[frontField];
+        
+        // CRITICAL FIX: Convert empty strings to 0 for numbers, or NULL for dates to prevent DB strict mode crashes
+        if (dateColumns.includes(dbField) && val === '') {
+          val = null;
+        } else if (numColumns.includes(dbField) && val === '') {
+          val = 0;
+        }
+        
         setClauses.push(`${dbField} = ?`);
-        values.push(updates[frontField]);
+        values.push(val);
       }
     }
 
@@ -2241,6 +2435,7 @@ app.put('/api/employees/:id', authenticateToken, async(req, res) => {
     db.query(sql, values, (err, result) => {
       if (err) {
         if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Email is already in use by another account.' });
+        console.error("DB Update Error:", err.message);
         return res.status(500).json({ success: false, message: 'Database error during update.' });
       }
       
@@ -2248,7 +2443,7 @@ app.put('/api/employees/:id', authenticateToken, async(req, res) => {
       res.json({ success: true, message: 'Employee profile updated successfully.' });
     });
   } catch (error) {
-    console.error("Update Employee Error:", error);
+    console.error("Update Employee Error:", error.message);
     res.status(500).json({ success: false, message: 'Server connection failed.' });
   }
 });
@@ -2382,10 +2577,7 @@ app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwne
 app.get('/api/appointments/:id/visitors', authenticateToken, (req, res) => {
   const { id } = req.params;
   db.query("SELECT * FROM appointment_visitors WHERE appointment_id = ?", [id], (err, results) => {
-    if (err) {
-      console.error("Fetch appointment visitors error:", err);
-      return res.status(500).json({ success: false, message: 'Failed to load companion visitors.' });
-    }
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load companion visitors.' });
     res.json(results || []);
   });
 });
@@ -2424,17 +2616,14 @@ app.get('/api/ble-tags', authenticateToken, (req, res) => {
   `;
 
   db.query(sql, (err, results) => {
-    if (err) {
-      console.error("Fetch BLE tags error:", err);
-      return res.status(500).json({ success: false, message: 'Failed to fetch BLE tags inventory.' });
-    }
+    if (err) return res.status(500).json({ success: false, message: 'Failed to fetch BLE tags.' });
     res.json(results || []);
   });
 });
 
 app.post('/api/ble-tags', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Security access required.' });
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
 
   const { ble_id, label, mac_address } = req.body;
@@ -2442,9 +2631,14 @@ app.post('/api/ble-tags', authenticateToken, async (req, res) => {
     return res.status(400).json({ success: false, message: "BLE ID and MAC address are required." });
   }
 
+  const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+  if (!macRegex.test(mac_address.trim())) {
+    return res.status(400).json({ success: false, message: "Invalid MAC address format. Example: 00:1A:2B:3C:4D:5E" });
+  }
+
   try {
     const [existing] = await db.promise().query(
-      "SELECT id FROM ble_tags WHERE ble_id = ? OR mac_address = ?", 
+      "SELECT id FROM ble_tags WHERE ble_id = ? OR UPPER(mac_address) = UPPER(?)", 
       [ble_id.trim(), mac_address.trim()]
     );
 
@@ -2454,33 +2648,50 @@ app.post('/api/ble-tags', authenticateToken, async (req, res) => {
 
     const [result] = await db.promise().query(
       "INSERT INTO ble_tags (ble_id, label, mac_address) VALUES (?, ?, ?)",
-      [ble_id.trim(), label ? label.trim() : '', mac_address.trim()]
+      [ble_id.trim(), label ? label.trim() : '', mac_address.trim().toUpperCase()]
     );
 
     logAction(req.user.id, 'CREATE_BLE_TAG', 'ble_tag', result.insertId, req);
     res.status(201).json({ success: true, message: "BLE Tag added successfully.", id: result.insertId });
   } catch (err) {
-    console.error("BLE Tag creation error:", err);
-    res.status(500).json({ success: false, message: "Internal server error while saving tag." });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-app.delete('/api/ble-tags/:id', authenticateToken, (req, res) => {
+app.delete('/api/ble-tags/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
   const { id } = req.params;
-  db.query("DELETE FROM ble_tags WHERE id = ?", [id], (err, result) => {
-    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
-    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Tag not found." });
+
+  try {
+    const [tag] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE id = ?", [id]);
+    if (tag.length === 0) return res.status(404).json({ success: false, message: "Tag not found." });
+
+    // Validate tag is not in active use
+    const [inUse] = await db.promise().query(
+      "SELECT id, first_name, last_name FROM visitor_requests WHERE ble_id = ? AND arrived = 1 AND returned = 0",
+      [tag[0].ble_id]
+    );
+
+    if (inUse.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete tag: Currently in use by visitor ${inUse[0].first_name} ${inUse[0].last_name}.`
+      });
+    }
+
+    await db.promise().query("DELETE FROM ble_tags WHERE id = ?", [id]);
     logAction(req.user.id, 'DELETE_BLE_TAG', 'ble_tag', id, req);
     res.json({ success: true, message: "BLE Tag deleted successfully." });
-  });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 app.get('/api/ble-tags/in-use', authenticateToken, (req, res) => {
   db.query(
-    "SELECT DISTINCT ble_id FROM visitor_requests WHERE arrived = true AND returned = false AND no_show = false AND ble_id IS NOT NULL",
+    "SELECT DISTINCT ble_id FROM visitor_requests WHERE arrived = 1 AND returned = 0 AND no_show = 0 AND ble_id IS NOT NULL",
     (err, results) => {
       if (err) return res.status(500).json({ success: false, message: 'Failed to fetch active tags.' });
       res.json(results.map(r => r.ble_id) || []);
@@ -2488,45 +2699,105 @@ app.get('/api/ble-tags/in-use', authenticateToken, (req, res) => {
   );
 });
 
-app.put('/api/visitor-requests/:id/return', authenticateToken, (req, res) => {
+app.put('/api/visitor-requests/:id/return', authenticateToken, async (req, res) => {
   const { id } = req.params;
 
-  db.query("SELECT ble_id FROM visitor_requests WHERE id = ?", [id], (err, rows) => {
-    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, first_name, last_name, ble_id, destination, arrived, returned FROM visitor_requests WHERE id = ?",
+      [id]
+    );
     if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
+    const visitor = rows[0];
+
+    if (visitor.arrived != 1) {
+      return res.status(400).json({ success: false, message: "Visitor has not checked in yet." });
+    }
+    if (visitor.returned == 1) {
+      return res.status(400).json({ success: false, message: "Visitor has already returned their BLE tag." });
+    }
     
-    const ble_id = rows[0].ble_id;
+    const ble_id = visitor.ble_id;
+    const visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
+
     if (ble_id) {
       delete visitorDestinations[ble_id];   
-      delete liveVisitors[ble_id];          
-      console.log(`🔓 Cleared destination lock for tag ${ble_id}`);
+      delete liveVisitors[ble_id];
+      delete lastKnownVisitorsData[ble_id];
+      logVisitorHistory(ble_id, visitorName, ble_id, null, 'Exit / Returned', 'disconnect', null, null);
     }
 
-    db.query(
+    await db.promise().query(
       `UPDATE visitor_requests 
-       SET returned = TRUE, returned_at = NOW(), 
+       SET returned = 1, returned_at = NOW(), 
            used_ble_id = ?, ble_id = NULL 
-       WHERE id = ? AND arrived = TRUE AND returned = FALSE`,
-      [ble_id, id],
-      (err, result) => {
-        if (err) return res.status(500).json({ success: false, message: "Database error during tag return." });
-        if (result.affectedRows === 0) {
-          return res.status(400).json({ success: false, message: "Visitor is not checked in or has already returned their tag." });
-        }
-        logAction(req.user.id, 'VISITOR_RETURN', 'visitor_request', id, req);
-        res.json({ success: true, message: "BLE tag successfully returned." });
-      }
+       WHERE id = ?`,
+      [ble_id, id]
     );
-  });
+
+    logAction(req.user.id, 'VISITOR_RETURN', 'visitor_request', id, req);
+    res.json({ success: true, message: "BLE tag successfully returned." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 app.get('/api/scanners', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin' && req.user.role !== 'security') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
-  db.query("SELECT * FROM scanners ORDER BY scanner_id ASC", (err, results) => {
+  db.query("SELECT * FROM scanners ORDER BY assigned_floor ASC, assigned_room ASC", (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Failed to load scanners.' });
     res.json(results || []);
+  });
+});
+
+app.post('/api/scanners', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  const { scanner_id, assigned_room, assigned_floor } = req.body;
+  if (!scanner_id || !assigned_room || !assigned_floor) {
+    return res.status(400).json({ success: false, message: "Scanner ID, assigned room, and floor are required." });
+  }
+
+  try {
+    const [existing] = await db.promise().query(
+      "SELECT id FROM scanners WHERE scanner_id = ?",
+      [scanner_id.trim()]
+    );
+
+    // Upsert support
+    if (existing.length > 0) {
+      await db.promise().query(
+        "UPDATE scanners SET assigned_room = ?, assigned_floor = ? WHERE scanner_id = ?",
+        [assigned_room.trim(), assigned_floor.trim(), scanner_id.trim()]
+      );
+      logAction(req.user.id, 'UPDATE_SCANNER', 'scanner', existing[0].id, req);
+      return res.json({ success: true, message: "Scanner room mapping updated successfully." });
+    }
+
+    const [result] = await db.promise().query(
+      "INSERT INTO scanners (scanner_id, assigned_room, assigned_floor) VALUES (?, ?, ?)",
+      [scanner_id.trim(), assigned_room.trim(), assigned_floor.trim()]
+    );
+    logAction(req.user.id, 'CREATE_SCANNER', 'scanner', result.insertId, req);
+    res.status(201).json({ success: true, message: "Scanner registered successfully.", id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete('/api/scanners/:id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  const { id } = req.params;
+  db.query("DELETE FROM scanners WHERE id = ?", [id], (err, result) => {
+    if (err) return res.status(500).json({ success: false, message: "Database error." });
+    if (result.affectedRows === 0) return res.status(404).json({ success: false, message: "Scanner not found." });
+    logAction(req.user.id, 'DELETE_SCANNER', 'scanner', id, req);
+    res.json({ success: true, message: "Scanner removed successfully." });
   });
 });
 
@@ -2895,7 +3166,7 @@ app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
 
 app.post('/api/ble-data', async (req, res) => {
   const hardwareApiKey = req.headers['x-api-key'];
-  if (!hardwareApiKey || hardwareApiKey !== process.env.HARDWARE_API_KEY) {
+  if (process.env.HARDWARE_API_KEY && hardwareApiKey !== process.env.HARDWARE_API_KEY) {
     console.warn("Unauthorized hardware access attempt blocked.");
     return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
@@ -2908,7 +3179,7 @@ app.post('/api/ble-data', async (req, res) => {
   try {
     const [scannerRows] = await db.promise().query(
       "SELECT assigned_room, assigned_floor FROM scanners WHERE scanner_id = ?",
-      [scannerId]
+      [scannerId.trim()]
     );
 
     if (scannerRows.length === 0) {
@@ -2916,58 +3187,63 @@ app.post('/api/ble-data', async (req, res) => {
     }
 
     const room = scannerRows[0].assigned_room;
-    const floor = scannerRows[0].assigned_floor;
+    const floor = String(scannerRows[0].assigned_floor);
 
     const sql = `
       SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
       FROM visitor_requests vr
       JOIN ble_tags bt ON vr.ble_id = bt.ble_id
-      WHERE bt.mac_address = ? 
-      AND vr.arrived = 1 
-      AND vr.no_show = 0 
-      AND vr.returned = 0
+      WHERE UPPER(bt.mac_address) = UPPER(?) 
+        AND vr.arrived = 1 
+        AND vr.no_show = 0 
+        AND vr.returned = 0
       LIMIT 1
     `;
 
-    db.query(sql, [beaconId], async (err, results) => {
-      if (err) {
-        console.error("BLE Data DB Error:", err);
-        return res.status(500).json({ success: false, message: "Database error" });
-      }
-      
-      if (results.length === 0) {
-        try {
-          const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE mac_address = ?", [beaconId]);
-          if (tagRes && tagRes.length > 0) {
-            const ghostId = tagRes[0].ble_id;
-            if (liveVisitors[ghostId]) {
-              delete liveVisitors[ghostId];
-            }
+    const [results] = await db.promise().query(sql, [beaconId.trim()]);
+
+    if (results.length === 0) {
+      try {
+        const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE UPPER(mac_address) = UPPER(?)", [beaconId.trim()]);
+        if (tagRes && tagRes.length > 0) {
+          const ghostId = tagRes[0].ble_id;
+          if (liveVisitors[ghostId]) {
+            delete liveVisitors[ghostId];
           }
-        } catch (dbErr) {
-          console.error("Ghost cleanup DB error:", dbErr);
         }
-        return res.json({ success: false, message: "Visitor not found or already returned" });
+      } catch (dbErr) {
+        console.error("Ghost cleanup DB error:", dbErr);
       }
+      return res.json({ success: false, message: "Visitor not found or already returned" });
+    }
 
-      const row = results[0];
-      const bleId = row.ble_id;
-      const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-      const destination = row.destination || 'Not Assigned';
+    const row = results[0];
+    const bleId = row.ble_id;
+    const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
+    const destination = row.destination || 'Not Assigned';
+    
+    // Calculate blueprint map coordinates (x, y)
+    const coords = getRoomCoords(floor, room);
 
-      liveVisitors[bleId] = {
-        id: bleId,
-        name: visitorName,
-        bleId: bleId,
-        floor: floor,
-        currentRoom: room,
-        destination: destination,
-        lastSeen: Date.now()
-      };
+    // Track movement event if visitor shifted rooms
+    if (liveVisitors[bleId] && liveVisitors[bleId].currentRoom !== room) {
+      logVisitorHistory(bleId, visitorName, bleId, floor, room, 'move', coords.x, coords.y);
+    }
 
-      visitorDestinations[bleId] = destination;
-      res.json({ success: true });
-    });
+    liveVisitors[bleId] = {
+      id: bleId,
+      name: visitorName,
+      bleId: bleId,
+      floor: floor,
+      currentRoom: room,
+      destination: destination,
+      x: coords.x,
+      y: coords.y,
+      lastSeen: Date.now()
+    };
+
+    visitorDestinations[bleId] = destination;
+    res.json({ success: true, message: "Visitor location updated successfully." });
 
   } catch (dbErr) {
     console.error("Dynamic Scanner Lookup Error:", dbErr);
@@ -2978,7 +3254,6 @@ app.post('/api/ble-data', async (req, res) => {
 app.post('/api/scan', async (req, res) => {
   const hardwareApiKey = req.headers['x-api-key'];
   if (process.env.HARDWARE_API_KEY && hardwareApiKey !== process.env.HARDWARE_API_KEY) {
-    console.warn("Unauthorized scanner access attempt blocked.");
     return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
 
@@ -2987,46 +3262,45 @@ app.post('/api/scan', async (req, res) => {
     return res.status(400).json({ success: false, message: "Missing scannerId or tagMac." });
   }
 
-  const sql = `
-    SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
-    FROM visitor_requests vr
-    JOIN ble_tags bt ON vr.ble_id = bt.ble_id
-    WHERE LOWER(bt.mac_address) = LOWER(?) 
-    AND vr.arrived = 1 
-    AND vr.no_show = 0 
-    AND vr.returned = 0
-    LIMIT 1
-  `;
+  try {
+    const sql = `
+      SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
+      FROM visitor_requests vr
+      JOIN ble_tags bt ON vr.ble_id = bt.ble_id
+      WHERE UPPER(bt.mac_address) = UPPER(?) 
+        AND vr.arrived = 1 
+        AND vr.no_show = 0 
+        AND vr.returned = 0
+      LIMIT 1
+    `;
 
-  db.query(sql, [tagMac.trim()], async (err, results) => {
-    if (err) {
-      console.error("Scanner DB Error:", err);
-      return res.status(500).json({ success: false, message: "Database error" });
-    }
-    
+    const [results] = await db.promise().query(sql, [tagMac.trim()]);
     if (results.length === 0) {
-      return res.json({ success: false, message: "Visitor not found or tag not active" });
+      return res.json({ success: false, message: "Visitor not found or tag is inactive." });
     }
 
     const row = results[0];
     const bleId = row.ble_id;
     const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-    const destination = row.destination || 'Classroom'; // Safe fallback room
+    const destination = row.destination || 'Classroom';
 
     let detectedFloor = "3";
     let detectedRoom = destination;
 
-    try {
-      const [scannerRows] = await db.promise().query(
-        "SELECT assigned_floor, assigned_room FROM scanners WHERE scanner_id = ?",
-        [scannerId]
-      );
-      if (scannerRows.length > 0) {
-        if (scannerRows[0].assigned_floor) detectedFloor = String(scannerRows[0].assigned_floor);
-        if (scannerRows[0].assigned_room) detectedRoom = scannerRows[0].assigned_room;
-      }
-    } catch (e) {
-      console.error("Scanner floor lookup error:", e);
+    const [scannerRows] = await db.promise().query(
+      "SELECT assigned_floor, assigned_room FROM scanners WHERE scanner_id = ?",
+      [scannerId]
+    );
+    if (scannerRows.length > 0) {
+      if (scannerRows[0].assigned_floor) detectedFloor = String(scannerRows[0].assigned_floor);
+      if (scannerRows[0].assigned_room) detectedRoom = scannerRows[0].assigned_room;
+    }
+
+    const coords = getRoomCoords(detectedFloor, detectedRoom);
+
+    // Track movement event
+    if (liveVisitors[bleId] && liveVisitors[bleId].currentRoom !== detectedRoom) {
+      logVisitorHistory(bleId, visitorName, bleId, detectedFloor, detectedRoom, 'move', coords.x, coords.y);
     }
 
     liveVisitors[bleId] = {
@@ -3036,12 +3310,16 @@ app.post('/api/scan', async (req, res) => {
       floor: detectedFloor,
       currentRoom: detectedRoom,
       destination: destination,
+      x: coords.x,
+      y: coords.y,
       lastSeen: Date.now(),
       rssi: rssi || -50
     };
 
-    res.status(200).json({ success: true, message: "Visitor tracked successfully" });
-  });
+    res.status(200).json({ success: true, message: "Visitor location updated." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // ============================================
@@ -4041,99 +4319,129 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
     });
 
     const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    const doc = new PDFDocument({ margin: 40, size: 'A4' }); // Narrower margins for formal look
     
-    // Do not set headers until we are absolutely sure the PDF is generating
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=attendance_compliance_${year}_${month}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=HCT_Attendance_Compliance_${year}_${String(month).padStart(2,'0')}.pdf`);
     doc.pipe(res);
 
-    doc.fontSize(18).font('Helvetica-Bold').text('HCT ACADEMY', { align: 'center' });
-    doc.fontSize(10).font('Helvetica').text('Healthcare Training Center', { align: 'center' });
-    doc.fontSize(9).text('123 Healthcare Avenue, Pasay City, Metro Manila', { align: 'center' });
-    doc.text('Tel: (02) 8123-4567 | Email: info@hct.ph', { align: 'center' });
-    doc.moveDown(0.5);
-    
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).lineWidth(1).stroke();
+    // --- FORMAL HEADER ---
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#0F172A').text('HCT ACADEMY', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#475569').text('Healthcare Training Center', { align: 'center' });
+    doc.fontSize(9).text('123 Healthcare Avenue, Pasay City, Metro Manila | Tel: (02) 8123-4567', { align: 'center' });
     doc.moveDown(1);
-
-    doc.fontSize(14).font('Helvetica-Bold').text('ATTENDANCE COMPLIANCE REPORT', { align: 'center' });
-    const monthName = new Date(year, month-1).toLocaleString('default', { month: 'long' });
-    doc.fontSize(10).font('Helvetica').text(`Period: ${monthName} ${year}`, { align: 'center' });
+    
+    doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(1.5).stroke('#CBD5E1');
     doc.moveDown(1.5);
 
-    const startX = 50;
-    const colWidths = [55, 145, 60, 55, 45, 50, 60]; 
-    const headers = ['ID', 'Name', 'Scheduled', 'Present', 'Late', 'Leave', 'Comp%'];
-    const rowHeight = 22;
+    // --- DOCUMENT TITLE ---
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#0F172A').text('OFFICIAL ATTENDANCE COMPLIANCE REPORT', { align: 'center', characterSpacing: 1 });
+    const monthName = new Date(year, month-1).toLocaleString('default', { month: 'long' });
+    doc.fontSize(10).font('Helvetica').fillColor('#64748B').text(`Reporting Period: ${monthName} ${year}`, { align: 'center' });
+    doc.moveDown(2);
 
+    // --- TABLE CONFIGURATION ---
+    const startX = 40;
+    const colWidths = [50, 165, 60, 55, 45, 45, 60]; // Adjusted to fit 515 width
+    const headers = ['EMP ID', 'INSTRUCTOR NAME', 'SCHED', 'PRESENT', 'LATE', 'LEAVE', 'COMP RATE'];
+    const rowHeight = 24;
     let currentY = doc.y;
 
-    doc.rect(startX, currentY, 470, rowHeight).fillAndStroke('#F3F4F6', '#000000');
-    doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9);
+    // --- TABLE HEADER ROW ---
+    doc.rect(startX, currentY, 515, rowHeight).fillAndStroke('#F1F5F9', '#CBD5E1');
+    doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
     
     headers.forEach((h, i) => {
       let x = startX;
       for (let j = 0; j < i; j++) x += colWidths[j];
-      doc.text(h, x, currentY + 6, { width: colWidths[i], align: 'center' });
-      if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).stroke();
+      const alignObj = (i === 1) ? { align: 'left' } : { align: 'center' };
+      const xOffset = (i === 1) ? 5 : 0; // Padding for text
+      doc.text(h, x + xOffset, currentY + 7, { width: colWidths[i] - (xOffset*2), ...alignObj });
+      if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).lineWidth(0.5).stroke('#CBD5E1');
     });
     
     currentY += rowHeight;
-    doc.font('Helvetica').fontSize(8.5);
+    doc.font('Helvetica').fontSize(9);
 
+    // --- TABLE DATA ROWS ---
+    let alternate = false;
     for (const emp of reportData) {
-      if (currentY > 700) {
+      if (currentY > 740) {
         doc.addPage();
-        currentY = 50;
+        currentY = 40;
         
-        doc.rect(startX, currentY, 470, rowHeight).fillAndStroke('#F3F4F6', '#000000');
-        doc.fillColor('#000000').font('Helvetica-Bold').fontSize(9);
+        // Redraw Header on new page
+        doc.rect(startX, currentY, 515, rowHeight).fillAndStroke('#F1F5F9', '#CBD5E1');
+        doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
         headers.forEach((h, i) => {
           let x = startX;
           for (let j = 0; j < i; j++) x += colWidths[j];
-          doc.text(h, x, currentY + 6, { width: colWidths[i], align: 'center' });
-          if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).stroke();
+          const alignObj = (i === 1) ? { align: 'left' } : { align: 'center' };
+          doc.text(h, x + (i===1?5:0), currentY + 7, { width: colWidths[i] - (i===1?10:0), ...alignObj });
+          if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).stroke('#CBD5E1');
         });
         currentY += rowHeight;
-        doc.font('Helvetica').fontSize(8.5);
+        doc.font('Helvetica').fontSize(9);
       }
 
-      doc.rect(startX, currentY, 470, rowHeight).stroke();
+      // Draw Row Background
+      if (alternate) {
+        doc.rect(startX, currentY, 515, rowHeight).fill('#F8FAFC');
+      }
+      doc.rect(startX, currentY, 515, rowHeight).stroke('#CBD5E1');
+      doc.fillColor('#0F172A');
 
       let x = startX;
-      doc.text(emp.employee_id, x + 5, currentY + 6, { width: colWidths[0] - 10, align: 'left' });
-      doc.moveTo(x + colWidths[0], currentY).lineTo(x + colWidths[0], currentY + rowHeight).stroke();
+      
+      // EMP ID
+      doc.text(emp.employee_id, x, currentY + 7, { width: colWidths[0], align: 'center' });
+      doc.moveTo(x + colWidths[0], currentY).lineTo(x + colWidths[0], currentY + rowHeight).stroke('#CBD5E1');
       x += colWidths[0];
 
-      doc.text(emp.full_name.substring(0, 30), x + 5, currentY + 6, { width: colWidths[1] - 10, align: 'left' });
-      doc.moveTo(x + colWidths[1], currentY).lineTo(x + colWidths[1], currentY + rowHeight).stroke();
+      // NAME
+      doc.text(emp.full_name.substring(0, 30), x + 5, currentY + 7, { width: colWidths[1] - 10, align: 'left' });
+      doc.moveTo(x + colWidths[1], currentY).lineTo(x + colWidths[1], currentY + rowHeight).stroke('#CBD5E1');
       x += colWidths[1];
 
-      doc.text(emp.scheduled_days.toString(), x, currentY + 6, { width: colWidths[2], align: 'center' });
-      doc.moveTo(x + colWidths[2], currentY).lineTo(x + colWidths[2], currentY + rowHeight).stroke();
+      // SCHEDULED
+      doc.text(emp.scheduled_days.toString(), x, currentY + 7, { width: colWidths[2], align: 'center' });
+      doc.moveTo(x + colWidths[2], currentY).lineTo(x + colWidths[2], currentY + rowHeight).stroke('#CBD5E1');
       x += colWidths[2];
 
-      doc.text(emp.present_days.toString(), x, currentY + 6, { width: colWidths[3], align: 'center' });
-      doc.moveTo(x + colWidths[3], currentY).lineTo(x + colWidths[3], currentY + rowHeight).stroke();
+      // PRESENT
+      doc.text(emp.present_days.toString(), x, currentY + 7, { width: colWidths[3], align: 'center' });
+      doc.moveTo(x + colWidths[3], currentY).lineTo(x + colWidths[3], currentY + rowHeight).stroke('#CBD5E1');
       x += colWidths[3];
 
-      doc.text(emp.late_days.toString(), x, currentY + 6, { width: colWidths[4], align: 'center' });
-      doc.moveTo(x + colWidths[4], currentY).lineTo(x + colWidths[4], currentY + rowHeight).stroke();
+      // LATE
+      if(emp.late_days > 0) doc.fillColor('#DC2626'); // Highlight lates in red
+      doc.text(emp.late_days.toString(), x, currentY + 7, { width: colWidths[4], align: 'center' });
+      doc.fillColor('#0F172A');
+      doc.moveTo(x + colWidths[4], currentY).lineTo(x + colWidths[4], currentY + rowHeight).stroke('#CBD5E1');
       x += colWidths[4];
 
-      doc.text(emp.leave_days.toString(), x, currentY + 6, { width: colWidths[5], align: 'center' });
-      doc.moveTo(x + colWidths[5], currentY).lineTo(x + colWidths[5], currentY + rowHeight).stroke();
+      // LEAVE
+      doc.text(emp.leave_days.toString(), x, currentY + 7, { width: colWidths[5], align: 'center' });
+      doc.moveTo(x + colWidths[5], currentY).lineTo(x + colWidths[5], currentY + rowHeight).stroke('#CBD5E1');
       x += colWidths[5];
 
-      doc.text(`${emp.compliance_rate}%`, x, currentY + 6, { width: colWidths[6], align: 'center' });
+      // COMP RATE
+      const rate = parseFloat(emp.compliance_rate);
+      if (rate < 85) doc.fillColor('#DC2626');
+      else if (rate === 100) doc.fillColor('#059669');
+      doc.font('Helvetica-Bold').text(`${rate.toFixed(1)}%`, x, currentY + 7, { width: colWidths[6], align: 'center' });
+      doc.font('Helvetica').fillColor('#0F172A');
 
       currentY += rowHeight;
+      alternate = !alternate;
     }
 
-    doc.moveDown(2);
+    doc.moveDown(3);
 
+    // --- FORMAL EXECUTIVE SUMMARY BOX ---
     currentY = doc.y;
+    if (currentY > 650) { doc.addPage(); currentY = 40; }
+
     const totalScheduled = reportData.reduce((s, e) => s + e.scheduled_days, 0);
     const totalPresent = reportData.reduce((s, e) => s + e.present_days, 0);
     const totalLate = reportData.reduce((s, e) => s + e.late_days, 0);
@@ -4141,52 +4449,59 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
     const totalAbsent = totalScheduled - totalPresent - totalLeave;
     const overallRate = totalScheduled > 0 ? (totalPresent / totalScheduled) * 100 : 0;
 
-    doc.font('Helvetica-Bold').fontSize(10);
-    doc.text('EXECUTIVE SUMMARY', startX, currentY, { underline: true });
+    // Draw Summary Box
+    doc.rect(startX, currentY, 515, 120).fillAndStroke('#F8FAFC', '#CBD5E1');
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(10);
+    doc.text('EXECUTIVE DEPARTMENT SUMMARY', startX + 15, currentY + 15);
     
-    currentY += 18;
+    doc.moveTo(startX + 15, currentY + 30).lineTo(startX + 500, currentY + 30).lineWidth(0.5).stroke('#CBD5E1');
     
+    let sumY = currentY + 40;
     doc.font('Helvetica').fontSize(9);
-    const labelWidth = 110;
-    const valueWidth = 30;
-
-    const drawSummaryRow = (label, value) => {
-      doc.text(label, startX, currentY, { width: labelWidth, align: 'left' });
-      doc.text(value.toString(), startX + labelWidth, currentY, { width: valueWidth, align: 'right' });
-      currentY += 14;
-    };
-
-    drawSummaryRow('Total Scheduled Days:', totalScheduled);
-    drawSummaryRow('Total Present Days:', totalPresent);
-    drawSummaryRow('Total Late Days:', totalLate);
-    drawSummaryRow('Total Leave Days:', totalLeave);
-    drawSummaryRow('Total Absent Days:', totalAbsent);
     
-    currentY += 4;
-    doc.font('Helvetica-Bold');
-    doc.text('Overall Compliance Rate:', startX, currentY, { width: labelWidth, align: 'left' });
-    doc.text(`${overallRate.toFixed(1)}%`, startX + labelWidth, currentY, { width: valueWidth, align: 'right' });
+    // Column 1
+    doc.text('Total Scheduled Shifts:', startX + 15, sumY);
+    doc.font('Helvetica-Bold').text(totalScheduled.toString(), startX + 140, sumY);
     
-    if (overallRate < 85) {
-      doc.font('Helvetica').fillColor('#DC2626').text(' (Below department target of 85%)', startX + labelWidth + valueWidth + 5, currentY);
-      doc.fillColor('#000000');
-    }
+    doc.font('Helvetica').text('Total Shifts Attended:', startX + 15, sumY + 15);
+    doc.font('Helvetica-Bold').fillColor('#059669').text(totalPresent.toString(), startX + 140, sumY + 15).fillColor('#0F172A');
+    
+    doc.font('Helvetica').text('Total Approved Leaves:', startX + 15, sumY + 30);
+    doc.font('Helvetica-Bold').text(totalLeave.toString(), startX + 140, sumY + 30);
+
+    // Column 2
+    doc.font('Helvetica').text('Total Late Incidents:', startX + 250, sumY);
+    doc.font('Helvetica-Bold').fillColor(totalLate > 0 ? '#DC2626' : '#0F172A').text(totalLate.toString(), startX + 360, sumY).fillColor('#0F172A');
+    
+    doc.font('Helvetica').text('Total Unexcused Absences:', startX + 250, sumY + 15);
+    doc.font('Helvetica-Bold').fillColor(totalAbsent > 0 ? '#DC2626' : '#0F172A').text(totalAbsent.toString(), startX + 360, sumY + 15).fillColor('#0F172A');
+
+    // Overall Compliance
+    doc.font('Helvetica-Bold').fontSize(10).text('Overall Department Compliance:', startX + 250, sumY + 45);
+    const rateColor = overallRate >= 85 ? '#059669' : '#DC2626';
+    doc.fontSize(14).fillColor(rateColor).text(`${overallRate.toFixed(1)}%`, startX + 430, sumY + 42);
+    doc.fillColor('#0F172A');
 
     doc.moveDown(5);
-    currentY = doc.y;
-    
-    doc.moveTo(startX, currentY).lineTo(startX + 120, currentY).stroke();
-    doc.moveTo(startX + 175, currentY).lineTo(startX + 295, currentY).stroke();
-    doc.moveTo(startX + 350, currentY).lineTo(startX + 470, currentY).stroke();
-    
-    doc.font('Helvetica').fontSize(8);
-    doc.text('Prepared By (HR)', startX, currentY + 5, { width: 120, align: 'center' });
-    doc.text('Reviewed By (Manager)', startX + 175, currentY + 5, { width: 120, align: 'center' });
-    doc.text('Approved By (Director)', startX + 350, currentY + 5, { width: 120, align: 'center' });
 
-    doc.moveDown(4);
-    doc.fontSize(8).fillColor('gray').text(`Generated on ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}`, { align: 'center' });
-    doc.text('This is a system-generated official document.', { align: 'center' });
+    // --- SIGNATURE BLOCK ---
+    currentY = doc.y;
+    if (currentY > 700) { doc.addPage(); currentY = 50; }
+
+    doc.moveTo(startX, currentY).lineTo(startX + 140, currentY).lineWidth(1).stroke('#0F172A');
+    doc.moveTo(startX + 187, currentY).lineTo(startX + 327, currentY).stroke('#0F172A');
+    doc.moveTo(startX + 375, currentY).lineTo(startX + 515, currentY).stroke('#0F172A');
+    
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('Prepared By (HR Admin)', startX, currentY + 5, { width: 140, align: 'center' });
+    doc.text('Reviewed By (Department Head)', startX + 187, currentY + 5, { width: 140, align: 'center' });
+    doc.text('Approved By (Director)', startX + 375, currentY + 5, { width: 140, align: 'center' });
+
+    // --- FOOTER ---
+    const dateStr = new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila', dateStyle: 'full', timeStyle: 'short' });
+    doc.fontSize(7).font('Helvetica').fillColor('#94A3B8');
+    doc.text(`CONFIDENTIAL - SYSTEM GENERATED DOCUMENT`, 40, 780, { align: 'center' });
+    doc.text(`Generated on ${dateStr} via UniVITA Analytics`, 40, 790, { align: 'center' });
 
     doc.end();
   } catch (err) {
@@ -4504,26 +4819,35 @@ app.get('/api/audit-logs', authenticateToken, (req, res) => {
 
 app.put('/api/users/:id/role', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
   
   const { role } = req.body;
   const userId = req.params.id;
   
-  if (!['admin', 'hr_admin', 'security', 'instructor'].includes(role)) {
-    return res.status(400).json({ error: 'Invalid role' });
+  // 1. Strict Self-Edit Validation (Prevent admin lockout)
+  if (req.user.id.toString() === userId.toString()) {
+    return res.status(400).json({ success: false, message: 'You cannot change your own role.' });
   }
 
-  const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
-  if (oldRecord.length === 0) return res.status(404).json({ error: 'User not found' });
-  const oldData = oldRecord[0];
+  // 2. Strict Role Set Validation
+  if (!['admin', 'hr_admin', 'security', 'instructor'].includes(role)) {
+    return res.status(400).json({ success: false, message: 'Invalid role assignment.' });
+  }
 
-  db.query("UPDATE users SET role = ? WHERE id = ?", [role, userId], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
+    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+    const oldData = oldRecord[0];
+
+    await db.promise().query("UPDATE users SET role = ? WHERE id = ?", [role, userId]);
     
     logAction(req.user.id, 'UPDATE_USER_ROLE', 'user', userId, req, { role: oldData.role }, { role });
-    res.json({ success: true });
-  });
+    res.json({ success: true, message: 'User role successfully updated.' });
+  } catch (err) {
+    console.error("Role update error:", err);
+    res.status(500).json({ success: false, message: 'Server error while updating role.' });
+  }
 });
 
 const createConfigTable = `
@@ -4551,19 +4875,45 @@ app.get('/api/system-config', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/system-config', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+app.put('/api/system-config', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+  }
+  
   const { password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts } = req.body;
-  const sql = `UPDATE system_config SET 
-    password_expiry_days = ?, 
-    otp_expiry_minutes = ?, 
-    geofence_default_radius = ?, 
-    max_login_attempts = ? 
-    WHERE id = 1`;
-  db.query(sql, [password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true });
-  });
+  
+  // Strict Input Validation to prevent system-breaking configurations
+  if (password_expiry_days === undefined || password_expiry_days < 0) {
+    return res.status(400).json({ success: false, message: 'Password expiry days cannot be negative.' });
+  }
+  if (!otp_expiry_minutes || otp_expiry_minutes < 1) {
+    return res.status(400).json({ success: false, message: 'OTP expiry must be at least 1 minute.' });
+  }
+  if (!geofence_default_radius || geofence_default_radius < 50) {
+    return res.status(400).json({ success: false, message: 'Geofence default radius must be at least 50 meters to account for GPS drift.' });
+  }
+  if (!max_login_attempts || max_login_attempts < 1) {
+    return res.status(400).json({ success: false, message: 'Max login attempts must be at least 1.' });
+  }
+
+  try {
+    const sql = `UPDATE system_config SET 
+      password_expiry_days = ?, 
+      otp_expiry_minutes = ?, 
+      geofence_default_radius = ?, 
+      max_login_attempts = ? 
+      WHERE id = 1`;
+      
+    await db.promise().query(sql, [password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts]);
+    
+    // Log the configuration change
+    logAction(req.user.id, 'UPDATE_SYSTEM_CONFIG', 'system_config', 1, req, null, req.body);
+    
+    res.json({ success: true, message: 'System configuration saved successfully.' });
+  } catch (err) {
+    console.error("System config update error:", err);
+    res.status(500).json({ success: false, message: 'Server error while updating configuration.' });
+  }
 });
 
 app.get('/api/visitor-requests', authenticateToken, (req, res) => {
@@ -4579,53 +4929,147 @@ app.get('/api/visitor-requests', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/visitor-requests/:id/arrive', authenticateToken, (req, res) => {
+app.put('/api/visitor-requests/:id/arrive', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { floor, destination, ble_id } = req.body; 
 
-  if (!destination || !ble_id || !floor) {
+  if (!destination || !destination.trim() || !ble_id || !ble_id.trim() || !floor) {
     return res.status(400).json({ success: false, message: "Floor, destination room, and BLE tag are required." });
   }
 
-  db.query("SELECT first_name, last_name FROM visitor_requests WHERE id = ?", [id], (err, rows) => {
-    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
-    
-    const visitorName = `${rows[0].first_name} ${rows[0].last_name || ''}`.trim();
-    const sql = `UPDATE visitor_requests SET arrived = TRUE, arrived_at = NOW(), destination = ?, ble_id = ? WHERE id = ?`;
-    
-    db.query(sql, [destination.trim(), ble_id.trim(), id], (err) => {
-      if (err) return res.status(500).json({ success: false, message: "Failed to check in visitor." });
+  const cleanFloor = String(floor).trim();
+  const cleanRoom = destination.trim();
+  const cleanBleId = ble_id.trim();
 
-      logAction(req.user.id, 'VISITOR_ARRIVE', 'visitor_request', id, req);
-      visitorDestinations[ble_id] = destination;
+  try {
+    // Check request state
+    const [reqRows] = await db.promise().query(
+      "SELECT id, first_name, last_name, status, arrived, returned, no_show FROM visitor_requests WHERE id = ?",
+      [id]
+    );
+    if (reqRows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
+    const visitor = reqRows[0];
 
-      liveVisitors[ble_id] = {
-        id: ble_id,
-        name: visitorName,
-        bleId: ble_id,
-        floor: String(floor),
-        currentRoom: destination.trim(),
-        destination: destination.trim(),
-        lastSeen: Date.now() + 60000 
-      };
+    if (visitor.status !== 'APPROVED') {
+      return res.status(400).json({ success: false, message: `Cannot check in visitor. Status is '${visitor.status}' (must be APPROVED).` });
+    }
+    if (visitor.arrived == 1 && visitor.returned != 1) {
+      return res.status(400).json({ success: false, message: "Visitor is already checked in." });
+    }
+    if (visitor.no_show == 1) {
+      return res.status(400).json({ success: false, message: "Cannot check in a visitor who was marked as No Show." });
+    }
 
-      console.log(`✅ Checked In: ${visitorName} on Floor ${floor} at ${destination}`);
-      res.json({ success: true, message: "Visitor successfully checked in." });
-    });
-  });
+    // Verify tag exists
+    const [tagRows] = await db.promise().query("SELECT id FROM ble_tags WHERE ble_id = ?", [cleanBleId]);
+    if (tagRows.length === 0) {
+      return res.status(404).json({ success: false, message: `BLE Tag '${cleanBleId}' is not registered in the inventory.` });
+    }
+
+    // Verify tag is not in use
+    const [activeWithTag] = await db.promise().query(
+      "SELECT id, first_name, last_name FROM visitor_requests WHERE ble_id = ? AND arrived = 1 AND returned = 0 AND id != ?",
+      [cleanBleId, id]
+    );
+    if (activeWithTag.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `BLE Tag '${cleanBleId}' is already assigned to active visitor ${activeWithTag[0].first_name} ${activeWithTag[0].last_name}.`
+      });
+    }
+
+    const visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
+    const coords = getRoomCoords(cleanFloor, cleanRoom);
+
+    await db.promise().query(
+      `UPDATE visitor_requests 
+       SET arrived = 1, arrived_at = NOW(), destination = ?, ble_id = ?, returned = 0, no_show = 0 
+       WHERE id = ?`,
+      [cleanRoom, cleanBleId, id]
+    );
+
+    logAction(req.user.id, 'VISITOR_ARRIVE', 'visitor_request', id, req);
+    visitorDestinations[cleanBleId] = cleanRoom;
+
+    liveVisitors[cleanBleId] = {
+      id: cleanBleId,
+      name: visitorName,
+      bleId: cleanBleId,
+      floor: cleanFloor,
+      currentRoom: cleanRoom,
+      destination: cleanRoom,
+      x: coords.x,
+      y: coords.y,
+      lastSeen: Date.now() + 60000 
+    };
+
+    logVisitorHistory(cleanBleId, visitorName, cleanBleId, cleanFloor, cleanRoom, 'connect', coords.x, coords.y);
+    res.json({ success: true, message: "Visitor checked in successfully and BLE tag activated." });
+
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
-app.put('/api/visitor-requests/:id/no-show', authenticateToken, (req, res) => {
+app.put('/api/visitor-requests/:id/no-show', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  db.query(
-    "UPDATE visitor_requests SET no_show = TRUE, no_show_at = NOW(), arrived = FALSE, arrived_at = NULL WHERE id = ?",
-    [id],
-    (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ success: true });
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, arrived, returned FROM visitor_requests WHERE id = ?",
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
+    const visitor = rows[0];
+
+    if (visitor.arrived == 1 && visitor.returned != 1) {
+      return res.status(400).json({ success: false, message: "Cannot mark as No Show: Visitor is currently checked in on campus." });
     }
-  );
+    if (visitor.returned == 1) {
+      return res.status(400).json({ success: false, message: "Cannot mark as No Show: Visit has already been completed." });
+    }
+
+    await db.promise().query(
+      "UPDATE visitor_requests SET no_show = 1, no_show_at = NOW(), arrived = 0, ble_id = NULL WHERE id = ?",
+      [id]
+    );
+
+    logAction(req.user.id, 'VISITOR_NO_SHOW', 'visitor_request', id, req);
+    res.json({ success: true, message: "Visitor marked as No Show." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/visitor-requests/:id/destination', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { destination, ble_id } = req.body;
+  if (!destination || !destination.trim()) {
+    return res.status(400).json({ success: false, message: "Destination room is required." });
+  }
+
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, ble_id FROM visitor_requests WHERE id = ? OR ble_id = ?",
+      [id, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor not found." });
+    const vis = rows[0];
+    const targetBle = ble_id || vis.ble_id;
+
+    await db.promise().query("UPDATE visitor_requests SET destination = ? WHERE id = ?", [destination.trim(), vis.id]);
+
+    if (targetBle) {
+      visitorDestinations[targetBle] = destination.trim();
+      if (liveVisitors[targetBle]) {
+        liveVisitors[targetBle].destination = destination.trim();
+      }
+    }
+
+    logAction(req.user.id, 'UPDATE_VISITOR_DESTINATION', 'visitor_request', vis.id, req);
+    res.json({ success: true, message: "Visitor destination re-routed successfully." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 app.post('/api/instructor/location', authenticateToken, async (req, res) => {
@@ -4987,7 +5431,7 @@ app.get('/api/visitor-requests/history', authenticateToken, (req, res) => {
 // ============================================
 
 app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'), async (req, res) => {
-  const { date, start_time, end_time, reason, scenario_type } = req.body;
+  const { date, start_time, end_time, reason, scenario_type, schedule_id } = req.body;
   const userId = req.user.id;
   const attachment = req.file ? `/uploads/${req.file.filename}` : null;
 
@@ -5013,25 +5457,52 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
 
   try {
     let attendanceId = null;
-    
-    // For ongoing requests, ensure the user actually has an active clock-in today
+    let targetScheduleId = schedule_id;
+
+    const [userRows] = await db.promise().query("SELECT employee_id FROM users WHERE id = ?", [userId]);
+    if (userRows.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+    const employeeId = userRows[0].employee_id;
+
+    // Resolve or validate the specific schedule_id
+    if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
+      const [schedRows] = await db.promise().query(
+        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
+        [employeeId, date]
+      );
+      if (schedRows.length > 0) {
+        targetScheduleId = schedRows[0].id;
+      }
+    } else {
+      const [schedVerify] = await db.promise().query(
+        "SELECT id FROM schedules WHERE id = ? AND user_id = ? AND date = ?",
+        [targetScheduleId, employeeId, date]
+      );
+      if (schedVerify.length === 0) {
+        return res.status(400).json({ success: false, message: 'Invalid schedule selected for this date.' });
+      }
+    }
+
+    // For ongoing requests, ensure the user has an active clock-in for this specific schedule
     if (scenario_type === 'ongoing') {
+      if (!targetScheduleId) {
+        return res.status(400).json({ success: false, message: 'A specific shift schedule is required for ongoing overtime.' });
+      }
       const [attRecords] = await db.promise().query(
         `SELECT id, time_in, time_out FROM attendance 
-         WHERE user_id = (SELECT employee_id FROM users WHERE id = ?) AND date = ? AND time_out IS NULL`,
-        [userId, date]
+         WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL`,
+        [employeeId, targetScheduleId]
       );
       if (attRecords.length === 0) {
-        return res.status(400).json({ success: false, message: 'No active clock-in found for today. Cannot request ongoing overtime.' });
+        return res.status(400).json({ success: false, message: 'No active clock-in found for this specific shift. Cannot request ongoing overtime.' });
       }
       attendanceId = attRecords[0].id;
     }
 
     const [result] = await db.promise().query(
       `INSERT INTO overtime_requests 
-       (user_id, date, start_time, end_time, reason, attachment, scenario_type, attendance_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-      [userId, date, start_time, end_time, reason, attachment, scenario_type, attendanceId]
+       (user_id, date, schedule_id, start_time, end_time, reason, attachment, scenario_type, attendance_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      [userId, date, targetScheduleId || null, start_time, end_time, reason, attachment, scenario_type, attendanceId]
     );
 
     logAction(userId, 'SUBMIT_OVERTIME', 'overtime_request', result.insertId, req);
@@ -5325,7 +5796,7 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
       
       const { user_id: employee_id, request_date, type } = leaveRows[0];
       
-      // FIX: Get the INT ID for the employee_leave_balances table
+      // Get the INT ID for the employee_leave_balances table
       const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
       if (userRows.length === 0) {
         throw new Error(`User account not found for employee ${employee_id}.`);
@@ -5344,7 +5815,6 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
         if (typeRows.length > 0) {
           const leaveTypeId = typeRows[0].id;
           
-          // Use internalUserId (INT) for the balance lookup and lock the row to prevent race conditions
           const [balanceRows] = await connection.query(
             `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ? FOR UPDATE`,
             [internalUserId, leaveTypeId, leaveYear]
@@ -5357,23 +5827,40 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
               [newBalance, internalUserId, leaveTypeId, leaveYear]
             );
           } else {
-            // Throwing here triggers the transaction rollback safely
             throw new Error(`Insufficient ${type} balance for ${employee_id} to approve all selected days.`);
           }
         } else {
             throw new Error(`Invalid leave type: ${type}`);
         }
 
-        await connection.query(
-          `INSERT INTO attendance (user_id, date, status, location) VALUES (?, ?, 'on leave', 'Remote/Leave') ON DUPLICATE KEY UPDATE status = 'on leave'`,
-          [employee_id, request_date] // Uses employee_id (VARCHAR) for the attendance table
+        // MULTI-SHIFT FIX: Find ALL schedules for this instructor on this leave date and mark each one 'on leave'
+        const [targetSchedules] = await connection.query(
+          `SELECT id FROM schedules WHERE user_id = ? AND date = ?`,
+          [employee_id, request_date]
         );
+
+        if (targetSchedules.length > 0) {
+          for (const sched of targetSchedules) {
+            await connection.query(
+              `INSERT INTO attendance (user_id, schedule_id, date, status, location) 
+               VALUES (?, ?, ?, 'on leave', 'Remote/Leave') 
+               ON DUPLICATE KEY UPDATE status = 'on leave'`,
+              [employee_id, sched.id, request_date]
+            );
+          }
+        } else {
+          await connection.query(
+            `INSERT INTO attendance (user_id, date, status, location) 
+             VALUES (?, ?, 'on leave', 'Remote/Leave') 
+             ON DUPLICATE KEY UPDATE status = 'on leave'`,
+            [employee_id, request_date]
+          );
+        }
       }
     }
     
     await connection.commit();
     
-    // Log the batch action securely
     logAction(req.user.id, `BATCH_${status.toUpperCase()}_LEAVE`, 'leave_request', `Batch IDs: ${ids.join(',')}`, req);
     
     res.json({ success: true, message: `Successfully ${status.toLowerCase()} ${ids.length} leave requests.` });

@@ -68,6 +68,37 @@
 input:checked + .set-toggle-slider { background-color: #0D9488; }
 input:checked + .set-toggle-slider:before { transform: translateX(20px); }
 
+/* Password Checklist Styles */
+.sec-checklist-card {
+  background: #F8FAFC;
+  border-radius: 10px;
+  padding: 12px 14px;
+  border: 1px solid #E2E8F0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: -0.25rem;
+}
+
+.sec-checkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sec-checkText {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8rem;
+  color: #64748B;
+}
+
+.sec-checkPassed {
+  color: #059669;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 @media (max-width: 768px) {
   .expert-container { padding: 1.5rem; }
   .set-tabs { overflow-x: auto; white-space: nowrap; }

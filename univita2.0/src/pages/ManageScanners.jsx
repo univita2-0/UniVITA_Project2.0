@@ -11,16 +11,42 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-const FLOOR_3_ROOMS = [
-  'AHA Room', 'Private Room', 'Operating Room', 'Delivery Room', 'MICU', 'ICU',
-  'Classroom', 'Library', 'Breakout Room 1', 'Breakout Room 2', 'Breakout Room 3',
-  'Faculty Room', 'Main Entrance'
+// Floor 3 Standardized Rooms (Matches 3rd Floor Blueprint)
+export const FLOOR_3_ROOMS = [
+  'Classroom',
+  'AHA Room',
+  'Private Room',
+  'Operating Room',
+  'Delivery Room',
+  'NICU',
+  'ICU',
+  'Library',
+  'Breakout Room 1',
+  'Breakout Room 2',
+  'Breakout Room 3',
+  'Faculty Room',
+  'Main Entrance'
 ];
 
-const FLOOR_5_ROOMS = [
-  'Lounge / IV Drip', 'Operating Room', 'Delivery Room', 'ICU', 'Educ Head',
-  'Executive', 'Conference', 'Creatives', 'Debrief Room', 'Entrance',
-  'AHA Room', 'Classroom 1', 'Classroom 2', 'HR / Admin Finance', 'Pantry'
+// Floor 5 Standardized Rooms (Matches 5th Floor Blueprint)
+export const FLOOR_5_ROOMS = [
+  'Lounge / IV Drip',
+  'Operating Room',
+  'Delivery Room',
+  'ICU',
+  'Educ Head',
+  'Executive',
+  'Conference',
+  'Creatives',
+  'Debrief Room',
+  'Lobby',
+  'Entrance',
+  'AHA Room',
+  'Classroom 1',
+  'Classroom 2',
+  'HR / Admin',
+  'Pantry',
+  'Toilet'
 ];
 
 const ManageScanners = () => {

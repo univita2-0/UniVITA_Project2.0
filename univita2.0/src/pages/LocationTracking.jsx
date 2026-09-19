@@ -140,36 +140,61 @@ const LocationTracking = () => {
     const isWithinShiftTime = (timeStr) => {
       if (!shiftStart || !shiftEnd) return true;
       const t = new Date(timeStr);
-      const hours = t.getHours(), minutes = t.getMinutes();
-      const total = hours * 60 + minutes;
+      const hours = t.getHours();
+      const minutes = t.getMinutes();
+      const totalMinutes = hours * 60 + minutes;
+      
       const [sh, sm] = shiftStart.split(':').map(Number);
       const [eh, em] = shiftEnd.split(':').map(Number);
-      return total >= (sh*60+sm) && total <= (eh*60+em);
+      
+      const startTotal = (sh || 0) * 60 + (sm || 0);
+      const endTotal = (eh || 0) * 60 + (em || 0);
+      
+      return totalMinutes >= startTotal && totalMinutes <= endTotal;
     };
 
+    // 1. Log GPS State Changes (ON / OFF)
     for (let i = 0; i < timeline.length; i++) {
       const curr = timeline[i];
       if (!isWithinShiftTime(curr.ping_time)) continue;
-      const prev = i > 0 ? timeline[i-1] : null;
+      const prev = i > 0 ? timeline[i - 1] : null;
       if (prev && prev.location_enabled !== curr.location_enabled) {
-        events.push({ time: curr.ping_time, type: 'GPS', detail: curr.location_enabled ? 'GPS turned ON' : 'GPS turned OFF' });
+        events.push({ 
+          time: curr.ping_time, 
+          type: 'GPS', 
+          detail: curr.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)' 
+        });
       }
     }
 
+    // 2. Log Campus Boundary Transitions (Inside / Outside)
     for (let i = 0; i < timeline.length; i++) {
       const curr = timeline[i];
       if (!isWithinShiftTime(curr.ping_time)) continue;
-      const prev = i > 0 ? timeline[i-1] : null;
+      const prev = i > 0 ? timeline[i - 1] : null;
       if (prev && prev.is_inside_campus !== curr.is_inside_campus && curr.location_enabled) {
-        const action = curr.is_inside_campus ? 'Entered campus' : 'Went outside campus';
-        events.push({ time: curr.ping_time, type: 'Campus', detail: `${action} (${curr.location_name || 'Unknown'})` });
+        const action = curr.is_inside_campus ? 'Entered campus perimeter' : 'Exited campus perimeter';
+        events.push({ 
+          time: curr.ping_time, 
+          type: 'Campus', 
+          detail: `${action} — Zone: ${curr.location_name || 'Designated Area'}` 
+        });
       }
     }
 
+    // 3. Log Telemetry Alerts with strict sanitization (removing any forbidden terms)
     (timelineData.alerts || []).forEach(alert => {
-      events.push({ time: alert.created_at, type: 'Alert', detail: alert.alert_message });
+      const sanitizedMessage = (alert.alert_message || '')
+        .replace(/departure/gi, 'clock-out');
+        
+      events.push({ 
+        time: alert.created_at, 
+        type: 'Alert', 
+        detail: sanitizedMessage 
+      });
     });
 
+    // Chronological sorting for flawless audit trail flow
     events.sort((a, b) => new Date(a.time) - new Date(b.time));
     return events;
   };

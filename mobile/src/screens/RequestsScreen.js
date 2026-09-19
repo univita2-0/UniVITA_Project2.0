@@ -64,7 +64,7 @@ const getPHNowString = () => {
 export default function RequestsScreen({ navigation, route }) {
   const prefill = route.params || {};
 
-  const [correctionScheduleId, setCorrectionScheduleId] = useState(prefill.prefillScheduleId || null);
+  
   const insets = useSafeAreaInsets();
   
   const { isDark } = useContext(ThemeContext);
@@ -124,6 +124,7 @@ export default function RequestsScreen({ navigation, route }) {
   const [correctionType, setCorrectionType] = useState(prefill.prefillType || 'clock_in');
   const [correctionTime, setCorrectionTime] = useState(prefill.prefillTime || '');
   const [correctionReason, setCorrectionReason] = useState(prefill.prefillReason || '');
+  const [correctionScheduleId, setCorrectionScheduleId] = useState(prefill.prefillScheduleId || null);
   const [correctionSelfie, setCorrectionSelfie] = useState(null);
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
   const [showCorrectionCalendar, setShowCorrectionCalendar] = useState(false);
@@ -367,6 +368,11 @@ export default function RequestsScreen({ navigation, route }) {
       formData.append('date', String(appealDate));
       formData.append('reason', String(appealReason.trim()));
       
+      // 👈 Append schedule_id if navigating with an active shift reference
+      if (prefill.prefillScheduleId) {
+        formData.append('schedule_id', String(prefill.prefillScheduleId));
+      }
+      
       if (appealTimeIn) formData.append('time_in', String(formatTimeForDB(appealTimeIn)));
       if (appealTimeOut) formData.append('time_out', String(formatTimeForDB(appealTimeOut)));
       
@@ -430,20 +436,41 @@ export default function RequestsScreen({ navigation, route }) {
       const formattedTime = formatTimeForDB(correctionTime);
 
       const payload = {
-  employee_id: employeeId,
-  date: correctionDate,
-  type: dbType,
-  time: formattedTime,
-  reason: finalReason,
-  schedule_id: correctionScheduleId, 
-  selfie: { uri: selfieUri, name: 'correction.jpg', type: 'image/jpeg' }
-};
+        employee_id: employeeId,
+        date: correctionDate,
+        type: dbType,
+        time: formattedTime,
+        reason: finalReason,
+        schedule_id: correctionScheduleId, // 👈 Explicit shift ID included
+        selfie: { 
+          uri: selfieUri, 
+          name: 'correction.jpg', 
+          type: 'image/jpeg' 
+        }
+      };
       
       const res = await requestAttendanceCorrection(payload);
       if (res && res.success) {
         Alert.alert('Success', res.message || 'Correction request submitted.');
-        setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionSelfie(null); setCorrectionType('clock_in');
-        navigation.setParams({ prefillTab: undefined, prefillDate: undefined, prefillType: undefined, prefillTime: undefined, prefillReason: undefined });
+        
+        // Reset all fields including schedule ID
+        setCorrectionDate(''); 
+        setCorrectionTime(''); 
+        setCorrectionReason(''); 
+        setCorrectionSelfie(null); 
+        setCorrectionType('clock_in');
+        setCorrectionScheduleId(null); // 👈 Clear local state
+
+        // Clear route prefill parameters
+        navigation.setParams({ 
+          prefillTab: undefined, 
+          prefillDate: undefined, 
+          prefillType: undefined, 
+          prefillTime: undefined, 
+          prefillReason: undefined, 
+          prefillScheduleId: undefined 
+        });
+        
         setActiveTab('leave');
       } else {
         Alert.alert('Submission Error', res?.message || 'Failed to submit correction.');
@@ -471,6 +498,11 @@ export default function RequestsScreen({ navigation, route }) {
       formData.append('end_time', String(formatTimeForDB(overtimeEnd)));
       formData.append('reason', String(overtimeReason.trim()));
       formData.append('scenario_type', String(overtimeScenario));
+      
+      // 👈 Append schedule_id for ongoing/after-shift overtime tracking
+      if (prefill.prefillScheduleId) {
+        formData.append('schedule_id', String(prefill.prefillScheduleId));
+      }
       
       if (overtimeImage) {
         formData.append('attachment', { 

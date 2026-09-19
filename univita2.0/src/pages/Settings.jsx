@@ -2,13 +2,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { User, Lock, Bell, Eye, EyeOff, Key, Settings as SettingsIcon, Save, ShieldCheck } from 'lucide-react';
+import { User, Lock, Bell, Eye, EyeOff, Key, Settings as SettingsIcon, Save, ShieldCheck, Check, X } from 'lucide-react';
 import './Settings.css';
 import { API_BASE } from '../api';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
 
 const Settings = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -33,6 +36,12 @@ const Settings = () => {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Password Complexity Validation Helpers
+  const hasLength = passwordData.newPassword.length >= 8;
+  const hasUppercase = /[A-Z]/.test(passwordData.newPassword);
+  const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(passwordData.newPassword);
+  const passwordsMatch = passwordData.newPassword.length > 0 && passwordData.newPassword === passwordData.confirmPassword;
+
   const [pinData, setPinData] = useState({
     currentPin: '',
     newPin: '',
@@ -46,7 +55,6 @@ const Settings = () => {
     emailAlerts: true,
     emergencyAlerts: true,
     leaveUpdates: true,
-    darkMode: false,
   });
 
   const userRole = localStorage.getItem('user_role');
@@ -102,19 +110,15 @@ const Settings = () => {
     }
   }, [fetchUserData]);
 
-  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const isValidPhone = (phone) => phone === '' || /^[\d\s\-\+\(\)]*$/.test(phone);
-  const isValidPin = (pin) => /^\d{4,6}$/.test(pin);
-
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     if (!profileData.full_name.trim() || !profileData.email.trim()) {
-      return toast.warning('Name and Email are required fields.');
+      return toast.warning('Full name and email are required fields.');
     }
-    if (!isValidEmail(profileData.email)) {
-      return toast.warning('Please enter a valid email address.');
+    if (!EMAIL_REGEX.test(profileData.email.trim())) {
+      return toast.warning('Please enter a valid email address format.');
     }
-    if (!isValidPhone(profileData.phone)) {
+    if (profileData.phone.trim() && !PHONE_REGEX.test(profileData.phone.trim())) {
       return toast.warning('Please enter a valid phone number.');
     }
 
@@ -122,20 +126,20 @@ const Settings = () => {
     try {
       await axios.put(`${API_BASE}/employees/${user.id}`, {
         full_name: profileData.full_name.trim(),
-        email: profileData.email.trim(),
-        phone: profileData.phone.trim(),
+        email: profileData.email.trim().toLowerCase(),
+        phone_number: profileData.phone.trim() || null,
       }, getAuthHeaders());
       
       localStorage.setItem('user_name', profileData.full_name.trim());
-      localStorage.setItem('user_email', profileData.email.trim());
+      localStorage.setItem('user_email', profileData.email.trim().toLowerCase());
       
       setUser(prev => ({
         ...prev,
         full_name: profileData.full_name.trim(),
-        email: profileData.email.trim()
+        email: profileData.email.trim().toLowerCase()
       }));
 
-      toast.success('Profile updated successfully.');
+      toast.success('Profile information updated successfully.');
     } catch (err) {
       toast.error(err.response?.data?.message || err.response?.data?.error || 'Profile update failed.');
     } finally {
@@ -148,24 +152,27 @@ const Settings = () => {
     if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
       return toast.warning('All password fields are required.');
     }
-    if (passwordData.newPassword.length < 6) {
-      return toast.warning('New password must be at least 6 characters.');
+    if (!hasLength || !hasUppercase || !hasSpecial) {
+      return toast.warning('New password does not meet all security complexity requirements.');
     }
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
+    if (passwordData.currentPassword === passwordData.newPassword) {
+      return toast.warning('New password must differ from your current password.');
+    }
+    if (!passwordsMatch) {
       return toast.warning('New passwords do not match.');
     }
 
     setLoadingPassword(true);
     try {
-      await axios.put(`${API_BASE}/users/${user.id}/update-password`, {
+      const res = await axios.put(`${API_BASE}/users/${user.id}/update-password`, {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword,
       }, getAuthHeaders());
       
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      toast.success('Password changed successfully.');
+      toast.success(res.data.message || 'Password changed successfully.');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Invalid current password.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Incorrect current password.');
     } finally {
       setLoadingPassword(false);
     }
@@ -176,8 +183,11 @@ const Settings = () => {
     if (!pinData.currentPin || !pinData.newPin || !pinData.confirmPin) {
       return toast.warning('All PIN fields are required.');
     }
-    if (!isValidPin(pinData.newPin)) {
-      return toast.warning('New PIN must be strictly 4-6 digits.');
+    if (!/^\d{4,6}$/.test(pinData.newPin)) {
+      return toast.warning('New PIN must be strictly 4 to 6 numeric digits.');
+    }
+    if (pinData.currentPin === pinData.newPin) {
+      return toast.warning('New PIN must differ from your current PIN.');
     }
     if (pinData.newPin !== pinData.confirmPin) {
       return toast.warning('New PINs do not match.');
@@ -185,7 +195,7 @@ const Settings = () => {
 
     setLoadingPin(true);
     try {
-      await axios.put(`${API_BASE}/users/update-pin`, {
+      const res = await axios.put(`${API_BASE}/users/update-pin`, {
         email: user.email,
         currentPin: pinData.currentPin,
         newPin: pinData.newPin,
@@ -193,9 +203,9 @@ const Settings = () => {
       
       setPinData({ currentPin: '', newPin: '', confirmPin: '' });
       setShowPinChange(false);
-      toast.success('Security PIN changed successfully.');
+      toast.success(res.data.message || 'Security PIN changed successfully.');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'PIN change failed.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'PIN update failed.');
     } finally {
       setLoadingPin(false);
     }
@@ -215,6 +225,7 @@ const Settings = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
+            
             <p className="expert-subtitle">Manage your profile, security credentials, and personal interface preferences.</p>
           </div>
         </div>
@@ -304,6 +315,7 @@ const Settings = () => {
                     </button>
                   </div>
                 </div>
+
                 <div className="set-form-group">
                   <label>New Password <span className="set-required">*</span></label>
                   <div className="set-input-icon-wrapper">
@@ -312,15 +324,30 @@ const Settings = () => {
                       className="expert-clean-input border"
                       value={passwordData.newPassword}
                       onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                      minLength={6}
                       required
                     />
                     <button type="button" className="set-eye-btn" onClick={() => setShowNew(!showNew)} tabIndex="-1">
                       {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
-                  <span className="set-hint">Must be at least 6 characters long.</span>
                 </div>
+
+                {/* Password Complexity Checklist Card */}
+                <div className="sec-checklist-card">
+                  <div className="sec-checkRow">
+                    {hasLength ? <Check size={14} color="#059669" /> : <X size={14} color="#64748B" />}
+                    <span className={hasLength ? 'sec-checkPassed' : 'sec-checkText'}>At least 8 characters</span>
+                  </div>
+                  <div className="sec-checkRow">
+                    {hasUppercase ? <Check size={14} color="#059669" /> : <X size={14} color="#64748B" />}
+                    <span className={hasUppercase ? 'sec-checkPassed' : 'sec-checkText'}>At least 1 uppercase letter</span>
+                  </div>
+                  <div className="sec-checkRow">
+                    {hasSpecial ? <Check size={14} color="#059669" /> : <X size={14} color="#64748B" />}
+                    <span className={hasSpecial ? 'sec-checkPassed' : 'sec-checkText'}>At least 1 special character (!@#$...)</span>
+                  </div>
+                </div>
+
                 <div className="set-form-group">
                   <label>Confirm New Password <span className="set-required">*</span></label>
                   <div className="set-input-icon-wrapper">
@@ -335,9 +362,15 @@ const Settings = () => {
                       {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
+                  {passwordData.confirmPassword.length > 0 && (
+                    <span style={{ fontSize: '0.8rem', marginTop: '4px', color: passwordsMatch ? '#059669' : '#DC2626', fontWeight: 600 }}>
+                      {passwordsMatch ? '✓ Passwords match' : '✕ Passwords do not match'}
+                    </span>
+                  )}
                 </div>
+
                 <div className="set-form-actions">
-                  <button type="submit" className="expert-btn-primary" disabled={loadingPassword}>
+                  <button type="submit" className="expert-btn-primary" disabled={loadingPassword || !hasLength || !hasUppercase || !hasSpecial || !passwordsMatch}>
                     <Lock size={16} />
                     {loadingPassword ? 'Updating...' : 'Update Password'}
                   </button>
@@ -350,7 +383,7 @@ const Settings = () => {
                 <div className="set-card-header">
                   <h3>Payroll Security PIN</h3>
                 </div>
-                <p className="set-card-desc">Your 4-6 digit PIN is required to access sensitive payroll modules.</p>
+                <p className="set-card-desc">Your 4 to 6 digit numerical PIN is required to access sensitive payroll modules and records.</p>
                 
                 {!showPinChange ? (
                   <button className="expert-btn-secondary" onClick={() => setShowPinChange(true)}>
@@ -390,7 +423,7 @@ const Settings = () => {
                             {showNewPin ? <EyeOff size={16} /> : <Eye size={16} />}
                           </button>
                         </div>
-                        <span className="set-hint">Numeric only (4-6 digits).</span>
+                        <span className="set-hint">Numeric digits only (4 to 6 digits).</span>
                       </div>
                       <div className="set-form-group">
                         <label>Confirm PIN <span className="set-required">*</span></label>

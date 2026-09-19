@@ -25,7 +25,6 @@ const ChatPanel = ({ token }) => {
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [unreadMap, setUnreadMap] = useState({});
 
-  // Use refs to avoid stale closures inside WebSocket message listeners
   const activeRoomRef = useRef(activeRoom);
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
 
@@ -59,7 +58,7 @@ const ChatPanel = ({ token }) => {
       const data = await res.json();
       const map = {};
       let total = 0;
-      data.forEach(r => {
+      (data || []).forEach(r => {
         map[r.room_id] = r.unread || 0;
         total += r.unread || 0;
       });
@@ -83,23 +82,25 @@ const ChatPanel = ({ token }) => {
     wsRef.current = ws;
     
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'new_message') {
-        const msgRoomId = data.message.room_id;
-        
-        // Append message only if user is currently viewing this exact room
-        if (activeRoomRef.current && activeRoomRef.current.id === msgRoomId) {
-          setMessages((prev) => [...prev, data.message]);
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'new_message') {
+          const msgRoomId = data.message.room_id;
+          
+          if (activeRoomRef.current && activeRoomRef.current.id === msgRoomId) {
+            setMessages((prev) => [...prev, data.message]);
+          }
+          
+          if (!openRef.current || !activeRoomRef.current || activeRoomRef.current.id !== msgRoomId) {
+            setUnreadMap(prev => ({
+              ...prev,
+              [msgRoomId]: (prev[msgRoomId] || 0) + 1
+            }));
+            setUnreadTotal(prev => prev + 1);
+          }
         }
-        
-        // Increment unread count if panel is closed or user is in a different room
-        if (!openRef.current || !activeRoomRef.current || activeRoomRef.current.id !== msgRoomId) {
-          setUnreadMap(prev => ({
-            ...prev,
-            [msgRoomId]: (prev[msgRoomId] || 0) + 1
-          }));
-          setUnreadTotal(prev => prev + 1);
-        }
+      } catch (err) {
+        console.error('Web WS message parse error:', err);
       }
     };
     return () => ws.close();
@@ -124,11 +125,15 @@ const ChatPanel = ({ token }) => {
   }, [open, rooms, token]);
 
   const fetchRooms = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/chat/rooms`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const data = await res.json();
-    setRooms(data || []);
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/rooms`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setRooms(data || []);
+    } catch (err) {
+      console.error('Fetch rooms error:', err);
+    }
   }, [token]);
 
   useEffect(() => { if (token) fetchRooms(); }, [token, fetchRooms]);
@@ -178,8 +183,13 @@ const ChatPanel = ({ token }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // VALIDATION FLOW: Robust check before dispatching message via WebSocket
   const handleSend = () => {
-    if (!newMsg.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!newMsg || !newMsg.trim()) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      alert('Chat connection is inactive. Please re-open the panel.');
+      return;
+    }
     wsRef.current.send(JSON.stringify({
       type: 'message',
       roomId: activeRoom.id,
@@ -190,76 +200,98 @@ const ChatPanel = ({ token }) => {
   };
 
   const startDM = async (partner) => {
-    const dmRes = await fetch(`${API_BASE}/api/chat/dm-room`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ partnerUserId: partner.id })
-    });
-    const dmData = await dmRes.json();
-    if (dmData.roomId) {
-      const newRoom = {
-        id: dmData.roomId,
-        name: dmData.roomName,
-        display_name: partner.full_name,
-        type: 'direct'
-      };
-      setRooms(prev => [newRoom, ...prev.filter(r => r.id !== newRoom.id)]);
-      setActiveRoom(newRoom);
+    try {
+      const dmRes = await fetch(`${API_BASE}/api/chat/dm-room`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ partnerUserId: partner.id })
+      });
+      const dmData = await dmRes.json();
+      if (dmData.roomId) {
+        const newRoom = {
+          id: dmData.roomId,
+          name: dmData.roomName,
+          display_name: partner.full_name,
+          type: 'direct'
+        };
+        setRooms(prev => [newRoom, ...prev.filter(r => r.id !== newRoom.id)]);
+        setActiveRoom(newRoom);
+      }
+      setSearchTerm('');
+      setShowSearchResults(false);
+    } catch (err) {
+      console.error('Start DM error:', err);
     }
-    setSearchTerm('');
-    setShowSearchResults(false);
   };
 
+  // VALIDATION FLOW: Strict Group Creation Validation
   const createGroup = async () => {
-    if (!groupName.trim() || selectedUsers.length < 1) return;
+    if (!groupName || groupName.trim().length < 2) {
+      alert('Group name must be at least 2 characters.');
+      return;
+    }
+    if (selectedUsers.length < 1) {
+      alert('Please select at least one member for the group.');
+      return;
+    }
     
-    const res = await fetch(`${API_BASE}/api/chat/group-room`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ name: groupName.trim(), memberIds: selectedUsers.map(u => u.id) })
-    });
-    const data = await res.json();
-    if (data.success) {
-      fetchRooms();
-      setShowGroupModal(false);
-      setGroupName('');
-      setSelectedUsers([]);
-      setGroupSearch('');
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/group-room`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ name: groupName.trim(), memberIds: selectedUsers.map(u => u.id) })
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchRooms();
+        setShowGroupModal(false);
+        setGroupName('');
+        setSelectedUsers([]);
+        setGroupSearch('');
+      } else {
+        alert(data.error || 'Failed to create group');
+      }
+    } catch (err) {
+      alert('Network error while creating group.');
     }
   };
 
   const deleteRoom = async (roomId) => {
-    const res = await fetch(`${API_BASE}/api/chat/rooms/${roomId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (res.ok) {
-      setRooms(prev => prev.filter(r => r.id !== roomId));
-      if (activeRoom?.id === roomId) setActiveRoom(null);
-    }
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/rooms/${roomId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setRooms(prev => prev.filter(r => r.id !== roomId));
+        if (activeRoom?.id === roomId) setActiveRoom(null);
+      }
+    } catch (err) {}
   };
 
   const leaveRoom = async (roomId) => {
-    const res = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/leave`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (res.ok) {
-      setRooms(prev => prev.filter(r => r.id !== roomId));
-      if (activeRoom?.id === roomId) setActiveRoom(null);
-    }
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/leave`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setRooms(prev => prev.filter(r => r.id !== roomId));
+        if (activeRoom?.id === roomId) setActiveRoom(null);
+      }
+    } catch (err) {}
   };
 
   const togglePanel = () => setOpen(!open);
   
   const isSendDisabled = !newMsg.trim();
-  const isGroupCreateDisabled = !groupName.trim() || selectedUsers.length < 1;
+  const isGroupCreateDisabled = !groupName.trim() || groupName.trim().length < 2 || selectedUsers.length < 1;
 
   return (
     <>
@@ -399,7 +431,7 @@ const ChatPanel = ({ token }) => {
           <div className="cp-modal">
             <h4>Create Group Chat</h4>
             <div className="cp-form-group">
-              <label>Group Name</label>
+              <label>Group Name (Min 2 chars)</label>
               <input placeholder="e.g. Project Alpha" value={groupName} onChange={e => setGroupName(e.target.value)} />
             </div>
             <div className="cp-form-group">
@@ -461,3 +493,4 @@ const ChatPanel = ({ token }) => {
 };
 
 export default ChatPanel;
+

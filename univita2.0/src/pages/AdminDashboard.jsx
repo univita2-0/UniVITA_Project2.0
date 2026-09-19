@@ -37,21 +37,25 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
     setLoading(true);
     setError(null);
     try {
-      // Added attendance-appeals to the Promise array
+      // Fetch all pending operational requests across the system in parallel
       const [
         employeesRes,
         leaveRes,
         appointmentsHistoryRes,
         appointmentsPendingRes,
         overtimeRes,
-        appealsRes
+        appealsRes,
+        correctionsRes,
+        scheduleReqRes
       ] = await Promise.allSettled([
         axios.get(`${API_BASE}/employees`, getAuthHeaders()),
         axios.get(`${API_BASE}/leave-requests/all`, getAuthHeaders()),
         axios.get(`${API_BASE}/appointments/history`, getAuthHeaders()),
         axios.get(`${API_BASE}/appointments/pending`, getAuthHeaders()),
-        axios.get(`${API_BASE}/overtime-requests`, getAuthHeaders()),
-        axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders())
+        axios.get(`${API_BASE}/overtime-requests/pending`, getAuthHeaders()),
+        axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders()),
+        axios.get(`${API_BASE}/attendance/corrections/pending`, getAuthHeaders()),
+        axios.get(`${API_BASE}/schedule-requests/pending`, getAuthHeaders())
       ]);
 
       // Calculate Employee & System Stats
@@ -69,14 +73,11 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
       const allLeaves = leaveRes.status === 'fulfilled' ? leaveRes.value.data || [] : [];
       const pendingLeavesCount = allLeaves.filter(leave => leave.status === 'Pending').length;
 
-      const pendingVisitorReqs = appointmentsPendingRes.status === 'fulfilled' ? appointmentsPendingRes.value.data || [] : [];
-      const pendingVisitorsCount = pendingVisitorReqs.length;
-
-      const allOvertime = overtimeRes.status === 'fulfilled' ? overtimeRes.value.data || [] : [];
-      const pendingOvertimeCount = allOvertime.filter(ot => ot.status === 'Pending').length;
-
-      const pendingAppealsList = appealsRes.status === 'fulfilled' ? appealsRes.value.data || [] : [];
-      const pendingAppealsCount = pendingAppealsList.length;
+      const pendingVisitorsCount = appointmentsPendingRes.status === 'fulfilled' ? (appointmentsPendingRes.value.data || []).length : 0;
+      const pendingOvertimeCount = overtimeRes.status === 'fulfilled' ? (overtimeRes.value.data || []).length : 0;
+      const pendingAppealsCount = appealsRes.status === 'fulfilled' ? (appealsRes.value.data || []).length : 0;
+      const pendingCorrectionsCount = correctionsRes.status === 'fulfilled' ? (correctionsRes.value.data || []).length : 0;
+      const pendingScheduleRequestsCount = scheduleReqRes.status === 'fulfilled' ? (scheduleReqRes.value.data || []).length : 0;
 
       let systemStatus = 'Operational';
       try {
@@ -92,7 +93,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
         systemStatus
       });
 
-      // Construct Grouped Summary Array
+      // Construct Grouped Summary Array with all pending categories
       const summary = [];
       if (pendingVisitorsCount > 0) {
         summary.push({ id: 'visits', title: 'Visitor Request', count: pendingVisitorsCount, route: 'manage-request', icon: Users });
@@ -105,6 +106,12 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
       }
       if (pendingAppealsCount > 0) {
         summary.push({ id: 'appeals', title: 'Attendance Appeal', count: pendingAppealsCount, route: 'attendance-appeals', icon: AlertCircle });
+      }
+      if (pendingCorrectionsCount > 0) {
+        summary.push({ id: 'corrections', title: 'Correction Request', count: pendingCorrectionsCount, route: 'attendance-correction', icon: FileText });
+      }
+      if (pendingScheduleRequestsCount > 0) {
+        summary.push({ id: 'schedule', title: 'Schedule Request', count: pendingScheduleRequestsCount, route: 'schedule', icon: Calendar });
       }
 
       setPendingTasks(summary);
@@ -236,7 +243,6 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
               <span>Approve Visitor Entries</span>
               <ChevronRight size={16} />
             </button>
-            
             <button className="expert-action-btn" onClick={() => setView('employee-management')}>
               <span>Add New Employee</span>
               <ChevronRight size={16} />

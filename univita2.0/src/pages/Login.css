@@ -13,7 +13,7 @@
   font-family: 'Inter', system-ui, sans-serif;
   background-color: #0F172A; /* Deep Slate Base */
   overflow: hidden;
-  box-sizing: border-box; /* Added to keep padding inside bounds */
+  box-sizing: border-box; 
 }
 
 .login-ambient-bg {
@@ -103,7 +103,7 @@
     0 25px 50px -12px rgba(0, 0, 0, 0.5),
     0 0 0 1px rgba(255, 255, 255, 0.2) inset;
   animation: cardEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  box-sizing: border-box; /* CRITICAL FIX: Forces padding to be calculated inward */
+  box-sizing: border-box;
 }
 
 @keyframes cardEntrance {
@@ -148,13 +148,6 @@
   color: #111827;
   margin: 0 0 0.25rem 0;
   letter-spacing: -0.02em;
-}
-
-.gl-brand-subtitle {
-  font-size: 0.9rem;
-  color: #6B7280;
-  margin: 0;
-  font-weight: 500;
 }
 
 /* ---------- FORM ELEMENTS ---------- */
@@ -208,7 +201,14 @@
   background: #FAFAFA;
   outline: none;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-sizing: border-box; /* Keeps input padding inside */
+  box-sizing: border-box;
+}
+
+/* FIX: Hide Microsoft Edge / Browser Default Eye Icon */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear,
+input::-webkit-credentials-auto-fill-button {
+  display: none !important;
 }
 
 .gl-input:focus {
@@ -334,7 +334,7 @@
     padding: 2rem 1.5rem; 
     border-radius: 20px; 
     width: 100%;
-    max-width: 100%; /* Prevents stretching issues on very small screens */
+    max-width: 100%; 
   }
   .btn-glass-back { 
     top: 1.5rem; 

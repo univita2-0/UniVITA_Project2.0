@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Download, Calendar, FileText, ShieldCheck, CheckCircle, Clock, FileBadge } from 'lucide-react';
+import { Download, Calendar, FileText, CheckCircle, Clock, ShieldCheck, Building } from 'lucide-react';
 import './ComplianceReports.css';
 import { API_BASE } from '../api';
 
@@ -32,7 +32,7 @@ const ComplianceReports = () => {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `attendance_compliance_${year}_${String(month).padStart(2, '0')}.pdf`);
+      link.setAttribute('download', `HCT_Attendance_Compliance_${year}_${String(month).padStart(2, '0')}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -42,12 +42,11 @@ const ComplianceReports = () => {
       localStorage.setItem('last_compliance_report', now);
       setLastGenerated(new Date(now));
 
-      toast.success('Report downloaded successfully');
+      toast.success('Official report downloaded securely.');
     } catch (err) {
       console.error(err);
       let errorMsg = 'Failed to generate report. Please try again.';
       if (err.response?.status === 401) errorMsg = 'Session expired. Please log in again.';
-      else if (err.response?.data?.error) errorMsg = err.response.data.error;
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -61,150 +60,126 @@ const ComplianceReports = () => {
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
   return (
-    <div className="expert-container">
-      {/* Header */}
-      <div className="expert-header" style={{ marginBottom: '2.5rem' }}>
-        <div className="expert-title-group">
+    <div className="formal-cr-container">
+      <div className="formal-cr-header">
+        <div className="formal-cr-title-block">
           
           <div>
             
-            <p className="expert-subtitle">Generate official, audit-ready attendance compliance reports for accreditation.</p>
+            <p>Generate official, audit-ready PDF documents for internal review and external accreditation.</p>
           </div>
         </div>
-        <div className="cr-accreditation-badge">
-          <FileBadge size={16} />
-          <span>Accreditation Ready format</span>
+        <div className="formal-cr-security-badge">
+          <ShieldCheck size={16} />
+          <span>Strict Audit Trail Enabled</span>
         </div>
       </div>
 
-      <div className="cr-grid-layout">
-        {/* Left: Configuration Panel */}
-        <div className="expert-card cr-config-panel">
-          <div className="cr-panel-header">
-            <div className="cr-panel-icon">
-              <FileText size={20} />
-            </div>
-            <div>
-              <h3>Report Configuration</h3>
-              <p>Select the target period to compile the attendance metrics.</p>
-            </div>
+      <div className="formal-cr-grid">
+        {/* Left: Configuration */}
+        <div className="formal-cr-card">
+          <div className="formal-cr-card-header">
+            <h3>Report Parameters</h3>
           </div>
-
-          <div className="cr-form-grid">
-            <div className="cr-form-group">
-              <label>Target Month</label>
-              <div className="cr-select-wrapper">
-                <Calendar size={18} className="cr-select-icon" />
-                <select 
-                  value={month} 
-                  onChange={e => setMonth(parseInt(e.target.value))} 
-                  className="cr-modern-select"
-                  disabled={loading}
-                >
-                  {monthNames.map((name, idx) => (
-                    <option key={idx + 1} value={idx + 1}>{name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            
-            <div className="cr-form-group">
-              <label>Target Year</label>
-              <div className="cr-select-wrapper">
-                <Calendar size={18} className="cr-select-icon" />
-                <select 
-                  value={year} 
-                  onChange={e => setYear(parseInt(e.target.value))} 
-                  className="cr-modern-select"
-                  disabled={loading}
-                >
-                  {years.map(y => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="cr-action-section">
-            {lastGenerated ? (
-              <div className="cr-status-banner success">
-                <CheckCircle size={18} />
-                <div className="cr-status-text">
-                  <strong>Ready for download</strong>
-                  <span>Last generated: {lastGenerated.toLocaleString()}</span>
+          <div className="formal-cr-card-body">
+            <div className="formal-cr-form-row">
+              <div className="formal-cr-form-group">
+                <label>Target Month</label>
+                <div className="formal-cr-input-wrapper">
+                  <Calendar size={16} className="formal-cr-icon" />
+                  <select 
+                    value={month} 
+                    onChange={e => setMonth(parseInt(e.target.value))} 
+                    disabled={loading}
+                  >
+                    {monthNames.map((name, idx) => (
+                      <option key={idx + 1} value={idx + 1}>{name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            ) : (
-              <div className="cr-status-banner neutral">
-                <Clock size={18} />
-                <div className="cr-status-text">
-                  <strong>No recent generations</strong>
-                  <span>Configure the period above and click generate.</span>
+              
+              <div className="formal-cr-form-group">
+                <label>Fiscal Year</label>
+                <div className="formal-cr-input-wrapper">
+                  <Calendar size={16} className="formal-cr-icon" />
+                  <select 
+                    value={year} 
+                    onChange={e => setYear(parseInt(e.target.value))} 
+                    disabled={loading}
+                  >
+                    {years.map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
+            </div>
 
-            <button className="cr-btn-generate" onClick={generateReport} disabled={loading}>
-              {loading ? (
-                <>
-                  <span className="cr-spinner"></span>
-                  <span>Compiling PDF Document...</span>
-                </>
+            <div className="formal-cr-divider"></div>
+
+            <div className="formal-cr-status-area">
+              {lastGenerated ? (
+                <div className="formal-cr-status success">
+                  <CheckCircle size={16} />
+                  <span>Last exported: {lastGenerated.toLocaleString()}</span>
+                </div>
               ) : (
-                <>
-                  <Download size={18} />
-                  <span>Generate Official Report</span>
-                </>
+                <div className="formal-cr-status neutral">
+                  <Clock size={16} />
+                  <span>No recent exports on this device.</span>
+                </div>
               )}
-            </button>
+
+              <button className="formal-cr-btn-primary" onClick={generateReport} disabled={loading}>
+                {loading ? (
+                  <>
+                    <span className="formal-cr-spinner"></span> Compiling Document...
+                  </>
+                ) : (
+                  <>
+                    <Download size={16} /> Export Official PDF
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Right: What's Inside / Guidelines */}
-        <div className="expert-card cr-guidelines-panel">
-          <h3>Report Contents Overview</h3>
-          <p className="cr-guideline-desc">
-            This document compiles automated metrics to meet strict institutional and accreditation auditing standards.
-          </p>
+        {/* Right: Output Specifications */}
+        <div className="formal-cr-card">
+          <div className="formal-cr-card-header">
+            <h3>Document Specifications</h3>
+          </div>
+          <div className="formal-cr-card-body bg-light">
+            <p className="formal-cr-specs-desc">
+              The generated PDF complies with standard HR auditing formats. It aggregates data strictly from verified system logs.
+            </p>
 
-          <ul className="cr-checklist">
-            <li>
-              <div className="cr-check-icon"><CheckCircle size={16} /></div>
-              <div className="cr-check-text">
-                <strong>Attendance Summary & Totals</strong>
-                <span>Aggregated regular and overtime hours.</span>
-              </div>
-            </li>
-            <li>
-              <div className="cr-check-icon"><CheckCircle size={16} /></div>
-              <div className="cr-check-text">
-                <strong>Detailed Incident Logs</strong>
-                <span>Itemized list of late arrivals, absences, and formal leave days.</span>
-              </div>
-            </li>
-            <li>
-              <div className="cr-check-icon"><CheckCircle size={16} /></div>
-              <div className="cr-check-text">
-                <strong>Compliance Rate Calculations</strong>
-                <span>Scheduled vs. actual presence metrics calculated per instructor.</span>
-              </div>
-            </li>
-            <li>
-              <div className="cr-check-icon"><CheckCircle size={16} /></div>
-              <div className="cr-check-text">
-                <strong>Department Target Analysis</strong>
-                <span>Overall department summary compared to expected SLA targets.</span>
-              </div>
-            </li>
-            <li>
-              <div className="cr-check-icon"><CheckCircle size={16} /></div>
-              <div className="cr-check-text">
-                <strong>Official Formatting</strong>
-                <span>Includes formal institution headers, timestamps, and signature lines.</span>
-              </div>
-            </li>
-          </ul>
+            <ul className="formal-cr-specs-list">
+              <li>
+                <FileText size={16} className="specs-icon" />
+                <div>
+                  <strong>Instructor Compliance Matrix</strong>
+                  <span>Calculates actual attendance against scheduled shifts to generate a strict SLA percentage.</span>
+                </div>
+              </li>
+              <li>
+                <FileText size={16} className="specs-icon" />
+                <div>
+                  <strong>Incident Breakdown</strong>
+                  <span>Itemizes authorized leaves, late arrivals (exceeding 15 mins), and unexcused absences.</span>
+                </div>
+              </li>
+              <li>
+                <FileText size={16} className="specs-icon" />
+                <div>
+                  <strong>Executive Summary</strong>
+                  <span>Provides a top-level departmental health metric for management review.</span>
+                </div>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>

@@ -33,7 +33,7 @@ import PinChangeModal from './pages/PinChangeModal';
 import PayrollHistoryModal from './pages/PayrollHistoryModal';
 import useInactivityTimer from './hooks/useInactivityTimer';
 import JobPostings from './pages/JobPostings';
-import PerformanceEvaluation from './pages/PerformanceEvaluation';
+
 import ToastNotification from './components/ToastNotification';
 import { NotificationProvider } from './contexts/NotificationContext';
 import Policies from './pages/Policies';
@@ -42,7 +42,7 @@ import AuditLogs from './pages/AuditLogs';
 import RoleManagement from './pages/RoleManagement';
 import SystemConfig from './pages/SystemConfig';
 import ManageScanners from './pages/ManageScanners';
-import EmergencyAlertBanner from './components/EmergencyAlertBanner'; // <--- NEW IMPORT FOR WEB BANNER
+import EmergencyAlertBanner from './components/EmergencyAlertBanner'; 
 import 'leaflet/dist/leaflet.css';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -52,7 +52,7 @@ import ManageReasons from './pages/ManageReasons';
 import ManageBLETags from './pages/ManageBLETags';
 import CompletedVisits from './pages/CompletedVisits';
 import OvertimeRequests from './pages/OvertimeRequests';
-import './App.css'; // Global Enterprise Styles
+import './App.css'; 
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -146,7 +146,9 @@ function App() {
       case 'history': return { title: 'History' };
       case 'track-visitor': return { title: 'Building Visitor Tracking' };
       case 'attendance': return { title: 'Attendance' };
+      case 'attendance-correction': return { title: 'Attendance Correction' };
       case 'attendance-appeals': return { title: 'Attendance Appeals' };
+      case 'leave-management': return { title: 'Leave Requests' };
       case 'schedule': return { title: 'Schedule' };
       case 'shared-calendar': return { title: 'Calendar' };
       case 'payroll': return { title: 'Payroll Security' };
@@ -203,7 +205,7 @@ function App() {
       case 'manage-ble': return <ManageBLETags />;
       case 'manage-scanners': return <ManageScanners />;
       case 'completed-visits': return <CompletedVisits />;
-      case 'performance': return <PerformanceEvaluation />;
+      
       case 'location-tracking': return <LocationTracking />;
       case 'policies': return <Policies />;
       case 'documents': return <Documents />;
@@ -255,7 +257,9 @@ function App() {
   return (
     <NotificationProvider>
       {/* Global Live Emergency Banner for Web Users (Admins, HR, Security, Instructors) */}
-      <EmergencyAlertBanner />
+      <div className="global-alerts-overlay">
+        <EmergencyAlertBanner />
+      </div>
 
       <Layout
         currentView={currentView}

@@ -195,7 +195,6 @@ const Login = ({ onBack }) => {
     }
   };
 
-  // Step 1 of Password Recovery: Verify OTP before opening New Password input
   const handleVerifyResetOtp = async (e) => {
     e.preventDefault();
     if (!resetOtp || resetOtp.length < 6) {
@@ -225,11 +224,16 @@ const Login = ({ onBack }) => {
     }
   };
 
-  // Step 2 of Password Recovery: Submit New Password & Confirmation
   const handleResetPasswordSubmit = async (e) => {
     e.preventDefault();
-    if (!newPassword || newPassword.length < 8) {
-      toast.error('For security, your password must be at least 8 characters long.');
+    
+    if (
+      !newPassword || 
+      newPassword.length < 8 || 
+      !/[A-Z]/.test(newPassword) || 
+      !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)
+    ) {
+      toast.error('Your password must be at least 8 chars long, contain 1 uppercase, and 1 special character.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -468,7 +472,7 @@ const Login = ({ onBack }) => {
                 <input
                   type={showNewPassword ? "text" : "password"}
                   className="gl-input"
-                  placeholder="New Password (min. 8 chars)"
+                  placeholder="New Password (min 8 chars)"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   minLength={8}

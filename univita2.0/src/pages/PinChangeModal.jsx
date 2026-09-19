@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import { API_BASE } from '../api'; // 👈 FIX: Import API_BASE
 import FormalModal from '../components/FormalModal';
+
+const getAuthHeaders = () => ({
+  headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+});
 
 const PinChangeModal = ({ show, onClose, adminEmail }) => {
   const [currentPin, setCurrentPin] = useState('');
@@ -13,27 +18,29 @@ const PinChangeModal = ({ show, onClose, adminEmail }) => {
     e.preventDefault();
     setError('');
 
-    // basic validation
+    
     if (!currentPin || !newPin || !confirmPin) {
-      setError('All fields are required.');
-      return;
+      return setError('All fields are required.');
     }
     if (newPin.length < 4 || newPin.length > 6 || !/^\d+$/.test(newPin)) {
-      setError('PIN must be 4–6 digits.');
-      return;
+      return setError('New PIN must be exactly 4-6 numeric digits.');
+    }
+    if (currentPin === newPin) {
+      return setError('New PIN must be different from your current PIN.');
     }
     if (newPin !== confirmPin) {
-      setError('PINs do not match.');
-      return;
+      return setError('New PIN and confirmation do not match.');
     }
 
     setLoading(true);
     try {
-      const res = await axios.put('http://localhost:5000/api/users/update-pin', {
+     
+      const res = await axios.put(`${API_BASE}/users/update-pin`, {
         email: adminEmail,
         currentPin,
         newPin
-      });
+      }, getAuthHeaders());
+      
       if (res.data.success) {
         alert('PIN updated successfully.');
         onClose();
@@ -46,6 +53,7 @@ const PinChangeModal = ({ show, onClose, adminEmail }) => {
       setLoading(false);
     }
   };
+
 
   return (
     <FormalModal

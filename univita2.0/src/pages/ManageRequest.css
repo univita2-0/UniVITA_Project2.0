@@ -95,9 +95,237 @@
 .vm-visitor-list li { padding: 0.6rem 0; border-bottom: 1px solid #F1F5F9; color: #475569; font-size: 0.9rem; }
 .vm-visitor-list li:last-child { border-bottom: none; }
 
+
+/* ----------------------------------------------------
+   CUSTOM ENTERPRISE MODAL (Pending Visitor Requests)
+   ---------------------------------------------------- */
+.vm-custom-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 1rem;
+}
+
+.vm-custom-modal {
+  background: #FFFFFF;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  border: 1px solid #E2E8F0;
+  animation: vmModalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes vmModalPop {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.vm-custom-modal-header {
+  padding: 1.25rem 1.75rem;
+  background: #F8FAFC;
+  border-bottom: 1px solid #E2E8F0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vm-custom-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.vm-custom-close-btn {
+  background: transparent;
+  border: none;
+  color: #64748B;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.vm-custom-close-btn:hover {
+  background: #E2E8F0;
+  color: #0F172A;
+}
+
+.vm-custom-modal-body {
+  padding: 1.75rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.vm-custom-requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.vm-custom-request-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+
+.vm-custom-req-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.vm-custom-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0F172A;
+  margin-right: 8px;
+}
+
+.vm-custom-email-tag {
+  font-size: 0.8rem;
+  color: #64748B;
+  background: #F1F5F9;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #E2E8F0;
+}
+
+.vm-custom-date-pill {
+  background: #F1F5F9;
+  color: #475569;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid #E2E8F0;
+  white-space: nowrap;
+}
+
+.vm-custom-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1.5rem;
+}
+
+.vm-custom-prop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.vm-custom-prop.full-width {
+  grid-column: span 2;
+}
+
+.vm-custom-prop label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748B;
+  letter-spacing: 0.05em;
+}
+
+.vm-custom-prop span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1E293B;
+}
+
+.vm-custom-prop span.nowrap {
+  white-space: nowrap;
+}
+
+.vm-custom-prop .reason-text {
+  font-weight: 500;
+  color: #475569;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.vm-custom-req-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #F1F5F9;
+  flex-wrap: wrap;
+}
+
+.vm-btn-approve-custom, .vm-btn-reject-custom, .vm-btn-view-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.vm-btn-approve-custom {
+  background: #ECFDF5;
+  color: #059669;
+  border-color: #A7F3D0;
+}
+.vm-btn-approve-custom:hover { background: #D1FAE5; }
+
+.vm-btn-reject-custom {
+  background: #FEF2F2;
+  color: #DC2626;
+  border-color: #FECACA;
+}
+.vm-btn-reject-custom:hover { background: #FEE2E2; }
+
+.vm-btn-view-details {
+  background: #F8FAFC;
+  color: #334155;
+  border-color: #CBD5E1;
+}
+.vm-btn-view-details:hover { background: #F1F5F9; color: #0F172A; }
+
+.vm-custom-modal-pagination {
+  padding: 0.75rem 1.75rem;
+  background: #F8FAFC;
+  border-top: 1px solid #E2E8F0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.vm-custom-modal-footer {
+  padding: 1rem 1.75rem;
+  background: #F8FAFC;
+  border-top: 1px solid #E2E8F0;
+  display: flex;
+  justify-content: flex-end;
+}
+
 @media (max-width: 768px) {
   .vm-container { padding: 1.5rem; }
   .vm-search-input-group { max-width: 100% !important; }
-  .vm-pagination { justify-content: center; }
+  .vm-pagination, .vm-custom-modal-pagination { justify-content: center; }
   .vm-details-grid-clean, .vm-form-row { grid-template-columns: 1fr; }
+  .vm-custom-details-grid { grid-template-columns: 1fr; }
+  .vm-custom-prop.full-width { grid-column: span 1; }
 }

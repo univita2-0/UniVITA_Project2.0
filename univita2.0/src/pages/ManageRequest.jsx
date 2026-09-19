@@ -340,78 +340,88 @@ const ManageRequest = () => {
         )}
       </div>
 
-      {/* PENDING REQUESTS MODAL */}
-      <FormalModal show={showPendingModal} onClose={() => setShowPendingModal(false)} title="Pending Visitor Requests" wide footer={<button className="vm-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>}>
-        {loadingPending ? (
-          <div className="vm-loading">Loading pending requests...</div>
-        ) : (
-          <div className="vm-modal-content">
-            <div className="vm-search-input-group border" style={{ marginBottom: '16px' }}>
-              <Search size={18} className="text-muted" />
-              <input type="text" placeholder="Search visitor name or email..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="vm-clean-input" />
-              {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+      {/* CUSTOMIZED PENDING VISITOR REQUESTS MODAL (No FormalModal, Strict Unbroken Layout) */}
+      {showPendingModal && (
+        <div className="vm-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
+          <div className="vm-custom-modal" onClick={e => e.stopPropagation()}>
+            <div className="vm-custom-modal-header">
+              <h3>Pending Visitor Requests</h3>
+              <button className="vm-custom-close-btn" onClick={() => setShowPendingModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="vm-custom-modal-body">
+              <div className="vm-search-input-group border" style={{ marginBottom: '1.25rem', maxWidth: '100%' }}>
+                <Search size={18} className="text-muted" />
+                <input type="text" placeholder="Search visitor name or email..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="vm-clean-input" />
+                {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+              </div>
+
+              {loadingPending ? (
+                <div className="vm-loading">Loading pending requests...</div>
+              ) : filteredPending.length === 0 ? (
+                <div className="vm-empty">No pending visitor requests match your criteria.</div>
+              ) : (
+                <div className="vm-custom-requests-list">
+                  {currentPending.map(req => (
+                    <div key={req.id} className="vm-custom-request-card">
+                      <div className="vm-custom-req-top">
+                        <div>
+                          <span className="vm-custom-name">{req.first_name} {req.last_name}</span>
+                          <span className="vm-custom-email-tag">{req.email}</span>
+                        </div>
+                        <span className="vm-custom-date-pill">{formatDate(req.visit_date)}</span>
+                      </div>
+
+                      <div className="vm-custom-details-grid">
+                        <div className="vm-custom-prop">
+                          <label>Visit Time</label>
+                          <span className="nowrap">{formatTime(req.visit_time)}</span>
+                        </div>
+                        <div className="vm-custom-prop">
+                          <label>Contact Phone</label>
+                          <span className="nowrap">{req.phone || 'N/A'}</span>
+                        </div>
+                        <div className="vm-custom-prop full-width">
+                          <label>Purpose of Visit</label>
+                          <span className="reason-text">{req.reason || '—'}</span>
+                        </div>
+                      </div>
+
+                      <div className="vm-custom-req-actions">
+                        <button className="vm-btn-view-details" onClick={() => openPendingDetails(req)}>
+                          <Eye size={14} /> Inspect Full Details
+                        </button>
+                        <button className="vm-btn-reject-custom" onClick={() => openRejectModal(req)}>
+                          <XCircle size={16} /> Reject Request
+                        </button>
+                        <button className="vm-btn-approve-custom" onClick={() => handleApprove(req)}>
+                          <CheckCircle size={16} /> Approve Visit
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {filteredPending.length === 0 ? (
-              <div className="vm-empty">No pending visitor requests match your criteria.</div>
-            ) : (
-              <>
-                <div className="vm-table-wrapper" style={{ maxHeight: '55vh', overflowY: 'auto' }}>
-                  <table className="vm-table">
-                    <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                      <tr>
-                        <th>Guest</th>
-                        <th>Date & Time</th>
-                        <th>Purpose</th>
-                        <th className="text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentPending.map(req => (
-                        <tr key={req.id}>
-                          <td>
-                            <div className="font-semibold text-dark">{req.first_name} {req.last_name}</div>
-                            <div className="text-xs text-muted">{req.email}</div>
-                          </td>
-                          <td>
-                            <div className="font-medium text-dark">{formatDate(req.visit_date)}</div>
-                            <div className="text-xs text-muted">{formatTime(req.visit_time)}</div>
-                          </td>
-                          <td className="max-w-xs truncate" title={req.reason}>{req.reason || '—'}</td>
-                          <td>
-                            <div className="vm-action-group right">
-                              <button className="vm-btn-icon" onClick={() => openPendingDetails(req)} title="View Details">
-                                <Eye size={18} color="#475569" />
-                              </button>
-                              <button className="vm-btn-icon success" onClick={() => handleApprove(req)} title="Approve">
-                                <CheckCircle size={18} />
-                              </button>
-                              <button className="vm-btn-icon danger" onClick={() => openRejectModal(req)} title="Reject">
-                                <XCircle size={18} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {pendingTotalPages > 1 && (
+              <div className="vm-custom-modal-pagination">
+                <span className="vm-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
+                <div className="vm-page-controls">
+                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="vm-page-btn"><ChevronLeft size={16} /></button>
+                  <span className="vm-page-current">{pendingPage} / {pendingTotalPages}</span>
+                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="vm-page-btn"><ChevronRight size={16} /></button>
                 </div>
-
-                {pendingTotalPages > 1 && (
-                  <div className="vm-pagination">
-                    <span className="vm-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
-                    <div className="vm-page-controls">
-                      <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="vm-page-btn"><ChevronLeft size={16} /></button>
-                      <span className="vm-page-current">{pendingPage} / {pendingTotalPages}</span>
-                      <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="vm-page-btn"><ChevronRight size={16} /></button>
-                    </div>
-                  </div>
-                )}
-              </>
+              </div>
             )}
+
+            <div className="vm-custom-modal-footer">
+              <button className="vm-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>
+            </div>
           </div>
-        )}
-      </FormalModal>
+        </div>
+      )}
 
       {/* PENDING DETAILS MODAL */}
       <FormalModal show={showPendingDetailsModal} onClose={() => setShowPendingDetailsModal(false)} title="Visit Request Details" wide footer={

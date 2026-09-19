@@ -261,16 +261,23 @@ export default function LoginScreen({ navigation }) {
       setResetLoading(false);
     }
   };
-  // --- PASSWORD RECOVERY STEP 3: Submit New Password ---
+  
   const handleResetPassword = async () => {
-    if (!resetNewPassword || resetNewPassword.length < 6) {
-      showToast('Password must be at least 6 characters', 'error');
+    
+    if (
+      !resetNewPassword || 
+      resetNewPassword.length < 8 || 
+      !/[A-Z]/.test(resetNewPassword) || 
+      !/[!@#$%^&*(),.?":{}|<>]/.test(resetNewPassword)
+    ) {
+      showToast('Password must be at least 8 chars, contain 1 uppercase & 1 special char', 'error');
       return;
     }
     if (resetNewPassword !== resetConfirmPassword) {
       showToast('Passwords do not match', 'error');
       return;
     }
+    
     setResetLoading(true);
     try {
       const result = await resetPassword(resetEmail, resetOtp, resetNewPassword);
@@ -498,7 +505,7 @@ export default function LoginScreen({ navigation }) {
                 <TextInput
                   style={styles.resetInput}
                   secureTextEntry
-                  placeholder="New password (min. 6 chars)"
+                  placeholder="New password (8+ chars, 1 upper, 1 special)"
                   placeholderTextColor="#64748B"
                   value={resetNewPassword}
                   onChangeText={setResetNewPassword}

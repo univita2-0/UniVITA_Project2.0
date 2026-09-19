@@ -4,7 +4,7 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
   Search, Edit2, Trash2, UserCheck, AlertCircle, ChevronLeft, ChevronRight, 
-  Users, Eye, EyeOff, Plus, Copy, CheckCircle, FileText, Calendar
+  Users, Eye, EyeOff, Plus, Copy, CheckCircle, FileText, Calendar, UploadCloud
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
@@ -35,15 +35,19 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // File Upload States
+  const [newResumeFile, setNewResumeFile] = useState(null);
+  const [editResumeFile, setEditResumeFile] = useState(null);
+
   const [formData, setFormData] = useState({
     employee_id: '', full_name: '', first_name: '', last_name: '', middle_initial: '',
     email: '', phone: '', date_of_birth: '', gender: 'Prefer not to say',
     emergency_contact_name: '', emergency_contact_phone: '',
     street: '', city: '', state: '', postal_code: '', country: 'Philippines',
-    notes: '', position: 'Entry Level Simulationist', employment_type: 'Regular',
+    notes: '', position: 'Entry Level Simulationist', employment_type: 'Full-time',
     date_of_joining: '', account_expiry: '', status: 'active', role: 'instructor',
     salary: 32000, work_days_per_month: 22,
-    application_date: '', interview_date: '', resume_link: ''
+    application_date: '', interview_date: '', resume_link: '', resume_file: ''
   });
 
   const [showSoftDeleteModal, setShowSoftDeleteModal] = useState(false);
@@ -58,7 +62,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
   
   const [newEmployeeData, setNewEmployeeData] = useState({
     first_name: '', last_name: '', middle_initial: '', full_name: '', email: '', phone: '',
-    position: 'Entry Level Simulationist', employment_type: 'Regular', role: 'instructor', status: 'active',
+    position: 'Entry Level Simulationist', employment_type: 'Full-time', role: 'instructor', status: 'active',
     salary: 32000, application_date: '', interview_date: '', date_of_joining: '', resume_link: ''
   });
 
@@ -120,13 +124,14 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
   const openEditModal = (emp) => {
     setSelectedEmployee(emp);
     
-    let appDate = '', intDate = '', resLink = '', parsedNotes = emp.additional_info || '';
+    let appDate = '', intDate = '', resLink = '', resFile = '', parsedNotes = emp.additional_info || '';
     try {
       if (emp.additional_info && emp.additional_info.startsWith('{')) {
         const parsed = JSON.parse(emp.additional_info);
         appDate = parsed.application_date || '';
         intDate = parsed.interview_date || '';
         resLink = parsed.resume_link || '';
+        resFile = parsed.resume_file || '';
         parsedNotes = parsed.notes || '';
       }
     } catch(e) {}
@@ -150,7 +155,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       country: emp.country || 'Philippines',
       notes: parsedNotes,
       position: emp.position_level || emp.position || 'Entry Level Simulationist',
-      employment_type: emp.contract_type === 'Full-time' ? 'Regular' : (emp.contract_type || emp.employment_type || 'Regular'),
+      employment_type: emp.contract_type || emp.employment_type || 'Full-time',
       date_of_joining: extractDate(emp.date_of_joining),
       account_expiry: extractDate(emp.account_expiration_date || emp.account_expiry),
       status: emp.status || 'active',
@@ -159,8 +164,10 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       work_days_per_month: emp.work_days_per_month || 22,
       application_date: appDate,
       interview_date: intDate,
-      resume_link: resLink
+      resume_link: resLink,
+      resume_file: resFile
     });
+    setEditResumeFile(null);
     setActiveTabModal('general');
     setShowChangePassword(false);
     setNewPassword(''); setConfirmPassword(''); setPasswordError('');
@@ -193,7 +200,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
   };
 
   const formatDateForDB = (dateStr) => {
-    if (!dateStr) return null;
+    if (!dateStr) return '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
     return dateStr.split('T')[0];
   };
@@ -228,33 +235,50 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     try {
       const advancedInfoJSON = JSON.stringify({
         notes: (formData.notes || '').trim(),
-        application_date: formData.application_date,
-        interview_date: formData.interview_date,
-        resume_link: formData.resume_link.trim()
+        application_date: formData.application_date || null,
+        interview_date: formData.interview_date || null,
+        resume_link: (formData.resume_link || '').trim()
       });
 
-      const payload = {
-        full_name: formData.full_name.trim(),
-        first_name: firstName, last_name: lastName, middle_initial: (formData.middle_initial || '').trim(),
-        email: email, phone: (formData.phone || '').trim(),
-        position_level: formData.role === 'instructor' ? formData.position : formData.role,
-        contract_type: formData.employment_type,
-        status: formData.status, role: formData.role,
-        date_of_joining: formatDateForDB(formData.date_of_joining),
-        monthly_salary: Number(formData.salary),
-        work_days_per_month: formData.work_days_per_month,
-        date_of_birth: formatDateForDB(formData.date_of_birth),
-        gender: formData.gender,
-        emergency_contact_name: (formData.emergency_contact_name || '').trim(),
-        emergency_contact_phone: (formData.emergency_contact_phone || '').trim(),
-        street: (formData.street || '').trim(), city: (formData.city || '').trim(),
-        state: (formData.state || '').trim(), postal_code: (formData.postal_code || '').trim(),
-        country: (formData.country || 'Philippines').trim(),
-        additional_info: advancedInfoJSON,
-        account_expiry: formatDateForDB(formData.account_expiry),
+      const fd = new FormData();
+      const appendSafe = (key, val) => {
+        fd.append(key, val === null || val === undefined ? '' : val);
       };
 
-      await axios.put(`${API_BASE}/employees/${selectedEmployee.id}`, payload, getAuthHeaders());
+      appendSafe('full_name', formData.full_name.trim());
+      appendSafe('first_name', firstName);
+      appendSafe('last_name', lastName);
+      appendSafe('middle_initial', (formData.middle_initial || '').trim());
+      appendSafe('email', email);
+      appendSafe('phone', (formData.phone || '').trim());
+      appendSafe('position_level', formData.role === 'instructor' ? formData.position : formData.role);
+      appendSafe('contract_type', formData.employment_type);
+      appendSafe('status', formData.status);
+      appendSafe('role', formData.role);
+      appendSafe('monthly_salary', Number(formData.salary));
+      appendSafe('work_days_per_month', formData.work_days_per_month);
+      appendSafe('gender', formData.gender);
+      appendSafe('emergency_contact_name', (formData.emergency_contact_name || '').trim());
+      appendSafe('emergency_contact_phone', (formData.emergency_contact_phone || '').trim());
+      appendSafe('street_address', (formData.street || '').trim());
+      appendSafe('city', (formData.city || '').trim());
+      appendSafe('state_province', (formData.state || '').trim());
+      appendSafe('postal_code', (formData.postal_code || '').trim());
+      appendSafe('country', (formData.country || 'Philippines').trim());
+      appendSafe('additional_info', advancedInfoJSON);
+
+      appendSafe('date_of_joining', formatDateForDB(formData.date_of_joining));
+      appendSafe('date_of_birth', formatDateForDB(formData.date_of_birth));
+      appendSafe('account_expiry', formatDateForDB(formData.account_expiry));
+
+      if (editResumeFile) {
+        fd.append('resume_file', editResumeFile);
+      }
+
+      // CRITICAL FIX: Simply passing getAuthHeaders() removes the manual Content-Type override
+      // This allows the browser to automatically set the boundary so Multer can read the data.
+      await axios.put(`${API_BASE}/employees/${selectedEmployee.id}`, fd, getAuthHeaders());
+      
       toast.success('Employee updated successfully!');
       setShowEditModal(false);
       await loadEmployees();
@@ -308,33 +332,45 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
 
     try {
       const advancedInfoJSON = JSON.stringify({
-        application_date: newEmployeeData.application_date,
-        interview_date: newEmployeeData.interview_date,
+        application_date: newEmployeeData.application_date || null,
+        interview_date: newEmployeeData.interview_date || null,
         resume_link: newEmployeeData.resume_link.trim()
       });
 
-      await axios.post(`${API_BASE}/employees`, {
-        employee_id: generatedEmpId,
-        full_name: newEmployeeData.full_name.trim(),
-        first_name: firstName, last_name: lastName, middle_initial: (newEmployeeData.middle_initial || '').trim(),
-        email: email, phone: (newEmployeeData.phone || '').trim(),
-        position_level: newEmployeeData.role === 'instructor' ? newEmployeeData.position : newEmployeeData.role,
-        contract_type: newEmployeeData.employment_type,
-        status: newEmployeeData.status, role: newEmployeeData.role,
-        password: generatedPassword,
-        monthly_salary: Number(newEmployeeData.salary),
-        work_days_per_month: 22,
-        date_of_joining: newEmployeeData.date_of_joining || null,
-        additional_info: advancedInfoJSON
-      }, getAuthHeaders());
+      const fd = new FormData();
+      const appendSafe = (key, val) => fd.append(key, val === null || val === undefined ? '' : val);
+
+      appendSafe('employee_id', generatedEmpId);
+      appendSafe('full_name', newEmployeeData.full_name.trim());
+      appendSafe('first_name', firstName);
+      appendSafe('last_name', lastName);
+      appendSafe('middle_initial', (newEmployeeData.middle_initial || '').trim());
+      appendSafe('email', email);
+      appendSafe('phone', (newEmployeeData.phone || '').trim());
+      appendSafe('position_level', newEmployeeData.role === 'instructor' ? newEmployeeData.position : newEmployeeData.role);
+      appendSafe('contract_type', newEmployeeData.employment_type);
+      appendSafe('status', newEmployeeData.status);
+      appendSafe('role', newEmployeeData.role);
+      appendSafe('password', generatedPassword);
+      appendSafe('monthly_salary', Number(newEmployeeData.salary));
+      appendSafe('work_days_per_month', 22);
+      appendSafe('date_of_joining', newEmployeeData.date_of_joining || '');
+      appendSafe('additional_info', advancedInfoJSON);
+
+      if (newResumeFile) {
+        fd.append('resume_file', newResumeFile);
+      }
+
+      await axios.post(`${API_BASE}/employees`, fd, getAuthHeaders());
 
       toast.success(`Employee added successfully! ID: ${generatedEmpId}`);
       setShowAddModal(false);
       setNewEmployeeData({
         first_name: '', last_name: '', middle_initial: '', full_name: '', email: '', phone: '',
-        position: 'Entry Level Simulationist', employment_type: 'Regular', role: 'instructor', status: 'active',
+        position: 'Entry Level Simulationist', employment_type: 'Full-time', role: 'instructor', status: 'active',
         salary: 32000, application_date: '', interview_date: '', date_of_joining: '', resume_link: ''
       });
+      setNewResumeFile(null);
       setGeneratedEmpId(''); setGeneratedPassword('');
       loadEmployees();
     } catch (err) {
@@ -367,7 +403,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     switch (activeTab) {
       case 'instructors': filtered = employees.filter(emp => emp.role === 'instructor' && emp.status === 'active'); break;
       case 'staff': filtered = employees.filter(emp => emp.role !== 'instructor' && emp.status === 'active'); break;
-      case 'deactivated': filtered = employees.filter(emp => emp.status === 'inactive'); break;
+      case 'deactivated': filtered = employees.filter(emp => emp.status === 'deactivated'); break;
       case 'deleted': filtered = employees.filter(emp => emp.status === 'deleted'); break;
       default: filtered = [];
     }
@@ -397,7 +433,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     <div className="em-container">
       <div className="em-header">
         <div>
-          <h2>Employee Directory</h2>
+          
           <p>Oversee directory, manage system roles, and configure employee profiles.</p>
         </div>
         <button className="btn-add" onClick={() => { generateNewEmployeeId(); setShowAddModal(true); }}>
@@ -437,7 +473,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
           Staff <span className="tab-count">{staffCount}</span>
         </button>
         <button className={`filter-tab ${activeTab === 'deactivated' ? 'active' : ''}`} onClick={() => setActiveTab('deactivated')}>
-          Deactivated <span className="tab-count">{employees.filter(e => e.status === 'inactive').length}</span>
+          Deactivated <span className="tab-count">{employees.filter(e => e.status === 'deactivated').length}</span>
         </button>
         <button className={`filter-tab ${activeTab === 'deleted' ? 'active' : ''}`} onClick={() => setActiveTab('deleted')}>
           Deleted <span className="tab-count">{employees.filter(e => e.status === 'deleted').length}</span>
@@ -481,8 +517,8 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
                   </td>
                   <td className="emp-contract">{emp.contract_type || emp.employment_type || '—'}</td>
                   <td>
-                    <span className={`status-badge ${emp.status === 'active' ? 'active' : emp.status === 'inactive' ? 'inactive' : 'deleted'}`}>
-                      {emp.status === 'active' ? 'Active' : emp.status === 'inactive' ? 'Deactivated' : 'Deleted'}
+                    <span className={`status-badge ${emp.status === 'active' ? 'active' : emp.status === 'deactivated' ? 'inactive' : 'deleted'}`}>
+                      {emp.status === 'active' ? 'Active' : emp.status === 'deactivated' ? 'Deactivated' : 'Deleted'}
                     </span>
                   </td>
                   <td className="actions">
@@ -529,7 +565,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
           </div>
         </div>
 
-        <div className="form-row-grid">
+        <div className="form-row-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <div className="modal-form-group">
             <label>System Role</label>
             <select value={newEmployeeData.role} onChange={e => handleAddEmployeeChange('role', e.target.value)}>
@@ -543,11 +579,21 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
             <div className="modal-form-group">
               <label>Instructor Position</label>
               <select value={newEmployeeData.position} onChange={e => handleAddEmployeeChange('position', e.target.value)}>
-                <option>Entry Level Simulationist</option>
-                <option>Senior Simulationist</option>
+                <option value="Entry Level Simulationist">Entry Level Simulationist</option>
+                <option value="Senior Simulationist">Senior Simulationist</option>
               </select>
             </div>
           )}
+          <div className="modal-form-group">
+            <label>Employment Type</label>
+            <select value={newEmployeeData.employment_type} onChange={e => handleAddEmployeeChange('employment_type', e.target.value)}>
+              <option value="Full-time">Full-time</option>
+              <option value="Part-time">Part-time</option>
+              <option value="Provisionary">Provisionary</option>
+              <option value="Project-based">Project-based</option>
+              <option value="Consultant">Consultant</option>
+            </select>
+          </div>
           <div className="modal-form-group">
             <label>Base Monthly Salary (₱)</label>
             <input type="number" min="0" value={newEmployeeData.salary} onChange={e => handleAddEmployeeChange('salary', e.target.value)} />
@@ -569,6 +615,17 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
           <div className="modal-form-group">
             <label>Hire Date (Date of Joining)</label>
             <input type="date" value={newEmployeeData.date_of_joining} onChange={e => handleAddEmployeeChange('date_of_joining', e.target.value)} />
+          </div>
+        </div>
+
+        <div className="form-row-grid">
+          <div className="modal-form-group">
+            <label><FileText size={14} style={{display:'inline', marginBottom:'-2px'}}/> Document Link</label>
+            <input type="url" placeholder="https://..." value={newEmployeeData.resume_link} onChange={e => handleAddEmployeeChange('resume_link', e.target.value)} />
+          </div>
+          <div className="modal-form-group">
+            <label><UploadCloud size={14} style={{display:'inline', marginBottom:'-2px'}}/> Upload PDF Resume</label>
+            <input type="file" accept=".pdf" onChange={(e) => setNewResumeFile(e.target.files[0])} style={{ padding: '0.4rem 0' }} />
           </div>
         </div>
 
@@ -631,13 +688,18 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
                   <div className="form-group">
                     <label>Contract Type</label>
                     <select name="employment_type" value={formData.employment_type} onChange={handleEditInputChange}>
-                      <option>Regular</option><option>Part-time</option><option>Contract</option>
+                      <option value="Full-time">Full-time</option>
+                      <option value="Part-time">Part-time</option>
+                      <option value="Provisionary">Provisionary</option>
+                      <option value="Project-based">Project-based</option>
+                      <option value="Consultant">Consultant</option>
                     </select>
                   </div>
                   <div className="form-group">
                     <label>Status</label>
                     <select name="status" value={formData.status} onChange={handleEditInputChange}>
-                      <option value="active">Active</option><option value="inactive">Deactivated</option>
+                      <option value="active">Active</option>
+                      <option value="deactivated">Deactivated</option>
                     </select>
                   </div>
                 </div>
@@ -659,8 +721,8 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
                   <div className="form-group">
                     <label>Instructor Position</label>
                     <select name="position" value={formData.position} onChange={handleEditInputChange}>
-                      <option>Entry Level Simulationist</option>
-                      <option>Senior Simulationist</option>
+                      <option value="Entry Level Simulationist">Entry Level Simulationist</option>
+                      <option value="Senior Simulationist">Senior Simulationist</option>
                     </select>
                   </div>
                 )}
@@ -756,12 +818,19 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
                     <input type="date" name="date_of_joining" value={formData.date_of_joining} onChange={handleEditInputChange} />
                   </div>
                   <div className="form-group">
-                    <label><FileText size={14} style={{display:'inline', marginBottom:'-2px'}}/> Resume / Document Link</label>
+                    <label><FileText size={14} style={{display:'inline', marginBottom:'-2px'}}/> Document Link</label>
                     <input type="url" name="resume_link" placeholder="https://..." value={formData.resume_link} onChange={handleEditInputChange} />
                     {formData.resume_link && (
-                      <a href={formData.resume_link} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#0284C7', marginTop: '0.2rem' }}>Test Link</a>
+                      <a href={formData.resume_link} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#0284C7', marginTop: '0.2rem', display: 'inline-block' }}>Visit Link</a>
                     )}
                   </div>
+                </div>
+                <div className="form-group">
+                  <label><UploadCloud size={14} style={{display:'inline', marginBottom:'-2px'}}/> Upload PDF Resume</label>
+                  <input type="file" accept=".pdf" onChange={(e) => setEditResumeFile(e.target.files[0])} style={{ padding: '0.4rem 0' }} />
+                  {formData.resume_file && !editResumeFile && (
+                    <a href={`${API_BASE.replace('/api', '')}${formData.resume_file}`} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#059669', marginTop: '0.2rem', display: 'inline-block' }}>View Current Resume File</a>
+                  )}
                 </div>
                 <div className="form-group">
                   <label>HR Onboarding Notes</label>

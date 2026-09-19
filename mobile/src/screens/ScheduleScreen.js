@@ -109,7 +109,6 @@ export default function ScheduleScreen() {
     fetchSchedules();
   };
 
-  // Robust status evaluation matching web dashboard logic
   const evaluateScheduleStatus = (schedule, targetDateStr) => {
     if (schedule.course === 'On Leave' || schedule.attendance_status === 'on leave') {
       return 'ON LEAVE';
@@ -126,6 +125,14 @@ export default function ScheduleScreen() {
 
     const hasClockIn = schedule.time_in && schedule.time_in !== '--:--' && schedule.time_in !== null;
     const hasClockOut = schedule.time_out && schedule.time_out !== '--:--' && schedule.time_out !== null;
+
+    if (hasClockOut) {
+      const dbStatus = (schedule.attendance_record_status || schedule.status || '').toLowerCase();
+      if (dbStatus.includes('early') || dbStatus.includes('clock out')) {
+        return 'COMPLETED - EARLY CLOCK OUT';
+      }
+      return 'COMPLETED';
+    }
 
     const isPassed = (targetDateStr < todayStr) || (targetDateStr === todayStr && currentMinutes > endMins);
     const isActive = (targetDateStr === todayStr) && (currentMinutes >= (startMins - 30) && currentMinutes <= endMins);
@@ -154,7 +161,9 @@ export default function ScheduleScreen() {
       case 'IN PROGRESS':
         return { label: 'IN PROGRESS', color: isLight ? '#059669' : '#34D399', bg: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)', border: isLight ? '#A7F3D0' : 'rgba(52, 211, 153, 0.3)' };
       case 'COMPLETED':
-        return { label: 'COMPLETED', color: isLight ? '#2563EB' : '#60A5FA', bg: isLight ? '#DBEAFE' : 'rgba(96, 165, 250, 0.15)', border: isLight ? '#BFDBFE' : 'rgba(96, 165, 250, 0.3)' };
+      case 'COMPLETED - EARLY CLOCK OUT':
+      case 'EARLY CLOCK OUT':
+        return { label: status, color: isLight ? '#2563EB' : '#60A5FA', bg: isLight ? '#DBEAFE' : 'rgba(96, 165, 250, 0.15)', border: isLight ? '#BFDBFE' : 'rgba(96, 165, 250, 0.3)' };
       case 'MISSING CLOCK-OUT':
         return { label: 'MISSING CLOCK-OUT', color: isLight ? '#DC2626' : '#F87171', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', border: isLight ? '#FECACA' : 'rgba(248, 113, 113, 0.3)' };
       case 'MISSED SCHEDULE':
