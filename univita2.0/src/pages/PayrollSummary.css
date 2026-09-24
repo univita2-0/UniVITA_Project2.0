@@ -1,8 +1,9 @@
-/* src/pages/PayrollSummary.css – Responsive */
+/* src/pages/PayrollSummary.css */
 .payroll-summary-container {
-  padding: 1rem;
+  padding: 1.5rem;
   background: #f8fafc;
-  min-height: 100%;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 
 .summary-header {
@@ -22,29 +23,35 @@
 }
 
 .btn-export {
-  background: #00897B;
+  background: #0D9488;
   color: white;
   border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 40px;
+  padding: 0.6rem 1.25rem;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   font-weight: 600;
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.btn-export:hover {
+  background: #0F766E;
 }
 
 .summary-controls {
   display: flex;
-  gap: 0.75rem;
+  gap: 1rem;
   flex-wrap: wrap;
   margin-bottom: 1.5rem;
   background: white;
-  padding: 0.75rem;
-  border-radius: 16px;
-  border: 1px solid #eef2f6;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 
 .filter-group {
@@ -52,10 +59,11 @@
   align-items: center;
   gap: 0.5rem;
   background: #f8fafc;
-  padding: 0.4rem 0.8rem;
-  border-radius: 40px;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
   flex: 1;
-  min-width: 160px;
+  min-width: 200px;
 }
 
 .filter-group input,
@@ -63,85 +71,100 @@
   border: none;
   background: transparent;
   outline: none;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   width: 100%;
+  color: #0f172a;
+  font-family: inherit;
 }
 
 .summary-table-wrapper {
   overflow-x: auto;
   background: white;
-  border-radius: 20px;
-  border: 1px solid #eef2f6;
-  margin: 0 -1rem;
-  padding: 0 1rem;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 
 .summary-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 700px;  /* ensures horizontal scroll on mobile */
+  min-width: 700px;
 }
 
 .summary-table th,
 .summary-table td {
-  padding: 0.75rem 0.75rem;
+  padding: 1rem 1.25rem;
   text-align: left;
   border-bottom: 1px solid #f1f5f9;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+  color: #334155;
 }
 
 .summary-table th {
   background: #f8fafc;
-  font-weight: 600;
-  color: #475569;
+  font-weight: 700;
+  color: #64748b;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-table tr:hover td {
+  background: #f8fafc;
 }
 
 .emp-id {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   color: #64748b;
+  font-family: monospace;
 }
 
 .net-pay {
   font-weight: 700;
-  color: #00897B;
+  color: #0D9488;
+}
+
+.text-center {
+  text-align: center;
 }
 
 .status-badge {
   display: inline-block;
-  padding: 0.2rem 0.6rem;
-  border-radius: 30px;
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
   white-space: nowrap;
 }
 
 .status-badge.paid {
-  background: #dcfce7;
-  color: #15803d;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
 }
 
 .status-badge.pending {
-  background: #fef3c7;
-  color: #92400e;
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
 }
 
 .loading-spinner,
 .empty-row td {
   text-align: center;
-  padding: 2rem;
+  padding: 3rem;
   color: #64748b;
+  font-weight: 500;
 }
 
-/* PIN MODAL – responsive */
+/* PIN MODAL */
 .pin-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -152,27 +175,33 @@
 .pin-modal {
   position: relative;
   background: white;
-  border-radius: 28px;
-  padding: 2rem 1.5rem;
-  width: 90%;
-  max-width: 320px;
+  border-radius: 20px;
+  padding: 2.5rem 2rem;
+  width: 100%;
+  max-width: 380px;
   text-align: center;
-  box-shadow: 0 25px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
 }
 
 .pin-close-btn {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  background: none;
+  top: 1rem;
+  right: 1rem;
+  background: transparent;
   border: none;
   cursor: pointer;
   color: #94a3b8;
-  transition: color 0.2s;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
 }
 
 .pin-close-btn:hover {
-  color: #1e293b;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .pin-header {
@@ -180,19 +209,21 @@
 }
 
 .pin-header svg {
-  color: #00897B;
-  margin-bottom: 0.5rem;
+  color: #0D9488;
+  margin-bottom: 0.75rem;
 }
 
 .pin-header h2 {
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   font-weight: 700;
+  color: #0f172a;
   margin-bottom: 0.25rem;
 }
 
 .pin-header p {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: #64748b;
+  margin: 0;
 }
 
 .pin-input-group {
@@ -200,9 +231,9 @@
   align-items: center;
   gap: 0.5rem;
   background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 0.5rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.5rem 1rem;
   margin-bottom: 1rem;
 }
 
@@ -210,64 +241,54 @@
   flex: 1;
   border: none;
   background: transparent;
-  font-size: 1.2rem;
-  letter-spacing: 2px;
+  font-size: 1.25rem;
+  letter-spacing: 0.2em;
   outline: none;
   text-align: center;
+  color: #0f172a;
+  font-family: monospace;
 }
 
 .pin-input-group input::placeholder {
   text-align: center;
   font-size: 0.9rem;
+  letter-spacing: normal;
+  font-family: inherit;
 }
 
 .pin-error {
   color: #dc2626;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
   margin-bottom: 1rem;
 }
 
 .btn-unlock {
-  background: #00897B;
+  background: #0F172A;
   color: white;
   border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 40px;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
   width: 100%;
   font-weight: 600;
+  font-size: 0.95rem;
   cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-unlock:hover:not(:disabled) {
+  background: #1e293b;
 }
 
 .btn-unlock:disabled {
   opacity: 0.6;
+  cursor: not-allowed;
 }
 
-/* ===== Responsive adjustments ===== */
-@media (min-width: 768px) {
+@media (max-width: 640px) {
   .payroll-summary-container {
-    padding: 1.5rem;
+    padding: 1rem;
   }
-  .summary-header h1 {
-    font-size: 1.8rem;
-  }
-  .summary-table-wrapper {
-    margin: 0;
-    padding: 0;
-  }
-  .summary-table th,
-  .summary-table td {
-    padding: 0.75rem 1rem;
-  }
-  .pin-modal {
-    padding: 2rem;
-    max-width: 360px;
-  }
-  .pin-header h2 {
-    font-size: 1.3rem;
-  }
-}
-
-@media (max-width: 480px) {
   .summary-header {
     flex-direction: column;
     align-items: stretch;
@@ -277,12 +298,5 @@
   }
   .filter-group {
     min-width: 100%;
-  }
-  .pin-modal {
-    width: 95%;
-    padding: 1.5rem;
-  }
-  .pin-header h2 {
-    font-size: 1.1rem;
   }
 }

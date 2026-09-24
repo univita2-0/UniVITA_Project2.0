@@ -94,6 +94,8 @@ const OvertimeRequests = () => {
       case 'future': return 'Future Date';
       case 'ongoing': return 'Ongoing Shift';
       case 'after_shift': return 'After Shift';
+      case 'early_ot': return 'Early OT';
+      case 'normal_ot': return 'Normal OT';
       default: return scenario || '—';
     }
   };
@@ -159,7 +161,8 @@ const OvertimeRequests = () => {
                   <tr>
                     <th>Date</th>
                     <th>Employee</th>
-                    <th>Scenario</th>
+                    <th>Type</th>
+                    <th>Timing</th>
                     <th>Time</th>
                     <th>Status</th>
                     <th className="text-center">Proof</th>
@@ -174,10 +177,11 @@ const OvertimeRequests = () => {
                         <div className="font-semibold text-dark">{req.full_name}</div>
                         <div className="text-xs text-muted">{req.employee_id}</div>
                       </td>
+                      <td className="whitespace-nowrap"><span className="ot-chip default">{req.overtime_type || 'Regular Overtime'}</span></td>
                       <td className="whitespace-nowrap"><span className="ot-chip default">{getScenarioLabel(req.scenario_type)}</span></td>
                       <td className="whitespace-nowrap">{formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</td>
                       <td>
-                        <span className={`ot-chip ${req.status?.toLowerCase() === 'approved' ? 'success' : req.status?.toLowerCase() === 'rejected' ? 'danger' : 'warning'}`}>
+                        <span className={`ot-chip ${req.status?.toLowerCase() === 'approved' ? 'success' : req.status?.toLowerCase() === 'rejected' ? 'danger' : req.status?.toLowerCase() === 'cancelled' ? 'default' : 'warning'}`}>
                           {req.status?.toUpperCase()}
                         </span>
                       </td>
@@ -209,7 +213,7 @@ const OvertimeRequests = () => {
         )}
       </div>
 
-      {/* CUSTOMIZED PENDING OVERTIME REQUESTS MODAL (No FormalModal) */}
+      {/* PENDING OVERTIME REQUESTS MODAL */}
       {showPendingModal && (
         <div className="ot-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="ot-custom-modal" onClick={e => e.stopPropagation()}>
@@ -239,7 +243,7 @@ const OvertimeRequests = () => {
                           <span className="ot-custom-name">{req.full_name}</span>
                           <span className="ot-custom-id-tag">{req.employee_id}</span>
                         </div>
-                        <span className="ot-custom-scenario-pill">{getScenarioLabel(req.scenario_type)}</span>
+                        <span className="ot-custom-scenario-pill">{req.overtime_type || 'Regular Overtime'} ({getScenarioLabel(req.scenario_type)})</span>
                       </div>
                       
                       <div className="ot-custom-details-grid">

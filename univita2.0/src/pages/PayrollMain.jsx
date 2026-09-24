@@ -15,7 +15,7 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Philippine TRAIN Law Monthly Tax Brackets
+// Philippine TRAIN Law Monthly Tax Brackets[cite: 21]
 const taxTable = [
   { min: 0, max: 20833, rate: 0, base: 0 },
   { min: 20833, max: 33332, rate: 0.15, base: 0 },
@@ -342,7 +342,6 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     return ['Full-time', 'Regular', 'Provisionary'].includes(type);
   };
 
-  // Bulletproof Inline Styles to fix responsiveness and modal layout hierarchy
   const modalStyles = {
     container: { display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', boxSizing: 'border-box' },
     grid: { display: 'flex', flexWrap: 'wrap', gap: '20px', width: '100%', alignItems: 'stretch' },
@@ -534,7 +533,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
         </div>
       </FormalModal>
 
-      {/* Payslip Editor Modal (Bulletproof Inline Responsive Styling & Buttons) */}
+      {/* Payslip Editor Modal */}
       <FormalModal 
         show={showPayslipModal && !!payslipEmployee} 
         onClose={() => { setShowPayslipModal(false); setPayslipEmployee(null); }} 

@@ -373,7 +373,7 @@ const AttendanceCorrection = () => {
         </div>
       </FormalModal>
 
-      {/* CUSTOMIZED PENDING CORRECTION REQUESTS MODAL (No FormalModal) */}
+      {/* PENDING CORRECTIONS MODAL */}
       {showPendingModal && (
         <div className="ac-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="ac-custom-modal" onClick={e => e.stopPropagation()}>
@@ -417,7 +417,7 @@ const AttendanceCorrection = () => {
                           <div className="ac-custom-prop full-width">
                             <label>Attached Verification Proof</label>
                             <span>
-                              <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${c.selfie_url}`)} className="ac-link-btn" style={{ border: 'none', cursor: 'pointer' }}>
+                              <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${c.selfie_url}`)} className="ac-link-btn" style={{ border: 'none', cursor: 'pointer', background: 'transparent' }}>
                                 <Eye size={14} /> View Selfie Verification
                               </button>
                             </span>

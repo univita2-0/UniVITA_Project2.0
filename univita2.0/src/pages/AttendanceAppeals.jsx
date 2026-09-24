@@ -191,7 +191,7 @@ const AttendanceAppeals = () => {
                       <td className="whitespace-nowrap">{formatTo12Hour(appeal.requested_time_in)}</td>
                       <td className="whitespace-nowrap">{formatTo12Hour(appeal.requested_time_out)}</td>
                       <td className="text-center">
-                        <span className={`aa-chip ${appeal.status?.toLowerCase() === 'approved' ? 'success' : 'danger'}`}>
+                        <span className={`aa-chip ${appeal.status?.toLowerCase() === 'approved' ? 'success' : appeal.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
                           {appeal.status?.toUpperCase()}
                         </span>
                       </td>
@@ -226,7 +226,7 @@ const AttendanceAppeals = () => {
         )}
       </div>
 
-      {/* CUSTOMIZED PENDING APPEAL REQUESTS MODAL (No FormalModal) */}
+      {/* PENDING APPEALS MODAL */}
       {showPendingModal && (
         <div className="aa-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="aa-custom-modal" onClick={e => e.stopPropagation()}>

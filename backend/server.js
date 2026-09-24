@@ -405,7 +405,18 @@ const storage = multer.diskStorage({
     cb(null, `leave_${unique}${path.extname(file.originalname)}`);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
+
+const documentFilter = (req, file, cb) => {
+  const allowed = [
+    'image/jpeg', 'image/png', 'image/jpg', 
+    'application/pdf', 'application/msword', 
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ];
+  if (allowed.includes(file.mimetype)) cb(null, true);
+  else cb(new Error('Invalid file type. Only JPG, PNG, PDF, DOC, DOCX allowed.'));
+};
+
+const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: documentFilter });
 
 // 2. RESUMES
 const resumeDir = path.join(uploadsPath, 'resumes');
@@ -453,7 +464,10 @@ const appealStorage = multer.diskStorage({
     cb(null, `appeal_${unique}${path.extname(file.originalname)}`);
   }
 });
-const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
+// Applied documentFilter
+const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: documentFilter });
+
+
 
 
 
@@ -838,6 +852,12 @@ const getPHTime = () => {
   return { date, time };
 };
 
+// Global helper accessible to all routes
+const getPHDateTime = () => {
+  const { date, time } = getPHTime();
+  return `${date} ${time}`;
+};
+
 app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
   let { latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
@@ -1058,9 +1078,9 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
         const reason = "System Auto-Logged: Instructor clocked out late. Awaiting review.";
         await db.promise().query(
           `INSERT INTO overtime_requests 
-           (user_id, date, start_time, end_time, reason, scenario_type, attendance_id, status)
-           VALUES (?, ?, ?, ?, ?, 'after_shift', ?, 'pending')`,
-          [userId, todayDate, scheduledEndTime, currentTime, reason, existing[0].id]
+           (user_id, date, schedule_id, start_time, end_time, reason, scenario_type, attendance_id, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'after_shift', ?, 'pending', ?)`,
+          [userId, todayDate, schedule_id, scheduledEndTime, currentTime, reason, existing[0].id, getPHDateTime()]
         );
       }
     }
@@ -1125,13 +1145,19 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ============================================
+// ATTENDANCE CORRECTIONS (Secured, Validated & Timezone-Synchronized)
+// ============================================
+
+// 1. Submit Correction Request (Explicit Philippine Submission Timestamp)
 app.post('/api/attendance/correction-request', authenticateToken, multerCorrection.single('selfie'), async (req, res) => {
   let { employee_id, date, type, time, reason, schedule_id } = req.body;
   const userId = req.user.id;
   const selfiePath = req.file ? `/uploads/corrections/${req.file.filename}` : null;
+  const phNow = getPHDateTime();
 
   if (!employee_id || !date || !type || !time || !reason) {
-    return res.status(400).json({ success: false, message: 'Missing required fields' });
+    return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
   const { date: today } = getPHTime();
@@ -1141,16 +1167,17 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
 
   try {
     const [userRows] = await db.promise().query(
-      "SELECT id, employee_id FROM users WHERE id = ? AND employee_id = ? AND status = 'active'",
-      [userId, employee_id]
+      "SELECT id, employee_id FROM users WHERE id = ? AND status = 'active'",
+      [userId]
     );
-    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'Invalid user' });
+    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'Invalid or inactive user account.' });
+    const resolvedEmployeeId = userRows[0].employee_id;
 
     // 1. Resolve or validate the specific schedule_id
     if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
       const [schedRows] = await db.promise().query(
-        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC",
-        [employee_id, date]
+        "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC",
+        [resolvedEmployeeId, userId, date]
       );
       if (schedRows.length === 0) {
         return res.status(400).json({ success: false, message: "No schedule found for this date. Correction not allowed." });
@@ -1158,8 +1185,8 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
       schedule_id = schedRows[0].id;
     } else {
       const [schedVerify] = await db.promise().query(
-        "SELECT id FROM schedules WHERE id = ? AND user_id = ? AND date = ?",
-        [schedule_id, employee_id, date]
+        "SELECT id FROM schedules WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?",
+        [schedule_id, resolvedEmployeeId, userId, date]
       );
       if (schedVerify.length === 0) {
         return res.status(400).json({ success: false, message: "Invalid schedule selected for this date." });
@@ -1169,32 +1196,35 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
     // 2. Check for duplicate pending/approved requests scoped strictly to this specific shift
     const [existingCorr] = await db.promise().query(
       `SELECT id FROM attendance_corrections 
-       WHERE user_id = ? AND attendance_date = ? AND schedule_id = ? AND status IN ('pending', 'approved') 
+       WHERE (user_id = ? OR user_id = ?) AND attendance_date = ? AND schedule_id = ? AND status IN ('pending', 'approved') 
        AND ${type === 'clock_in' ? 'requested_clock_in IS NOT NULL' : 'requested_clock_out IS NOT NULL'}`,
-      [userId, date, schedule_id]
+      [userId, resolvedEmployeeId, date, schedule_id]
     );
 
     if (existingCorr.length > 0) {
-      return res.status(409).json({ success: false, message: `You already have a pending or approved ${type.replace('_', ' ')} request for this specific shift.` });
+      return res.status(409).json({ 
+        success: false, 
+        message: `You already have a pending or approved ${type.replace('_', ' ')} request for this specific shift.` 
+      });
     }
 
-    // 3. Insert correction record including the schedule_id
+    // 3. Insert correction record explicitly stamped with Philippine Standard Time
     await db.promise().query(
       `INSERT INTO attendance_corrections 
-        (user_id, attendance_date, schedule_id, requested_clock_in, requested_clock_out, reason, selfie_url, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
-      [userId, date, schedule_id, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason, selfiePath]
+        (user_id, attendance_date, schedule_id, requested_clock_in, requested_clock_out, reason, selfie_url, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [userId, date, schedule_id, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason.trim(), selfiePath, phNow]
     );
 
     // 4. Update attendance specifically for this schedule_id if clock_out / early_out
-    if (type === 'clock_out') {
+    if (type === 'clock_out' || type === 'early_out') {
       await db.promise().query(
-        "UPDATE attendance SET time_out = ?, status = 'early clock-out' WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
-        [time, employee_id, schedule_id]
+        "UPDATE attendance SET time_out = ?, status = 'early clock-out' WHERE (user_id = ? OR user_id = ?) AND schedule_id = ? AND time_out IS NULL",
+        [time, resolvedEmployeeId, userId, schedule_id]
       );
       await db.promise().query(
         "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
-        [employee_id]
+        [resolvedEmployeeId]
       );
     }
 
@@ -1209,14 +1239,25 @@ app.get('/api/attendance/corrections/user/:employeeId', authenticateToken, verif
   const { employeeId } = req.params;
   try {
     const [results] = await db.promise().query(
-      `SELECT c.id, DATE_FORMAT(c.attendance_date, '%Y-%m-%d') AS attendance_date, 
-              c.requested_clock_in, c.requested_clock_out, c.reason, c.selfie_url, 
-              c.status, c.reviewed_at 
+      `SELECT c.id, 
+              c.schedule_id,
+              c.requested_clock_in, 
+              c.requested_clock_out, 
+              c.reason, 
+              c.selfie_url, 
+              c.status, 
+              c.admin_remarks,
+              DATE_FORMAT(c.attendance_date, '%Y-%m-%d') AS attendance_date, 
+              DATE_FORMAT(c.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+              DATE_FORMAT(c.created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+              DATE_FORMAT(c.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
+              u.full_name,
+              u.employee_id
        FROM attendance_corrections c 
-       JOIN users u ON c.user_id = u.id 
-       WHERE u.employee_id = ? 
+       JOIN users u ON (c.user_id = u.id OR c.user_id = u.employee_id)
+       WHERE (u.employee_id = ? OR u.id = ? OR c.user_id = ?)
        ORDER BY c.id DESC`,
-      [employeeId]
+      [employeeId, employeeId, employeeId]
     );
     res.json(results || []);
   } catch (err) {
@@ -1229,8 +1270,9 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
+
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, admin_remarks } = req.body;
   const phNow = getPHDateTime();
 
   if (!['approved', 'rejected'].includes(status)) {
@@ -1239,14 +1281,18 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
 
   try {
     const [corr] = await db.promise().query(
-      "SELECT c.*, u.employee_id FROM attendance_corrections c JOIN users u ON c.user_id = u.id WHERE c.id = ?", 
+      `SELECT c.*, u.employee_id, u.id as internal_user_id 
+       FROM attendance_corrections c 
+       JOIN users u ON (c.user_id = u.id OR c.user_id = u.employee_id) 
+       WHERE c.id = ?`, 
       [id]
     );
     if (corr.length === 0) return res.status(404).json({ error: 'Request not found' });
 
+    // Stamped with exact Philippine Time on review
     await db.promise().query(
-      "UPDATE attendance_corrections SET status = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
-      [status, req.user.id, phNow, id]
+      "UPDATE attendance_corrections SET status = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+      [status, admin_remarks || null, req.user.id, phNow, id]
     );
 
     if (status === 'approved') {
@@ -1256,15 +1302,15 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
 
       if (!targetScheduleId) {
         const [schedRows] = await db.promise().query(
-          "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
-          [empIdString, record.attendance_date]
+          "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
+          [empIdString, record.internal_user_id, record.attendance_date]
         );
         if (schedRows.length > 0) targetScheduleId = schedRows[0].id;
       }
 
       const [existing] = await db.promise().query(
-        "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ?",
-        [empIdString, targetScheduleId]
+        "SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?",
+        [empIdString, record.internal_user_id, targetScheduleId]
       );
 
       if (existing.length === 0) {
@@ -1286,9 +1332,9 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
     
     const actionName = status === 'approved' ? 'APPROVE_CORRECTION' : 'REJECT_CORRECTION';
     logAction(req.user.id, actionName, 'attendance_correction', id, req);
-    res.json({ success: true });
+    res.json({ success: true, message: `Correction request successfully ${status}.` });
   } catch (err) {
-    console.error(err);
+    console.error("Review correction error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1298,24 +1344,32 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
 // 3. ATTENDANCE APPEALS
 // ============================================
 
-// 1. Get User Attendance Appeals History (Formatted to Philippine Time Strings with Dual-ID resolution)
 app.get('/api/attendance-appeals/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   const { employeeId } = req.params;
   const sql = `
     SELECT 
-      a.*, 
+      a.id,
+      a.user_id,
+      a.schedule_id,
+      a.reason,
+      a.image_url,
+      a.status,
+      a.admin_remarks,
+      a.requested_time_in,
+      a.requested_time_out,
       DATE_FORMAT(a.date, '%Y-%m-%d') AS date,
       DATE_FORMAT(a.submitted_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(a.submitted_at, '%Y-%m-%d %H:%i:%s') AS created_at,
       DATE_FORMAT(a.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
       u.full_name, 
       u.employee_id 
     FROM attendance_appeals a 
-    JOIN users u ON (a.user_id = u.employee_id OR a.user_id = u.id)
-    WHERE (a.user_id = ? OR a.user_id = (SELECT employee_id FROM users WHERE id = ?))
-    ORDER BY a.submitted_at DESC
+    LEFT JOIN users u ON (a.user_id = u.employee_id OR a.user_id = u.id)
+    WHERE (a.user_id = ? OR a.user_id = (SELECT employee_id FROM users WHERE id = ?) OR a.user_id = (SELECT id FROM users WHERE employee_id = ?))
+    ORDER BY a.submitted_at DESC, a.id DESC
   `;
 
-  db.query(sql, [employeeId, employeeId], (err, results) => {
+  db.query(sql, [employeeId, employeeId, employeeId], (err, results) => {
     if (err) {
       console.error("User appeals fetch error:", err);
       return res.status(500).json({ error: err.message });
@@ -1324,7 +1378,6 @@ app.get('/api/attendance-appeals/user/:employeeId', authenticateToken, verifyOwn
   });
 });
 
-// 2. Submit Attendance Appeal (Stamped with Philippine Submission Timestamp)
 app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('image'), async (req, res) => {
   const { date, reason, time_in, time_out, schedule_id } = req.body;
   const userId = req.user.id;
@@ -1339,16 +1392,19 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
   }
 
   try {
-    const [userRows] = await db.promise().query("SELECT employee_id FROM users WHERE id = ?", [userId]);
-    if (userRows.length === 0) return res.status(500).json({ success: false, error: "User not found" });
+    const [userRows] = await db.promise().query(
+      "SELECT employee_id FROM users WHERE id = ? AND status = 'active'",
+      [userId]
+    );
+    if (userRows.length === 0) return res.status(404).json({ success: false, error: "User not found or inactive." });
     const employee_id = userRows[0].employee_id;
 
     // Resolve or validate target schedule_id
     let targetScheduleId = schedule_id;
     if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
       const [schedRows] = await db.promise().query(
-        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
-        [employee_id, date]
+        "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
+        [employee_id, userId, date]
       );
       if (schedRows.length === 0) {
         return res.status(400).json({ success: false, error: "No schedule found for this date. Cannot submit appeal." });
@@ -1356,8 +1412,8 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
       targetScheduleId = schedRows[0].id;
     } else {
       const [schedVerify] = await db.promise().query(
-        "SELECT id FROM schedules WHERE id = ? AND user_id = ? AND date = ?",
-        [targetScheduleId, employee_id, date]
+        "SELECT id FROM schedules WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?",
+        [targetScheduleId, employee_id, userId, date]
       );
       if (schedVerify.length === 0) {
         return res.status(400).json({ success: false, error: "Invalid schedule selected for this date." });
@@ -1366,8 +1422,9 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
 
     // Check for existing pending or approved appeal on this shift
     const [existingAppeal] = await db.promise().query(
-      "SELECT id FROM attendance_appeals WHERE user_id = ? AND date = ? AND schedule_id = ? AND status IN ('pending', 'approved')",
-      [employee_id, date, targetScheduleId]
+      `SELECT id FROM attendance_appeals 
+       WHERE (user_id = ? OR user_id = ?) AND date = ? AND schedule_id = ? AND status IN ('pending', 'approved')`,
+      [employee_id, userId, date, targetScheduleId]
     );
 
     if (existingAppeal.length > 0) {
@@ -1378,11 +1435,12 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
     const appealTimeIn = time_in || null;
     const appealTimeOut = time_out || null;
 
+    // Explicitly stamp submitted_at with Philippine Standard Time
     const [result] = await db.promise().query(
       `INSERT INTO attendance_appeals 
         (user_id, date, schedule_id, reason, image_url, status, requested_time_in, requested_time_out, submitted_at)
        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-      [employee_id, date, targetScheduleId, reason, image_url, appealTimeIn, appealTimeOut, phNow]
+      [employee_id, date, targetScheduleId, reason.trim(), image_url, appealTimeIn, appealTimeOut, phNow]
     );
 
     logAction(req.user.id, 'SUBMIT_APPEAL', 'attendance_appeal', result.insertId, req);
@@ -1393,7 +1451,6 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
   }
 });
 
-// 3. Get Pending Attendance Appeals (Admin & HR Review Queue)
 app.get('/api/attendance-appeals/pending', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
@@ -1404,19 +1461,18 @@ app.get('/api/attendance-appeals/pending', authenticateToken, (req, res) => {
       a.*, 
       DATE_FORMAT(a.date, '%Y-%m-%d') AS date,
       DATE_FORMAT(a.submitted_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(a.submitted_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(a.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
       u.full_name, 
       u.employee_id 
     FROM attendance_appeals a 
-    JOIN users u ON a.user_id = u.employee_id 
+    JOIN users u ON (a.user_id = u.employee_id OR a.user_id = u.id) 
     WHERE a.status = 'pending' 
     ORDER BY a.submitted_at DESC
   `;
 
   db.query(sql, (err, results) => {
-    if (err) {
-      console.error("Pending appeals error:", err);
-      return res.status(500).json({ error: err.message });
-    }
+    if (err) return res.status(500).json({ error: err.message });
     res.json(results || []);
   });
 });
@@ -1499,7 +1555,6 @@ app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res
   }
 });
 
-// 5. Get All Attendance Appeals (Admin & HR History View)
 app.get('/api/attendance-appeals/history', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
@@ -1510,31 +1565,33 @@ app.get('/api/attendance-appeals/history', authenticateToken, (req, res) => {
       a.*, 
       DATE_FORMAT(a.date, '%Y-%m-%d') AS date,
       DATE_FORMAT(a.submitted_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(a.submitted_at, '%Y-%m-%d %H:%i:%s') AS created_at,
       DATE_FORMAT(a.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
       u.full_name, 
       u.employee_id 
     FROM attendance_appeals a 
-    JOIN users u ON a.user_id = u.employee_id 
+    JOIN users u ON (a.user_id = u.employee_id OR a.user_id = u.id) 
     WHERE a.status IN ('approved', 'rejected') 
     ORDER BY a.submitted_at DESC
   `;
 
   db.query(sql, (err, results) => {
-    if (err) {
-      console.error("Appeals history error:", err);
-      return res.status(500).json({ error: err.message });
-    }
+    if (err) return res.status(500).json({ error: err.message });
     res.json(results || []);
   });
 });
 
 // ============================================
-// LEAVE REQUESTS (Secured & Validated)
+// LEAVE REQUESTS (Secured, Validated & Timezone-Synchronized)
 // ============================================
 
 app.post('/api/leave-requests', authenticateToken, upload.single('image'), async (req, res) => {
   const { request_date, reason, type } = req.body;
   const userId = req.user.id;
+  const image_url = req.file ? `/uploads/leave_images/${req.file.filename}` : null;
+  const duration = req.body.duration || 'Whole Day';
+  const isPaid = (req.body.is_paid === 'true' || req.body.is_paid === true || req.body.is_paid === 1 || req.body.is_paid === '1') ? 1 : 0;
+  const phNow = getPHDateTime();
 
   // 1. Strict Input Validation
   if (!request_date || !reason || !type) {
@@ -1550,28 +1607,41 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
     return res.status(400).json({ success: false, message: `${type} cannot be filed retroactively.` });
   }
 
-  const leaveYear = new Date(request_date).getFullYear();
+  const leaveYear = parseInt(String(request_date).split('-')[0], 10) || new Date().getFullYear();
 
   try {
-    const [userRows] = await db.promise().query("SELECT employee_id FROM users WHERE id = ?", [userId]);
+    const [userRows] = await db.promise().query(
+      "SELECT employee_id FROM users WHERE id = ?",
+      [userId]
+    );
     if (userRows.length === 0) return res.status(404).json({ success: false, message: "User not found in system." });
     const employee_id = userRows[0].employee_id;
 
+    // Check for existing pending or approved requests across both user_id formats
     const [existingReq] = await db.promise().query(
-      "SELECT id FROM leave_requests WHERE user_id = ? AND request_date = ? AND status IN ('Pending', 'Approved')",
-      [employee_id, request_date]
+      `SELECT id FROM leave_requests 
+       WHERE (user_id = ? OR user_id = ?) AND request_date = ? AND status IN ('Pending', 'Approved')`,
+      [employee_id, userId, request_date]
     );
-    if (existingReq.length > 0) return res.status(409).json({ success: false, message: "A request already exists for this date." });
+    if (existingReq.length > 0) {
+      return res.status(409).json({ success: false, message: "A request already exists for this date." });
+    }
 
-    const [typeRows] = await db.promise().query("SELECT id, annual_quota FROM leave_types WHERE name = ?", [type]);
-    if (typeRows.length === 0) return res.status(400).json({ success: false, message: "Invalid leave type selected." });
+    const [typeRows] = await db.promise().query(
+      "SELECT id, annual_quota FROM leave_types WHERE name = ?",
+      [type]
+    );
+    if (typeRows.length === 0) {
+      return res.status(400).json({ success: false, message: "Invalid leave type selected." });
+    }
     
     const leaveTypeId = typeRows[0].id;
     const annualQuota = typeRows[0].annual_quota || 15;
 
-    // Ensure balance row exists
+    // Ensure leave balance entry exists
     await db.promise().query(
-      `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated) VALUES (?, ?, ?, ?, CURDATE())`,
+      `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated) 
+       VALUES (?, ?, ?, ?, CURDATE())`,
       [userId, leaveTypeId, annualQuota, leaveYear]
     );
 
@@ -1580,21 +1650,23 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       [userId, leaveTypeId, leaveYear]
     );
     
-    if (balanceRows[0].remaining_days < 1) {
-      return res.status(400).json({ success: false, message: `Insufficient ${type} balance. You have 0 days remaining.` });
+    // Validate balance ONLY if the request is marked as 'Paid'
+    if (isPaid === 1 && (!balanceRows.length || balanceRows[0].remaining_days < 1)) {
+      return res.status(400).json({ success: false, message: `Insufficient ${type} balance for a paid leave. You have 0 days remaining.` });
     }
 
-    const image_url = req.file ? `/uploads/leave_images/${req.file.filename}` : null;
     const [result] = await db.promise().query(
-      `INSERT INTO leave_requests (user_id, request_date, reason, type, image_url, status) VALUES (?, ?, ?, ?, ?, 'Pending')`,
-      [employee_id, request_date, reason, type, image_url]
+      `INSERT INTO leave_requests (user_id, request_date, duration, is_paid, reason, type, image_url, status, submitted_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?)`,
+      [employee_id, request_date, duration, isPaid, reason.trim(), type, image_url, phNow]
     );
     
+    logAction(req.user.id, 'SUBMIT_LEAVE', 'leave_request', result.insertId, req);
     res.json({ success: true, message: "Leave request submitted successfully." });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: "Duplicate entry detected." });
     console.error("Leave Request Submit Error:", err);
-    res.status(500).json({ success: false, message: "Server connection failed while submitting request." });
+    res.status(500).json({ success: false, message: err.message || "Server connection failed while submitting request." });
   }
 });
 
@@ -1602,43 +1674,84 @@ app.get('/api/leave-requests/all', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
-  db.query(
-    `SELECT lr.*, u.full_name FROM leave_requests lr LEFT JOIN users u ON lr.user_id = u.employee_id WHERE lr.is_hidden = 0 ORDER BY lr.request_date DESC`,
-    (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: "Failed to fetch leave requests." });
-      res.json(results || []);
-    }
-  );
+
+  const sql = `
+    SELECT 
+      lr.*,
+      DATE_FORMAT(lr.request_date, '%Y-%m-%d') AS request_date,
+      DATE_FORMAT(lr.submitted_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(lr.submitted_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(lr.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
+      u.full_name, 
+      u.employee_id 
+    FROM leave_requests lr 
+    LEFT JOIN users u ON (lr.user_id = u.employee_id OR lr.user_id = u.id) 
+    WHERE lr.is_hidden = 0 
+    ORDER BY lr.request_date DESC, lr.id DESC
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: "Failed to fetch leave requests." });
+    res.json(results || []);
+  });
 });
 
+// 3. Get Leave History by Identifier (Formatted with PHT Strings to Prevent UTC Shifting)
 app.get('/api/leave-requests/history/:identifier', authenticateToken, (req, res) => {
   const { identifier } = req.params;
-  db.query(
-    `SELECT lr.*, DATE_FORMAT(lr.request_date, '%Y-%m-%d') as formatted_date, 
-       DATE_FORMAT(lr.reviewed_at, '%Y-%m-%d %H:%i:%s') as reviewed_at
-     FROM leave_requests lr 
-     JOIN users u ON (lr.user_id = u.employee_id OR lr.user_id = u.id) 
-     WHERE (u.employee_id = ? OR u.id = ?) AND lr.status IN ('Approved', 'Rejected') AND lr.is_hidden = 0 
-     ORDER BY lr.request_date DESC`,
-    [identifier, identifier],
-    (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: "Failed to fetch leave history." });
-      res.json(results || []);
+  const sql = `
+    SELECT 
+      lr.*, 
+      DATE_FORMAT(lr.request_date, '%Y-%m-%d') AS formatted_date,
+      DATE_FORMAT(lr.request_date, '%Y-%m-%d') AS request_date,
+      DATE_FORMAT(lr.submitted_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(lr.submitted_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(lr.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
+      u.full_name,
+      u.employee_id
+    FROM leave_requests lr 
+    JOIN users u ON (lr.user_id = u.employee_id OR lr.user_id = u.id) 
+    WHERE (u.employee_id = ? OR u.id = ?) 
+      AND lr.status IN ('Approved', 'Rejected') 
+      AND lr.is_hidden = 0 
+    ORDER BY lr.request_date DESC, lr.id DESC
+  `;
+
+  db.query(sql, [identifier, identifier], (err, results) => {
+    if (err) {
+      console.error("Failed to fetch leave history:", err);
+      return res.status(500).json({ success: false, message: "Failed to fetch leave history." });
     }
-  );
+    res.json(results || []);
+  });
 });
 
 app.get('/api/leave-requests/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
-  db.query("SELECT * FROM leave_requests WHERE user_id = ? ORDER BY request_date DESC", [req.params.employeeId], (err, result) => {
+  const { employeeId } = req.params;
+  const sql = `
+    SELECT 
+      id, user_id, type, reason, status, image_url, admin_remarks, is_hidden,
+      DATE_FORMAT(request_date, '%Y-%m-%d') AS request_date,
+      DATE_FORMAT(submitted_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(submitted_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
+    FROM leave_requests 
+    WHERE (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?) OR user_id = (SELECT id FROM users WHERE employee_id = ?)) 
+    ORDER BY request_date DESC, id DESC
+  `;
+
+  db.query(sql, [employeeId, employeeId, employeeId], (err, result) => {
     if (err) return res.status(500).json({ success: false, message: "Failed to fetch user leaves." });
     res.json(result || []);
   });
 });
 
+// 5. Update Leave Request Status (Approved / Rejected with Philippine Time Sync)
 app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
+
   const { status, admin_remarks } = req.body;
   const requestId = req.params.id;
   const phtNow = getPHDateTime();
@@ -1651,28 +1764,34 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
   await connection.beginTransaction();
 
   try {
-    const [leaveRows] = await connection.query(`SELECT user_id, request_date, type FROM leave_requests WHERE id = ?`, [requestId]);
+    const [leaveRows] = await connection.query(
+      `SELECT user_id, request_date, type FROM leave_requests WHERE id = ?`,
+      [requestId]
+    );
     if (leaveRows.length === 0) {
       await connection.rollback();
       return res.status(404).json({ success: false, message: "Leave request not found." });
     }
     const { user_id: employee_id, request_date, type } = leaveRows[0];
 
-    // Get the INT ID for the employee_leave_balances table
-    const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
+    const [userRows] = await connection.query(
+      "SELECT id FROM users WHERE employee_id = ? OR id = ?",
+      [employee_id, employee_id]
+    );
     if (userRows.length === 0) {
       await connection.rollback();
       return res.status(404).json({ success: false, message: "Associated user account not found." });
     }
     const internalUserId = userRows[0].id;
 
+    // Stamp reviewed_at explicitly with Philippine Time
     await connection.query(
-  `UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?`, 
-  [status, admin_remarks || null, phtNow, requestId]
-);
+      `UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?`, 
+      [status, admin_remarks || null, phtNow, requestId]
+    );
 
     if (status === 'Approved') {
-      const leaveYear = new Date(request_date).getFullYear();
+      const leaveYear = parseInt(String(request_date).split('-')[0], 10) || new Date().getFullYear();
       const [typeRows] = await connection.query(`SELECT id FROM leave_types WHERE name = ?`, [type]);
       if (typeRows.length === 0) {
         await connection.rollback();
@@ -1696,10 +1815,10 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
         [newBalance, internalUserId, leaveTypeId, leaveYear]
       );
       
-      // MULTI-SHIFT FIX: Find ALL schedules for this instructor on this leave date and mark each one 'on leave'
+      // Update attendance for all scheduled shifts on this leave date
       const [targetSchedules] = await connection.query(
-        `SELECT id FROM schedules WHERE user_id = ? AND date = ?`,
-        [employee_id, request_date]
+        `SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ?`,
+        [employee_id, internalUserId, request_date]
       );
 
       if (targetSchedules.length > 0) {
@@ -1720,15 +1839,15 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
         );
       }
     }
+
     await connection.commit();
-    
     const action = status === 'Approved' ? 'APPROVE_LEAVE' : 'REJECT_LEAVE';
     logAction(req.user.id, action, 'leave_request', requestId, req);
     res.json({ success: true, message: `Leave request successfully ${status.toLowerCase()}.` });
   } catch (err) {
     await connection.rollback();
     console.error("Error updating leave request status:", err);
-    res.status(500).json({ success: false, message: "Server connection failed while updating status." });
+    res.status(500).json({ success: false, message: err.message || "Server connection failed while updating status." });
   } finally {
     connection.release();
   }
@@ -2161,13 +2280,14 @@ app.get('/api/schedule-requests/my', authenticateToken, (req, res) => {
       id, user_id, full_name, request_type, place, course, start_time, end_time, reason, schedule_id, status, admin_remarks,
       DATE_FORMAT(date, '%Y-%m-%d') AS date,
       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
       DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
     FROM schedule_change_requests 
-    WHERE user_id = (SELECT employee_id FROM users WHERE id = ?) OR user_id = ?
-    ORDER BY created_at DESC
+    WHERE (user_id = (SELECT employee_id FROM users WHERE id = ?) OR user_id = ? OR user_id = (SELECT id FROM users WHERE employee_id = ?))
+    ORDER BY created_at DESC, id DESC
   `;
 
-  db.query(sql, [userId, userId], (err, results) => {
+  db.query(sql, [userId, userId, userId], (err, results) => {
     if (err) {
       console.error("Failed to load my schedule requests:", err);
       return res.status(500).json({ error: err.message });
@@ -2176,7 +2296,6 @@ app.get('/api/schedule-requests/my', authenticateToken, (req, res) => {
   });
 });
 
-// 2. Submit Schedule Request (Stamped with Explicit Philippine Creation Time)
 app.post('/api/schedule-requests', authenticateToken, (req, res) => {
   const { request_type, date, place, course, start_time, end_time, reason, schedule_id } = req.body;
   const userId = req.user.id;
@@ -2186,11 +2305,12 @@ app.post('/api/schedule-requests', authenticateToken, (req, res) => {
     return res.status(400).json({ success: false, error: 'Missing required schedule fields.' });
   }
 
-  db.query("SELECT employee_id, full_name FROM users WHERE id = ?", [userId], (err, rows) => {
-    if (err || rows.length === 0) return res.status(500).json({ success: false, error: 'User not found' });
+  db.query("SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active'", [userId], (err, rows) => {
+    if (err || rows.length === 0) return res.status(500).json({ success: false, error: 'User not found or inactive.' });
     const employeeId = rows[0].employee_id;
     const fullName = rows[0].full_name;
 
+    // Explicitly stamp created_at with Philippine Standard Time
     const sql = `
       INSERT INTO schedule_change_requests 
         (user_id, full_name, request_type, date, place, course, start_time, end_time, reason, schedule_id, status, created_at) 
@@ -2199,7 +2319,7 @@ app.post('/api/schedule-requests', authenticateToken, (req, res) => {
 
     db.query(
       sql,
-      [employeeId, fullName, request_type, date, place, course, start_time, end_time, reason, schedule_id || null, phNow],
+      [employeeId, fullName, request_type, date, place, course, start_time, end_time, reason ? reason.trim() : '', schedule_id || null, phNow],
       (insertErr, result) => {
         if (insertErr) {
           console.error("Schedule request submission error:", insertErr);
@@ -2223,6 +2343,7 @@ app.get('/api/schedule-requests/pending', authenticateToken, (req, res) => {
       id, user_id, full_name, request_type, place, course, start_time, end_time, reason, schedule_id, status, admin_remarks,
       DATE_FORMAT(date, '%Y-%m-%d') AS date,
       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
       DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
     FROM schedule_change_requests 
     WHERE LOWER(status) = 'pending' 
@@ -3191,7 +3312,15 @@ setInterval(async () => {
     `);
     validBleIds = new Set(activeRows.map(row => String(row.ble_id).trim()));
   } catch (err) {
-    console.error("Failed to fetch valid BLE IDs", err);
+    // Suppress transient remote cloud proxy drops and connection losses from spamming the console
+    if (
+      err.code !== 'ECONNRESET' && 
+      err.code !== 'ETIMEDOUT' && 
+      err.code !== 'ENOTFOUND' && 
+      err.code !== 'PROTOCOL_CONNECTION_LOST'
+    ) {
+      console.error("Failed to fetch valid BLE IDs:", err.message);
+    }
   }
 
   for (const bleId in liveVisitors) {
@@ -3209,7 +3338,7 @@ setInterval(async () => {
       delete liveVisitors[bleId];
     }
   }
-}, 5000);
+}, 15000);
 
 app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
   if (req.user.role !== 'instructor') {
@@ -5149,10 +5278,7 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
     const fullName = userRows[0].full_name;
     const { date: today } = getPHTime();
 
-    const getPHDateTime = () => {
-  const now = new Date();
-  return now.toLocaleString('sv-SE', { timeZone: 'Asia/Manila' });
-};
+    
 
     const [scheduleRows] = await db.promise().query(
       `SELECT id, place, start_time, end_time FROM schedules 
@@ -5492,13 +5618,14 @@ app.get('/api/visitor-requests/history', authenticateToken, (req, res) => {
 });
 
 // ============================================
-// OVERTIME REQUESTS (Secured & Validated)
+// OVERTIME REQUESTS (Secured, Validated & Timezone-Synchronized)
 // ============================================
 
 app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'), async (req, res) => {
-  const { date, start_time, end_time, reason, scenario_type, schedule_id } = req.body;
+  const { date, start_time, end_time, reason, scenario_type, overtime_type, schedule_id } = req.body;
   const userId = req.user.id;
   const attachment = req.file ? `/uploads/${req.file.filename}` : null;
+  const phNow = getPHDateTime();
 
   // 1. Strict Input Validation
   if (!date || !start_time || !end_time || !reason || !scenario_type) {
@@ -5509,9 +5636,6 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
   }
   if (start_time >= end_time) {
     return res.status(400).json({ success: false, message: 'Overtime end time must be strictly after the start time.' });
-  }
-  if (!['future', 'ongoing', 'after_shift'].includes(scenario_type)) {
-    return res.status(400).json({ success: false, message: 'Invalid overtime scenario type.' });
   }
 
   // 2. Prevent logical date errors
@@ -5531,16 +5655,16 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
     // Resolve or validate the specific schedule_id
     if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
       const [schedRows] = await db.promise().query(
-        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
-        [employeeId, date]
+        "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
+        [employeeId, userId, date]
       );
       if (schedRows.length > 0) {
         targetScheduleId = schedRows[0].id;
       }
     } else {
       const [schedVerify] = await db.promise().query(
-        "SELECT id FROM schedules WHERE id = ? AND user_id = ? AND date = ?",
-        [targetScheduleId, employeeId, date]
+        "SELECT id FROM schedules WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?",
+        [targetScheduleId, employeeId, userId, date]
       );
       if (schedVerify.length === 0) {
         return res.status(400).json({ success: false, message: 'Invalid schedule selected for this date.' });
@@ -5554,8 +5678,8 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
       }
       const [attRecords] = await db.promise().query(
         `SELECT id, time_in, time_out FROM attendance 
-         WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL`,
-        [employeeId, targetScheduleId]
+         WHERE (user_id = ? OR user_id = ?) AND schedule_id = ? AND time_out IS NULL`,
+        [employeeId, userId, targetScheduleId]
       );
       if (attRecords.length === 0) {
         return res.status(400).json({ success: false, message: 'No active clock-in found for this specific shift. Cannot request ongoing overtime.' });
@@ -5563,11 +5687,12 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
       attendanceId = attRecords[0].id;
     }
 
+    // Explicitly stamp created_at with Philippine Standard Time and save overtime_type
     const [result] = await db.promise().query(
       `INSERT INTO overtime_requests 
-       (user_id, date, schedule_id, start_time, end_time, reason, attachment, scenario_type, attendance_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-      [userId, date, targetScheduleId || null, start_time, end_time, reason, attachment, scenario_type, attendanceId]
+        (user_id, date, schedule_id, start_time, end_time, reason, attachment, scenario_type, overtime_type, attendance_id, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [userId, date, targetScheduleId || null, start_time, end_time, reason.trim(), attachment, scenario_type, overtime_type || 'Regular Overtime', attendanceId, phNow]
     );
 
     logAction(userId, 'SUBMIT_OVERTIME', 'overtime_request', result.insertId, req);
@@ -5578,17 +5703,19 @@ app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'
   }
 });
 
+// 2. Get User's Overtime Requests (Formatted with Philippine Time Strings & Dual Identifiers)
 app.get('/api/overtime-requests', authenticateToken, (req, res) => {
   const userId = req.user.id;
   const sql = `
     SELECT 
-      *,
+      id, user_id, schedule_id, start_time, end_time, reason, attachment, scenario_type, attendance_id, status, admin_remarks,
       DATE_FORMAT(date, '%Y-%m-%d') AS date,
-      DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
     FROM overtime_requests 
     WHERE (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))
-    ORDER BY date DESC
+    ORDER BY date DESC, id DESC
   `;
 
   db.query(sql, [userId, userId], (err, rows) => {
@@ -5600,6 +5727,31 @@ app.get('/api/overtime-requests', authenticateToken, (req, res) => {
   });
 });
 
+app.get('/api/overtime-requests/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
+  const { employeeId } = req.params;
+  const sql = `
+    SELECT 
+      o.id, o.user_id, o.schedule_id, o.start_time, o.end_time, o.reason, o.attachment, o.scenario_type, o.attendance_id, o.status, o.admin_remarks,
+      DATE_FORMAT(o.date, '%Y-%m-%d') AS date,
+      DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(o.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
+    FROM overtime_requests o
+    JOIN users u ON (o.user_id = u.id OR o.user_id = u.employee_id)
+    WHERE (u.employee_id = ? OR u.id = ?)
+    ORDER BY o.date DESC, o.id DESC
+  `;
+
+  db.query(sql, [employeeId, employeeId], (err, rows) => {
+    if (err) {
+      console.error("Failed to load user overtime history:", err);
+      return res.status(500).json({ success: false, message: 'Failed to load overtime history.' });
+    }
+    res.json(rows || []);
+  });
+});
+
+// 3. Get Pending Overtime Requests for Admin & HR Review
 app.get('/api/overtime-requests/pending', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
@@ -5610,6 +5762,7 @@ app.get('/api/overtime-requests/pending', authenticateToken, (req, res) => {
       o.*, 
       DATE_FORMAT(o.date, '%Y-%m-%d') AS date,
       DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(o.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
       u.full_name, u.employee_id 
     FROM overtime_requests o
     JOIN users u ON (o.user_id = u.id OR o.user_id = u.employee_id)
@@ -5632,7 +5785,7 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
   }
 
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, admin_remarks } = req.body;
   const phNow = getPHDateTime();
 
   if (!['approved', 'rejected'].includes(status)) {
@@ -5647,57 +5800,92 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
       `SELECT o.*, u.employee_id, u.id as user_id 
        FROM overtime_requests o
        JOIN users u ON (o.user_id = u.id OR o.user_id = u.employee_id)
-       WHERE o.id = ? AND o.processed = 0 FOR UPDATE`,
+       WHERE o.id = ? AND o.status = 'pending' FOR UPDATE`,
       [id]
     );
 
     if (rows.length === 0) {
       await connection.rollback();
-      return res.status(404).json({ success: false, message: 'Request not found or has already been processed.' });
+      return res.status(404).json({ success: false, message: 'Request not found or has already been reviewed.' });
     }
 
     const reqData = rows[0];
 
-    // Stamp the exact real-time Philippine timestamp on review
+    // Stamp status, remarks, and Philippine review time
     await connection.query(
-      `UPDATE overtime_requests SET status = ?, processed = 1, reviewed_at = ? WHERE id = ?`, 
-      [status, phNow, id]
+      `UPDATE overtime_requests 
+       SET status = ?, admin_remarks = ?, reviewed_at = ? 
+       WHERE id = ?`, 
+      [status, admin_remarks || null, phNow, id]
     );
 
     if (status === 'approved') {
       const overtimeHours = calculateHours(reqData.start_time, reqData.end_time);
-      const rate = await hourlyRateFromUser(reqData.user_id);
-      const overtimePay = overtimeHours * (rate * 1.25);
 
+      // CHECK IF OVERTIME TYPE IS COMPENSATORY TIME OFF (CTO)
+      if (reqData.overtime_type && reqData.overtime_type.toLowerCase().includes('cto')) {
+        // Convert overtime hours into leave credits (e.g., 8 hours = 1 day)
+        const earnedDays = overtimeHours / 8;
+        const leaveYear = new Date(reqData.date).getFullYear();
+
+        const [typeRows] = await connection.query(
+          `SELECT id FROM leave_types WHERE name = 'Compensatory Paid Off' OR name LIKE '%Compensatory%' LIMIT 1`
+        );
+
+        if (typeRows.length > 0) {
+          const leaveTypeId = typeRows[0].id;
+
+          // Ensure balance entry exists
+          await connection.query(
+            `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated) 
+             VALUES (?, ?, 0, ?, CURDATE())`,
+            [reqData.user_id, leaveTypeId, leaveYear]
+          );
+
+          // Add converted credits to leave balance
+          await connection.query(
+            `UPDATE employee_leave_balances 
+             SET remaining_days = remaining_days + ?, last_updated = CURDATE() 
+             WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
+            [earnedDays, reqData.user_id, leaveTypeId, leaveYear]
+          );
+        }
+      } else {
+        // REGULAR OVERTIME (Monetary Pay Added to Payroll)
+        const rate = await hourlyRateFromUser(reqData.user_id);
+        const overtimePay = overtimeHours * (rate * 1.25);
+
+        const monthYear = new Date(reqData.date).toLocaleString('default', { month: 'long', year: 'numeric' });
+        const [payrollRows] = await connection.query(
+          `SELECT id, overtime_hours, overtime_pay FROM payroll WHERE user_id = ? AND month_year = ?`,
+          [reqData.user_id, monthYear]
+        );
+
+        if (payrollRows.length > 0) {
+          const newOvertimeHours = (parseFloat(payrollRows[0].overtime_hours) || 0) + overtimeHours;
+          const newOvertimePay = (parseFloat(payrollRows[0].overtime_pay) || 0) + overtimePay;
+          await connection.query(
+            `UPDATE payroll 
+             SET overtime_hours = ?, overtime_pay = ?, gross_pay = gross_pay + ?, net_pay = net_pay + ?
+             WHERE id = ?`,
+            [newOvertimeHours, newOvertimePay, overtimePay, overtimePay, payrollRows[0].id]
+          );
+        }
+      }
+
+      // Record attendance entry for the approved shift
       if (reqData.scenario_type === 'ongoing' && reqData.attendance_id) {
         await connection.query(
           `UPDATE attendance SET time_out = ?, total_hours = TIMESTAMPDIFF(MINUTE, time_in, ?) / 60 
            WHERE id = ?`,
           [reqData.end_time, reqData.end_time, reqData.attendance_id]
         );
-      } else if (reqData.scenario_type === 'future' || reqData.scenario_type === 'after_shift') {
+      } else {
         await connection.query(
           `INSERT INTO attendance 
-           (user_id, date, time_in, time_out, status, location, total_hours, correction_requested)
-           VALUES (?, ?, ?, ?, 'overtime', 'Approved Overtime', ?, 0)`,
-          [reqData.employee_id, reqData.date, reqData.start_time, reqData.end_time, overtimeHours]
-        );
-      }
-
-      const monthYear = new Date(reqData.date).toLocaleString('default', { month: 'long', year: 'numeric' });
-      const [payrollRows] = await connection.query(
-        `SELECT id, overtime_hours, overtime_pay FROM payroll WHERE user_id = ? AND month_year = ?`,
-        [reqData.user_id, monthYear]
-      );
-
-      if (payrollRows.length > 0) {
-        const newOvertimeHours = (parseFloat(payrollRows[0].overtime_hours) || 0) + overtimeHours;
-        const newOvertimePay = (parseFloat(payrollRows[0].overtime_pay) || 0) + overtimePay;
-        await connection.query(
-          `UPDATE payroll 
-           SET overtime_hours = ?, overtime_pay = ?, gross_pay = gross_pay + ?, net_pay = net_pay + ?
-           WHERE id = ?`,
-          [newOvertimeHours, newOvertimePay, overtimePay, overtimePay, payrollRows[0].id]
+           (user_id, schedule_id, date, time_in, time_out, status, location, total_hours, correction_requested)
+           VALUES (?, ?, ?, ?, ?, 'overtime', 'Approved Overtime', ?, 0)`,
+          [reqData.employee_id, reqData.schedule_id || null, reqData.date, reqData.start_time, reqData.end_time, overtimeHours]
         );
       }
     }
@@ -5709,7 +5897,7 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
   } catch (err) {
     await connection.rollback();
     console.error("Overtime status update error:", err);
-    res.status(500).json({ success: false, message: 'Server error while updating request.' });
+    res.status(500).json({ success: false, message: err.message || 'Server error while updating request.' });
   } finally {
     connection.release();
   }
@@ -5770,35 +5958,61 @@ app.get('/api/attendance/corrections/pending', authenticateToken, (req, res) => 
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
-  db.query(
-    `SELECT c.*, DATE_FORMAT(c.attendance_date, '%Y-%m-%d') AS attendance_date, u.full_name, u.employee_id
-     FROM attendance_corrections c
-     JOIN users u ON c.user_id = u.id  
-     WHERE c.status = 'pending'
-     ORDER BY c.id DESC`,
-    (err, rows) => {
-      if (err) {
-        console.error("Pending corrections error:", err);
-        return res.status(500).json({ success: false, message: 'Failed to load attendance corrections.' });
-      }
-      res.json(rows || []);
+
+  const sql = `
+    SELECT c.id, 
+           c.schedule_id,
+           c.requested_clock_in, 
+           c.requested_clock_out, 
+           c.reason, 
+           c.selfie_url, 
+           c.status, 
+           c.admin_remarks,
+           DATE_FORMAT(c.attendance_date, '%Y-%m-%d') AS attendance_date, 
+           DATE_FORMAT(c.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+           DATE_FORMAT(c.created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+           DATE_FORMAT(c.reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
+           u.full_name, 
+           u.employee_id
+    FROM attendance_corrections c
+    JOIN users u ON (c.user_id = u.id OR c.user_id = u.employee_id)  
+    WHERE c.status = 'pending'
+    ORDER BY c.id DESC
+  `;
+
+  db.query(sql, (err, rows) => {
+    if (err) {
+      console.error("Pending corrections error:", err);
+      return res.status(500).json({ success: false, message: 'Failed to load attendance corrections.' });
     }
-  );
+    res.json(rows || []);
+  });
 });
 
-app.get('/api/schedule-requests/user/:employeeId', authenticateToken, async (req, res) => {
+app.get('/api/schedule-requests/user/:employeeId', authenticateToken, verifyOwnership, async (req, res) => {
   const { employeeId } = req.params;
-  try {
-    const [results] = await db.promise().query(
-      "SELECT * FROM schedule_change_requests WHERE user_id = ? ORDER BY id DESC",
-      [employeeId]
-    );
+  const sql = `
+    SELECT 
+      id, user_id, full_name, request_type, place, course, start_time, end_time, reason, schedule_id, status, admin_remarks,
+      DATE_FORMAT(date, '%Y-%m-%d') AS date,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
+      DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
+    FROM schedule_change_requests 
+    WHERE (user_id = ? OR user_id = (SELECT id FROM users WHERE employee_id = ?) OR user_id = (SELECT employee_id FROM users WHERE id = ?))
+    ORDER BY created_at DESC, id DESC
+  `;
+
+  db.query(sql, [employeeId, employeeId, employeeId], (err, results) => {
+    if (err) {
+      console.error("Schedule requests fetch error:", err);
+      return res.status(500).json({ success: false, message: 'Failed to load schedule requests.' });
+    }
     res.json(results || []);
-  } catch (err) {
-    console.error("Schedule requests fetch error:", err);
-    res.status(500).json({ success: false, message: 'Failed to load schedule requests.' });
-  }
+  });
 });
+
+
 
 app.get('/api/leave-requests/grouped', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -5973,6 +6187,145 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
     res.status(500).json({ success: false, message: err.message || "Database error during batch update." });
   } finally {
     connection.release();
+  }
+});
+
+// ============================================
+// USER CANCELLATION ENDPOINTS
+// ============================================
+
+// 1. Cancel Leave Request
+app.put('/api/leave-requests/:id/cancel', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const userId = req.user.id;
+  const phNow = getPHDateTime();
+
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, status FROM leave_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
+      [id, userId, userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+
+    const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
+    await db.promise().query(
+      "UPDATE leave_requests SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
+      [cancelRemark, phNow, id]
+    );
+    logAction(userId, 'CANCEL_LEAVE', 'leave_request', id, req);
+    res.json({ success: true, message: "Request cancelled successfully." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// 2. Cancel Overtime Request
+app.put('/api/overtime-requests/:id/cancel', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const userId = req.user.id;
+  const phNow = getPHDateTime();
+
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, status FROM overtime_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
+      [id, userId, userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+
+    const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
+    await db.promise().query(
+      "UPDATE overtime_requests SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
+      [cancelRemark, phNow, id]
+    );
+    logAction(userId, 'CANCEL_OVERTIME', 'overtime_request', id, req);
+    res.json({ success: true, message: "Request cancelled successfully." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// 3. Cancel Schedule Request
+app.put('/api/schedule-requests/:id/cancel', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const userId = req.user.id;
+  const phNow = getPHDateTime();
+
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, status FROM schedule_change_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
+      [id, userId, userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+
+    const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
+    await db.promise().query(
+      "UPDATE schedule_change_requests SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
+      [cancelRemark, phNow, id]
+    );
+    logAction(userId, 'CANCEL_SCHEDULE', 'schedule_request', id, req);
+    res.json({ success: true, message: "Request cancelled successfully." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// 4. Cancel Attendance Appeal
+app.put('/api/attendance-appeals/:id/cancel', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const userId = req.user.id;
+  const phNow = getPHDateTime();
+
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, status FROM attendance_appeals WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
+      [id, userId, userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+
+    const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
+    await db.promise().query(
+      "UPDATE attendance_appeals SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
+      [cancelRemark, phNow, id]
+    );
+    logAction(userId, 'CANCEL_APPEAL', 'attendance_appeal', id, req);
+    res.json({ success: true, message: "Request cancelled successfully." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
+  }
+});
+
+// 5. Cancel Attendance Correction
+app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+  const userId = req.user.id;
+  const phNow = getPHDateTime();
+
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT id, status FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
+      [id, userId, userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+
+    const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
+    await db.promise().query(
+      "UPDATE attendance_corrections SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
+      [cancelRemark, phNow, id]
+    );
+    logAction(userId, 'CANCEL_CORRECTION', 'attendance_correction', id, req);
+    res.json({ success: true, message: "Request cancelled successfully." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error." });
   }
 });
 

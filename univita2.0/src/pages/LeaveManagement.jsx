@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Check, X, Search, RefreshCw, ClipboardList, ChevronLeft, ChevronRight, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { Check, X, Search, RefreshCw, ClipboardList, ChevronLeft, ChevronRight, CheckCircle, XCircle, Eye, ExternalLink } from 'lucide-react';
 import { API_BASE } from '../api';
 import './LeaveManagement.css';
 
@@ -137,7 +137,6 @@ const LeaveManagement = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            
             <p className="expert-subtitle">Review historical and resolved employee leave and absence records.</p>
           </div>
         </div>
@@ -190,7 +189,7 @@ const LeaveManagement = () => {
                         <span className="expert-chip default">{group.type || 'Leave'}</span>
                       </td>
                       <td className="text-center whitespace-nowrap">
-                        <span className={`expert-chip ${group.status?.toLowerCase() === 'approved' ? 'success' : 'danger'}`}>
+                        <span className={`expert-chip ${group.status?.toLowerCase() === 'approved' ? 'success' : group.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
                           {group.status?.toUpperCase()}
                         </span>
                       </td>
@@ -219,7 +218,7 @@ const LeaveManagement = () => {
         )}
       </div>
 
-      {/* DETAILS MODAL (Displays required fields: Employee ID, Name, Leave Type, Date Range, Duration, Reason, Status, Admin Remarks) */}
+      {/* DETAILS MODAL */}
       {showDetailsModal && selectedGroup && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowDetailsModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
@@ -237,7 +236,7 @@ const LeaveManagement = () => {
                     <span className="lm-custom-name">{selectedGroup.full_name}</span>
                     <span className="lm-custom-id-tag">{selectedGroup.employee_id || '—'}</span>
                   </div>
-                  <span className={`expert-chip ${selectedGroup.status?.toLowerCase() === 'approved' ? 'success' : selectedGroup.status?.toLowerCase() === 'rejected' ? 'danger' : 'warning'}`}>
+                  <span className={`expert-chip ${selectedGroup.status?.toLowerCase() === 'approved' ? 'success' : selectedGroup.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
                     {selectedGroup.status?.toUpperCase()}
                   </span>
                 </div>
@@ -263,6 +262,16 @@ const LeaveManagement = () => {
                     <label>Admin Remarks</label>
                     <span className="reason-text">{selectedGroup.admin_remarks || '—'}</span>
                   </div>
+                  {selectedGroup.image_url && (
+                    <div className="lm-custom-prop full-width">
+                      <label>Supporting Document</label>
+                      <span>
+                        <a href={`${API_BASE.replace(/\/api$/, '')}${selectedGroup.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
+                          <ExternalLink size={14} /> View Attached Document / Proof
+                        </a>
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -284,7 +293,7 @@ const LeaveManagement = () => {
         </div>
       )}
 
-      {/* CUSTOMIZED PENDING LEAVE REQUESTS MODAL (With Independent Pagination) */}
+      {/* PENDING LEAVE REQUESTS MODAL */}
       {showPendingModal && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
@@ -331,6 +340,16 @@ const LeaveManagement = () => {
                           <label>Reason for Leave</label>
                           <span className="reason-text">{group.reason || '—'}</span>
                         </div>
+                        {group.image_url && (
+                          <div className="lm-custom-prop full-width">
+                            <label>Supporting Document</label>
+                            <span>
+                              <a href={`${API_BASE.replace(/\/api$/, '')}${group.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
+                                <ExternalLink size={14} /> View Attached Document / Proof
+                              </a>
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="lm-custom-req-actions">
@@ -365,7 +384,7 @@ const LeaveManagement = () => {
         </div>
       )}
 
-      {/* REMARKS & CONFIRMATION MODAL */}
+      {/* REMARKS MODAL */}
       {showRemarksModal && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowRemarksModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>

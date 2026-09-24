@@ -1,7 +1,7 @@
 // src/pages/PayrollSummary.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Download, Calendar, Lock, Key, X } from 'lucide-react';
+import { Download, Calendar, Lock, Key, X, Clock, ShieldCheck } from 'lucide-react';
 import './PayrollSummary.css';
 import { API_BASE } from '../api';
 
@@ -23,7 +23,6 @@ const PayrollSummary = () => {
   const token = localStorage.getItem('auth_token');
   const userEmail = localStorage.getItem('user_email') || '';
 
-  // Helper for authenticated requests
   const authHeaders = () => ({
     headers: { Authorization: `Bearer ${token}` }
   });
@@ -55,7 +54,6 @@ const PayrollSummary = () => {
   };
 
   const handleClose = () => {
-    // Navigate back to dashboard
     window.location.href = '/dashboard';
   };
 
@@ -83,7 +81,7 @@ const PayrollSummary = () => {
         'July', 'August', 'September', 'October', 'November', 'December'
       ];
       const [year, month] = selectedMonth.split('-');
-      const monthName = monthNames[parseInt(month) - 1];
+      const monthName = monthNames[parseInt(month, 10) - 1];
       filtered = filtered.filter(p => p.month_year === `${monthName} ${year}`);
     }
     if (searchTerm) {
@@ -96,9 +94,10 @@ const PayrollSummary = () => {
   }, [payrollData, selectedMonth, searchTerm]);
 
   const exportCSV = () => {
-    const headers = ['Employee', 'Month/Year', 'Gross Pay', 'Tax', 'SSS', 'PhilHealth', 'PagIBIG', 'Loan', 'Other Ded.', 'Net Pay', 'Status'];
+    const headers = ['Employee ID', 'Employee Name', 'Month/Year', 'Gross Pay', 'Tax', 'SSS', 'PhilHealth', 'PagIBIG', 'Loan', 'Other Ded.', 'Net Pay', 'Status'];
     const rows = filteredData.map(p => [
-      p.full_name,
+      p.employee_id || '',
+      `"${p.full_name || ''}"`,
       p.month_year,
       p.gross_pay,
       p.tax_deduction,
@@ -110,8 +109,8 @@ const PayrollSummary = () => {
       p.net_pay,
       p.status
     ]);
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -121,10 +120,12 @@ const PayrollSummary = () => {
   };
 
   const availableMonths = [...new Set(payrollData.map(p => {
-    const [month, year] = p.month_year?.split(' ') || [];
-    if (month && year) {
-      const monthIndex = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(month.slice(0,3));
-      if (monthIndex !== -1) return `${year}-${String(monthIndex+1).padStart(2,'0')}`;
+    const parts = p.month_year?.split(' ') || [];
+    if (parts.length >= 2) {
+      const monthStr = parts[0];
+      const yearStr = parts[1];
+      const monthIndex = ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(monthStr);
+      if (monthIndex !== -1) return `${yearStr}-${String(monthIndex + 1).padStart(2, '0')}`;
     }
     return null;
   }).filter(Boolean))].sort().reverse();
@@ -169,7 +170,7 @@ const PayrollSummary = () => {
   return (
     <div className="payroll-summary-container">
       <div className="summary-header">
-        
+        <h1>Payroll Financial Summary</h1>
         <button className="btn-export" onClick={exportCSV}>
           <Download size={16} /> Export CSV
         </button>
@@ -179,17 +180,23 @@ const PayrollSummary = () => {
         <div className="filter-group">
           <Calendar size={16} />
           <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
-            {availableMonths.map(month => (
-              <option key={month} value={month}>
-                {new Date(month + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}
+            {availableMonths.length === 0 ? (
+              <option value={selectedMonth}>
+                {new Date(selectedMonth + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}
               </option>
-            ))}
+            ) : (
+              availableMonths.map(month => (
+                <option key={month} value={month}>
+                  {new Date(month + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}
+                </option>
+              ))
+            )}
           </select>
         </div>
         <div className="filter-group">
           <input
             type="text"
-            placeholder="Search employee..."
+            placeholder="Search employee or ID..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
@@ -204,43 +211,51 @@ const PayrollSummary = () => {
             <thead>
               <tr>
                 <th>Employee</th>
-                <th>Month/Year</th>
+                <th>Period</th>
                 <th>Gross Pay</th>
                 <th>Tax</th>
-                <th>Deductions</th>
+                <th>Statutory & Deductions</th>
                 <th>Net Pay</th>
-                <th>Status</th>
+                <th className="text-center">Status</th>
               </tr>
             </thead>
             <tbody>
               {filteredData.length === 0 ? (
-                <tr><td colSpan="7" className="empty-row">No payroll records found.</td></tr>
+                <tr><td colSpan="7" className="empty-row">No payroll records found for this period.</td></tr>
               ) : (
-                filteredData.map(p => (
-                  <tr key={p.id}>
-                    <td>
-                      <strong>{p.full_name || '—'}</strong>
-                      {p.employee_id && (
-                        <>
-                          <br/>
-                          <span className="emp-id">{p.employee_id}</span>
-                        </>
-                      )}
-                    </td>
-                    <td>{p.month_year || '—'}</td>
-                    <td>₱{parseFloat(p.gross_pay || 0).toLocaleString()}</td>
-                    <td>₱{parseFloat(p.tax_deduction || 0).toLocaleString()}</td>
-                    <td>₱{(
-                      (parseFloat(p.sss_deduction||0)) +
-                      (parseFloat(p.philhealth_deduction||0)) +
-                      (parseFloat(p.pagibig_deduction||0)) +
-                      (parseFloat(p.loan_deduction||0)) +
-                      (parseFloat(p.other_deduction||0))
-                    ).toLocaleString()}</td>
-                    <td className="net-pay">₱{parseFloat(p.net_pay || 0).toLocaleString()}</td>
-                    <td><span className={`status-badge ${p.status}`}>{p.status}</span></td>
-                  </tr>
-                ))
+                filteredData.map(p => {
+                  const totalDeductions = (
+                    (parseFloat(p.sss_deduction || 0)) +
+                    (parseFloat(p.philhealth_deduction || 0)) +
+                    (parseFloat(p.pagibig_deduction || 0)) +
+                    (parseFloat(p.loan_deduction || 0)) +
+                    (parseFloat(p.other_deduction || 0))
+                  );
+
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <strong>{p.full_name || '—'}</strong>
+                        {p.employee_id && (
+                          <>
+                            <br />
+                            <span className="emp-id">{p.employee_id}</span>
+                          </>
+                        )}
+                      </td>
+                      <td>{p.month_year || '—'}</td>
+                      <td>₱{parseFloat(p.gross_pay || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td>₱{parseFloat(p.tax_deduction || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td>₱{totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="net-pay">₱{parseFloat(p.net_pay || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td className="text-center">
+                        <span className={`status-badge ${p.status?.toLowerCase() || 'paid'}`}>
+                          {p.status || 'Paid'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

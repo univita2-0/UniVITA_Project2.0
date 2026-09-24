@@ -1,6 +1,6 @@
 // src/screens/OvertimeHistoryScreen.js
 import React, { useState, useEffect, useContext, useMemo } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, StatusBar, Linking, Modal } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, StatusBar, Linking, Modal, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar as RNCalendar } from 'react-native-calendars';
 import { ArrowLeft, Calendar as CalendarIcon, Clock, FileText, AlertCircle, CheckCircle, ChevronLeft, ChevronRight, X, Eye, EyeOff } from 'lucide-react-native';
@@ -9,19 +9,59 @@ import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { API_URL } from './api';
 
 const formatTo12Hour = (timeStr) => {
-  if (!timeStr) return '';
-  const parts = timeStr.substring(0, 5).split(':');
+  if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00') return '';
+  let cleanStr = String(timeStr).trim();
+  if (cleanStr.includes('T')) {
+    cleanStr = cleanStr.split('T')[1] || cleanStr;
+  }
+  cleanStr = cleanStr.split('.')[0].replace('Z', '');
+  const parts = cleanStr.split(':');
+  if (parts.length < 2) return timeStr;
   let hours = parseInt(parts[0], 10);
   const minutes = parts[1] || '00';
+  if (isNaN(hours)) return timeStr;
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12 || 12;
   return `${hours}:${minutes} ${ampm}`;
 };
 
+const formatDate = (dateStr) => {
+  if (!dateStr) return '—';
+  const cleanStr = String(dateStr).substring(0, 10);
+  const parts = cleanStr.split('-');
+  if (parts.length === 3) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (!isNaN(year) && month >= 0 && month < 12 && !isNaN(day)) {
+      return `${months[month]} ${day}, ${year}`;
+    }
+  }
+  return cleanStr;
+};
+
+// Formats PHT MySQL timestamps (YYYY-MM-DD HH:mm:ss) without UTC shifting
 const formatDateTime = (dateStr) => {
-  if (!dateStr) return 'Not Recorded';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return 'Not Recorded';
+  if (!dateStr || dateStr === 'Not Recorded') return 'Not Recorded';
+  const raw = String(dateStr).trim();
+  const clean = raw.replace('T', ' ').split('.')[0].replace('Z', '');
+  const [dPart, tPart] = clean.split(' ');
+
+  if (dPart && tPart) {
+    const [y, m, d] = dPart.split('-').map(Number);
+    const [h, min] = tPart.split(':').map(Number);
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d) && !isNaN(h) && !isNaN(min)) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthStr = months[m - 1] || 'Jan';
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const hour12 = h % 12 || 12;
+      return `${monthStr} ${d}, ${y}, ${hour12}:${String(min).padStart(2, '0')} ${ampm}`;
+    }
+  }
+
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw || 'Not Recorded';
   return d.toLocaleString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
     hour: 'numeric', minute: '2-digit', hour12: true
@@ -32,6 +72,7 @@ const getStatusTheme = (status, isLight) => {
   const s = status?.toLowerCase();
   if (s === 'approved') return { bg: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)', text: isLight ? '#059669' : '#34D399' };
   if (s === 'rejected') return { bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+  if (s === 'cancelled') return { bg: isLight ? '#F1F5F9' : 'rgba(148, 163, 184, 0.15)', text: isLight ? '#64748B' : '#94A3B8' };
   return { bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
 };
 
@@ -62,6 +103,12 @@ export default function OvertimeHistoryScreen({ navigation }) {
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
 
+  // Cancellation State
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+
   useEffect(() => { loadHistory(); }, []);
 
   const loadHistory = async () => {
@@ -75,6 +122,39 @@ export default function OvertimeHistoryScreen({ navigation }) {
     } catch (err) {
       setAllHistory([]);
     } finally { setLoading(false); }
+  };
+
+  const handleCancelRequest = async () => {
+    if (!cancelReason.trim()) {
+      Alert.alert("Reason Required", "Please enter a reason for cancellation.");
+      return;
+    }
+    setCancelling(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${API_URL}/overtime-requests/${selectedRequestId}/cancel`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ reason: cancelReason })
+      });
+      
+      const data = await res.json();
+      if (res.ok && data.success) {
+        Alert.alert("Success", "Request cancelled successfully.");
+        setShowCancelModal(false);
+        setCancelReason('');
+        loadHistory(); 
+      } else {
+        Alert.alert("Error", data.message || "Failed to cancel request.");
+      }
+    } catch (err) {
+      Alert.alert("Error", "Server connection failed.");
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const openAttachment = (url) => { if (url) Linking.openURL(url); };
@@ -98,13 +178,17 @@ export default function OvertimeHistoryScreen({ navigation }) {
   const filteredByTab = allHistory.filter(item => {
     const s = item.status?.toLowerCase() || 'pending';
     if (activeTab === 'pending') return s === 'pending';
-    return s === 'approved' || s === 'rejected';
+    return s === 'approved' || s === 'rejected' || s === 'cancelled';
   });
 
   const filteredHistory = filteredByTab.filter(item => {
     const dateStr = item.date || item.request_date || '';
     if (!dateStr) return false;
     const safeDateString = dateStr.substring(0, 10);
+    const [y, m] = safeDateString.split('-').map(Number);
+    if (!isNaN(y) && !isNaN(m)) {
+      return (m - 1) === displayedMonth && y === displayedYear;
+    }
     const d = new Date(safeDateString);
     return d.getMonth() === displayedMonth && d.getFullYear() === displayedYear;
   });
@@ -163,7 +247,6 @@ export default function OvertimeHistoryScreen({ navigation }) {
           contentContainerStyle={styles.list}
           renderItem={({ item }) => {
             const rawDate = item.date || item.request_date || '';
-            const displayDate = rawDate ? rawDate.substring(0, 10) : '—';
             const statusTheme = getStatusTheme(item.status, isLight);
             const isExpanded = expandedId === item.id;
 
@@ -171,7 +254,7 @@ export default function OvertimeHistoryScreen({ navigation }) {
               <View style={styles.historyCard}>
                 <View style={styles.cardHeader}>
                   <CalendarIcon size={18} color={colors.primary} strokeWidth={2} />
-                  <Text style={styles.date}>{displayDate}</Text>
+                  <Text style={styles.date}>{formatDate(rawDate)}</Text>
                   <View style={[styles.statusBadge, { backgroundColor: statusTheme.bg }]}>
                     <Text style={[styles.statusText, { color: statusTheme.text }]}>{item.status?.toUpperCase() || 'PENDING'}</Text>
                   </View>
@@ -206,6 +289,18 @@ export default function OvertimeHistoryScreen({ navigation }) {
                   </TouchableOpacity>
                 )}
 
+                {item.status?.toLowerCase() === 'pending' && (
+                  <TouchableOpacity 
+                    style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 12, marginTop: 12, alignItems: 'center' }}
+                    onPress={() => {
+                      setSelectedRequestId(item.id);
+                      setShowCancelModal(true);
+                    }}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_18pt-Bold', fontSize: 14 }}>Cancel Request</Text>
+                  </TouchableOpacity>
+                )}
+
                 {isExpanded && (
                   <View style={styles.expandedContainer}>
                     <View style={styles.expandedRow}>
@@ -215,7 +310,7 @@ export default function OvertimeHistoryScreen({ navigation }) {
                     {(item.status?.toLowerCase() !== 'pending') && (
                       <View style={styles.expandedRow}>
                         <Text style={styles.expandedLabel}>
-                          {item.status?.toLowerCase() === 'approved' ? 'Approved On:' : 'Rejected On:'}
+                          {item.status?.toLowerCase() === 'approved' ? 'Approved On:' : item.status?.toLowerCase() === 'cancelled' ? 'Cancelled On:' : 'Rejected On:'}
                         </Text>
                         <Text style={styles.expandedValue}>{formatDateTime(item.reviewed_at || item.updated_at || item.processed_at)}</Text>
                       </View>
@@ -271,6 +366,33 @@ export default function OvertimeHistoryScreen({ navigation }) {
                   textSectionTitleColor: isLight ? '#64748B' : '#94A3B8',
                 }}
               />
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showCancelModal} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.calendarModalContent}>
+              <Text style={[styles.modalTitle, { marginBottom: 10 }]}>Cancel Request</Text>
+              <Text style={{ fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#475569' : colors.textSecondary, marginBottom: 10 }}>
+                Please provide a reason for cancelling this request:
+              </Text>
+              <TextInput
+                style={{ fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, height: 100, textAlignVertical: 'top' }}
+                multiline
+                placeholder="Reason for cancellation..."
+                placeholderTextColor={colors.textSecondary}
+                value={cancelReason}
+                onChangeText={setCancelReason}
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+                <TouchableOpacity onPress={() => setShowCancelModal(false)} style={{ padding: 12 }}>
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'Inter_18pt-Medium' }}>Close</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleCancelRequest} disabled={cancelling} style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 8 }}>
+                  <Text style={{ color: '#FFF', fontFamily: 'Inter_18pt-Bold' }}>{cancelling ? 'Cancelling...' : 'Confirm Cancel'}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>

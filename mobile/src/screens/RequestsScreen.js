@@ -2,12 +2,13 @@
 import React, { useState, useEffect, useContext } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar
+  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar, Platform
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
@@ -61,12 +62,18 @@ const getPHNowString = () => {
   return now.toLocaleDateString('en-CA', options);
 };
 
+const parseServerResponse = async (response) => {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return { success: false, message: text || `Server error (${response.status})` };
+  }
+};
+
 export default function RequestsScreen({ navigation, route }) {
   const prefill = route.params || {};
-
-  
   const insets = useSafeAreaInsets();
-  
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
@@ -78,19 +85,19 @@ export default function RequestsScreen({ navigation, route }) {
   const [timePickerMode, setTimePickerMode] = useState('');
   const [tempDate, setTempDate] = useState(new Date());
 
-  // Dynamic dropdown lists from database with fallback defaults
   const [locationList, setLocationList] = useState(['HCT Academy Pasig', 'National University - Manila', 'S Residence Tower 3']);
   const [courseList, setCourseList] = useState(['Allied Health', 'Healthcare101', 'Information Technology']);
 
-  // Dropdown modal pickers state
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [showCourseModal, setShowCourseModal] = useState(false);
 
-  // Leave
+  // --- LEAVE STATE ---
+  const [leaveStep, setLeaveStep] = useState(1);
+  const [leaveBreakdown, setLeaveBreakdown] = useState([]);
   const [leaveDateFrom, setLeaveDateFrom] = useState('');
   const [leaveDateTo, setLeaveDateTo] = useState('');
   const [isRange, setIsRange] = useState(false);
-  const [leaveType, setLeaveType] = useState('Sick Leave');
+  const [leaveType, setLeaveType] = useState('Vacation');
   const [leaveReason, setLeaveReason] = useState('');
   const [leaveImage, setLeaveImage] = useState(null);
   const [submittingLeave, setSubmittingLeave] = useState(false);
@@ -100,7 +107,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [loadingBalances, setLoadingBalances] = useState(false);
 
-  // Schedule
+  // --- SCHEDULE STATE ---
+  const [scheduleStep, setScheduleStep] = useState(1);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleStart, setScheduleStart] = useState('09:00');
   const [scheduleEnd, setScheduleEnd] = useState('17:00');
@@ -110,7 +118,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [submittingSchedule, setSubmittingSchedule] = useState(false);
   const [showScheduleCalendar, setShowScheduleCalendar] = useState(false);
 
-  // Appeal
+  // --- APPEAL STATE ---
+  const [appealStep, setAppealStep] = useState(1);
   const [appealDate, setAppealDate] = useState('');
   const [appealReason, setAppealReason] = useState('');
   const [appealImage, setAppealImage] = useState(null);
@@ -119,7 +128,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [appealTimeIn, setAppealTimeIn] = useState('');
   const [appealTimeOut, setAppealTimeOut] = useState('');
 
-  // Correction
+  // --- CORRECTION STATE ---
+  const [correctionStep, setCorrectionStep] = useState(1);
   const [correctionDate, setCorrectionDate] = useState(prefill.prefillDate || '');
   const [correctionType, setCorrectionType] = useState(prefill.prefillType || 'clock_in');
   const [correctionTime, setCorrectionTime] = useState(prefill.prefillTime || '');
@@ -129,7 +139,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
   const [showCorrectionCalendar, setShowCorrectionCalendar] = useState(false);
 
-  // Overtime
+  // --- OVERTIME STATE ---
+  const [overtimeStep, setOvertimeStep] = useState(1);
   const [overtimeDate, setOvertimeDate] = useState('');
   const [overtimeStart, setOvertimeStart] = useState('');
   const [overtimeEnd, setOvertimeEnd] = useState('');
@@ -137,11 +148,11 @@ export default function RequestsScreen({ navigation, route }) {
   const [overtimeImage, setOvertimeImage] = useState(null);
   const [submittingOvertime, setSubmittingOvertime] = useState(false);
   const [showOvertimeCalendar, setShowOvertimeCalendar] = useState(false);
-  const [overtimeScenario, setOvertimeScenario] = useState('future');
+  const [overtimeType, setOvertimeType] = useState('Regular Overtime');
+  const [overtimeTiming, setOvertimeTiming] = useState('Normal OT');
 
   const todayStr = getPHNowString();
 
-  // Fetch locations and courses from DB on mount with proper error guarding
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
@@ -149,7 +160,6 @@ export default function RequestsScreen({ navigation, route }) {
           axios.get(`${API_URL}/school-locations`).catch(() => ({ data: [] })),
           axios.get(`${API_URL}/courses`).catch(() => ({ data: [] }))
         ]);
-
         if (locRes.data && Array.isArray(locRes.data) && locRes.data.length > 0) {
           const names = locRes.data.map(l => l.name);
           setLocationList(names);
@@ -167,13 +177,19 @@ export default function RequestsScreen({ navigation, route }) {
     fetchDropdownData();
   }, []);
 
+  const handleTabSwitch = (tab) => {
+    setActiveTab(tab);
+    setLeaveStep(1);
+    setScheduleStep(1);
+    setAppealStep(1);
+    setCorrectionStep(1);
+    setOvertimeStep(1);
+  };
+
   const handleBackPress = () => {
     try {
-      if (navigation.canGoBack()) {
-        navigation.goBack();
-      } else {
-        navigation.navigate('Main');
-      }
+      if (navigation.canGoBack()) navigation.goBack();
+      else navigation.navigate('Main');
     } catch (err) {
       navigation.navigate('Main');
     }
@@ -215,11 +231,23 @@ export default function RequestsScreen({ navigation, route }) {
     } finally { setLoadingBalances(false); }
   };
 
-  const pickImage = async (setFn) => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Please allow gallery permissions.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.7 });
-    if (!result.canceled) setFn(result.assets[0].uri);
+  const pickDocument = async (setFn) => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        copyToCacheDirectory: true
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        if (file.size > 5 * 1024 * 1024) {
+          Alert.alert('File Too Large', 'Maximum file size is 5MB.');
+          return;
+        }
+        setFn(file);
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const takeSelfie = async () => {
@@ -231,107 +259,107 @@ export default function RequestsScreen({ navigation, route }) {
   };
 
   // ==========================================
-  // SUBMISSION & VALIDATION HANDLERS
+  // WIZARD VALIDATIONS & HANDLERS
   // ==========================================
 
-  const handleSubmitLeave = async () => {
+  // --- LEAVE ---
+  const handleNextLeave = () => {
     if (!leaveDateFrom) { Alert.alert('Validation Error', 'Please select a start date.'); return; }
-    if (isRange && !leaveDateTo) { Alert.alert('Validation Error', 'Please select an end date for your range.'); return; }
-    if (!leaveReason.trim() || leaveReason.trim().length < 10) { 
-      Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); 
-      return; 
-    }
+    if (isRange && !leaveDateTo) { Alert.alert('Validation Error', 'Please select an end date.'); return; }
+    if (!leaveReason.trim() || leaveReason.trim().length < 10) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); return; }
+    if (!leaveImage) { Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.'); return; }
+    if (isRange && leaveDateTo < leaveDateFrom) { Alert.alert('Invalid Date Range', 'End date cannot be earlier than start date.'); return; }
 
-    if (isRange && leaveDateTo < leaveDateFrom) {
-      Alert.alert('Invalid Date Range', 'End date cannot be earlier than the start date.');
-      return;
-    }
-
-    const userId = await AsyncStorage.getItem('user_id');
-    const year = new Date(leaveDateFrom).getFullYear();
-    let remainingDays = 15;
+    const start = new Date(leaveDateFrom);
+    const end = isRange ? new Date(leaveDateTo) : start;
+    const dates = [];
     
-    try {
-      const res = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`);
-      const balances = await res.json();
-      const found = balances.find(b => b.leave_type === leaveType);
-      if (found) remainingDays = Number(found.remaining_days);
-    } catch (err) {
-      console.error("Balance check error:", err);
-    }
+    let currentBalance = leaveBalances.find(b => b.leave_type === leaveType)?.remaining_days || 0;
 
-    let daysRequested = 1;
-    if (isRange) {
-      const start = new Date(leaveDateFrom);
-      const end = new Date(leaveDateTo);
-      daysRequested = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)) + 1;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      dates.push({
+        date: d.toISOString().split('T')[0],
+        duration: 'Whole Day',
+        isPaid: currentBalance >= 1
+      });
+      currentBalance -= 1;
     }
+    setLeaveBreakdown(dates);
+    setLeaveStep(2);
+  };
 
-    if (leaveType !== 'Emergency Leave' && daysRequested > remainingDays) {
-      Alert.alert('Insufficient Balance', `You only have ${remainingDays} day(s) remaining for ${leaveType}.`);
-      return;
-    }
+  const updateBreakdownDuration = (index, value) => {
+    const newBreakdown = [...leaveBreakdown];
+    newBreakdown[index].duration = value;
+    
+    let currentBalance = leaveBalances.find(b => b.leave_type === leaveType)?.remaining_days || 0;
+    newBreakdown.forEach(item => {
+      const cost = item.duration === 'Whole Day' ? 1 : 0.5;
+      item.isPaid = currentBalance >= cost;
+      currentBalance -= cost;
+    });
+    
+    setLeaveBreakdown(newBreakdown);
+  };
 
+  const handleSubmitLeave = async () => {
     setSubmittingLeave(true);
     try {
-      const start = new Date(leaveDateFrom);
-      const end = isRange ? new Date(leaveDateTo) : start;
-      const dateList = [];
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        dateList.push(d.toISOString().split('T')[0]);
-      }
-
+      const token = await AsyncStorage.getItem('auth_token');
       let successCount = 0;
       let lastMessage = '';
 
-      for (const date of dateList) {
+      const imageUri = typeof leaveImage === 'string' ? leaveImage : leaveImage.uri;
+      const filename = leaveImage.name || imageUri.split('/').pop() || 'leave_proof.pdf';
+      const mimeType = leaveImage.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
+      for (const item of leaveBreakdown) {
         const formData = new FormData();
         formData.append('type', String(leaveType));
         formData.append('reason', String(leaveReason.trim()));
-        formData.append('request_date', String(date));
-        
-        if (leaveImage) {
-          formData.append('image', { 
-            uri: leaveImage, 
-            name: 'leave.jpg', 
-            type: 'image/jpeg' 
-          });
-        }
-        
-        const token = await AsyncStorage.getItem('auth_token');
+        formData.append('request_date', String(item.date));
+        formData.append('duration', String(item.duration));
+        formData.append('is_paid', String(item.isPaid));
+        formData.append('image', {
+          uri: Platform.OS === 'android' ? imageUri : imageUri.replace('file://', ''),
+          name: filename,
+          type: mimeType
+        });
+
         const response = await fetch(`${API_URL}/leave-requests`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
           body: formData
         });
-        const result = await response.json();
-        if (response.ok && result.success) {
-          successCount++;
-        } else {
-          lastMessage = result.message || 'Failed to submit date.';
-        }
+
+        const result = await parseServerResponse(response);
+        if (response.ok && result.success) successCount++;
+        else lastMessage = result.message || 'Failed to submit date.';
       }
 
-      if (successCount === dateList.length) {
-        Alert.alert('Success', 'Leave request(s) submitted successfully!');
-        setLeaveDateFrom(''); setLeaveDateTo(''); setLeaveReason(''); setLeaveImage(null); setIsRange(false);
+      if (successCount === leaveBreakdown.length) {
+        Alert.alert('Success', 'Leave Application submitted successfully!');
+        setLeaveDateFrom(''); setLeaveDateTo(''); setLeaveReason(''); setLeaveImage(null); setIsRange(false); setLeaveStep(1);
       } else {
-        Alert.alert('Submission Notice', `${successCount}/${dateList.length} submitted. ${lastMessage}`);
+        Alert.alert('Submission Notice', `${successCount}/${leaveBreakdown.length} submitted. ${lastMessage}`);
       }
     } catch (err) {
-      console.error("Leave Submission Error:", err);
-      Alert.alert('Network Error', 'Failed to connect to server.');
+      Alert.alert('Submission Error', err.message || 'Failed to connect to server.');
     } finally {
       setSubmittingLeave(false);
     }
   };
 
-  const handleSubmitSchedule = async () => {
+  // --- SCHEDULE ---
+  const handleNextSchedule = () => {
     if (!scheduleDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
     if (!scheduleStart || !scheduleEnd) { Alert.alert('Validation Error', 'Please specify start and end times.'); return; }
     if (scheduleStart >= scheduleEnd) { Alert.alert('Validation Error', 'Schedule end time must be after the start time.'); return; }
     if (!schedulePlace.trim() || !scheduleCourse.trim()) { Alert.alert('Validation Error', 'Location and course are required.'); return; }
+    setScheduleStep(2);
+  };
 
+  const handleSubmitSchedule = async () => {
     setSubmittingSchedule(true);
     try {
       const result = await submitScheduleRequest({
@@ -343,72 +371,73 @@ export default function RequestsScreen({ navigation, route }) {
         end_time: formatTimeForDB(scheduleEnd),
         reason: scheduleReason.trim() || 'Schedule assignment request'
       });
-      if (result.success) {
+      if (result && result.success) {
         Alert.alert('Success', result.message || 'Schedule request submitted!');
-        setScheduleDate(''); setScheduleStart('09:00'); setScheduleEnd('17:00'); setScheduleReason('');
+        setScheduleDate(''); setScheduleStart('09:00'); setScheduleEnd('17:00'); setScheduleReason(''); setScheduleStep(1);
       } else {
-        Alert.alert('Submission Error', result.message || 'Failed to submit schedule request.');
+        Alert.alert('Submission Error', result?.message || result?.error || 'Failed to submit schedule request.');
       }
     } catch (error) {
-      Alert.alert('Network Error', 'Connection failed.');
+      Alert.alert('Submission Error', error.message || 'Connection failed.');
     } finally {
       setSubmittingSchedule(false);
     }
   };
 
-  const submitAppeal = async () => {
+  // --- APPEAL ---
+  const handleNextAppeal = () => {
     if (!appealDate) { Alert.alert('Validation Error', 'Please select a date for your appeal.'); return; }
     if (!appealReason.trim() || appealReason.trim().length < 10) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); return; }
+    if (!appealImage) { Alert.alert('Validation Error', 'An attachment or proof is strictly required.'); return; }
+    setAppealStep(2);
+  };
 
+  const handleSubmitAppeal = async () => {
     setSubmittingAppeal(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
+      const imageUri = typeof appealImage === 'string' ? appealImage : appealImage.uri;
+      const filename = appealImage.name || imageUri.split('/').pop() || 'appeal_proof.jpg';
+      const mimeType = appealImage.mimeType || (filename.endsWith('.png') ? 'image/png' : 'image/jpeg');
+
       const formData = new FormData();
-      
       formData.append('date', String(appealDate));
       formData.append('reason', String(appealReason.trim()));
-      
-      // 👈 Append schedule_id if navigating with an active shift reference
-      if (prefill.prefillScheduleId) {
-        formData.append('schedule_id', String(prefill.prefillScheduleId));
-      }
-      
+      if (prefill.prefillScheduleId) formData.append('schedule_id', String(prefill.prefillScheduleId));
       if (appealTimeIn) formData.append('time_in', String(formatTimeForDB(appealTimeIn)));
       if (appealTimeOut) formData.append('time_out', String(formatTimeForDB(appealTimeOut)));
-      
-      if (appealImage) {
-        formData.append('image', { 
-          uri: appealImage, 
-          name: 'appeal.jpg', 
-          type: 'image/jpeg' 
-        });
-      }
-      
+      formData.append('image', {
+        uri: Platform.OS === 'android' ? imageUri : imageUri.replace('file://', ''),
+        name: filename,
+        type: mimeType
+      });
+
       const response = await fetch(`${API_URL}/attendance-appeals`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
-      const result = await response.json();
+      const result = await parseServerResponse(response);
       if (response.ok && result.success) {
         Alert.alert('Success', 'Attendance appeal submitted successfully.');
-        setAppealDate(''); setAppealTimeIn(''); setAppealTimeOut(''); setAppealReason(''); setAppealImage(null);
+        setAppealDate(''); setAppealTimeIn(''); setAppealTimeOut(''); setAppealReason(''); setAppealImage(null); setAppealStep(1);
       } else {
         Alert.alert('Submission Error', result.message || result.error || 'Failed to submit appeal.');
       }
     } catch (error) {
-      Alert.alert('Network Error', 'Server connection failed.');
+      Alert.alert('Submission Error', error.message || 'Server connection failed.');
     } finally {
       setSubmittingAppeal(false);
     }
   };
 
-  const submitCorrection = async () => {
+  // --- CORRECTION ---
+  const handleNextCorrection = async () => {
     if (!correctionDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
     if (!correctionTime) { Alert.alert('Validation Error', 'Please select a correction time.'); return; }
-    if (!correctionReason.trim() || correctionReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a valid reason.'); return; }
-
+    if (!correctionReason.trim() || correctionReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a valid reason (minimum 5 characters).'); return; }
+    
     let selfieUri = correctionSelfie;
     if (!selfieUri) {
       const taken = await takeSelfie();
@@ -416,116 +445,124 @@ export default function RequestsScreen({ navigation, route }) {
       selfieUri = taken;
       setCorrectionSelfie(taken);
     }
-    
+    setCorrectionStep(2);
+  };
+
+  const handleSubmitCorrection = async () => {
     setSubmittingCorrection(true);
     try {
       let employeeId = await AsyncStorage.getItem('employee_id');
-      const userStr = await AsyncStorage.getItem('user');
-      if (userStr && !employeeId) {
-        employeeId = JSON.parse(userStr).employee_id;
-      }
-
       if (!employeeId) {
-        Alert.alert('Authentication Error', 'Employee ID not found. Please log in again.');
-        setSubmittingCorrection(false);
-        return;
+        const userStr = await AsyncStorage.getItem('user');
+        if (userStr) {
+          try { employeeId = JSON.parse(userStr).employee_id; } catch (e) {}
+        }
       }
+      if (!employeeId) { Alert.alert('Authentication Error', 'Employee ID not found.'); setSubmittingCorrection(false); return; }
 
       const dbType = correctionType === 'early_out' ? 'clock_out' : correctionType;
       const finalReason = correctionType === 'early_out' ? `[Early Departure] ${correctionReason.trim()}` : correctionReason.trim();
       const formattedTime = formatTimeForDB(correctionTime);
+      const finalSelfieUri = Platform.OS === 'android' ? correctionSelfie : correctionSelfie.replace('file://', '');
 
       const payload = {
-        employee_id: employeeId,
+        employee_id: String(employeeId),
         date: correctionDate,
         type: dbType,
         time: formattedTime,
         reason: finalReason,
-        schedule_id: correctionScheduleId, // 👈 Explicit shift ID included
-        selfie: { 
-          uri: selfieUri, 
-          name: 'correction.jpg', 
-          type: 'image/jpeg' 
-        }
+        schedule_id: correctionScheduleId || null,
+        selfie: { uri: finalSelfieUri, name: 'correction.jpg', type: 'image/jpeg' }
       };
       
       const res = await requestAttendanceCorrection(payload);
+      
       if (res && res.success) {
         Alert.alert('Success', res.message || 'Correction request submitted.');
-        
-        // Reset all fields including schedule ID
-        setCorrectionDate(''); 
-        setCorrectionTime(''); 
-        setCorrectionReason(''); 
-        setCorrectionSelfie(null); 
-        setCorrectionType('clock_in');
-        setCorrectionScheduleId(null); // 👈 Clear local state
-
-        // Clear route prefill parameters
-        navigation.setParams({ 
-          prefillTab: undefined, 
-          prefillDate: undefined, 
-          prefillType: undefined, 
-          prefillTime: undefined, 
-          prefillReason: undefined, 
-          prefillScheduleId: undefined 
-        });
-        
+        setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionSelfie(null); 
+        setCorrectionType('clock_in'); setCorrectionScheduleId(null); setCorrectionStep(1);
+        if (navigation.setParams) {
+          navigation.setParams({ prefillTab: undefined, prefillDate: undefined, prefillType: undefined, prefillTime: undefined, prefillReason: undefined, prefillScheduleId: undefined });
+        }
         setActiveTab('leave');
       } else {
-        Alert.alert('Submission Error', res?.message || 'Failed to submit correction.');
+        Alert.alert('Submission Error', res?.message || res?.error || 'Failed to submit correction.');
       }
-    } catch (err) { 
-      Alert.alert('Network Error', 'Connection failed.'); 
+    } catch (err) {
+      Alert.alert('Submission Error', err?.response?.data?.message || err?.message || 'Connection failed.');
     } finally { 
       setSubmittingCorrection(false); 
     }
   };
 
-  const handleSubmitOvertime = async () => {
+  // --- OVERTIME ---
+  const handleNextOvertime = () => {
     if (!overtimeDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
     if (!overtimeStart || !overtimeEnd) { Alert.alert('Validation Error', 'Start and end times are required.'); return; }
     if (overtimeStart >= overtimeEnd) { Alert.alert('Validation Error', 'Overtime end time must be strictly after the start time.'); return; }
     if (!overtimeReason.trim() || overtimeReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 5 characters).'); return; }
+    setOvertimeStep(2);
+  };
 
+  const handleSubmitOvertime = async () => {
     setSubmittingOvertime(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      const formData = new FormData();
-      
-      formData.append('date', String(overtimeDate));
-      formData.append('start_time', String(formatTimeForDB(overtimeStart)));
-      formData.append('end_time', String(formatTimeForDB(overtimeEnd)));
-      formData.append('reason', String(overtimeReason.trim()));
-      formData.append('scenario_type', String(overtimeScenario));
-      
-      // 👈 Append schedule_id for ongoing/after-shift overtime tracking
-      if (prefill.prefillScheduleId) {
-        formData.append('schedule_id', String(prefill.prefillScheduleId));
-      }
-      
+      let response;
+      const dbScenarioType = overtimeTiming === 'Early OT' ? 'early_ot' : 'normal_ot';
+
       if (overtimeImage) {
-        formData.append('attachment', { 
-          uri: overtimeImage, 
-          name: 'overtime.jpg', 
-          type: 'image/jpeg' 
+        const imageUri = typeof overtimeImage === 'string' ? overtimeImage : overtimeImage.uri;
+        const filename = overtimeImage.name || imageUri.split('/').pop() || 'overtime_proof.pdf';
+        const mimeType = overtimeImage.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
+        const formData = new FormData();
+        formData.append('date', String(overtimeDate));
+        formData.append('start_time', String(formatTimeForDB(overtimeStart)));
+        formData.append('end_time', String(formatTimeForDB(overtimeEnd)));
+        formData.append('reason', String(overtimeReason.trim()));
+        formData.append('scenario_type', String(dbScenarioType));
+        formData.append('overtime_type', String(overtimeType));
+        if (prefill.prefillScheduleId) formData.append('schedule_id', String(prefill.prefillScheduleId));
+        formData.append('attachment', {
+          uri: Platform.OS === 'android' ? imageUri : imageUri.replace('file://', ''),
+          name: filename,
+          type: mimeType
+        });
+
+        response = await fetch(`${API_URL}/overtime-requests`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+      } else {
+        response = await fetch(`${API_URL}/overtime-requests`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            date: overtimeDate,
+            start_time: formatTimeForDB(overtimeStart),
+            end_time: formatTimeForDB(overtimeEnd),
+            reason: overtimeReason.trim(),
+            scenario_type: dbScenarioType,
+            overtime_type: overtimeType,
+            schedule_id: prefill.prefillScheduleId || null
+          })
         });
       }
-      
-      const response = await fetch(`${API_URL}/overtime-requests`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      const result = await response.json();
+
+      const result = await parseServerResponse(response);
       if (response.ok && result.success) {
         Alert.alert('Success', result.message || 'Overtime request submitted successfully.');
-        setOvertimeDate(''); setOvertimeStart(''); setOvertimeEnd(''); setOvertimeReason(''); setOvertimeImage(null); setOvertimeScenario('future');
+        setOvertimeDate(''); setOvertimeStart(''); setOvertimeEnd(''); setOvertimeReason(''); setOvertimeImage(null); setOvertimeStep(1);
       } else {
-        Alert.alert('Submission Error', result.message || 'Failed to submit overtime request.');
+        Alert.alert('Submission Error', result.message || result.error || 'Failed to submit overtime request.');
       }
     } catch (err) {
-      Alert.alert('Network Error', 'Server connection failed.');
+      Alert.alert('Submission Error', err.message || 'Server connection failed.');
     } finally {
       setSubmittingOvertime(false);
     }
@@ -568,7 +605,7 @@ export default function RequestsScreen({ navigation, route }) {
               <TouchableOpacity
                 key={tab}
                 style={[styles.tab, activeTab === tab && styles.activeTab]}
-                onPress={() => setActiveTab(tab)}
+                onPress={() => handleTabSwitch(tab)}
               >
                 <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -580,266 +617,459 @@ export default function RequestsScreen({ navigation, route }) {
 
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           
+          {/* ======================================= */}
           {/* LEAVE TAB */}
+          {/* ======================================= */}
           {activeTab === 'leave' && (
             <View>
-              <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('LeaveHistory')}>
-                <Text style={styles.historyButtonText}>View Leave History</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.balancesButton} onPress={fetchLeaveBalances}>
-                <Text style={styles.balancesButtonText}>View Leave Balances</Text>
-              </TouchableOpacity>
-
-              <View style={styles.rangeToggle}>
-                <TouchableOpacity style={[styles.rangeButton, !isRange && styles.rangeButtonActive]} onPress={() => setIsRange(false)}>
-                  <Text style={[styles.rangeButtonText, !isRange && styles.rangeButtonTextActive]}>Single Day</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.rangeButton, isRange && styles.rangeButtonActive]} onPress={() => setIsRange(true)}>
-                  <Text style={[styles.rangeButtonText, isRange && styles.rangeButtonTextActive]}>Date Range</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.label}>{isRange ? 'From Date' : 'Date'}</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => setShowLeaveCalendarFrom(true)}>
-                <CalendarIcon size={20} color="#00897B" />
-                <Text style={styles.dateText}>{leaveDateFrom || 'Select date'}</Text>
-              </TouchableOpacity>
-              {renderCalendar(showLeaveCalendarFrom, setShowLeaveCalendarFrom, leaveDateFrom, setLeaveDateFrom, todayStr)}
-
-              {isRange && (
-                <>
-                  <Text style={styles.label}>To Date</Text>
-                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowLeaveCalendarTo(true)}>
-                    <CalendarIcon size={20} color="#00897B" />
-                    <Text style={styles.dateText}>{leaveDateTo || 'Select date'}</Text>
+              {leaveStep === 1 && (
+                <View>
+                  <TouchableOpacity style={styles.historyButton} onPress={() => { setLeaveStep(1); navigation.navigate('LeaveHistory'); }}>
+                    <Text style={styles.historyButtonText}>View Leave History</Text>
                   </TouchableOpacity>
-                  {renderCalendar(showLeaveCalendarTo, setShowLeaveCalendarTo, leaveDateTo, setLeaveDateTo, leaveDateFrom || todayStr)}
-                </>
+                  <TouchableOpacity style={styles.balancesButton} onPress={fetchLeaveBalances}>
+                    <Text style={styles.balancesButtonText}>View Leave Balances</Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.rangeToggle}>
+                    <TouchableOpacity style={[styles.rangeButton, !isRange && styles.rangeButtonActive]} onPress={() => setIsRange(false)}>
+                      <Text style={[styles.rangeButtonText, !isRange && styles.rangeButtonTextActive]}>Single Day</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.rangeButton, isRange && styles.rangeButtonActive]} onPress={() => setIsRange(true)}>
+                      <Text style={[styles.rangeButtonText, isRange && styles.rangeButtonTextActive]}>Date Range</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.label}>{isRange ? 'From Date' : 'Date'}</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowLeaveCalendarFrom(true)}>
+                    <CalendarIcon size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{leaveDateFrom || 'Select date'}</Text>
+                  </TouchableOpacity>
+                  {renderCalendar(showLeaveCalendarFrom, setShowLeaveCalendarFrom, leaveDateFrom, setLeaveDateFrom, todayStr)}
+
+                  {isRange && (
+                    <>
+                      <Text style={styles.label}>To Date</Text>
+                      <TouchableOpacity style={styles.datePicker} onPress={() => setShowLeaveCalendarTo(true)}>
+                        <CalendarIcon size={20} color="#00897B" />
+                        <Text style={styles.dateText}>{leaveDateTo || 'Select date'}</Text>
+                      </TouchableOpacity>
+                      {renderCalendar(showLeaveCalendarTo, setShowLeaveCalendarTo, leaveDateTo, setLeaveDateTo, leaveDateFrom || todayStr)}
+                    </>
+                  )}
+
+                  <Text style={styles.label}>Leave Type</Text>
+                  <View style={styles.typeGroup}>
+                    {['Birthday', 'PTO', 'Compensatory Paid Off', 'Emergency', 'Vacation'].map(t => (
+                      <TouchableOpacity key={t} style={[styles.typeChip, leaveType === t && styles.typeChipActive]} onPress={() => setLeaveType(t)}>
+                        <Text style={[styles.typeChipText, leaveType === t && styles.typeChipTextActive]}>{t}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
+                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain reason..." placeholderTextColor={colors.textSecondary} value={leaveReason} onChangeText={setLeaveReason} />
+
+                  <Text style={styles.label}>Attachment (Required - PDF, DOC, JPG up to 5MB)</Text>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setLeaveImage)}>
+                    <Upload size={18} color="#00897B" />
+                    <Text style={styles.uploadText}>{leaveImage ? (leaveImage.name || 'File Attached') : 'Upload Proof'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.submitBtn} onPress={handleNextLeave}>
+                    <Text style={styles.submitBtnText}>Next: Date Breakdown</Text>
+                  </TouchableOpacity>
+                </View>
               )}
 
-              <Text style={styles.label}>Type</Text>
-              <View style={styles.typeGroup}>
-                {['Sick Leave', 'Vacation Leave', 'Emergency Leave', 'Other'].map(t => (
-                  <TouchableOpacity key={t} style={[styles.typeChip, leaveType === t && styles.typeChipActive]} onPress={() => setLeaveType(t)}>
-                    <Text style={[styles.typeChipText, leaveType === t && styles.typeChipTextActive]}>{t}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              {leaveStep === 2 && (
+                <View>
+                  <Text style={[styles.headerTitle, { marginBottom: 16 }]}>Date Breakdown</Text>
+                  <Text style={[styles.label, { marginBottom: 16 }]}>Specify duration for each day. Pay status is calculated based on your remaining '{leaveType}' balance.</Text>
+                  
+                  {leaveBreakdown.map((item, index) => (
+                    <View key={item.date} style={styles.reviewBox}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary }}>{item.date}</Text>
+                        <Text style={{ fontFamily: 'Inter_18pt-Bold', color: item.isPaid ? '#059669' : '#DC2626' }}>
+                          {item.isPaid ? 'With Pay' : 'Without Pay'}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        {['Whole Day', '1st Half', '2nd Half'].map(dur => (
+                          <TouchableOpacity 
+                            key={dur} 
+                            style={[styles.typeChip, { flex: 1, paddingHorizontal: 0, alignItems: 'center' }, item.duration === dur && styles.typeChipActive]}
+                            onPress={() => updateBreakdownDuration(index, dur)}
+                          >
+                            <Text style={[styles.typeChipText, { fontSize: 11 }, item.duration === dur && styles.typeChipTextActive]}>{dur}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
 
-              <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain reason..." placeholderTextColor={colors.textSecondary} value={leaveReason} onChangeText={setLeaveReason} />
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => setLeaveStep(1)}>
+                      <Text style={[styles.submitBtnText, { color: colors.textPrimary }]}>Back</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={() => setLeaveStep(3)}>
+                      <Text style={styles.submitBtnText}>Review Application</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
-              <Text style={styles.label}>Attachment (optional)</Text>
-              <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setLeaveImage)}>
-                <Upload size={18} color="#00897B" /><Text style={styles.uploadText}>{leaveImage ? 'Change Image' : 'Upload'}</Text>
-              </TouchableOpacity>
-              {leaveImage && <Image source={{ uri: leaveImage }} style={styles.previewImage} />}
+              {leaveStep === 3 && (
+                <View>
+                  <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Leave Application Review</Text>
+                  
+                  <View style={styles.reviewBox}>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Type</Text><Text style={styles.dateText}>{leaveType}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{leaveReason}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Attachment</Text><Text style={styles.dateText}>{leaveImage?.name || 'File Attached'}</Text></View>
+                    
+                    <Text style={[styles.label, { marginTop: 10, borderTopWidth: 1, borderColor: colors.border, paddingTop: 10 }]}>Requested Dates:</Text>
+                    {leaveBreakdown.map((item) => (
+                      <View key={item.date} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                        <Text style={styles.dateText}>• {item.date} ({item.duration})</Text>
+                        <Text style={{ fontFamily: 'Inter_18pt-Bold', color: item.isPaid ? '#059669' : '#DC2626' }}>{item.isPaid ? 'With Pay' : 'Without Pay'}</Text>
+                      </View>
+                    ))}
+                  </View>
 
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSubmitLeave} disabled={submittingLeave}>
-                <Text style={styles.submitBtnText}>{submittingLeave ? 'Submitting...' : 'Submit Leave Request'}</Text>
-              </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => setLeaveStep(2)}>
+                      <Text style={[styles.submitBtnText, { color: colors.textPrimary }]}>Edit Dates</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={handleSubmitLeave} disabled={submittingLeave}>
+                      <Text style={styles.submitBtnText}>{submittingLeave ? 'Submitting...' : 'Confirm Submit'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 
+          {/* ======================================= */}
           {/* SCHEDULE TAB */}
+          {/* ======================================= */}
           {activeTab === 'schedule' && (
             <View>
-              <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('ScheduleHistory')}>
-                <Text style={styles.historyButtonText}>View Schedule History</Text>
-              </TouchableOpacity>
+              {scheduleStep === 1 && (
+                <View>
+                  <TouchableOpacity style={styles.historyButton} onPress={() => { setScheduleStep(1); navigation.navigate('ScheduleHistory'); }}>
+                    <Text style={styles.historyButtonText}>View Schedule History</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>Date</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => setShowScheduleCalendar(true)}>
-                <CalendarIcon size={20} color="#00897B" />
-                <Text style={styles.dateText}>{scheduleDate || 'Select date'}</Text>
-              </TouchableOpacity>
-              {renderCalendar(showScheduleCalendar, setShowScheduleCalendar, scheduleDate, setScheduleDate, todayStr)}
+                  <Text style={styles.label}>Date</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowScheduleCalendar(true)}>
+                    <CalendarIcon size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{scheduleDate || 'Select date'}</Text>
+                  </TouchableOpacity>
+                  {renderCalendar(showScheduleCalendar, setShowScheduleCalendar, scheduleDate, setScheduleDate, todayStr)}
 
-              <Text style={styles.label}>Start Time</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('scheduleStart'); setShowTimePicker(true); }}>
-                <Clock size={20} color="#00897B" />
-                <Text style={styles.dateText}>{scheduleStart ? formatTo12Hour(scheduleStart) : 'Select start time'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>Start Time</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('scheduleStart'); setShowTimePicker(true); }}>
+                    <Clock size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{scheduleStart ? formatTo12Hour(scheduleStart) : 'Select start time'}</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>End Time</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('scheduleEnd'); setShowTimePicker(true); }}>
-                <Clock size={20} color="#00897B" />
-                <Text style={styles.dateText}>{scheduleEnd ? formatTo12Hour(scheduleEnd) : 'Select end time'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>End Time</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('scheduleEnd'); setShowTimePicker(true); }}>
+                    <Clock size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{scheduleEnd ? formatTo12Hour(scheduleEnd) : 'Select end time'}</Text>
+                  </TouchableOpacity>
 
-              {/* Location / Campus Dropdown */}
-              <Text style={styles.label}>Location / Campus</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => setShowLocationModal(true)}>
-                <MapPin size={20} color="#00897B" />
-                <Text style={styles.dateText}>{schedulePlace || 'Select location...'}</Text>
-                <ChevronDown size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
+                  <Text style={styles.label}>Location / Campus</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowLocationModal(true)}>
+                    <MapPin size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{schedulePlace || 'Select location...'}</Text>
+                    <ChevronDown size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
 
-              {/* Course Name Dropdown */}
-              <Text style={styles.label}>Course Name</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => setShowCourseModal(true)}>
-                <BookOpen size={20} color="#00897B" />
-                <Text style={styles.dateText}>{scheduleCourse || 'Select course...'}</Text>
-                <ChevronDown size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
+                  <Text style={styles.label}>Course Name</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowCourseModal(true)}>
+                    <BookOpen size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{scheduleCourse || 'Select course...'}</Text>
+                    <ChevronDown size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>Reason for Request</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="e.g., Need to cover a shift..." placeholderTextColor={colors.textSecondary} value={scheduleReason} onChangeText={setScheduleReason} />
+                  <Text style={styles.label}>Reason for Request</Text>
+                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="e.g., Need to cover a shift..." placeholderTextColor={colors.textSecondary} value={scheduleReason} onChangeText={setScheduleReason} />
 
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSubmitSchedule} disabled={submittingSchedule}>
-                <Text style={styles.submitBtnText}>{submittingSchedule ? 'Sending...' : 'Send Schedule Request'}</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity style={styles.submitBtn} onPress={handleNextSchedule}>
+                    <Text style={styles.submitBtnText}>Next: Review Application</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {scheduleStep === 2 && (
+                <View>
+                  <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Schedule Application Review</Text>
+                  <View style={styles.reviewBox}>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{scheduleDate}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Time</Text><Text style={styles.dateText}>{formatTo12Hour(scheduleStart)} - {formatTo12Hour(scheduleEnd)}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Location</Text><Text style={styles.dateText}>{schedulePlace}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Course</Text><Text style={styles.dateText}>{scheduleCourse}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{scheduleReason}</Text></View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => setScheduleStep(1)}>
+                      <Text style={[styles.submitBtnText, { color: colors.textPrimary }]}>Edit Details</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={handleSubmitSchedule} disabled={submittingSchedule}>
+                      <Text style={styles.submitBtnText}>{submittingSchedule ? 'Sending...' : 'Confirm Submit'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 
+          {/* ======================================= */}
           {/* APPEAL TAB */}
+          {/* ======================================= */}
           {activeTab === 'appeal' && (
             <View>
-              <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('AppealHistory')}>
-                <Text style={styles.historyButtonText}>View Appeal History</Text>
-              </TouchableOpacity>
+              {appealStep === 1 && (
+                <View>
+                  <TouchableOpacity style={styles.historyButton} onPress={() => { setAppealStep(1); navigation.navigate('AppealHistory'); }}>
+                    <Text style={styles.historyButtonText}>View Appeal History</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>Date</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => setShowAppealCalendar(true)}>
-                <CalendarIcon size={20} color="#00897B" />
-                <Text style={styles.dateText}>{appealDate || 'Select date'}</Text>
-              </TouchableOpacity>
-              {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, null)}
+                  <Text style={styles.label}>Date</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowAppealCalendar(true)}>
+                    <CalendarIcon size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{appealDate || 'Select date'}</Text>
+                  </TouchableOpacity>
+                  {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, null)}
 
-              <Text style={styles.label}>Time In (optional)</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealIn'); setShowTimePicker(true); }}>
-                <Clock size={20} color="#00897B" />
-                <Text style={styles.dateText}>{appealTimeIn ? formatTo12Hour(appealTimeIn) : 'Select time in'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>Time In (optional)</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealIn'); setShowTimePicker(true); }}>
+                    <Clock size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{appealTimeIn ? formatTo12Hour(appealTimeIn) : 'Select time in'}</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>Time Out (optional)</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealOut'); setShowTimePicker(true); }}>
-                <Clock size={20} color="#00897B" />
-                <Text style={styles.dateText}>{appealTimeOut ? formatTo12Hour(appealTimeOut) : 'Select time out'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>Time Out (optional)</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealOut'); setShowTimePicker(true); }}>
+                    <Clock size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{appealTimeOut ? formatTo12Hour(appealTimeOut) : 'Select time out'}</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain why you couldn't clock in/out..." placeholderTextColor={colors.textSecondary} value={appealReason} onChangeText={setAppealReason} />
+                  <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
+                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain why you couldn't clock in/out..." placeholderTextColor={colors.textSecondary} value={appealReason} onChangeText={setAppealReason} />
 
-              <Text style={styles.label}>Proof (optional)</Text>
-              <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setAppealImage)}>
-                <Upload size={18} color="#00897B" /><Text style={styles.uploadText}>{appealImage ? 'Change Image' : 'Upload'}</Text>
-              </TouchableOpacity>
-              {appealImage && <Image source={{ uri: appealImage }} style={styles.previewImage} />}
+                  <Text style={styles.label}>Proof (Required - PDF, DOC, JPG up to 5MB)</Text>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setAppealImage)}>
+                    <Upload size={18} color="#00897B" />
+                    <Text style={styles.uploadText}>{appealImage ? (appealImage.name || 'File Attached') : 'Upload Proof'}</Text>
+                  </TouchableOpacity>
 
-              <TouchableOpacity style={styles.submitBtn} onPress={submitAppeal} disabled={submittingAppeal}>
-                <Text style={styles.submitBtnText}>{submittingAppeal ? 'Submitting...' : 'Submit Appeal'}</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity style={styles.submitBtn} onPress={handleNextAppeal}>
+                    <Text style={styles.submitBtnText}>Next: Review Application</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {appealStep === 2 && (
+                <View>
+                  <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Appeal Application Review</Text>
+                  <View style={styles.reviewBox}>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{appealDate}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Time In</Text><Text style={styles.dateText}>{appealTimeIn ? formatTo12Hour(appealTimeIn) : 'N/A'}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Time Out</Text><Text style={styles.dateText}>{appealTimeOut ? formatTo12Hour(appealTimeOut) : 'N/A'}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{appealReason}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Attachment</Text><Text style={styles.dateText}>{appealImage?.name || 'File Attached'}</Text></View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => setAppealStep(1)}>
+                      <Text style={[styles.submitBtnText, { color: colors.textPrimary }]}>Edit Details</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={handleSubmitAppeal} disabled={submittingAppeal}>
+                      <Text style={styles.submitBtnText}>{submittingAppeal ? 'Submitting...' : 'Confirm Submit'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 
+          {/* ======================================= */}
           {/* CORRECTION TAB */}
+          {/* ======================================= */}
           {activeTab === 'correction' && (
             <View>
-              <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('CorrectionHistory')}>
-                <Text style={styles.historyButtonText}>View Correction History</Text>
-              </TouchableOpacity>
+              {correctionStep === 1 && (
+                <View>
+                  <TouchableOpacity style={styles.historyButton} onPress={() => { setCorrectionStep(1); navigation.navigate('CorrectionHistory'); }}>
+                    <Text style={styles.historyButtonText}>View Correction History</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>Date</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => setShowCorrectionCalendar(true)}>
-                <CalendarIcon size={20} color="#00897B" />
-                <Text style={styles.dateText}>{correctionDate || 'Select date'}</Text>
-              </TouchableOpacity>
-              {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, null)}
+                  <Text style={styles.label}>Date</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowCorrectionCalendar(true)}>
+                    <CalendarIcon size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{correctionDate || 'Select date'}</Text>
+                  </TouchableOpacity>
+                  {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, null)}
 
-              <Text style={styles.label}>What to correct?</Text>
-              <View style={styles.typeGroup}>
-                <TouchableOpacity style={[styles.typeChip, correctionType === 'clock_in' && styles.typeChipActive]} onPress={() => setCorrectionType('clock_in')}>
-                  <Text style={[styles.typeChipText, correctionType === 'clock_in' && styles.typeChipTextActive]}>Clock In</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.typeChip, correctionType === 'clock_out' && styles.typeChipActive]} onPress={() => setCorrectionType('clock_out')}>
-                  <Text style={[styles.typeChipText, correctionType === 'clock_out' && styles.typeChipTextActive]}>Clock Out</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.typeChip, correctionType === 'early_out' && styles.typeChipActive]} onPress={() => setCorrectionType('early_out')}>
-                  <Text style={[styles.typeChipText, correctionType === 'early_out' && styles.typeChipTextActive]}>Early Out</Text>
-                </TouchableOpacity>
-              </View>
+                  <Text style={styles.label}>What to correct?</Text>
+                  <View style={styles.typeGroup}>
+                    <TouchableOpacity style={[styles.typeChip, correctionType === 'clock_in' && styles.typeChipActive]} onPress={() => setCorrectionType('clock_in')}>
+                      <Text style={[styles.typeChipText, correctionType === 'clock_in' && styles.typeChipTextActive]}>Clock In</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.typeChip, correctionType === 'clock_out' && styles.typeChipActive]} onPress={() => setCorrectionType('clock_out')}>
+                      <Text style={[styles.typeChipText, correctionType === 'clock_out' && styles.typeChipTextActive]}>Clock Out</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.typeChip, correctionType === 'early_out' && styles.typeChipActive]} onPress={() => setCorrectionType('early_out')}>
+                      <Text style={[styles.typeChipText, correctionType === 'early_out' && styles.typeChipTextActive]}>Early Out</Text>
+                    </TouchableOpacity>
+                  </View>
 
-              <Text style={styles.label}>Time</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('correctionTime'); setShowTimePicker(true); }}>
-                <Clock size={20} color="#00897B" />
-                <Text style={styles.dateText}>{correctionTime ? formatTo12Hour(correctionTime) : 'Select time'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>Time</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('correctionTime'); setShowTimePicker(true); }}>
+                    <Clock size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{correctionTime ? formatTo12Hour(correctionTime) : 'Select time'}</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.label}>Reason</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why did you forget to clock or need to leave early?" placeholderTextColor={colors.textSecondary} value={correctionReason} onChangeText={setCorrectionReason} />
+                  <Text style={styles.label}>Reason</Text>
+                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why did you forget to clock or need to leave early?" placeholderTextColor={colors.textSecondary} value={correctionReason} onChangeText={setCorrectionReason} />
 
-              <Text style={styles.label}>Selfie (proof)</Text>
-              <TouchableOpacity style={styles.uploadBtn} onPress={async () => { const uri = await takeSelfie(); if (uri) setCorrectionSelfie(uri); }}>
-                <Camera size={18} color="#00897B" /><Text style={styles.uploadText}>{correctionSelfie ? 'Retake Selfie' : 'Take Selfie'}</Text>
-              </TouchableOpacity>
-              {correctionSelfie && <Image source={{ uri: correctionSelfie }} style={styles.previewImage} />}
+                  <Text style={styles.label}>Selfie (Required Proof)</Text>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={async () => { const uri = await takeSelfie(); if (uri) setCorrectionSelfie(uri); }}>
+                    <Camera size={18} color="#00897B" />
+                    <Text style={styles.uploadText}>{correctionSelfie ? 'Retake Selfie' : 'Take Selfie'}</Text>
+                  </TouchableOpacity>
+                  {correctionSelfie && <Image source={{ uri: correctionSelfie }} style={styles.previewImage} />}
 
-              <TouchableOpacity style={styles.submitBtn} onPress={submitCorrection} disabled={submittingCorrection}>
-                <Text style={styles.submitBtnText}>{submittingCorrection ? 'Submitting...' : 'Submit Correction Request'}</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity style={styles.submitBtn} onPress={handleNextCorrection}>
+                    <Text style={styles.submitBtnText}>Next: Review Application</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {correctionStep === 2 && (
+                <View>
+                  <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Correction Application Review</Text>
+                  <View style={styles.reviewBox}>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{correctionDate}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Correction Type</Text><Text style={styles.dateText}>{correctionType}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Time</Text><Text style={styles.dateText}>{formatTo12Hour(correctionTime)}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{correctionReason}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Selfie Attached</Text><Text style={styles.dateText}>{correctionSelfie ? 'Yes' : 'No'}</Text></View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => setCorrectionStep(1)}>
+                      <Text style={[styles.submitBtnText, { color: colors.textPrimary }]}>Edit Details</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={handleSubmitCorrection} disabled={submittingCorrection}>
+                      <Text style={styles.submitBtnText}>{submittingCorrection ? 'Submitting...' : 'Confirm Submit'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 
+          {/* ======================================= */}
           {/* OVERTIME TAB */}
+          {/* ======================================= */}
           {activeTab === 'overtime' && (
             <View>
-              <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('OvertimeHistory')}>
-                <Text style={styles.historyButtonText}>View Overtime History</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.label}>Date</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => setShowOvertimeCalendar(true)}>
-                <CalendarIcon size={20} color="#00897B" />
-                <Text style={styles.dateText}>{overtimeDate || 'Select date'}</Text>
-              </TouchableOpacity>
-              {renderCalendar(showOvertimeCalendar, setShowOvertimeCalendar, overtimeDate, setOvertimeDate, todayStr)}
-
-              <Text style={styles.label}>Scenario Type</Text>
-              <View style={styles.typeGroup}>
-                {[
-                  { value: 'future', label: 'Future Date' },
-                  { value: 'ongoing', label: 'Ongoing Shift' },
-                  { value: 'after_shift', label: 'After Shift' }
-                ].map(opt => (
-                  <TouchableOpacity
-                    key={opt.value}
-                    style={[styles.typeChip, overtimeScenario === opt.value && styles.typeChipActive]}
-                    onPress={() => setOvertimeScenario(opt.value)}
-                  >
-                    <Text style={[styles.typeChipText, overtimeScenario === opt.value && styles.typeChipTextActive]}>
-                      {opt.label}
-                    </Text>
+              {overtimeStep === 1 && (
+                <View>
+                  <TouchableOpacity style={styles.historyButton} onPress={() => { setOvertimeStep(1); navigation.navigate('OvertimeHistory'); }}>
+                    <Text style={styles.historyButtonText}>View Overtime History</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
 
-              <Text style={styles.label}>Start Time</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('overtimeStart'); setShowTimePicker(true); }}>
-                <Clock size={20} color="#00897B" />
-                <Text style={styles.dateText}>{overtimeStart ? formatTo12Hour(overtimeStart) : 'Select start time'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>Date</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowOvertimeCalendar(true)}>
+                    <CalendarIcon size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{overtimeDate || 'Select date'}</Text>
+                  </TouchableOpacity>
+                  {renderCalendar(showOvertimeCalendar, setShowOvertimeCalendar, overtimeDate, setOvertimeDate, todayStr)}
 
-              <Text style={styles.label}>End Time</Text>
-              <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('overtimeEnd'); setShowTimePicker(true); }}>
-                <Clock size={20} color="#00897B" />
-                <Text style={styles.dateText}>{overtimeEnd ? formatTo12Hour(overtimeEnd) : 'Select end time'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>Overtime Type</Text>
+                  <View style={styles.typeGroup}>
+                    {['Regular Overtime', 'Compensatory Time Off (CTO)'].map(opt => (
+                      <TouchableOpacity
+                        key={opt}
+                        style={[styles.typeChip, overtimeType === opt && styles.typeChipActive]}
+                        onPress={() => setOvertimeType(opt)}
+                      >
+                        <Text style={[styles.typeChipText, overtimeType === opt && styles.typeChipTextActive]}>{opt}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-              <Text style={styles.label}>Reason / Task (Minimum 5 characters)</Text>
-              <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why is overtime needed?" placeholderTextColor={colors.textSecondary} value={overtimeReason} onChangeText={setOvertimeReason} />
+                  <Text style={styles.label}>Timing</Text>
+                  <View style={styles.typeGroup}>
+                    {['Early OT', 'Normal OT'].map(opt => (
+                      <TouchableOpacity
+                        key={opt}
+                        style={[styles.typeChip, overtimeTiming === opt && styles.typeChipActive]}
+                        onPress={() => setOvertimeTiming(opt)}
+                      >
+                        <Text style={[styles.typeChipText, overtimeTiming === opt && styles.typeChipTextActive]}>{opt}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-              <Text style={styles.label}>Attachment (optional)</Text>
-              <TouchableOpacity style={styles.uploadBtn} onPress={() => pickImage(setOvertimeImage)}>
-                <Upload size={18} color="#00897B" /><Text style={styles.uploadText}>{overtimeImage ? 'Change Image' : 'Upload'}</Text>
-              </TouchableOpacity>
-              {overtimeImage && <Image source={{ uri: overtimeImage }} style={styles.previewImage} />}
+                  <Text style={styles.label}>Start Time</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('overtimeStart'); setShowTimePicker(true); }}>
+                    <Clock size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{overtimeStart ? formatTo12Hour(overtimeStart) : 'Select start time'}</Text>
+                  </TouchableOpacity>
 
-              <TouchableOpacity style={styles.submitBtn} onPress={handleSubmitOvertime} disabled={submittingOvertime}>
-                <Text style={styles.submitBtnText}>{submittingOvertime ? 'Submitting...' : 'Submit Overtime Request'}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.label}>End Time</Text>
+                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('overtimeEnd'); setShowTimePicker(true); }}>
+                    <Clock size={20} color="#00897B" />
+                    <Text style={styles.dateText}>{overtimeEnd ? formatTo12Hour(overtimeEnd) : 'Select end time'}</Text>
+                  </TouchableOpacity>
+
+                  <Text style={styles.label}>Reason / Task (Minimum 5 characters)</Text>
+                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why is overtime needed?" placeholderTextColor={colors.textSecondary} value={overtimeReason} onChangeText={setOvertimeReason} />
+
+                  <Text style={styles.label}>Attachment (Optional - PDF, DOC, JPG up to 5MB)</Text>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setOvertimeImage)}>
+                    <Upload size={18} color="#00897B" />
+                    <Text style={styles.uploadText}>{overtimeImage ? (overtimeImage.name || 'File Attached') : 'Upload File'}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.submitBtn} onPress={handleNextOvertime}>
+                    <Text style={styles.submitBtnText}>Next: Review Application</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {overtimeStep === 2 && (
+                <View>
+                  <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Overtime Application Review</Text>
+                  <View style={styles.reviewBox}>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Type</Text><Text style={styles.dateText}>{overtimeType}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Timing</Text><Text style={styles.dateText}>{overtimeTiming}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{overtimeDate}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Time</Text><Text style={styles.dateText}>{formatTo12Hour(overtimeStart)} - {formatTo12Hour(overtimeEnd)}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{overtimeReason}</Text></View>
+                    <View style={styles.reviewRow}><Text style={styles.label}>Attachment</Text><Text style={styles.dateText}>{overtimeImage ? (overtimeImage.name || 'File Attached') : 'None'}</Text></View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => setOvertimeStep(1)}>
+                      <Text style={[styles.submitBtnText, { color: colors.textPrimary }]}>Edit Details</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={handleSubmitOvertime} disabled={submittingOvertime}>
+                      <Text style={styles.submitBtnText}>{submittingOvertime ? 'Submitting...' : 'Confirm Submit'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
           )}
+
         </ScrollView>
 
         {showTimePicker && (
@@ -983,5 +1213,8 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   emptyText: { fontFamily: 'Inter_18pt-Medium', textAlign: 'center', color: isLight ? '#94A3B8' : colors.textSecondary, marginTop: 20 },
 
   dropdownOption: { paddingVertical: 14, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
-  dropdownOptionText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary }
+  dropdownOptionText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
+
+  reviewBox: { backgroundColor: isLight ? '#F8FAFC' : colors.surface, padding: 16, borderRadius: 16, gap: 4, borderWidth: 1, borderColor: colors.border },
+  reviewRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 6 }
 });
