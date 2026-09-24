@@ -247,13 +247,19 @@ export const submitOvertimeRequest = async (data) => {
     if (data.end_time) formData.append('end_time', String(data.end_time));
     if (data.reason) formData.append('reason', String(data.reason));
     if (data.scenario_type) formData.append('scenario_type', String(data.scenario_type));
+    if (data.overtime_type) formData.append('overtime_type', String(data.overtime_type)); // Supports CTO / Regular OT[cite: 20]
+    if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
 
     if (data.attachment) {
-      const attUri = typeof data.attachment === 'string' ? data.attachment : data.attachment.uri;
+      const att = data.attachment;
+      const attUri = typeof att === 'string' ? att : att.uri;
       if (attUri) {
+        const filename = att.name || attUri.split('/').pop() || 'overtime_proof.jpg';
+        const mimeType = att.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
         const imgResp = await fetch(attUri);
         const blob = await imgResp.blob();
-        formData.append('attachment', blob, 'overtime.jpg');
+        formData.append('attachment', blob, filename);
       }
     }
 
@@ -436,11 +442,15 @@ export const submitLeaveRequest = async (payload) => {
     for (const key in payload) {
       if (payload[key] !== null && payload[key] !== undefined) {
         if (key === 'image' || key === 'attachment') {
-          const imgUri = typeof payload[key] === 'string' ? payload[key] : payload[key].uri;
-          if (imgUri) {
-            const imgResp = await fetch(imgUri);
+          const fileObj = payload[key];
+          const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
+          if (fileUri) {
+            const filename = fileObj.name || fileUri.split('/').pop() || 'leave_proof.jpg';
+            const mimeType = fileObj.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+
+            const imgResp = await fetch(fileUri);
             const blob = await imgResp.blob();
-            formData.append(key, blob, `${key}.jpg`);
+            formData.append(key, blob, filename);
           }
         } else {
           formData.append(key, String(payload[key]));

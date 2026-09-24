@@ -1,8 +1,11 @@
 /* univita2.0/src/api.js */
 
-//export const API_BASE = "https://api.univitahct.tech/api";
+const USE_REMOTE = true; 
 
-export const API_BASE = 'http://localhost:5000/api';
+const REMOTE_URL = "https://api.univitahct.tech";
+const LOCAL_URL = "http://localhost:5000";
+
+export const API_BASE = USE_REMOTE ? `${REMOTE_URL}/api` : `${LOCAL_URL}/api`;
 
 // Helper to handle JSON parsing safely and prevent dashboard crashes
 const handleWebResponse = async (res) => {
@@ -165,6 +168,19 @@ export const fetchLeaveRequests = async () => {
     }
 };
 
+export const fetchGroupedLeaveRequests = async () => {
+    try {
+        const res = await fetch(`${API_BASE}/leave-requests/grouped`, {
+            headers: getWebAuthHeaders()
+        });
+        const data = await handleWebResponse(res);
+        return Array.isArray(data) ? data : [];
+    } catch (error) {
+        console.error("Fetch Grouped Leave Requests Error:", error);
+        return [];
+    }
+};
+
 export const updateLeaveStatus = async (id, status, remarks = "") => {
     try {
         const res = await fetch(`${API_BASE}/leave-requests/${id}`, {
@@ -175,6 +191,20 @@ export const updateLeaveStatus = async (id, status, remarks = "") => {
         return await handleWebResponse(res);
     } catch (error) {
         console.error("Update Leave Error:", error);
+        return { success: false };
+    }
+};
+
+export const batchUpdateLeaveStatus = async (ids, status, remarks = "") => {
+    try {
+        const res = await fetch(`${API_BASE}/leave-requests/batch-status`, {
+            method: 'PUT',
+            headers: getWebAuthHeaders(),
+            body: JSON.stringify({ ids, status, admin_remarks: remarks })
+        });
+        return await handleWebResponse(res);
+    } catch (error) {
+        console.error("Batch Update Leave Error:", error);
         return { success: false };
     }
 };
@@ -237,7 +267,7 @@ export const addEvent = async (eventData) => {
 };
 
 // ==========================================
-// PAYROLL (NEW)
+// PAYROLL
 // ==========================================
 export const fetchAttendanceMonthly = async (month, year) => {
     try {
