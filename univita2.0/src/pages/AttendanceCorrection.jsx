@@ -240,65 +240,45 @@ const AttendanceCorrection = () => {
               <table className="ac-table">
                 <thead>
                   <tr>
-                    <th>Employee</th>
-                    <th>Date</th>
-                    <th>Time In</th>
-                    <th>Time Out</th>
-                    <th>Status</th>
-                    <th>Audit Status</th>
-                    <th>Location</th>
-                    <th className="text-center">Proof</th>
+                    <th>Employee ID</th>
+                    <th>Employee Name</th>
+                    <th className="text-center">Status</th>
+                    <th className="text-center">Audit Status</th>
                     <th className="text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {currentRecords.length === 0 ? (
                     <tr>
-                      <td colSpan="9"><div className="ac-empty-state">No records found matching your search.</div></td>
+                      <td colSpan="5"><div className="ac-empty-state">No records found matching your search.</div></td>
                     </tr>
                   ) : (
                     currentRecords.map(rec => {
                       const isCorrected = rec.correction_requested === 1 && rec.updated_at != null;
-                      const displayLocation = cleanLocation(rec.location);
 
                       return (
                         <tr key={rec.id}>
-                          <td className="whitespace-nowrap">
-                            <div className="ac-emp-name">{rec.full_name || 'Unknown'}</div>
-                            <div className="ac-emp-id">{rec.employee_id || '—'}</div>
-                          </td>
-                          <td className="font-medium text-gray-900 whitespace-nowrap">{formatDate(rec.date)}</td>
-                          <td className="whitespace-nowrap">{formatTo12Hour(rec.time_in)}</td>
-                          <td className="whitespace-nowrap">{formatTo12Hour(rec.time_out)}</td>
-                          <td>
+                          <td className="whitespace-nowrap font-mono text-xs text-muted">{rec.employee_id || '—'}</td>
+                          <td className="whitespace-nowrap font-semibold text-dark">{rec.full_name || 'Unknown'}</td>
+                          <td className="text-center whitespace-nowrap">
                             <span className={`ac-status-badge ${rec.status?.toLowerCase() || 'default'}`}>
                               {rec.status || 'Unknown'}
                             </span>
                           </td>
-                          <td>
+                          <td className="text-center whitespace-nowrap">
                             {isCorrected ? (
                               <span className="ac-status-badge warning" style={{fontSize: '0.65rem'}}>Corrected</span>
                             ) : (
                               <span className="ac-status-badge default" style={{fontSize: '0.65rem'}}>Original</span>
                             )}
                           </td>
-                          <td className="ac-location-cell" title={displayLocation}>
-                            {displayLocation}
-                          </td>
-                          <td className="text-center">
-                            {(rec.clock_in_selfie || rec.clock_out_selfie) ? (
-                              <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${rec.clock_in_selfie || rec.clock_out_selfie}`)} style={{ border: 'none', cursor: 'pointer', background: 'transparent' }} title="View Selfie">
-                                <Eye size={16} color="#0D9488" />
-                              </button>
-                            ) : <span className="text-muted">—</span>}
-                          </td>
-                          <td className="whitespace-nowrap">
-                            <div className="ac-action-group">
+                          <td className="text-center whitespace-nowrap">
+                            <div className="ac-action-group" style={{ justifyContent: 'center' }}>
                               <button onClick={() => setViewingRecord(rec)} className="ac-edit-btn" title="View Full Details">
-                                <Eye size={18} color="#0D9488" />
+                                <Eye size={16} color="#475569" />
                               </button>
                               <button onClick={() => openEditor(rec)} className="ac-edit-btn" title="Edit Record">
-                                <Edit3 size={18} color="#475569" />
+                                <Edit3 size={16} color="#475569" />
                               </button>
                             </div>
                           </td>
@@ -324,17 +304,52 @@ const AttendanceCorrection = () => {
         )}
       </div>
 
-      <FormalModal show={!!viewingRecord} onClose={() => setViewingRecord(null)} title="Record Details" footer={<button className="btn-modal-cancel" onClick={() => setViewingRecord(null)}>Close</button>}>
+      {/* VIEW DETAILS MODAL */}
+      <FormalModal show={!!viewingRecord} onClose={() => setViewingRecord(null)} title="Attendance Record Details" footer={<button className="btn-modal-cancel" onClick={() => setViewingRecord(null)}>Close Window</button>}>
         {viewingRecord && (
-          <div className="ac-details-grid">
-            <p><strong>Employee:</strong> {viewingRecord.full_name} ({viewingRecord.employee_id})</p>
-            <p><strong>Date:</strong> {formatDate(viewingRecord.date)}</p>
-            <p><strong>Time In:</strong> {formatTo12Hour(viewingRecord.time_in)}</p>
-            <p><strong>Time Out:</strong> {formatTo12Hour(viewingRecord.time_out)}</p>
-            <p><strong>Status:</strong> {viewingRecord.status || '—'}</p>
-            <p><strong>Location:</strong> {cleanLocation(viewingRecord.location)}</p>
-            <p><strong>Audit:</strong> {(viewingRecord.correction_requested === 1 && viewingRecord.updated_at != null) ? 'Corrected Record' : 'Original Record'}</p>
-            <p><strong>Last Edit:</strong> {viewingRecord.updated_at ? new Date(viewingRecord.updated_at).toLocaleString() : '—'}</p>
+          <div className="ac-custom-request-card" style={{ boxShadow: 'none', border: 'none', padding: 0 }}>
+            <div className="ac-custom-req-top">
+              <div>
+                <span className="ac-custom-name">{viewingRecord.full_name}</span>
+                <span className="ac-custom-id-tag">{viewingRecord.employee_id}</span>
+              </div>
+              <span className={`ac-status-badge ${viewingRecord.status?.toLowerCase() || 'default'}`}>
+                {viewingRecord.status || 'Unknown'}
+              </span>
+            </div>
+
+            <div className="ac-custom-details-grid" style={{ marginTop: '1rem' }}>
+              <div className="ac-custom-prop">
+                <label>Date</label>
+                <span className="nowrap">{formatDate(viewingRecord.date)}</span>
+              </div>
+              <div className="ac-custom-prop">
+                <label>Audit Status</label>
+                <span className="nowrap">{(viewingRecord.correction_requested === 1 && viewingRecord.updated_at != null) ? 'Corrected Record' : 'Original Record'}</span>
+              </div>
+              <div className="ac-custom-prop">
+                <label>Time In</label>
+                <span className="nowrap">{formatTo12Hour(viewingRecord.time_in)}</span>
+              </div>
+              <div className="ac-custom-prop">
+                <label>Time Out</label>
+                <span className="nowrap">{formatTo12Hour(viewingRecord.time_out)}</span>
+              </div>
+              <div className="ac-custom-prop full-width">
+                <label>Location</label>
+                <span>{cleanLocation(viewingRecord.location)}</span>
+              </div>
+              {(viewingRecord.clock_in_selfie || viewingRecord.clock_out_selfie) && (
+                <div className="ac-custom-prop full-width">
+                  <label>Proof</label>
+                  <span>
+                    <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${viewingRecord.clock_in_selfie || viewingRecord.clock_out_selfie}`)} className="ac-link-btn" style={{ border: 'none', cursor: 'pointer', background: 'transparent', padding: 0 }}>
+                      <Eye size={14} /> View Selfie Verification Proof
+                    </button>
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </FormalModal>
@@ -438,17 +453,6 @@ const AttendanceCorrection = () => {
                 </div>
               )}
             </div>
-
-            {pendingTotalPages > 1 && (
-              <div className="ac-custom-modal-pagination">
-                <span className="ac-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, pendingCorrections.length)} of {pendingCorrections.length}</span>
-                <div className="ac-page-controls">
-                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="ac-page-btn"><ChevronLeft size={16} /></button>
-                  <span className="ac-page-current">{pendingPage} / {pendingTotalPages}</span>
-                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="ac-page-btn"><ChevronRight size={16} /></button>
-                </div>
-              </div>
-            )}
 
             <div className="ac-custom-modal-footer">
               <button className="ac-pending-btn" onClick={() => setShowPendingModal(false)}>Close Window</button>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { RefreshCw, History, Eye, Map, AlertTriangle, ShieldCheck, Clock } from 'lucide-react';
+import { RefreshCw, History, Eye, Map, AlertTriangle, ShieldCheck, Clock, Search, X } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 import './LocationTracking.css';
@@ -13,6 +13,7 @@ const LocationTracking = () => {
   const [instructors, setInstructors] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   
@@ -63,7 +64,6 @@ const LocationTracking = () => {
     }
   };
 
-  // UPDATED: Now accepts the entire instructor object to populate modal headers
   const openTimelineModal = async (inst) => {
     setSelectedInstructor(inst);
     setShowTimelineModal(true);
@@ -131,6 +131,13 @@ const LocationTracking = () => {
   const todayStr = new Date().toISOString().split('T')[0];
   const isToday = selectedDate === todayStr;
 
+  const filteredInstructors = instructors.filter(inst =>
+    !searchQuery ||
+    inst.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    inst.employee_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    inst.schedule_course?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   const buildUnifiedEvents = () => {
     const events = [];
     const timeline = timelineData.timeline || [];
@@ -153,7 +160,6 @@ const LocationTracking = () => {
       return totalMinutes >= startTotal && totalMinutes <= endTotal;
     };
 
-    // 1. Log GPS State Changes (ON / OFF)
     for (let i = 0; i < timeline.length; i++) {
       const curr = timeline[i];
       if (!isWithinShiftTime(curr.ping_time)) continue;
@@ -167,7 +173,6 @@ const LocationTracking = () => {
       }
     }
 
-    // 2. Log Campus Boundary Transitions (Inside / Outside)
     for (let i = 0; i < timeline.length; i++) {
       const curr = timeline[i];
       if (!isWithinShiftTime(curr.ping_time)) continue;
@@ -182,11 +187,8 @@ const LocationTracking = () => {
       }
     }
 
-    // 3. Log Telemetry Alerts with strict sanitization (removing any forbidden terms)
     (timelineData.alerts || []).forEach(alert => {
-      const sanitizedMessage = (alert.alert_message || '')
-        .replace(/departure/gi, 'clock-out');
-        
+      const sanitizedMessage = (alert.alert_message || '').replace(/departure/gi, 'clock-out');
       events.push({ 
         time: alert.created_at, 
         type: 'Alert', 
@@ -194,7 +196,6 @@ const LocationTracking = () => {
       });
     });
 
-    // Chronological sorting for flawless audit trail flow
     events.sort((a, b) => new Date(a.time) - new Date(b.time));
     return events;
   };
@@ -202,8 +203,10 @@ const LocationTracking = () => {
   return (
     <div className="lt-container">
       <div className="lt-header-row">
-        <div>
-          <p className="lt-page-subtitle">Real-time geofencing and campus compliance monitoring.</p>
+        <div className="lt-title-group">
+          <div>
+            <p className="lt-page-subtitle">Real-time geofencing and campus compliance monitoring.</p>
+          </div>
         </div>
         <div className="lt-header-actions">
           <input
@@ -218,6 +221,21 @@ const LocationTracking = () => {
           <button className="btn-lt-primary" onClick={() => fetchData(selectedDate)}>
             <RefreshCw size={16} /> <span>Sync Data</span>
           </button>
+        </div>
+      </div>
+
+      <div className="lt-search-card" style={{ padding: '12px 20px', marginBottom: '1.5rem', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '12px' }}>
+        <div className="lt-search-input-group" style={{ maxWidth: '400px', display: 'flex', alignItems: 'center', gap: '0.75rem', background: '#F8FAFC', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0 1rem' }}>
+          <Search size={18} className="text-muted" />
+          <input
+            type="text"
+            placeholder="Search Name, Employee ID, or Course..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="lt-clean-input"
+            style={{ border: 'none', background: 'transparent', padding: '0.75rem 0', fontSize: '0.95rem', color: '#0F172A', width: '100%', outline: 'none' }}
+          />
+          {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
         </div>
       </div>
 
@@ -263,40 +281,35 @@ const LocationTracking = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {instructors.length === 0 ? (
+                  {filteredInstructors.length === 0 ? (
                     <tr className="lt-empty-row">
-                      <td colSpan="6">No active shifts scheduled for this date.</td>
+                      <td colSpan="6">No active shifts found matching your criteria.</td>
                     </tr>
                   ) : (
-                    instructors.map(inst => {
+                    filteredInstructors.map(inst => {
                       const isGpsOn = inst.gps_status === 'GPS ON';
                       const isOutside = inst.last_is_inside === 0;
                       const isAlert = isToday && (!isGpsOn || isOutside);
 
-                      // Determine dynamic styling for the Attendance status
                       const attStatus = inst.attendance_status || 'Unknown';
                       let attBadgeClass = 'gps-off';
                       
-                      // Identify missed or absent logic
                       const isMissed = attStatus.toLowerCase().includes('miss') || attStatus.toLowerCase().includes('absent');
 
                       if (isMissed) attBadgeClass = 'outside';
                       else if (attStatus.toLowerCase().includes('present')) attBadgeClass = 'inside';
                       else if (attStatus.toLowerCase().includes('late')) attBadgeClass = 'warning';
 
-                      // FORCE UNAVAILABLE FOR LOCATION & GPS IF MISSED/ABSENT
                       const displayGpsOn = isMissed ? false : isGpsOn;
                       const displayLocation = isMissed ? null : inst.last_is_inside;
 
                       return (
                         <tr key={inst.employee_id} className={isAlert ? 'lt-alert-row' : ''}>
-                          {/* 1. INSTRUCTOR */}
                           <td>
                             <div className="lt-emp-name">{inst.full_name}</div>
                             <div className="lt-emp-id">{inst.employee_id}</div>
                           </td>
                           
-                          {/* 2. ASSIGNMENT */}
                           <td>
                             {inst.schedule_course ? (
                               <div className="lt-assignment">
@@ -310,21 +323,18 @@ const LocationTracking = () => {
                             )}
                           </td>
 
-                          {/* 3. ATTENDANCE STATUS */}
                           <td className="text-center">
                             <span className={`lt-status-badge ${attBadgeClass}`} style={attStatus === 'Scheduled' ? { backgroundColor: '#EFF6FF', color: '#1D4ED8' } : {}}>
                               {attStatus.toUpperCase()}
                             </span>
                           </td>
                           
-                          {/* 4. GPS */}
                           <td className="text-center">
                             <span className={`lt-status-badge ${displayGpsOn ? 'gps-on' : 'gps-off'}`}>
                               {displayGpsOn ? 'ON' : 'OFF'}
                             </span>
                           </td>
                           
-                          {/* 5. LOCATION */}
                           <td className="text-center">
                             {displayLocation === null ? (
                               <span className="lt-status-badge outside" style={{ backgroundColor: '#F3F4F6', color: '#6B7280' }}>
@@ -337,7 +347,6 @@ const LocationTracking = () => {
                             )}
                           </td>
                           
-                          {/* 6. TIMELINE (Eye Icon) */}
                           <td className="text-center">
                             <button
                               className="lt-btn-icon"
@@ -430,7 +439,6 @@ const LocationTracking = () => {
               <span>Displaying location summaries, boundary transitions, and system alerts for <strong>{selectedDate}</strong>.</span>
             </div>
 
-            {/* MOVED COLUMNS INSIDE THE MODAL */}
             <div className="lt-timeline-summary">
               <div className="summary-item">
                 <span className="summary-label">Last Known Position</span>

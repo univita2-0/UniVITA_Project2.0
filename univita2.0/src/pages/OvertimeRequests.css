@@ -2,11 +2,9 @@
 .ot-container { background: #F8FAFC; padding: 2rem; min-height: 100vh; font-family: 'Inter', system-ui, sans-serif; }
 .ot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
 .ot-title-group { display: flex; align-items: center; gap: 1rem; }
-.ot-icon-wrapper { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: #EFF6FF; border: 1px solid #BFDBFE; }
-.ot-title { font-size: 1.6rem; font-weight: 700; color: #0F172A; margin: 0 0 0.2rem 0; letter-spacing: -0.02em; }
 .ot-subtitle { color: #64748B; font-size: 0.9rem; margin: 0; }
 
-.ot-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.65rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; background: #FFFFFF; color: #334155; border: 1px solid #CBD5E1; box-shadow: 0 1px 2px rgba(0,0,0,0.02); transition: all 0.2s ease; }
+.ot-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.65rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; background: #FFFFFF; color: #334155; border: 1px solid #CBD5E1; box-shadow: 0 1px 2px rgba(0,0,0,0.02); transition: all 0.2s ease; position: relative; }
 .ot-btn-secondary:hover { background: #F1F5F9; color: #0F172A; }
 
 .ot-search-card { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
@@ -16,7 +14,6 @@
 .ot-clean-input { border: none; background: transparent; padding: 0.75rem 0; font-size: 0.95rem; color: #0F172A; width: 100%; outline: none; font-family: inherit; }
 .cursor-pointer { cursor: pointer; }
 
-.ot-btn-secondary { position: relative; }
 .ot-badge-count { background: #EF4444; color: #FFFFFF; font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 20px; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center; }
 
 .ot-card { background: #FFFFFF; border-radius: 12px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.02); overflow: hidden; }
@@ -28,11 +25,11 @@
 
 .font-semibold { font-weight: 600; }
 .font-medium { font-weight: 500; }
+.font-mono { font-family: 'SF Mono', monospace; }
 .text-dark { color: #0F172A; }
 .text-muted { color: #64748B; }
 .text-xs { font-size: 0.75rem; }
 .text-center { text-align: center; }
-.text-right { text-align: right; }
 .whitespace-nowrap { white-space: nowrap; }
 
 .ot-chip { display: inline-flex; padding: 0.25rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -40,6 +37,9 @@
 .ot-chip.success { background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; }
 .ot-chip.danger { background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; }
 .ot-chip.warning { background: #FFFBEB; color: #D97706; border: 1px solid #FDE68A; }
+
+.ot-action-inspect-btn { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease; }
+.ot-action-inspect-btn:hover { background: #F1F5F9; border-color: #0D9488; }
 
 .ot-link { display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem; padding: 0.35rem 0.6rem; background: #F0FDFA; color: #0D9488; border-radius: 6px; font-weight: 600; font-size: 0.8rem; text-decoration: none; transition: background 0.2s; white-space: nowrap; }
 .ot-link:hover { background: #CCFBF1; }
@@ -55,224 +55,30 @@
 .ot-empty, .ot-loading { padding: 4rem 2rem; text-align: center; color: #64748B; font-weight: 500; font-size: 0.95rem; }
 .ot-loading { color: #0D9488; }
 
-/* ----------------------------------------------------
-   CUSTOM ENTERPRISE MODAL (Pending Overtime Requests)
-   ---------------------------------------------------- */
-.ot-custom-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(3px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  padding: 1rem;
-}
-
-.ot-custom-modal {
-  background: #FFFFFF;
-  border-radius: 12px;
-  width: 100%;
-  max-width: 680px;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  border: 1px solid #E2E8F0;
-  animation: otModalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes otModalPop {
-  from { opacity: 0; transform: scale(0.96) translateY(10px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-
-.ot-custom-modal-header {
-  padding: 1.25rem 1.75rem;
-  background: #F8FAFC;
-  border-bottom: 1px solid #E2E8F0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.ot-custom-modal-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #0F172A;
-}
-
-.ot-custom-close-btn {
-  background: transparent;
-  border: none;
-  color: #64748B;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  transition: all 0.2s;
-}
-
-.ot-custom-close-btn:hover {
-  background: #E2E8F0;
-  color: #0F172A;
-}
-
-.ot-custom-modal-body {
-  padding: 1.75rem;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.ot-custom-requests-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.ot-custom-request-card {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 8px;
-  padding: 1.25rem 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-}
-
-.ot-custom-req-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid #F1F5F9;
-}
-
-.ot-custom-name {
-  font-size: 1rem;
-  font-weight: 700;
-  color: #0F172A;
-  margin-right: 8px;
-}
-
-.ot-custom-id-tag {
-  font-size: 0.75rem;
-  font-family: monospace;
-  color: #64748B;
-  background: #F1F5F9;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  border: 1px solid #E2E8F0;
-}
-
-.ot-custom-scenario-pill {
-  background: #F1F5F9;
-  color: #475569;
-  padding: 0.2rem 0.6rem;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  border: 1px solid #E2E8F0;
-  white-space: nowrap;
-}
-
-.ot-custom-details-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem 1.5rem;
-}
-
-.ot-custom-prop {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.ot-custom-prop.full-width {
-  grid-column: span 2;
-}
-
-.ot-custom-prop label {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: #64748B;
-  letter-spacing: 0.05em;
-}
-
-.ot-custom-prop span {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #1E293B;
-}
-
-.ot-custom-prop span.nowrap {
-  white-space: nowrap;
-}
-
-.ot-custom-prop .reason-text {
-  font-weight: 500;
-  color: #475569;
-  white-space: normal;
-  word-break: break-word;
-}
-
-.ot-custom-req-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #F1F5F9;
-}
-
-.ot-btn-approve-custom, .ot-btn-reject-custom {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 0.85rem;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.2s;
-}
-
-.ot-btn-approve-custom {
-  background: #ECFDF5;
-  color: #059669;
-  border-color: #A7F3D0;
-}
-.ot-btn-approve-custom:hover { background: #D1FAE5; }
-
-.ot-btn-reject-custom {
-  background: #FEF2F2;
-  color: #DC2626;
-  border-color: #FECACA;
-}
-.ot-btn-reject-custom:hover { background: #FEE2E2; }
-
-.ot-custom-modal-pagination {
-  padding: 0.75rem 1.75rem;
-  background: #F8FAFC;
-  border-top: 1px solid #E2E8F0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.ot-custom-modal-footer {
-  padding: 1rem 1.75rem;
-  background: #F8FAFC;
-  border-top: 1px solid #E2E8F0;
-  display: flex;
-  justify-content: flex-end;
-}
+.ot-custom-modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 1rem; }
+.ot-custom-modal { background: #FFFFFF; border-radius: 12px; width: 100%; max-width: 680px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); border: 1px solid #E2E8F0; }
+.ot-custom-modal-header { padding: 1.25rem 1.75rem; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: space-between; }
+.ot-custom-modal-header h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #0F172A; }
+.ot-custom-close-btn { background: transparent; border: none; color: #64748B; cursor: pointer; padding: 4px; border-radius: 6px; display: flex; align-items: center; }
+.ot-custom-close-btn:hover { background: #E2E8F0; color: #0F172A; }
+.ot-custom-modal-body { padding: 1.75rem; overflow-y: auto; flex: 1; }
+.ot-custom-requests-list { display: flex; flex-direction: column; gap: 1.25rem; }
+.ot-custom-request-card { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+.ot-custom-req-top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.75rem; border-bottom: 1px solid #F1F5F9; }
+.ot-custom-name { font-size: 1rem; font-weight: 700; color: #0F172A; margin-right: 8px; }
+.ot-custom-id-tag { font-size: 0.75rem; font-family: monospace; color: #64748B; background: #F1F5F9; padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid #E2E8F0; }
+.ot-custom-scenario-pill { background: #F1F5F9; color: #475569; padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; border: 1px solid #E2E8F0; }
+.ot-custom-details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.5rem; }
+.ot-custom-prop { display: flex; flex-direction: column; gap: 0.15rem; }
+.ot-custom-prop.full-width { grid-column: span 2; }
+.ot-custom-prop label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; }
+.ot-custom-prop span { font-size: 0.9rem; font-weight: 600; color: #1E293B; }
+.ot-custom-prop .reason-text { font-weight: 500; color: #475569; word-break: break-word; }
+.ot-custom-req-actions { display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #F1F5F9; }
+.ot-btn-approve-custom, .ot-btn-reject-custom { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; border: 1px solid transparent; }
+.ot-btn-approve-custom { background: #ECFDF5; color: #059669; border-color: #A7F3D0; }
+.ot-btn-reject-custom { background: #FEF2F2; color: #DC2626; border-color: #FECACA; }
+.ot-custom-modal-footer { padding: 1rem 1.75rem; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; justify-content: flex-end; gap: 0.75rem; }
 
 @media (max-width: 768px) {
   .ot-container { padding: 1.5rem; }

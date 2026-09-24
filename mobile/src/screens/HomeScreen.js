@@ -12,7 +12,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import axios from 'axios';
 import {
-  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, API_URL
+  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, checkLocationServicesEnabled, API_URL
 } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import {
@@ -123,7 +123,6 @@ export default function HomeScreen({ navigation }) {
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
   const [modalDateFilter, setModalDateFilter] = useState('');
 
-  // ---- NEW: Notifications Modal & State ----
   const [notifications, setNotifications] = useState([]);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
@@ -149,18 +148,28 @@ export default function HomeScreen({ navigation }) {
     return () => { isMounted = false; };
   }, []);
 
+  // SMART GPS TRACKING: Turns off automatically after shift unless another shift exists today
   useEffect(() => {
-    if (!todaySchedule) return;
-    const checkAndEnableTracking = async (forceRestart = false) => {
+    const checkAndManageTracking = async (forceRestart = false) => {
       const now = new Date();
-      const [startHour, startMin] = todaySchedule.start_time.split(':').map(Number);
-      const [endHour, endMin] = todaySchedule.end_time.split(':').map(Number);
-      const startTime = new Date(); startTime.setHours(startHour, startMin, 0);
-      const endTime = new Date(); endTime.setHours(endHour, endMin, 0);
-      const isActive = now >= startTime && now <= endTime;
-      const willStartSoon = startTime - now > 0 && startTime - now < 30 * 60 * 1000;
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const todayStr = getTodayString();
 
-      if (isActive) {
+      // Filter today's shifts
+      const todaysShifts = (allTodaySchedules || []).filter(s => String(s.date || '').split('T')[0] === todayStr);
+
+      // Check if ANY shift today is currently ongoing or scheduled for later today
+      const hasActiveOrUpcomingShift = todaysShifts.some(shift => {
+        const [startH, startM] = String(shift.start_time || '00:00').split(':').map(Number);
+        const [endH, endM] = String(shift.end_time || '00:00').split(':').map(Number);
+        const startMinutes = startH * 60 + startM;
+        const endMinutes = endH * 60 + endM;
+
+        // Keep active if current time is within 30 mins before start or before/during shift end
+        return currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes;
+      });
+
+      if (hasActiveOrUpcomingShift) {
         try {
           const gpsOn = await Location.hasServicesEnabledAsync();
           if (gpsOn) {
@@ -182,16 +191,24 @@ export default function HomeScreen({ navigation }) {
             }
           }
         } catch (e) {}
-      } else if (willStartSoon) {
-        const timer = setTimeout(() => checkAndEnableTracking(true), startTime - now);
-        return () => clearTimeout(timer);
+      } else {
+        // No remaining shifts today! Turn off GPS / background location tracking automatically
+        try {
+          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+          if (isRegistered) {
+            await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+          }
+          await setTrackingEnabled(false);
+          console.log("[Location] Shift ended and no more shifts today. GPS tracking turned off.");
+        } catch (e) {}
       }
     };
-    checkAndEnableTracking();
-    const subscription = AppState.addEventListener('change', state => { if (state === 'active') checkAndEnableTracking(true); });
-    const interval = setInterval(() => checkAndEnableTracking(false), 30000); 
+
+    checkAndManageTracking();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') checkAndManageTracking(true); });
+    const interval = setInterval(() => checkAndManageTracking(false), 30000); 
     return () => { subscription.remove(); clearInterval(interval); };
-  }, [todaySchedule, colors.primary]);
+  }, [allTodaySchedules, colors.primary]);
 
   const captureSelfie = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -205,7 +222,6 @@ export default function HomeScreen({ navigation }) {
     setStats(result);
   }, []);
 
-  // ---- NEW: Fetch Approved & Rejected Request Notifications ----
   const fetchNotifications = async (empId, token) => {
     if (!empId || !token) return;
     setLoadingNotifications(true);
@@ -352,8 +368,14 @@ export default function HomeScreen({ navigation }) {
     } else setAttendanceStatus({ canClockIn: true, canClockOut: false, todayRecord: null });
   };
 
+  // MANDATORY GPS CHECK BEFORE CLOCK IN
   const handleClockIn = async () => {
     if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
+    
+    // Enforce GPS / Location services enabled check first
+    const isGpsReady = await checkLocationServicesEnabled();
+    if (!isGpsReady) return;
+
     const selfieUri = await captureSelfie();
     if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for check-in.');
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -468,14 +490,13 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.liveBadgeContainer}><View style={styles.liveDot} /><Text style={styles.liveBadgeText}>ONLINE</Text></View>
           </View>
 
-          {/* USER NAME WITH NOTIFICATION ICON IN THE UPPER SECTION */}
           <View style={styles.userHeaderRow}>
             <Text style={styles.userName}>{formatNameForDisplay(user.full_name || user.name)}</Text>
             <TouchableOpacity 
-            style={styles.notificationBtn} 
-            onPress={() => navigation.navigate('Notifications')} 
-            activeOpacity={0.7}
-          >
+              style={styles.notificationBtn} 
+              onPress={() => navigation.navigate('Notifications')} 
+              activeOpacity={0.7}
+            >
               <Bell size={22} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={1.8} />
               {notifications.length > 0 && (
                 <View style={styles.notificationBadge}>
@@ -587,7 +608,6 @@ export default function HomeScreen({ navigation }) {
             </TouchableOpacity>
           </View>
 
-          {/* NEW: ATTENDANCE HISTORY BUTTON BELOW REQUESTS BUTTON */}
           <TouchableOpacity 
             style={styles.attendanceHistoryCard} 
             onPress={() => navigation.navigate('AttendanceHistory')} 
@@ -599,14 +619,12 @@ export default function HomeScreen({ navigation }) {
               </View>
               <View>
                 <Text style={styles.attendanceHistoryTitle}>Attendance History</Text>
-                
               </View>
             </View>
             <ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} />
           </TouchableOpacity>
         </ScrollView>
 
-        {/* NOTIFICATIONS MODAL (APPROVED & REJECTED REQUESTS) */}
         <Modal visible={showNotificationsModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.notifModal}>
@@ -782,7 +800,6 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   moduleIconWrapper: { width: 44, height: 44, borderRadius: 22, backgroundColor: isLight ? '#F8FAFC' : colors.iconBg, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   moduleText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary, lineHeight: 20 },
   
-  // Attendance History Card
   attendanceHistoryCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 24 },
   attendanceHistoryLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   attendanceHistoryTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 2 },
@@ -808,7 +825,6 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   schedItemText: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: isLight ? '#64748B' : colors.textSecondary },
   btnCloseModal: { alignSelf: 'flex-end', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginTop: 20 },
 
-  // Notifications Modal Styles
   notifModal: { width: '100%', borderRadius: 24, padding: 22, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   notifCard: { backgroundColor: isLight ? '#F8FAFC' : colors.background, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   notifTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary, flex: 1, marginRight: 8 },

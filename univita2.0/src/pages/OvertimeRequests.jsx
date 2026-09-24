@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Clock, CheckCircle, XCircle, ClipboardList, ChevronLeft, ChevronRight, Paperclip, Search, X } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, ClipboardList, ChevronLeft, ChevronRight, Paperclip, Search, X, Eye } from 'lucide-react';
 import { API_BASE } from '../api';
 import './OvertimeRequests.css';
 
@@ -38,6 +38,8 @@ const OvertimeRequests = () => {
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [loadingPending, setLoadingPending] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+
+  const [viewingRequest, setViewingRequest] = useState(null);
 
   const [historyPage, setHistoryPage] = useState(1);
   const [pendingPage, setPendingPage] = useState(1);
@@ -84,6 +86,7 @@ const OvertimeRequests = () => {
       toast.success(`Request ${status}`);
       fetchPending(); 
       fetchAllHistory();
+      setViewingRequest(null);
     } catch (err) {
       toast.error(`Failed to ${status} request`);
     }
@@ -159,40 +162,29 @@ const OvertimeRequests = () => {
               <table className="ot-table">
                 <thead>
                   <tr>
-                    <th>Date</th>
-                    <th>Employee</th>
+                    <th>Employee ID</th>
+                    <th>Employee Name</th>
                     <th>Type</th>
-                    <th>Timing</th>
-                    <th>Time</th>
-                    <th>Status</th>
-                    <th className="text-center">Proof</th>
-                    <th>Submitted</th>
+                    <th className="text-center">Status</th>
+                    <th className="text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {currentHistory.map(req => (
                     <tr key={req.id}>
-                      <td className="font-medium text-dark whitespace-nowrap">{formatDate(req.date)}</td>
-                      <td className="whitespace-nowrap">
-                        <div className="font-semibold text-dark">{req.full_name}</div>
-                        <div className="text-xs text-muted">{req.employee_id}</div>
-                      </td>
+                      <td className="font-mono text-xs text-muted whitespace-nowrap">{req.employee_id || '—'}</td>
+                      <td className="font-semibold text-dark whitespace-nowrap">{req.full_name}</td>
                       <td className="whitespace-nowrap"><span className="ot-chip default">{req.overtime_type || 'Regular Overtime'}</span></td>
-                      <td className="whitespace-nowrap"><span className="ot-chip default">{getScenarioLabel(req.scenario_type)}</span></td>
-                      <td className="whitespace-nowrap">{formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</td>
-                      <td>
+                      <td className="text-center whitespace-nowrap">
                         <span className={`ot-chip ${req.status?.toLowerCase() === 'approved' ? 'success' : req.status?.toLowerCase() === 'rejected' ? 'danger' : req.status?.toLowerCase() === 'cancelled' ? 'default' : 'warning'}`}>
                           {req.status?.toUpperCase()}
                         </span>
                       </td>
-                      <td className="text-center">
-                        {req.attachment ? (
-                          <a href={`${API_BASE.replace(/\/api$/, '')}${req.attachment}`} target="_blank" rel="noopener noreferrer" className="ot-link">
-                            <Paperclip size={14} /> View
-                          </a>
-                        ) : <span className="text-muted">—</span>}
+                      <td className="text-center whitespace-nowrap">
+                        <button className="ot-action-inspect-btn" onClick={() => setViewingRequest(req)} title="View Details">
+                          <Eye size={16} color="#475569" />
+                        </button>
                       </td>
-                      <td className="text-xs text-muted whitespace-nowrap">{new Date(req.created_at).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -212,6 +204,83 @@ const OvertimeRequests = () => {
           </>
         )}
       </div>
+
+      {/* VIEW DETAILS MODAL */}
+      {viewingRequest && (
+        <div className="ot-custom-modal-backdrop" onClick={() => setViewingRequest(null)}>
+          <div className="ot-custom-modal" onClick={e => e.stopPropagation()}>
+            <div className="ot-custom-modal-header">
+              <h3>Overtime Request Details</h3>
+              <button className="ot-custom-close-btn" onClick={() => setViewingRequest(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="ot-custom-modal-body">
+              <div className="ot-custom-request-card" style={{ boxShadow: 'none', border: 'none', padding: 0 }}>
+                <div className="ot-custom-req-top">
+                  <div>
+                    <span className="ot-custom-name">{viewingRequest.full_name}</span>
+                    <span className="ot-custom-id-tag">{viewingRequest.employee_id}</span>
+                  </div>
+                  <span className={`ot-chip ${viewingRequest.status?.toLowerCase() === 'approved' ? 'success' : viewingRequest.status?.toLowerCase() === 'rejected' ? 'danger' : 'warning'}`}>
+                    {viewingRequest.status?.toUpperCase()}
+                  </span>
+                </div>
+                
+                <div className="ot-custom-details-grid">
+                  <div className="ot-custom-prop">
+                    <label>Type</label>
+                    <span>{viewingRequest.overtime_type || 'Regular Overtime'}</span>
+                  </div>
+                  <div className="ot-custom-prop">
+                    <label>Timing</label>
+                    <span className="nowrap">{getScenarioLabel(viewingRequest.scenario_type)}</span>
+                  </div>
+                  <div className="ot-custom-prop">
+                    <label>Date</label>
+                    <span className="nowrap">{formatDate(viewingRequest.date)}</span>
+                  </div>
+                  <div className="ot-custom-prop">
+                    <label>Time</label>
+                    <span className="nowrap">{formatTo12Hour(viewingRequest.start_time)} – {formatTo12Hour(viewingRequest.end_time)}</span>
+                  </div>
+                  <div className="ot-custom-prop full-width">
+                    <label>Submitted Date and Time</label>
+                    <span>{new Date(viewingRequest.created_at).toLocaleString()}</span>
+                  </div>
+                  <div className="ot-custom-prop full-width">
+                    <label>Reason / Remarks</label>
+                    <span className="reason-text">{viewingRequest.reason || '—'}</span>
+                  </div>
+                  {viewingRequest.attachment && (
+                    <div className="ot-custom-prop full-width">
+                      <label>Proof</label>
+                      <span>
+                        <a href={`${API_BASE.replace(/\/api$/, '')}${viewingRequest.attachment}`} target="_blank" rel="noopener noreferrer" className="ot-link">
+                          <Paperclip size={14} /> View Document Proof
+                        </a>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="ot-custom-modal-footer">
+              {viewingRequest.status === 'pending' && (
+                <>
+                  <button className="ot-btn-reject-custom" onClick={() => handleAction(viewingRequest.id, 'rejected')}>
+                    <XCircle size={16} /> Reject
+                  </button>
+                  <button className="ot-btn-approve-custom" onClick={() => handleAction(viewingRequest.id, 'approved')}>
+                    <CheckCircle size={16} /> Approve
+                  </button>
+                </>
+              )}
+              <button className="ot-btn-secondary" onClick={() => setViewingRequest(null)}>Close Window</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PENDING OVERTIME REQUESTS MODAL */}
       {showPendingModal && (
@@ -284,17 +353,6 @@ const OvertimeRequests = () => {
                 </div>
               )}
             </div>
-
-            {pendingTotalPages > 1 && (
-              <div className="ot-custom-modal-pagination">
-                <span className="ot-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
-                <div className="ot-page-controls">
-                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="ot-page-btn"><ChevronLeft size={16} /></button>
-                  <span className="ot-page-current">{pendingPage} / {pendingTotalPages}</span>
-                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="ot-page-btn"><ChevronRight size={16} /></button>
-                </div>
-              </div>
-            )}
 
             <div className="ot-custom-modal-footer">
               <button className="ot-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>

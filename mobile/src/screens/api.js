@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 
 const LOCAL_IP = "192.168.86.5"; 
 
@@ -28,6 +28,36 @@ const handleResponse = async (response) => {
     const errorText = await response.text();
     console.error("Server Error (non-JSON):", errorText.substring(0, 200));
     return { success: false, message: "Server connection failed. Please check your network." };
+  }
+};
+
+// Enforce GPS / Location Services Enabled Check
+export const checkLocationServicesEnabled = async () => {
+  try {
+    const enabled = await Location.hasServicesEnabledAsync();
+    if (!enabled) {
+      Alert.alert(
+        "GPS Required",
+        "Location services are disabled. Please turn on your GPS/Location to clock in.",
+        [{ text: "OK" }]
+      );
+      return false;
+    }
+
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        "Permission Denied",
+        "Location permission is required to verify your attendance location.",
+        [{ text: "OK" }]
+      );
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Location Check Error:", error);
+    return false;
   }
 };
 
@@ -247,7 +277,7 @@ export const submitOvertimeRequest = async (data) => {
     if (data.end_time) formData.append('end_time', String(data.end_time));
     if (data.reason) formData.append('reason', String(data.reason));
     if (data.scenario_type) formData.append('scenario_type', String(data.scenario_type));
-    if (data.overtime_type) formData.append('overtime_type', String(data.overtime_type)); // Supports CTO / Regular OT[cite: 20]
+    if (data.overtime_type) formData.append('overtime_type', String(data.overtime_type));
     if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
 
     if (data.attachment) {
@@ -255,8 +285,6 @@ export const submitOvertimeRequest = async (data) => {
       const attUri = typeof att === 'string' ? att : att.uri;
       if (attUri) {
         const filename = att.name || attUri.split('/').pop() || 'overtime_proof.jpg';
-        const mimeType = att.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-
         const imgResp = await fetch(attUri);
         const blob = await imgResp.blob();
         formData.append('attachment', blob, filename);
@@ -446,8 +474,6 @@ export const submitLeaveRequest = async (payload) => {
           const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
           if (fileUri) {
             const filename = fileObj.name || fileUri.split('/').pop() || 'leave_proof.jpg';
-            const mimeType = fileObj.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-
             const imgResp = await fetch(fileUri);
             const blob = await imgResp.blob();
             formData.append(key, blob, filename);
