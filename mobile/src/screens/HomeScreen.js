@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef, useContext, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
-  Alert, RefreshControl, Modal, TextInput, Platform, StatusBar, AppState
+  Alert, RefreshControl, Modal, TextInput, Platform, StatusBar, AppState, ActivityIndicator
 } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,12 +10,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import axios from 'axios';
 import {
-  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled
+  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, API_URL
 } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import {
-  Clock, MapPin, X, CheckCircle, XCircle, AlertCircle, TrendingUp, FileText, Calendar, ArrowUpRight, Eye, Filter
+  Clock, MapPin, X, CheckCircle, XCircle, AlertCircle, TrendingUp, FileText, Calendar, ArrowUpRight, Eye, Filter, Bell, Inbox
 } from 'lucide-react-native';
 
 const LOCATION_TASK_NAME = 'background-location-task';
@@ -41,6 +42,13 @@ const parseDateOnly = (dateInput) => {
   const dateObj = new Date(y, m - 1, d);
   dateObj.setHours(0, 0, 0, 0);
   return dateObj;
+};
+
+const formatNotificationDate = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr).split('T')[0];
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
@@ -114,6 +122,11 @@ export default function HomeScreen({ navigation }) {
   
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
   const [modalDateFilter, setModalDateFilter] = useState('');
+
+  // ---- NEW: Notifications Modal & State ----
+  const [notifications, setNotifications] = useState([]);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
 
   const getGreeting = () => {
     const hour = currentTime.getHours();
@@ -192,9 +205,59 @@ export default function HomeScreen({ navigation }) {
     setStats(result);
   }, []);
 
+  // ---- NEW: Fetch Approved & Rejected Request Notifications ----
+  const fetchNotifications = async (empId, token) => {
+    if (!empId || !token) return;
+    setLoadingNotifications(true);
+    try {
+      const config = { headers: { Authorization: `Bearer ${token}` } };
+      const [leavesRes, overtimeRes, correctionsRes, appealsRes, schedulesRes] = await Promise.allSettled([
+        axios.get(`${API_URL}/leave-requests/history/${empId}`, config),
+        axios.get(`${API_URL}/overtime-requests`, config),
+        axios.get(`${API_URL}/attendance/corrections/user/${empId}`, config),
+        axios.get(`${API_URL}/attendance-appeals/user/${empId}`, config),
+        axios.get(`${API_URL}/schedule-requests/my`, config)
+      ]);
+
+      let aggregated = [];
+
+      const processItems = (res, type, titleField, dateField) => {
+        if (res.status === 'fulfilled' && Array.isArray(res.value.data)) {
+          res.value.data.forEach(item => {
+            const status = (item.status || '').toLowerCase();
+            if (status === 'approved' || status === 'rejected') {
+              aggregated.push({
+                id: `${type}_${item.id}`,
+                type: type,
+                title: `${type} Request: ${item[titleField] || ''}`,
+                status: status,
+                date: item.reviewed_at || item[dateField] || item.updated_at || item.created_at,
+                remarks: item.admin_remarks || (status === 'approved' ? 'Your request has been approved.' : 'Your request was not approved.')
+              });
+            }
+          });
+        }
+      };
+
+      processItems(leavesRes, 'Leave', 'type', 'request_date');
+      processItems(overtimeRes, 'Overtime', 'date', 'created_at');
+      processItems(correctionsRes, 'Correction', 'attendance_date', 'attendance_date');
+      processItems(appealsRes, 'Appeal', 'date', 'submitted_at');
+      processItems(schedulesRes, 'Schedule', 'request_type', 'created_at');
+
+      aggregated.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      setNotifications(aggregated);
+    } catch (err) {
+      console.error('Failed to fetch request notifications:', err);
+    } finally {
+      setLoadingNotifications(false);
+    }
+  };
+
   const loadData = useCallback(async () => {
     try {
       const rawUser = await AsyncStorage.getItem('user');
+      const token = await AsyncStorage.getItem('auth_token');
       if (rawUser) {
         const parsed = JSON.parse(rawUser);
         const empId = parsed.employee_id;
@@ -205,6 +268,7 @@ export default function HomeScreen({ navigation }) {
         setRawHistory(history || []);
         setRawSchedule(schedule || []);
         computeMonthlyStats(history || [], schedule || [], selectedMonth);
+        await fetchNotifications(empId, token);
 
         const todayStr = getTodayString();
         const now = new Date();
@@ -344,7 +408,7 @@ export default function HomeScreen({ navigation }) {
 
   const formatTo12H = (timeStr) => {
     if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr == null) return '—';
-    const timePart = String(timeStr).includes('T') ? String(timeStr).split('T').split('Z')[0] : String(timeStr);
+    const timePart = String(timeStr).includes('T') ? String(timeStr).split('T')[1].split('Z')[0] : String(timeStr);
     const cleanTime = timePart.split('.')[0].replace(',', ':');
     const [rawH, rawM] = cleanTime.split(':');
     const h = parseInt(rawH, 10);
@@ -403,7 +467,23 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.greeting}>{getGreeting()}</Text>
             <View style={styles.liveBadgeContainer}><View style={styles.liveDot} /><Text style={styles.liveBadgeText}>ONLINE</Text></View>
           </View>
-          <Text style={styles.userName}>{formatNameForDisplay(user.full_name || user.name)}</Text>
+
+          {/* USER NAME WITH NOTIFICATION ICON IN THE UPPER SECTION */}
+          <View style={styles.userHeaderRow}>
+            <Text style={styles.userName}>{formatNameForDisplay(user.full_name || user.name)}</Text>
+            <TouchableOpacity 
+            style={styles.notificationBtn} 
+            onPress={() => navigation.navigate('Notifications')} 
+            activeOpacity={0.7}
+          >
+              <Bell size={22} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={1.8} />
+              {notifications.length > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>{notifications.length > 9 ? '9+' : notifications.length}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.glassBanner}>
             <View style={styles.bannerContentLeft}>
@@ -506,7 +586,72 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.moduleText}>Payroll{'\n'}Details</Text>
             </TouchableOpacity>
           </View>
+
+          {/* NEW: ATTENDANCE HISTORY BUTTON BELOW REQUESTS BUTTON */}
+          <TouchableOpacity 
+            style={styles.attendanceHistoryCard} 
+            onPress={() => navigation.navigate('AttendanceHistory')} 
+            activeOpacity={0.8}
+          >
+            <View style={styles.attendanceHistoryLeft}>
+              <View style={[styles.moduleIconWrapper, { backgroundColor: isLight ? '#F0FDFA' : colors.iconBg, borderColor: isLight ? '#CCFBF1' : colors.border }]}>
+                <Clock size={20} color={isLight ? "#0D9488" : colors.primary} strokeWidth={2} />
+              </View>
+              <View>
+                <Text style={styles.attendanceHistoryTitle}>Attendance History</Text>
+                
+              </View>
+            </View>
+            <ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} />
+          </TouchableOpacity>
         </ScrollView>
+
+        {/* NOTIFICATIONS MODAL (APPROVED & REJECTED REQUESTS) */}
+        <Modal visible={showNotificationsModal} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.notifModal}>
+              <View style={styles.schedModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Bell size={18} color={isLight ? "#0D9488" : colors.primary} />
+                  <Text style={styles.schedModalTitle}>Request Notifications</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowNotificationsModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
+              </View>
+
+              {loadingNotifications ? (
+                <ActivityIndicator size="small" color="#0D9488" style={{ paddingVertical: 20 }} />
+              ) : (
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 8, maxHeight: 380 }}>
+                  {notifications.length === 0 ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 32, gap: 8 }}>
+                      <Inbox size={36} color={colors.textSecondary} opacity={0.5} />
+                      <Text style={styles.emptyStateText}>No request updates found.</Text>
+                    </View>
+                  ) : (
+                    notifications.map(item => (
+                      <View key={item.id} style={styles.notifCard}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                          <Text style={styles.notifTitle}>{item.title}</Text>
+                          <View style={item.status === 'approved' ? styles.badgeSuccess : styles.badgeDanger}>
+                            <Text style={item.status === 'approved' ? styles.badgeTextSuccess : styles.badgeTextDanger}>
+                              {item.status.toUpperCase()}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.notifRemarks}>{item.remarks}</Text>
+                        <Text style={styles.notifDate}>{formatNotificationDate(item.date)}</Text>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+              )}
+
+              <TouchableOpacity style={styles.btnCloseModal} onPress={() => setShowNotificationsModal(false)}>
+                <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary, fontSize: 13 }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         <Modal visible={showMonthlyModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -579,7 +724,13 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   scroll: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 10 },
   heroHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   greeting: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, letterSpacing: 1.2 },
-  userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 28, color: isLight ? '#0F172A' : colors.textPrimary, lineHeight: 34, marginBottom: 28 },
+  
+  userHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 26, color: isLight ? '#0F172A' : colors.textPrimary, lineHeight: 32, flex: 1, marginRight: 10 },
+  notificationBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: isLight ? '#FFFFFF' : colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, position: 'relative' },
+  notificationBadge: { position: 'absolute', top: 2, right: 2, backgroundColor: '#EF4444', borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
+  notificationBadgeText: { color: '#FFFFFF', fontSize: 9, fontFamily: 'Inter_18pt-Bold' },
+
   liveBadgeContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, gap: 5 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: isLight ? '#059669' : '#34D399' },
   liveBadgeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, color: isLight ? '#059669' : '#34D399', letterSpacing: 0.5 },
@@ -624,11 +775,19 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   statIconWrapper: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   statValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 24, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 4 },
   statLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 10, color: isLight ? '#64748B' : colors.textSecondary, letterSpacing: 1 },
-  modulesGrid: { flexDirection: 'row', gap: 14, marginBottom: 20 },
+  
+  modulesGrid: { flexDirection: 'row', gap: 14, marginBottom: 14 },
   moduleCard: { flex: 1, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, height: 130, justifyContent: 'space-between' },
   moduleTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   moduleIconWrapper: { width: 44, height: 44, borderRadius: 22, backgroundColor: isLight ? '#F8FAFC' : colors.iconBg, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   moduleText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary, lineHeight: 20 },
+  
+  // Attendance History Card
+  attendanceHistoryCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 24 },
+  attendanceHistoryLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  attendanceHistoryTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 2 },
+  attendanceHistorySubtitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
+
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
   schedModal: { width: '100%', borderRadius: 24, padding: 24, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, maxHeight: '80%' },
   schedModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
@@ -648,4 +807,15 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   schedItemDetail: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   schedItemText: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: isLight ? '#64748B' : colors.textSecondary },
   btnCloseModal: { alignSelf: 'flex-end', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginTop: 20 },
+
+  // Notifications Modal Styles
+  notifModal: { width: '100%', borderRadius: 24, padding: 22, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  notifCard: { backgroundColor: isLight ? '#F8FAFC' : colors.background, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
+  notifTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary, flex: 1, marginRight: 8 },
+  notifRemarks: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#475569' : colors.textSecondary, marginBottom: 6 },
+  notifDate: { fontFamily: 'Inter_18pt-Medium', fontSize: 10, color: isLight ? '#94A3B8' : colors.textSecondary },
+  badgeSuccess: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  badgeTextSuccess: { color: '#059669', fontSize: 9, fontFamily: 'Inter_18pt-Bold' },
+  badgeDanger: { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  badgeTextDanger: { color: '#DC2626', fontSize: 9, fontFamily: 'Inter_18pt-Bold' }
 });

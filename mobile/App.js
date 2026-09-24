@@ -37,6 +37,8 @@ import AppealHistoryScreen from './src/screens/AppealHistoryScreen';
 import OvertimeHistoryScreen from './src/screens/OvertimeHistoryScreen';
 import CorrectionHistoryScreen from './src/screens/CorrectionHistoryScreen'; 
 import ChatScreen from './src/screens/ChatScreen';
+import AttendanceHistoryScreen from './src/screens/AttendanceHistoryScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -328,6 +330,8 @@ function AppContent() {
             <Stack.Screen name="AppealHistory" component={AppealHistoryScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CorrectionHistory" component={CorrectionHistoryScreen} options={{ headerShown: false }} /> 
             <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} options={{ headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
+            <Stack.Screen name="AttendanceHistory" component={AttendanceHistoryScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
           </Stack.Navigator>
         </NavigationContainer>
       </ErrorBoundary>

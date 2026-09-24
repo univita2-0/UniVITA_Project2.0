@@ -152,7 +152,7 @@ const LeaveBalancesManagement = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            <h2>Leave Balances</h2>
+            
             <p className="expert-subtitle">Monitor and manually adjust employee leave quotas.</p>
           </div>
         </div>
