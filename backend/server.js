@@ -685,15 +685,21 @@ app.post('/api/login', loginLimiter, (req, res) => {
 
   db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
-    if (results.length === 0) return res.status(401).json({ success: false, message: 'Incorrect password.' }); 
+    
+    // 1. Email is incorrect or inactive:
+    if (results.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+    }
 
     const user = results[0];
     const match = await bcrypt.compare(password, user.password);
     
+    // 2. Password check:
     if (!match && password === user.password) {
       const hashed = await bcrypt.hash(password, 10);
       db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
     } else if (!match) {
+      // 3. Email is valid, but password does not match:
       return res.status(401).json({ success: false, message: 'Incorrect password.' });
     }
 

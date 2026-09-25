@@ -258,11 +258,7 @@ export default function RequestsScreen({ navigation, route }) {
     return null;
   };
 
-  // ==========================================
-  // WIZARD VALIDATIONS & HANDLERS
-  // ==========================================
-
-  // --- LEAVE ---
+  // --- LEAVE VALIDATION & SUBMISSION ---
   const handleNextLeave = () => {
     if (!leaveDateFrom) { Alert.alert('Validation Error', 'Please select a start date.'); return; }
     if (isRange && !leaveDateTo) { Alert.alert('Validation Error', 'Please select an end date.'); return; }
@@ -350,7 +346,7 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- SCHEDULE ---
+  // --- SCHEDULE VALIDATION & SUBMISSION ---
   const handleNextSchedule = () => {
     if (!scheduleDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
     if (!scheduleStart || !scheduleEnd) { Alert.alert('Validation Error', 'Please specify start and end times.'); return; }
@@ -384,7 +380,7 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- APPEAL ---
+  // --- APPEAL VALIDATION & SUBMISSION ---
   const handleNextAppeal = () => {
     if (!appealDate) { Alert.alert('Validation Error', 'Please select a date for your appeal.'); return; }
     if (!appealReason.trim() || appealReason.trim().length < 10) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); return; }
@@ -432,7 +428,7 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- CORRECTION ---
+  // --- CORRECTION VALIDATION & SUBMISSION ---
   const handleNextCorrection = async () => {
     if (!correctionDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
     if (!correctionTime) { Alert.alert('Validation Error', 'Please select a correction time.'); return; }
@@ -495,7 +491,7 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- OVERTIME ---
+  // --- OVERTIME VALIDATION & SUBMISSION ---
   const handleNextOvertime = () => {
     if (!overtimeDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
     if (!overtimeStart || !overtimeEnd) { Alert.alert('Validation Error', 'Start and end times are required.'); return; }
@@ -685,7 +681,7 @@ export default function RequestsScreen({ navigation, route }) {
               {leaveStep === 2 && (
                 <View>
                   <Text style={[styles.headerTitle, { marginBottom: 16 }]}>Date Breakdown</Text>
-                  <Text style={[styles.label, { marginBottom: 16 }]}>Specify duration for each day. Pay status is calculated based on your remaining '{leaveType}' balance.</Text>
+                  <Text style={[styles.subLabel, { marginBottom: 16 }]}>Specify duration for each day. Pay status is calculated based on your remaining '{leaveType}' balance.</Text>
                   
                   {leaveBreakdown.map((item, index) => (
                     <View key={item.date} style={styles.reviewBox}>
@@ -725,17 +721,33 @@ export default function RequestsScreen({ navigation, route }) {
                   <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Leave Application Review</Text>
                   
                   <View style={styles.reviewBox}>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Type</Text><Text style={styles.dateText}>{leaveType}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{leaveReason}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Attachment</Text><Text style={styles.dateText}>{leaveImage?.name || 'File Attached'}</Text></View>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Type</Text>
+                      <Text style={styles.reviewValue}>{leaveType}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRowColumn}>
+                      <Text style={styles.reviewLabel}>Reason</Text>
+                      <Text style={styles.reviewValueMultiline}>{leaveReason || '—'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Attachment</Text>
+                      <Text style={styles.reviewValue}>{leaveImage?.name || (leaveImage ? 'File Attached' : 'None')}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
                     
-                    <Text style={[styles.label, { marginTop: 10, borderTopWidth: 1, borderColor: colors.border, paddingTop: 10 }]}>Requested Dates:</Text>
-                    {leaveBreakdown.map((item) => (
-                      <View key={item.date} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-                        <Text style={styles.dateText}>• {item.date} ({item.duration})</Text>
-                        <Text style={{ fontFamily: 'Inter_18pt-Bold', color: item.isPaid ? '#059669' : '#DC2626' }}>{item.isPaid ? 'With Pay' : 'Without Pay'}</Text>
-                      </View>
-                    ))}
+                    <View style={{ paddingTop: 8 }}>
+                      <Text style={[styles.reviewLabel, { marginBottom: 8 }]}>Requested Dates ({leaveBreakdown.length} day{leaveBreakdown.length > 1 ? 's' : ''}):</Text>
+                      {leaveBreakdown.map((item) => (
+                        <View key={item.date} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 }}>
+                          <Text style={{ fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#334155' : colors.textPrimary }}>• {item.date} ({item.duration})</Text>
+                          <Text style={{ fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: item.isPaid ? '#059669' : '#DC2626' }}>{item.isPaid ? 'With Pay' : 'Without Pay'}</Text>
+                        </View>
+                      ))}
+                    </View>
                   </View>
 
                   <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
@@ -808,11 +820,34 @@ export default function RequestsScreen({ navigation, route }) {
                 <View>
                   <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Schedule Application Review</Text>
                   <View style={styles.reviewBox}>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{scheduleDate}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Time</Text><Text style={styles.dateText}>{formatTo12Hour(scheduleStart)} - {formatTo12Hour(scheduleEnd)}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Location</Text><Text style={styles.dateText}>{schedulePlace}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Course</Text><Text style={styles.dateText}>{scheduleCourse}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{scheduleReason}</Text></View>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Date</Text>
+                      <Text style={styles.reviewValue}>{scheduleDate}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Time Window</Text>
+                      <Text style={styles.reviewValue}>{formatTo12Hour(scheduleStart)} – {formatTo12Hour(scheduleEnd)}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Location</Text>
+                      <Text style={styles.reviewValue}>{schedulePlace}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Course / Department</Text>
+                      <Text style={styles.reviewValue}>{scheduleCourse}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRowColumn}>
+                      <Text style={styles.reviewLabel}>Reason</Text>
+                      <Text style={styles.reviewValueMultiline}>{scheduleReason || '—'}</Text>
+                    </View>
                   </View>
 
                   <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
@@ -877,11 +912,34 @@ export default function RequestsScreen({ navigation, route }) {
                 <View>
                   <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Appeal Application Review</Text>
                   <View style={styles.reviewBox}>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{appealDate}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Time In</Text><Text style={styles.dateText}>{appealTimeIn ? formatTo12Hour(appealTimeIn) : 'N/A'}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Time Out</Text><Text style={styles.dateText}>{appealTimeOut ? formatTo12Hour(appealTimeOut) : 'N/A'}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{appealReason}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Attachment</Text><Text style={styles.dateText}>{appealImage?.name || 'File Attached'}</Text></View>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Date</Text>
+                      <Text style={styles.reviewValue}>{appealDate}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Time In</Text>
+                      <Text style={styles.reviewValue}>{appealTimeIn ? formatTo12Hour(appealTimeIn) : 'N/A'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Time Out</Text>
+                      <Text style={styles.reviewValue}>{appealTimeOut ? formatTo12Hour(appealTimeOut) : 'N/A'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRowColumn}>
+                      <Text style={styles.reviewLabel}>Reason</Text>
+                      <Text style={styles.reviewValueMultiline}>{appealReason || '—'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Attachment</Text>
+                      <Text style={styles.reviewValue}>{appealImage?.name || (appealImage ? 'File Attached' : 'None')}</Text>
+                    </View>
                   </View>
 
                   <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
@@ -954,11 +1012,36 @@ export default function RequestsScreen({ navigation, route }) {
                 <View>
                   <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Correction Application Review</Text>
                   <View style={styles.reviewBox}>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{correctionDate}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Correction Type</Text><Text style={styles.dateText}>{correctionType}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Time</Text><Text style={styles.dateText}>{formatTo12Hour(correctionTime)}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{correctionReason}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Selfie Attached</Text><Text style={styles.dateText}>{correctionSelfie ? 'Yes' : 'No'}</Text></View>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Date</Text>
+                      <Text style={styles.reviewValue}>{correctionDate}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Correction Type</Text>
+                      <Text style={styles.reviewValue}>
+                        {correctionType === 'clock_in' ? 'Clock In' : correctionType === 'clock_out' ? 'Clock Out' : 'Early Out'}
+                      </Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Time</Text>
+                      <Text style={styles.reviewValue}>{formatTo12Hour(correctionTime)}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRowColumn}>
+                      <Text style={styles.reviewLabel}>Reason</Text>
+                      <Text style={styles.reviewValueMultiline}>{correctionReason || '—'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Selfie Attached</Text>
+                      <Text style={styles.reviewValue}>{correctionSelfie ? 'Yes (Attached)' : 'No'}</Text>
+                    </View>
                   </View>
 
                   <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
@@ -1049,12 +1132,40 @@ export default function RequestsScreen({ navigation, route }) {
                 <View>
                   <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Overtime Application Review</Text>
                   <View style={styles.reviewBox}>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Type</Text><Text style={styles.dateText}>{overtimeType}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Timing</Text><Text style={styles.dateText}>{overtimeTiming}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Date</Text><Text style={styles.dateText}>{overtimeDate}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Time</Text><Text style={styles.dateText}>{formatTo12Hour(overtimeStart)} - {formatTo12Hour(overtimeEnd)}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Reason</Text><Text style={styles.dateText}>{overtimeReason}</Text></View>
-                    <View style={styles.reviewRow}><Text style={styles.label}>Attachment</Text><Text style={styles.dateText}>{overtimeImage ? (overtimeImage.name || 'File Attached') : 'None'}</Text></View>
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Type</Text>
+                      <Text style={styles.reviewValue}>{overtimeType || 'Regular Overtime'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Timing</Text>
+                      <Text style={styles.reviewValue}>{overtimeTiming || 'Normal OT'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Date</Text>
+                      <Text style={styles.reviewValue}>{overtimeDate}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Time</Text>
+                      <Text style={styles.reviewValue}>{formatTo12Hour(overtimeStart)} – {formatTo12Hour(overtimeEnd)}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRowColumn}>
+                      <Text style={styles.reviewLabel}>Reason</Text>
+                      <Text style={styles.reviewValueMultiline}>{overtimeReason || '—'}</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Attachment</Text>
+                      <Text style={styles.reviewValue}>{overtimeImage ? (overtimeImage.name || 'File Attached') : 'None'}</Text>
+                    </View>
                   </View>
 
                   <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
@@ -1166,6 +1277,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   
   container: { padding: 22, paddingBottom: 60 },
   label: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#334155' : colors.textPrimary, marginBottom: 8, marginTop: 16 },
+  subLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
   
   input: { fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, padding: 16, fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, marginBottom: 16 },
   textArea: { height: 110, textAlignVertical: 'top' },
@@ -1215,6 +1327,50 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   dropdownOption: { paddingVertical: 14, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
   dropdownOptionText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
 
-  reviewBox: { backgroundColor: isLight ? '#F8FAFC' : colors.surface, padding: 16, borderRadius: 16, gap: 4, borderWidth: 1, borderColor: colors.border },
-  reviewRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 6 }
+  // ==========================================
+  // REVIEW APPLICATION STYLES
+  // ==========================================
+  reviewBox: {
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    padding: 20,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+    marginBottom: 12,
+  },
+  reviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  reviewRowColumn: {
+    flexDirection: 'column',
+    paddingVertical: 10,
+    gap: 6,
+  },
+  reviewLabel: {
+    fontFamily: 'Inter_18pt-Bold',
+    fontSize: 13,
+    color: isLight ? '#64748B' : colors.textSecondary,
+    letterSpacing: 0.3,
+  },
+  reviewValue: {
+    fontFamily: 'Inter_18pt-Bold',
+    fontSize: 14,
+    color: isLight ? '#0F172A' : colors.textPrimary,
+    textAlign: 'right',
+    flexShrink: 1,
+    marginLeft: 16,
+  },
+  reviewValueMultiline: {
+    fontFamily: 'Inter_18pt-Medium',
+    fontSize: 14,
+    color: isLight ? '#0F172A' : colors.textPrimary,
+    lineHeight: 20,
+  },
+  reviewDivider: {
+    height: 1,
+    backgroundColor: isLight ? '#F1F5F9' : colors.border,
+  }
 });
