@@ -552,24 +552,7 @@ export const fetchUserSchedule = async (employeeId) => {
   }
 };
 
-export const submitScheduleRequest = async (requestData) => {
-  try {
-    const token = await AsyncStorage.getItem('auth_token');
-    const response = await fetch(`${API_URL}/schedule-requests`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestData)
-    });
-    const result = await handleResponse(response);
-    return result;
-  } catch (error) {
-    console.error("Schedule Request Error:", error.message);
-    return { success: false, message: "Network error: " + error.message };
-  }
-};
+
 
 export const fetchEvents = async () => {
   try {

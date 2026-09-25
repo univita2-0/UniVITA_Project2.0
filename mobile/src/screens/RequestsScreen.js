@@ -1,5 +1,5 @@
 // src/screens/RequestsScreen.js
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useContext } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar, Platform
@@ -10,10 +10,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
-import { submitLeaveRequest, requestAttendanceCorrection, API_URL, submitScheduleRequest } from './api';
-import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft, ChevronDown, MapPin, BookOpen } from 'lucide-react-native';
+import { API_URL, requestAttendanceCorrection } from './api';
+import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft } from 'lucide-react-native';
 
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr === 'null' || timeStr == null) return '';
@@ -85,12 +84,6 @@ export default function RequestsScreen({ navigation, route }) {
   const [timePickerMode, setTimePickerMode] = useState('');
   const [tempDate, setTempDate] = useState(new Date());
 
-  const [locationList, setLocationList] = useState(['HCT Academy Pasig', 'National University - Manila', 'S Residence Tower 3']);
-  const [courseList, setCourseList] = useState(['Allied Health', 'Healthcare101', 'Information Technology']);
-
-  const [showLocationModal, setShowLocationModal] = useState(false);
-  const [showCourseModal, setShowCourseModal] = useState(false);
-
   // --- LEAVE STATE ---
   const [leaveStep, setLeaveStep] = useState(1);
   const [leaveBreakdown, setLeaveBreakdown] = useState([]);
@@ -106,17 +99,6 @@ export default function RequestsScreen({ navigation, route }) {
   const [showBalancesModal, setShowBalancesModal] = useState(false);
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [loadingBalances, setLoadingBalances] = useState(false);
-
-  // --- SCHEDULE STATE ---
-  const [scheduleStep, setScheduleStep] = useState(1);
-  const [scheduleDate, setScheduleDate] = useState('');
-  const [scheduleStart, setScheduleStart] = useState('09:00');
-  const [scheduleEnd, setScheduleEnd] = useState('17:00');
-  const [schedulePlace, setSchedulePlace] = useState('HCT Academy Pasig');
-  const [scheduleCourse, setScheduleCourse] = useState('Allied Health');
-  const [scheduleReason, setScheduleReason] = useState('');
-  const [submittingSchedule, setSubmittingSchedule] = useState(false);
-  const [showScheduleCalendar, setShowScheduleCalendar] = useState(false);
 
   // --- APPEAL STATE ---
   const [appealStep, setAppealStep] = useState(1);
@@ -153,34 +135,9 @@ export default function RequestsScreen({ navigation, route }) {
 
   const todayStr = getPHNowString();
 
-  useEffect(() => {
-    const fetchDropdownData = async () => {
-      try {
-        const [locRes, courseRes] = await Promise.all([
-          axios.get(`${API_URL}/school-locations`).catch(() => ({ data: [] })),
-          axios.get(`${API_URL}/courses`).catch(() => ({ data: [] }))
-        ]);
-        if (locRes.data && Array.isArray(locRes.data) && locRes.data.length > 0) {
-          const names = locRes.data.map(l => l.name);
-          setLocationList(names);
-          setSchedulePlace(names[0]);
-        }
-        if (courseRes.data && Array.isArray(courseRes.data) && courseRes.data.length > 0) {
-          const names = courseRes.data.map(c => c.name);
-          setCourseList(names);
-          setScheduleCourse(names[0]);
-        }
-      } catch (err) {
-        console.error("Failed to fetch dropdown options:", err);
-      }
-    };
-    fetchDropdownData();
-  }, []);
-
   const handleTabSwitch = (tab) => {
     setActiveTab(tab);
     setLeaveStep(1);
-    setScheduleStep(1);
     setAppealStep(1);
     setCorrectionStep(1);
     setOvertimeStep(1);
@@ -202,8 +159,6 @@ export default function RequestsScreen({ navigation, route }) {
       const minutes = String(selectedDate.getMinutes()).padStart(2, '0');
       const timeString = `${hours}:${minutes}`;
 
-      if (timePickerMode === 'scheduleStart') setScheduleStart(timeString);
-      if (timePickerMode === 'scheduleEnd') setScheduleEnd(timeString);
       if (timePickerMode === 'appealIn') setAppealTimeIn(timeString);
       if (timePickerMode === 'appealOut') setAppealTimeOut(timeString);
       if (timePickerMode === 'correctionTime') setCorrectionTime(timeString);
@@ -343,40 +298,6 @@ export default function RequestsScreen({ navigation, route }) {
       Alert.alert('Submission Error', err.message || 'Failed to connect to server.');
     } finally {
       setSubmittingLeave(false);
-    }
-  };
-
-  // --- SCHEDULE VALIDATION & SUBMISSION ---
-  const handleNextSchedule = () => {
-    if (!scheduleDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
-    if (!scheduleStart || !scheduleEnd) { Alert.alert('Validation Error', 'Please specify start and end times.'); return; }
-    if (scheduleStart >= scheduleEnd) { Alert.alert('Validation Error', 'Schedule end time must be after the start time.'); return; }
-    if (!schedulePlace.trim() || !scheduleCourse.trim()) { Alert.alert('Validation Error', 'Location and course are required.'); return; }
-    setScheduleStep(2);
-  };
-
-  const handleSubmitSchedule = async () => {
-    setSubmittingSchedule(true);
-    try {
-      const result = await submitScheduleRequest({
-        request_type: 'new',
-        date: scheduleDate,
-        place: schedulePlace.trim(), 
-        course: scheduleCourse.trim(), 
-        start_time: formatTimeForDB(scheduleStart),
-        end_time: formatTimeForDB(scheduleEnd),
-        reason: scheduleReason.trim() || 'Schedule assignment request'
-      });
-      if (result && result.success) {
-        Alert.alert('Success', result.message || 'Schedule request submitted!');
-        setScheduleDate(''); setScheduleStart('09:00'); setScheduleEnd('17:00'); setScheduleReason(''); setScheduleStep(1);
-      } else {
-        Alert.alert('Submission Error', result?.message || result?.error || 'Failed to submit schedule request.');
-      }
-    } catch (error) {
-      Alert.alert('Submission Error', error.message || 'Connection failed.');
-    } finally {
-      setSubmittingSchedule(false);
     }
   };
 
@@ -597,7 +518,7 @@ export default function RequestsScreen({ navigation, route }) {
 
         <View style={styles.tabBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {['leave', 'schedule', 'appeal', 'correction', 'overtime'].map((tab) => (
+            {['leave', 'appeal', 'correction', 'overtime'].map((tab) => (
               <TouchableOpacity
                 key={tab}
                 style={[styles.tab, activeTab === tab && styles.activeTab]}
@@ -756,106 +677,6 @@ export default function RequestsScreen({ navigation, route }) {
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={handleSubmitLeave} disabled={submittingLeave}>
                       <Text style={styles.submitBtnText}>{submittingLeave ? 'Submitting...' : 'Confirm Submit'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* ======================================= */}
-          {/* SCHEDULE TAB */}
-          {/* ======================================= */}
-          {activeTab === 'schedule' && (
-            <View>
-              {scheduleStep === 1 && (
-                <View>
-                  <TouchableOpacity style={styles.historyButton} onPress={() => { setScheduleStep(1); navigation.navigate('ScheduleHistory'); }}>
-                    <Text style={styles.historyButtonText}>View Schedule History</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.label}>Date</Text>
-                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowScheduleCalendar(true)}>
-                    <CalendarIcon size={20} color="#00897B" />
-                    <Text style={styles.dateText}>{scheduleDate || 'Select date'}</Text>
-                  </TouchableOpacity>
-                  {renderCalendar(showScheduleCalendar, setShowScheduleCalendar, scheduleDate, setScheduleDate, todayStr)}
-
-                  <Text style={styles.label}>Start Time</Text>
-                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('scheduleStart'); setShowTimePicker(true); }}>
-                    <Clock size={20} color="#00897B" />
-                    <Text style={styles.dateText}>{scheduleStart ? formatTo12Hour(scheduleStart) : 'Select start time'}</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.label}>End Time</Text>
-                  <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('scheduleEnd'); setShowTimePicker(true); }}>
-                    <Clock size={20} color="#00897B" />
-                    <Text style={styles.dateText}>{scheduleEnd ? formatTo12Hour(scheduleEnd) : 'Select end time'}</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.label}>Location / Campus</Text>
-                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowLocationModal(true)}>
-                    <MapPin size={20} color="#00897B" />
-                    <Text style={styles.dateText}>{schedulePlace || 'Select location...'}</Text>
-                    <ChevronDown size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-
-                  <Text style={styles.label}>Course Name</Text>
-                  <TouchableOpacity style={styles.datePicker} onPress={() => setShowCourseModal(true)}>
-                    <BookOpen size={20} color="#00897B" />
-                    <Text style={styles.dateText}>{scheduleCourse || 'Select course...'}</Text>
-                    <ChevronDown size={18} color={colors.textSecondary} />
-                  </TouchableOpacity>
-
-                  <Text style={styles.label}>Reason for Request</Text>
-                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="e.g., Need to cover a shift..." placeholderTextColor={colors.textSecondary} value={scheduleReason} onChangeText={setScheduleReason} />
-
-                  <TouchableOpacity style={styles.submitBtn} onPress={handleNextSchedule}>
-                    <Text style={styles.submitBtnText}>Next: Review Application</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {scheduleStep === 2 && (
-                <View>
-                  <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Schedule Application Review</Text>
-                  <View style={styles.reviewBox}>
-                    <View style={styles.reviewRow}>
-                      <Text style={styles.reviewLabel}>Date</Text>
-                      <Text style={styles.reviewValue}>{scheduleDate}</Text>
-                    </View>
-                    <View style={styles.reviewDivider} />
-
-                    <View style={styles.reviewRow}>
-                      <Text style={styles.reviewLabel}>Time Window</Text>
-                      <Text style={styles.reviewValue}>{formatTo12Hour(scheduleStart)} – {formatTo12Hour(scheduleEnd)}</Text>
-                    </View>
-                    <View style={styles.reviewDivider} />
-
-                    <View style={styles.reviewRow}>
-                      <Text style={styles.reviewLabel}>Location</Text>
-                      <Text style={styles.reviewValue}>{schedulePlace}</Text>
-                    </View>
-                    <View style={styles.reviewDivider} />
-
-                    <View style={styles.reviewRow}>
-                      <Text style={styles.reviewLabel}>Course / Department</Text>
-                      <Text style={styles.reviewValue}>{scheduleCourse}</Text>
-                    </View>
-                    <View style={styles.reviewDivider} />
-
-                    <View style={styles.reviewRowColumn}>
-                      <Text style={styles.reviewLabel}>Reason</Text>
-                      <Text style={styles.reviewValueMultiline}>{scheduleReason || '—'}</Text>
-                    </View>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 20 }}>
-                    <TouchableOpacity style={[styles.submitBtn, { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }]} onPress={() => setScheduleStep(1)}>
-                      <Text style={[styles.submitBtnText, { color: colors.textPrimary }]}>Edit Details</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.submitBtn, { flex: 1 }]} onPress={handleSubmitSchedule} disabled={submittingSchedule}>
-                      <Text style={styles.submitBtnText}>{submittingSchedule ? 'Sending...' : 'Confirm Submit'}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1194,44 +1015,6 @@ export default function RequestsScreen({ navigation, route }) {
           />
         )}
 
-        {/* Location Dropdown Modal */}
-        <RNModal visible={showLocationModal} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.balancesModal}>
-              <View style={styles.modalHeaderRow}>
-                <Text style={styles.modalTitle}>Select Location</Text>
-                <TouchableOpacity onPress={() => setShowLocationModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
-              </View>
-              <ScrollView style={{ maxHeight: 250 }}>
-                {locationList.map((loc, idx) => (
-                  <TouchableOpacity key={idx} style={styles.dropdownOption} onPress={() => { setSchedulePlace(loc); setShowLocationModal(false); }}>
-                    <Text style={styles.dropdownOptionText}>{loc}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </RNModal>
-
-        {/* Course Dropdown Modal */}
-        <RNModal visible={showCourseModal} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.balancesModal}>
-              <View style={styles.modalHeaderRow}>
-                <Text style={styles.modalTitle}>Select Course</Text>
-                <TouchableOpacity onPress={() => setShowCourseModal(false)}><X size={22} color={colors.textSecondary} /></TouchableOpacity>
-              </View>
-              <ScrollView style={{ maxHeight: 250 }}>
-                {courseList.map((c, idx) => (
-                  <TouchableOpacity key={idx} style={styles.dropdownOption} onPress={() => { setScheduleCourse(c); setShowCourseModal(false); }}>
-                    <Text style={styles.dropdownOptionText}>{c}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </RNModal>
-
         {/* Leave Balances Modal */}
         <RNModal visible={showBalancesModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -1324,12 +1107,6 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   closeBalancesBtn: { marginTop: 20, alignItems: 'center', paddingVertical: 10 },
   emptyText: { fontFamily: 'Inter_18pt-Medium', textAlign: 'center', color: isLight ? '#94A3B8' : colors.textSecondary, marginTop: 20 },
 
-  dropdownOption: { paddingVertical: 14, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
-  dropdownOptionText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
-
-  // ==========================================
-  // REVIEW APPLICATION STYLES
-  // ==========================================
   reviewBox: {
     backgroundColor: isLight ? '#FFFFFF' : colors.surface,
     padding: 20,

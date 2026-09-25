@@ -2270,163 +2270,7 @@ app.post('/api/schedules/bulk', authenticateToken, async (req, res) => {
   res.json({ success: true, ...results });
 });
 
-app.get('/api/schedule-requests/pending-count', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
-  db.query("SELECT COUNT(*) AS count FROM schedule_change_requests WHERE LOWER(status) = 'pending'", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ count: results[0].count });
-  });
-});
 
-// 1. Get User's Own Schedule Requests (Formatted with Philippine Time Strings)
-app.get('/api/schedule-requests/my', authenticateToken, (req, res) => {
-  const userId = req.user.id;
-  const sql = `
-    SELECT 
-      id, user_id, full_name, request_type, place, course, start_time, end_time, reason, schedule_id, status, admin_remarks,
-      DATE_FORMAT(date, '%Y-%m-%d') AS date,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
-      DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
-    FROM schedule_change_requests 
-    WHERE (user_id = (SELECT employee_id FROM users WHERE id = ?) OR user_id = ? OR user_id = (SELECT id FROM users WHERE employee_id = ?))
-    ORDER BY created_at DESC, id DESC
-  `;
-
-  db.query(sql, [userId, userId, userId], (err, results) => {
-    if (err) {
-      console.error("Failed to load my schedule requests:", err);
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(results || []);
-  });
-});
-
-app.post('/api/schedule-requests', authenticateToken, (req, res) => {
-  const { request_type, date, place, course, start_time, end_time, reason, schedule_id } = req.body;
-  const userId = req.user.id;
-  const phNow = getPHDateTime();
-
-  if (!request_type || !date || !place || !start_time || !end_time) {
-    return res.status(400).json({ success: false, error: 'Missing required schedule fields.' });
-  }
-
-  db.query("SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active'", [userId], (err, rows) => {
-    if (err || rows.length === 0) return res.status(500).json({ success: false, error: 'User not found or inactive.' });
-    const employeeId = rows[0].employee_id;
-    const fullName = rows[0].full_name;
-
-    // Explicitly stamp created_at with Philippine Standard Time
-    const sql = `
-      INSERT INTO schedule_change_requests 
-        (user_id, full_name, request_type, date, place, course, start_time, end_time, reason, schedule_id, status, created_at) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-    `;
-
-    db.query(
-      sql,
-      [employeeId, fullName, request_type, date, place, course, start_time, end_time, reason ? reason.trim() : '', schedule_id || null, phNow],
-      (insertErr, result) => {
-        if (insertErr) {
-          console.error("Schedule request submission error:", insertErr);
-          return res.status(500).json({ success: false, error: insertErr.message });
-        }
-        logAction(req.user.id, 'SUBMIT_SCHEDULE_REQUEST', 'schedule_request', result.insertId, req);
-        res.json({ success: true, message: 'Schedule request submitted!' });
-      }
-    );
-  });
-});
-
-// 3. Get Pending Schedule Requests for Admin & HR (Formatted with Philippine Time Strings)
-app.get('/api/schedule-requests/pending', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
-  const sql = `
-    SELECT 
-      id, user_id, full_name, request_type, place, course, start_time, end_time, reason, schedule_id, status, admin_remarks,
-      DATE_FORMAT(date, '%Y-%m-%d') AS date,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
-      DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
-    FROM schedule_change_requests 
-    WHERE LOWER(status) = 'pending' 
-    ORDER BY created_at DESC
-  `;
-
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error("Pending schedule requests fetch error:", err);
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(results || []);
-  });
-});
-
-// 4. Update Schedule Request Status (Approved / Rejected) Synchronized to Real Philippine Time
-app.put('/api/schedule-requests/:id/status', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  const { status, admin_remarks } = req.body;
-  const requestId = req.params.id;
-  const phNow = getPHDateTime();
-
-  const newStatus = String(status || '').toLowerCase();
-  if (!['approved', 'rejected'].includes(newStatus)) {
-    return res.status(400).json({ success: false, error: 'Status must be approved or rejected.' });
-  }
-
-  db.query("SELECT * FROM schedule_change_requests WHERE id = ?", [requestId], (err, rows) => {
-    if (err || rows.length === 0) return res.status(500).json({ error: 'Request not found' });
-    const request = rows[0];
-
-    db.query(
-      "UPDATE schedule_change_requests SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?", 
-      [newStatus, admin_remarks || null, phNow, requestId], 
-      async (updateErr) => {
-        if (updateErr) {
-          console.error("Failed to update schedule request status:", updateErr);
-          return res.status(500).json({ error: updateErr.message });
-        }
-
-        const action = newStatus === 'approved' ? 'APPROVE_SCHEDULE_REQUEST' : 'REJECT_SCHEDULE_REQUEST';
-        logAction(req.user.id, action, 'schedule_request', requestId, req);
-
-        if (newStatus === 'approved') {
-          try {
-            if (request.request_type === 'new') {
-              await db.promise().query(
-                "INSERT INTO schedules (user_id, date, place, course, start_time, end_time) VALUES (?, ?, ?, ?, ?, ?)",
-                [request.user_id, request.date, request.place, request.course, request.start_time, request.end_time]
-              );
-            } else if (request.request_type === 'change') {
-              if (request.schedule_id) {
-                await db.promise().query(
-                  "UPDATE schedules SET place = ?, course = ?, start_time = ?, end_time = ? WHERE id = ?",
-                  [request.place, request.course, request.start_time, request.end_time, request.schedule_id]
-                );
-              } else {
-                await db.promise().query(
-                  "UPDATE schedules SET place = ?, course = ?, start_time = ?, end_time = ? WHERE user_id = ? AND date = ?",
-                  [request.place, request.course, request.start_time, request.end_time, request.user_id, request.date]
-                );
-              }
-            }
-            return res.json({ success: true, message: 'Request approved and schedule updated.' });
-          } catch (syncErr) {
-            console.error("Schedule sync error on approval:", syncErr);
-            return res.status(500).json({ success: false, error: syncErr.message });
-          }
-        } else {
-          return res.json({ success: true, message: 'Request rejected.' });
-        }
-      }
-    );
-  });
-});
 
 
 // ============================================
@@ -5995,28 +5839,7 @@ app.get('/api/attendance/corrections/pending', authenticateToken, (req, res) => 
   });
 });
 
-app.get('/api/schedule-requests/user/:employeeId', authenticateToken, verifyOwnership, async (req, res) => {
-  const { employeeId } = req.params;
-  const sql = `
-    SELECT 
-      id, user_id, full_name, request_type, place, course, start_time, end_time, reason, schedule_id, status, admin_remarks,
-      DATE_FORMAT(date, '%Y-%m-%d') AS date,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
-      DATE_FORMAT(reviewed_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at
-    FROM schedule_change_requests 
-    WHERE (user_id = ? OR user_id = (SELECT id FROM users WHERE employee_id = ?) OR user_id = (SELECT employee_id FROM users WHERE id = ?))
-    ORDER BY created_at DESC, id DESC
-  `;
 
-  db.query(sql, [employeeId, employeeId, employeeId], (err, results) => {
-    if (err) {
-      console.error("Schedule requests fetch error:", err);
-      return res.status(500).json({ success: false, message: 'Failed to load schedule requests.' });
-    }
-    res.json(results || []);
-  });
-});
 
 
 
@@ -6254,32 +6077,7 @@ app.put('/api/overtime-requests/:id/cancel', authenticateToken, async (req, res)
   }
 });
 
-// 3. Cancel Schedule Request
-app.put('/api/schedule-requests/:id/cancel', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { reason } = req.body;
-  const userId = req.user.id;
-  const phNow = getPHDateTime();
 
-  try {
-    const [rows] = await db.promise().query(
-      "SELECT id, status FROM schedule_change_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
-      [id, userId, userId]
-    );
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
-    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
-
-    const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
-    await db.promise().query(
-      "UPDATE schedule_change_requests SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
-      [cancelRemark, phNow, id]
-    );
-    logAction(userId, 'CANCEL_SCHEDULE', 'schedule_request', id, req);
-    res.json({ success: true, message: "Request cancelled successfully." });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
-  }
-});
 
 // 4. Cancel Attendance Appeal
 app.put('/api/attendance-appeals/:id/cancel', authenticateToken, async (req, res) => {

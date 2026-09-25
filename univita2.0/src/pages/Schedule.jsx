@@ -1,10 +1,10 @@
-// src/pages/Schedule.js
+// src/pages/Schedule.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import './Schedule.css';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
-  ChevronLeft, ChevronRight, Plus, Trash2, Edit3, Calendar, ShieldAlert, Bell, Clock, MapPin, Check, X
+  ChevronLeft, ChevronRight, Plus, Trash2, Edit3, Calendar, ShieldAlert, Clock, MapPin
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
@@ -22,15 +22,6 @@ const formatTo12Hour = (timeStr) => {
   hours = hours % 12;
   hours = hours ? hours : 12; 
   return `${hours}:${minutes} ${ampm}`;
-};
-
-const formatDisplayDate = (dateString) => {
-  if (!dateString) return '';
-  const cleanDate = dateString.split('T')[0];
-  const [year, month, day] = cleanDate.split('-');
-  if (!year || !month || !day) return cleanDate;
-  const dateObj = new Date(year, month - 1, day);
-  return dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 };
 
 const Schedule = () => {
@@ -52,14 +43,6 @@ const Schedule = () => {
 
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailSession, setDetailSession] = useState(null);
-
-  const [showScheduleRequests, setShowScheduleRequests] = useState(false);
-  const [pendingRequests, setPendingRequests] = useState([]);
-  const [pendingCount, setPendingCount] = useState(0);
-
-  const [showRejectModal, setShowRejectModal] = useState(false);
-  const [rejectTargetId, setRejectTargetId] = useState(null);
-  const [rejectReason, setRejectReason] = useState('');
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
@@ -123,22 +106,12 @@ const Schedule = () => {
       setSchedules(cleaned);
       setSchoolLocations(locRes.data);
       setCourses(courseRes.data);
-
-      fetchPendingCount();
     } catch (err) {
       toast.error('Failed to load schedule data');
     } finally {
       setLoading(false);
     }
   }, []);
-
-  const fetchPendingCount = async () => {
-    if (!canEdit) return;
-    try {
-      const res = await axios.get(`${API_BASE}/schedule-requests/pending-count`, getAuthHeaders());
-      setPendingCount(res.data.count || 0);
-    } catch (err) {}
-  };
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -312,53 +285,6 @@ const Schedule = () => {
     }
   };
 
-  const fetchPendingRequests = async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/schedule-requests/pending`, getAuthHeaders());
-      setPendingRequests(res.data);
-    } catch (err) {}
-  };
-
-  const openRejectModal = (id) => {
-    setRejectTargetId(id);
-    setRejectReason('');
-    setShowRejectModal(true);
-  };
-
-  const confirmReject = async () => {
-    if (!rejectTargetId) return;
-    try {
-      await axios.put(`${API_BASE}/schedule-requests/${rejectTargetId}/status`, {
-        status: 'rejected',
-        admin_remarks: rejectReason
-      }, getAuthHeaders());
-      toast.info('Request rejected');
-      setShowRejectModal(false);
-      fetchPendingRequests();
-      loadData();
-    } catch (err) {
-      toast.error('Failed to update request.');
-    }
-  };
-
-  const handleProcessRequest = async (id, status) => {
-    if (status === 'rejected') {
-      openRejectModal(id);
-      return;
-    }
-    try {
-      await axios.put(`${API_BASE}/schedule-requests/${id}/status`, {
-        status,
-        admin_remarks: ''
-      }, getAuthHeaders());
-      toast.success('Request approved');
-      fetchPendingRequests();
-      loadData();
-    } catch (err) {
-      toast.error('Failed to update request.');
-    }
-  };
-
   const addManualBulkRow = () => {
     setManualBulkRows([...manualBulkRows, {
       id: Date.now() + Math.random(),
@@ -429,15 +355,6 @@ const Schedule = () => {
         <div className="sch-actions">
           {canEdit && (
             <>
-              <button 
-                className="btn-sch-outline sch-requests-btn" 
-                onClick={() => { setShowScheduleRequests(true); fetchPendingRequests(); }}
-              >
-                <Bell size={16} /> 
-                <span>Requests</span>
-                {pendingCount > 0 && <span className="sch-badge-count">{pendingCount}</span>}
-              </button>
-              
               <button className="btn-sch-outline" onClick={openBulkModal}>
                 <Calendar size={16} /> 
                 <span>Bulk Assign</span>
@@ -529,7 +446,7 @@ const Schedule = () => {
                             <div className="sch-empty-slot" onClick={() => canEdit && handleQuickAdd(inst, colDateStr)}>
                               {canEdit ? <><Plus size={14} /> Add</> : 'No Schedule'}
                             </div>
-                           </td>
+                          </td>
                         );
                       }
 
@@ -564,7 +481,7 @@ const Schedule = () => {
                               {totalCount > 1 ? `${totalCount} Total Sessions` : (displaySession.place || 'No Room')}
                             </div>
                           </div>
-                         </td>
+                        </td>
                       );
                     })}
                   </tr>
@@ -791,90 +708,6 @@ const Schedule = () => {
           ) : (
             <div className="sch-empty-state">No schedule details available.</div>
           )}
-        </div>
-      </FormalModal>
-
-      {/* CUSTOMIZED PENDING SCHEDULE REQUESTS MODAL (No FormalModal, Strict Unbroken Layout) */}
-      {showScheduleRequests && (
-        <div className="sch-custom-modal-backdrop" onClick={() => setShowScheduleRequests(false)}>
-          <div className="sch-custom-modal" onClick={e => e.stopPropagation()}>
-            <div className="sch-custom-modal-header">
-              <h3>Pending Schedule Requests</h3>
-              <button className="sch-custom-close-btn" onClick={() => setShowScheduleRequests(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            <div className="sch-custom-modal-body">
-              {pendingRequests.length === 0 ? (
-                <div className="sch-empty-state">No pending requests at this time.</div>
-              ) : (
-                <div className="sch-custom-requests-list">
-                  {pendingRequests.map(req => (
-                    <div key={req.id} className="sch-custom-request-card">
-                      <div className="sch-custom-req-top">
-                        <span className="sch-custom-name">{req.full_name}</span>
-                        <span className="sch-custom-type-pill">{req.request_type === 'new' ? 'New Schedule' : 'Schedule Change'}</span>
-                      </div>
-                      <div className="sch-custom-details-grid">
-                        <div className="sch-custom-prop">
-                          <label>Date</label>
-                          <span className="nowrap">{formatDisplayDate(req.date)}</span>
-                        </div>
-                        <div className="sch-custom-prop">
-                          <label>Course & Location</label>
-                          <span>{req.course} at {req.place}</span>
-                        </div>
-                        <div className="sch-custom-prop">
-                          <label>Time Period</label>
-                          <span className="nowrap">{formatTo12Hour(req.start_time)} – {formatTo12Hour(req.end_time)}</span>
-                        </div>
-                        {req.reason && (
-                          <div className="sch-custom-prop full-width">
-                            <label>Reason / Remarks</label>
-                            <span className="reason-text">{req.reason}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="sch-custom-req-actions">
-                        <button className="btn-sch-reject" onClick={() => handleProcessRequest(req.id, 'rejected')}>
-                          <X size={14} /> Reject
-                        </button>
-                        <button className="btn-sch-approve" onClick={() => handleProcessRequest(req.id, 'approved')}>
-                          <Check size={14} /> Approve Request
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="sch-custom-modal-footer">
-              <button className="btn-sch-cancel" onClick={() => setShowScheduleRequests(false)}>Close Window</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <FormalModal
-        show={showRejectModal}
-        onClose={() => setShowRejectModal(false)}
-        title="Provide Rejection Reason"
-        footer={
-          <>
-            <button className="btn-sch-cancel" onClick={() => setShowRejectModal(false)}>Cancel</button>
-            <button className="btn-sch-danger" onClick={confirmReject}>Confirm Rejection</button>
-          </>
-        }
-      >
-        <div className="sch-form-group">
-          <label>Reason (Optional)</label>
-          <textarea
-            className="sch-input"
-            rows="4"
-            placeholder="Enter reason for rejecting the request..."
-            value={rejectReason}
-            onChange={e => setRejectReason(e.target.value)}
-          />
         </div>
       </FormalModal>
 

@@ -2,8 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
-  Users, FileText, Clock, AlertCircle, Calendar, Zap, ChevronRight,
-  UserCheck, CheckCircle, Clock3, FileSpreadsheet
+  Users, FileText, Clock, AlertCircle, Zap, ChevronRight,
+  CheckCircle, Clock3, FileSpreadsheet
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './Dashboard.css';
@@ -18,7 +18,6 @@ const HRDashboard = ({ setView }) => {
     pendingLeaves: 0,
     presentToday: 0,
     pendingAppeals: 0,
-    pendingScheduleRequests: 0,
     pendingOvertime: 0,
     pendingCorrections: 0
   });
@@ -40,7 +39,6 @@ const HRDashboard = ({ setView }) => {
         leaveRes, 
         attRes, 
         appealsRes, 
-        schedReqRes, 
         overtimeRes, 
         correctionsRes
       ] = await Promise.allSettled([
@@ -48,7 +46,6 @@ const HRDashboard = ({ setView }) => {
         axios.get(`${API_BASE}/leave-requests/all`, getAuthHeaders()),
         axios.get(`${API_BASE}/attendance-report?date=${new Date().toISOString().split('T')[0]}`, getAuthHeaders()),
         axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders()),
-        axios.get(`${API_BASE}/schedule-requests/pending`, getAuthHeaders()),
         axios.get(`${API_BASE}/overtime-requests/pending`, getAuthHeaders()),
         axios.get(`${API_BASE}/attendance/corrections/pending`, getAuthHeaders())
       ]);
@@ -65,9 +62,6 @@ const HRDashboard = ({ setView }) => {
       const pendingAppealsList = appealsRes.status === 'fulfilled' ? appealsRes.value.data || [] : [];
       const pendingAppeals = pendingAppealsList.length;
 
-      const pendingScheduleList = schedReqRes.status === 'fulfilled' ? schedReqRes.value.data || [] : [];
-      const pendingScheduleRequests = pendingScheduleList.length;
-
       const pendingOvertimeList = overtimeRes.status === 'fulfilled' ? overtimeRes.value.data || [] : [];
       const pendingOvertime = pendingOvertimeList.length;
 
@@ -79,7 +73,6 @@ const HRDashboard = ({ setView }) => {
         pendingLeaves,
         presentToday,
         pendingAppeals,
-        pendingScheduleRequests,
         pendingOvertime,
         pendingCorrections
       });
@@ -113,13 +106,6 @@ const HRDashboard = ({ setView }) => {
           title: `${c.full_name || c.employee_id} submitted time correction for ${c.attendance_date}`,
           date: c.attendance_date,
           action: 'attendance-correction'
-        })),
-        ...pendingScheduleList.slice(0, 3).map(s => ({
-          id: `sched-${s.id}`,
-          type: 'Schedule Request',
-          title: `${s.full_name} submitted a schedule change request`,
-          date: s.date,
-          action: 'schedule'
         }))
       ];
 
@@ -155,7 +141,7 @@ const HRDashboard = ({ setView }) => {
     );
   }
 
-  const totalPendingActions = stats.pendingLeaves + stats.pendingAppeals + stats.pendingScheduleRequests + stats.pendingOvertime + stats.pendingCorrections;
+  const totalPendingActions = stats.pendingLeaves + stats.pendingAppeals + stats.pendingOvertime + stats.pendingCorrections;
 
   return (
     <div className="expert-container">
@@ -163,7 +149,7 @@ const HRDashboard = ({ setView }) => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            <p className="expert-subtitle">Monitor staff attendance, leave applications, overtime, and personnel schedule adjustments.</p>
+            <p className="expert-subtitle">Monitor staff attendance, leave applications, overtime, and personnel records.</p>
           </div>
         </div>
       </div>
@@ -224,14 +210,6 @@ const HRDashboard = ({ setView }) => {
             <span className="expert-stat-label">Appeals</span>
           </div>
           <div className="expert-stat-value">{stats.pendingAppeals}</div>
-        </div>
-
-        <div className="expert-stat-card" onClick={() => handleNavigate('schedule')}>
-          <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Calendar size={18} /></div>
-            <span className="expert-stat-label">Schedules</span>
-          </div>
-          <div className="expert-stat-value">{stats.pendingScheduleRequests}</div>
         </div>
       </section>
 

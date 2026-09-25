@@ -32,7 +32,7 @@ import AlertsScreen from './src/screens/AlertsScreen';
 import RequestsScreen from './src/screens/RequestsScreen';
 import MyPayrollScreen from './src/screens/MyPayrollScreen';
 import LeaveHistoryScreen from './src/screens/LeaveHistoryScreen';
-import ScheduleHistoryScreen from './src/screens/ScheduleHistoryScreen';
+
 import AppealHistoryScreen from './src/screens/AppealHistoryScreen';
 import OvertimeHistoryScreen from './src/screens/OvertimeHistoryScreen';
 import CorrectionHistoryScreen from './src/screens/CorrectionHistoryScreen'; 
@@ -326,7 +326,7 @@ function AppContent() {
             <Stack.Screen name="Requests" component={RequestsScreen} options={{ headerShown: false }} />
             <Stack.Screen name="MyPayroll" component={MyPayrollScreen} options={{ headerShown: true, title: 'My Payroll', headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
             <Stack.Screen name="LeaveHistory" component={LeaveHistoryScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="ScheduleHistory" component={ScheduleHistoryScreen} options={{ headerShown: false }} />
+            
             <Stack.Screen name="AppealHistory" component={AppealHistoryScreen} options={{ headerShown: false }} />
             <Stack.Screen name="CorrectionHistory" component={CorrectionHistoryScreen} options={{ headerShown: false }} /> 
             <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} options={{ headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />

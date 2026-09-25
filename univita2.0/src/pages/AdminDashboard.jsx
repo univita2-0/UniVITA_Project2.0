@@ -45,8 +45,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
         appointmentsPendingRes,
         overtimeRes,
         appealsRes,
-        correctionsRes,
-        scheduleReqRes
+        correctionsRes
       ] = await Promise.allSettled([
         axios.get(`${API_BASE}/employees`, getAuthHeaders()),
         axios.get(`${API_BASE}/leave-requests/all`, getAuthHeaders()),
@@ -54,8 +53,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
         axios.get(`${API_BASE}/appointments/pending`, getAuthHeaders()),
         axios.get(`${API_BASE}/overtime-requests/pending`, getAuthHeaders()),
         axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders()),
-        axios.get(`${API_BASE}/attendance/corrections/pending`, getAuthHeaders()),
-        axios.get(`${API_BASE}/schedule-requests/pending`, getAuthHeaders())
+        axios.get(`${API_BASE}/attendance/corrections/pending`, getAuthHeaders())
       ]);
 
       // Calculate Employee & System Stats
@@ -77,7 +75,6 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
       const pendingOvertimeCount = overtimeRes.status === 'fulfilled' ? (overtimeRes.value.data || []).length : 0;
       const pendingAppealsCount = appealsRes.status === 'fulfilled' ? (appealsRes.value.data || []).length : 0;
       const pendingCorrectionsCount = correctionsRes.status === 'fulfilled' ? (correctionsRes.value.data || []).length : 0;
-      const pendingScheduleRequestsCount = scheduleReqRes.status === 'fulfilled' ? (scheduleReqRes.value.data || []).length : 0;
 
       let systemStatus = 'Operational';
       try {
@@ -109,9 +106,6 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
       }
       if (pendingCorrectionsCount > 0) {
         summary.push({ id: 'corrections', title: 'Correction Request', count: pendingCorrectionsCount, route: 'attendance-correction', icon: FileText });
-      }
-      if (pendingScheduleRequestsCount > 0) {
-        summary.push({ id: 'schedule', title: 'Schedule Request', count: pendingScheduleRequestsCount, route: 'schedule', icon: Calendar });
       }
 
       setPendingTasks(summary);
