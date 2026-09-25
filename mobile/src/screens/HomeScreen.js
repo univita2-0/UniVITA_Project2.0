@@ -21,11 +21,7 @@ import {
 
 const LOCATION_TASK_NAME = 'background-location-task';
 
-const disableBatteryOptimization = async () => {
-  if (Platform.OS === 'android') {
-    try { await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS); } catch (err) {}
-  }
-};
+
 
 const getTodayString = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 
@@ -134,6 +130,44 @@ export default function HomeScreen({ navigation }) {
     return "GOOD EVENING";
   };
 
+  const promptBatteryOptimizationOnce = async () => {
+  if (Platform.OS !== 'android') return;
+
+  try {
+    // 1. Check if the user has already been prompted
+    const hasPrompted = await AsyncStorage.getItem('@has_prompted_battery');
+    if (hasPrompted === 'true') {
+      return; // Already prompted, do nothing!
+    }
+
+    // 2. Mark as prompted immediately so it never fires again
+    await AsyncStorage.setItem('@has_prompted_battery', 'true');
+
+    // 3. Show a clear dialog explaining WHY settings are opening
+    Alert.alert(
+      "Background Location Tracking",
+      "To keep your location tracking active during work shifts while your screen is locked, please set UniVITA's battery usage to 'Unrestricted'.",
+      [
+        { text: "Dismiss", style: "cancel" },
+        {
+          text: "Open Settings",
+          onPress: async () => {
+            try {
+              await IntentLauncher.startActivityAsync(
+                IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS
+              );
+            } catch (err) {
+              console.warn("Failed to open battery optimization settings:", err);
+            }
+          }
+        }
+      ]
+    );
+  } catch (error) {
+    console.error("Battery prompt error:", error);
+  }
+};
+
   useEffect(() => {
     let isMounted = true;
     const initBackgroundTracking = async () => {
@@ -141,7 +175,7 @@ export default function HomeScreen({ navigation }) {
         const { status: fg } = await Location.requestForegroundPermissionsAsync();
         const { status: bg } = await Location.requestBackgroundPermissionsAsync();
         if (fg !== 'granted' || bg !== 'granted') return;
-        if (Platform.OS === 'android') await disableBatteryOptimization();
+        if (Platform.OS === 'android') await promptBatteryOptimizationOnce();
       } catch (err) {}
     };
     initBackgroundTracking();
@@ -227,12 +261,12 @@ export default function HomeScreen({ navigation }) {
     setLoadingNotifications(true);
     try {
       const config = { headers: { Authorization: `Bearer ${token}` } };
-      const [leavesRes, overtimeRes, correctionsRes, appealsRes, schedulesRes] = await Promise.allSettled([
+      const [leavesRes, overtimeRes, correctionsRes, appealsRes] = await Promise.allSettled([
         axios.get(`${API_URL}/leave-requests/history/${empId}`, config),
         axios.get(`${API_URL}/overtime-requests`, config),
         axios.get(`${API_URL}/attendance/corrections/user/${empId}`, config),
         axios.get(`${API_URL}/attendance-appeals/user/${empId}`, config),
-        axios.get(`${API_URL}/schedule-requests/my`, config)
+        
       ]);
 
       let aggregated = [];
@@ -259,7 +293,7 @@ export default function HomeScreen({ navigation }) {
       processItems(overtimeRes, 'Overtime', 'date', 'created_at');
       processItems(correctionsRes, 'Correction', 'attendance_date', 'attendance_date');
       processItems(appealsRes, 'Appeal', 'date', 'submitted_at');
-      processItems(schedulesRes, 'Schedule', 'request_type', 'created_at');
+      
 
       aggregated.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
       setNotifications(aggregated);

@@ -975,6 +975,20 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
 
     logAction(req.user.id, 'CLOCK_IN', 'attendance', result.insertId, req);
 
+    await db.promise().query(
+      `INSERT INTO instructor_location_tracking 
+       (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
+       VALUES (?, ?, ?, ?, ?, 1, 1, NOW())`,
+      [employee_id, schedule_id, parsedLat, parsedLon, schedulePlace]
+    );
+
+    await db.promise().query(
+      "UPDATE users SET last_location_ping = NOW(), location_tracking_enabled = 1 WHERE employee_id = ?",
+      [employee_id]
+    );
+
+    await broadcastInstructorStatus(employee_id);
+
     res.json({ success: true, message: `Clocked in successfully as ${status} at ${formatTo12Hour(currentTime)}.` });
   } catch (err) {
     console.error("Clock-in error:", err);
@@ -5126,14 +5140,14 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
 
     const employeeId = userRows[0].employee_id;
     const fullName = userRows[0].full_name;
-    const { date: today } = getPHTime();
+    const { date: today, time: currentTime } = getPHTime();
 
     
 
     const [scheduleRows] = await db.promise().query(
       `SELECT id, place, start_time, end_time FROM schedules 
-       WHERE user_id = ? AND date = ? AND TIME(NOW()) BETWEEN start_time AND end_time`,
-      [employeeId, today]
+       WHERE user_id = ? AND date = ? AND ? BETWEEN start_time AND end_time`,
+      [employeeId, today, currentTime]
     );
     const currentSchedule = scheduleRows[0];
     if (!currentSchedule) {
