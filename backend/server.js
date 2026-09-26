@@ -6101,12 +6101,21 @@ app.put('/api/attendance-appeals/:id/cancel', authenticateToken, async (req, res
   const phNow = getPHDateTime();
 
   try {
+    const [userRows] = await db.promise().query(
+      "SELECT id, employee_id FROM users WHERE id = ?",
+      [userId]
+    );
+    if (userRows.length === 0) return res.status(403).json({ success: false, message: "Unauthorized user." });
+
+    const internalId = userRows[0].id;
+    const empId = userRows[0].employee_id;
+
     const [rows] = await db.promise().query(
-      "SELECT id, status FROM attendance_appeals WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
-      [id, userId, userId]
+      "SELECT id, status FROM attendance_appeals WHERE id = ? AND (user_id = ? OR user_id = ?)",
+      [id, internalId, empId]
     );
     if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
-    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    if (String(rows[0].status).toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
 
     const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
     await db.promise().query(
@@ -6116,11 +6125,10 @@ app.put('/api/attendance-appeals/:id/cancel', authenticateToken, async (req, res
     logAction(userId, 'CANCEL_APPEAL', 'attendance_appeal', id, req);
     res.json({ success: true, message: "Request cancelled successfully." });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
+    res.status(500).json({ success: false, message: err.message || "Server error." });
   }
 });
 
-// 5. Cancel Attendance Correction
 app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { reason } = req.body;
@@ -6128,22 +6136,45 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
   const phNow = getPHDateTime();
 
   try {
-    const [rows] = await db.promise().query(
-      "SELECT id, status FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
-      [id, userId, userId]
+    // 1. Resolve current user's internal ID and employee_id safely
+    const [userRows] = await db.promise().query(
+      "SELECT id, employee_id FROM users WHERE id = ?",
+      [userId]
     );
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
-    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+
+    if (userRows.length === 0) {
+      return res.status(403).json({ success: false, message: "Unauthorized user." });
+    }
+
+    const internalId = userRows[0].id;
+    const empId = userRows[0].employee_id;
+
+    // 2. Find request by matching either internal user_id OR employee_id
+    const [rows] = await db.promise().query(
+      "SELECT id, status FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = ?)",
+      [id, internalId, empId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    }
+
+    if (String(rows[0].status).toLowerCase() !== 'pending') {
+      return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    }
 
     const cancelRemark = reason ? `[Cancelled by User] Reason: ${reason}` : '[Cancelled by User]';
+
     await db.promise().query(
       "UPDATE attendance_corrections SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
       [cancelRemark, phNow, id]
     );
+
     logAction(userId, 'CANCEL_CORRECTION', 'attendance_correction', id, req);
     res.json({ success: true, message: "Request cancelled successfully." });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Server error." });
+    console.error("Cancel Correction DB Error:", err);
+    res.status(500).json({ success: false, message: err.message || "Server error." });
   }
 });
 

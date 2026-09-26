@@ -11,8 +11,27 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
+import { File } from 'expo-file-system';
 import { API_URL, requestAttendanceCorrection } from './api';
 import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft } from 'lucide-react-native';
+
+const appendFileToFormData = (formData, fieldName, fileObj) => {
+  if (!fileObj) return;
+  const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
+  if (!fileUri) return;
+
+  try {
+    // Standard Expo SDK 54/57 WinterCG File object
+    formData.append(fieldName, new File(fileUri));
+  } catch (err) {
+    // Fallback for environments where File is not available
+    formData.append(fieldName, {
+      uri: fileUri,
+      name: fileObj.name || fileUri.split('/').pop() || 'attachment.jpg',
+      type: fileObj.mimeType || 'image/jpeg',
+    });
+  }
+};
 
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00' || timeStr === 'null' || timeStr == null) return '';
@@ -260,8 +279,9 @@ export default function RequestsScreen({ navigation, route }) {
       let successCount = 0;
       let lastMessage = '';
 
-      const imageUri = typeof leaveImage === 'string' ? leaveImage : leaveImage.uri;
-      const filename = leaveImage.name || imageUri.split('/').pop() || 'leave_proof.pdf';
+      const rawUri = typeof leaveImage === 'string' ? leaveImage : leaveImage.uri;
+      const cleanUri = Platform.OS === 'android' ? rawUri : rawUri.replace('file://', '');
+      const filename = leaveImage.name || rawUri.split('/').pop() || 'leave_proof.jpg';
       const mimeType = leaveImage.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
 
       for (const item of leaveBreakdown) {
@@ -270,31 +290,41 @@ export default function RequestsScreen({ navigation, route }) {
         formData.append('reason', String(leaveReason.trim()));
         formData.append('request_date', String(item.date));
         formData.append('duration', String(item.duration));
-        formData.append('is_paid', String(item.isPaid));
-        formData.append('image', {
-          uri: Platform.OS === 'android' ? imageUri : imageUri.replace('file://', ''),
-          name: filename,
-          type: mimeType
-        });
+        formData.append('is_paid', String(item.isPaid ? '1' : '0'));
+        
+        if (leaveImage) {
+  appendFileToFormData(formData, 'image', leaveImage);
+}
 
         const response = await fetch(`${API_URL}/leave-requests`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData
-        });
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${token}`,
+  },
+  body: formData,
+});
 
         const result = await parseServerResponse(response);
-        if (response.ok && result.success) successCount++;
-        else lastMessage = result.message || 'Failed to submit date.';
+        if (response.ok && result.success) {
+          successCount++;
+        } else {
+          lastMessage = result.message || 'Failed to submit date.';
+        }
       }
 
       if (successCount === leaveBreakdown.length) {
         Alert.alert('Success', 'Leave Application submitted successfully!');
-        setLeaveDateFrom(''); setLeaveDateTo(''); setLeaveReason(''); setLeaveImage(null); setIsRange(false); setLeaveStep(1);
+        setLeaveDateFrom('');
+        setLeaveDateTo('');
+        setLeaveReason('');
+        setLeaveImage(null);
+        setIsRange(false);
+        setLeaveStep(1);
       } else {
         Alert.alert('Submission Notice', `${successCount}/${leaveBreakdown.length} submitted. ${lastMessage}`);
       }
     } catch (err) {
+      console.error('Submit Leave Error:', err);
       Alert.alert('Submission Error', err.message || 'Failed to connect to server.');
     } finally {
       setSubmittingLeave(false);
@@ -323,17 +353,18 @@ export default function RequestsScreen({ navigation, route }) {
       if (prefill.prefillScheduleId) formData.append('schedule_id', String(prefill.prefillScheduleId));
       if (appealTimeIn) formData.append('time_in', String(formatTimeForDB(appealTimeIn)));
       if (appealTimeOut) formData.append('time_out', String(formatTimeForDB(appealTimeOut)));
-      formData.append('image', {
-        uri: Platform.OS === 'android' ? imageUri : imageUri.replace('file://', ''),
-        name: filename,
-        type: mimeType
-      });
+      
+      if (appealImage) { 
+          appendFileToFormData(formData, 'image', appealImage);
+      }
 
       const response = await fetch(`${API_URL}/attendance-appeals`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
+  method: 'POST',
+  headers: {
+    Authorization: `Bearer ${token}`,
+  },
+  body: formData,
+});
 
       const result = await parseServerResponse(response);
       if (response.ok && result.success) {
@@ -441,17 +472,18 @@ export default function RequestsScreen({ navigation, route }) {
         formData.append('scenario_type', String(dbScenarioType));
         formData.append('overtime_type', String(overtimeType));
         if (prefill.prefillScheduleId) formData.append('schedule_id', String(prefill.prefillScheduleId));
-        formData.append('attachment', {
-          uri: Platform.OS === 'android' ? imageUri : imageUri.replace('file://', ''),
-          name: filename,
-          type: mimeType
-        });
 
-        response = await fetch(`${API_URL}/overtime-requests`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
+       if (overtimeImage) { 
+       appendFileToFormData(formData, 'image', overtimeImage);
+       }
+
+       const response = await fetch(`${API_URL}/overtime-requests`, {
+       method: 'POST',
+       headers: {
+       Authorization: `Bearer ${token}`,
+      },
+       body: formData,
+      });
       } else {
         response = await fetch(`${API_URL}/overtime-requests`, {
           method: 'POST',
