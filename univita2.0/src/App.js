@@ -1,5 +1,6 @@
 // src/App.js
 import React, { useState, useEffect } from 'react';
+import LandingPageManagement from './pages/LandingPageManagement';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import AppointmentPage from './pages/AppointmentPage';
@@ -170,6 +171,7 @@ function App() {
       case 'audit-logs': return { title: 'Audit Logs' };
       case 'role-management': return { title: 'Role Management' };
       case 'system-config': return { title: 'System Configuration' };
+      case 'landing-cms': return { title: 'Landing Page CMS' };
       case 'today-visitors': return { title: 'Today\'s Visitors' };
       case 'location-tracking': return { title: 'Location Tracking' };
       case 'manage-reasons': return { title: 'Manage Visit Reasons' };
@@ -213,6 +215,7 @@ function App() {
       case 'role-management': return <RoleManagement />;
       case 'manage-reasons': return <ManageReasons />;
       case 'system-config': return <SystemConfig />;
+      case 'landing-cms': return <LandingPageManagement />;
       case 'today-visitors': return <TodayVisitors />;
       case 'payroll': return <Payroll onUnlock={handlePayrollUnlock} adminEmail={adminEmail} />;
       case 'payroll-main':

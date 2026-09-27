@@ -1,8 +1,7 @@
-// src/pages/Settings.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { User, Lock, Bell, Eye, EyeOff, Key, Settings as SettingsIcon, Save, ShieldCheck, Check, X } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, Save, ShieldCheck, Check, X } from 'lucide-react';
 import './Settings.css';
 import { API_BASE } from '../api';
 
@@ -51,12 +50,6 @@ const Settings = () => {
   const [showCurrentPin, setShowCurrentPin] = useState(false);
   const [showNewPin, setShowNewPin] = useState(false);
 
-  const [preferences, setPreferences] = useState({
-    emailAlerts: true,
-    emergencyAlerts: true,
-    leaveUpdates: true,
-  });
-
   const userRole = localStorage.getItem('user_role');
   const canChangePin = userRole === 'admin' || userRole === 'hr_admin';
 
@@ -102,11 +95,6 @@ const Settings = () => {
         phone: '',
       });
       fetchUserData(userId);
-    }
-
-    const savedPrefs = localStorage.getItem('user_preferences');
-    if (savedPrefs) {
-      setPreferences(JSON.parse(savedPrefs));
     }
   }, [fetchUserData]);
 
@@ -211,13 +199,6 @@ const Settings = () => {
     }
   };
 
-  const handlePreferenceChange = (key, value) => {
-    const newPrefs = { ...preferences, [key]: value };
-    setPreferences(newPrefs);
-    localStorage.setItem('user_preferences', JSON.stringify(newPrefs));
-    toast.info('Preferences updated automatically.');
-  };
-
   if (!user) return <div className="expert-loading">Loading settings...</div>;
 
   return (
@@ -225,8 +206,7 @@ const Settings = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            
-            <p className="expert-subtitle">Manage your profile, security credentials, and personal interface preferences.</p>
+            <p className="expert-subtitle">Manage your profile and security credentials.</p>
           </div>
         </div>
       </div>
@@ -237,9 +217,6 @@ const Settings = () => {
         </button>
         <button className={`set-tab ${activeTab === 'security' ? 'active' : ''}`} onClick={() => setActiveTab('security')}>
           <Lock size={16} /> <span>Security & Access</span>
-        </button>
-        <button className={`set-tab ${activeTab === 'preferences' ? 'active' : ''}`} onClick={() => setActiveTab('preferences')}>
-          <Bell size={16} /> <span>System Preferences</span>
         </button>
       </div>
 
@@ -453,60 +430,6 @@ const Settings = () => {
                 )}
               </div>
             )}
-          </div>
-        )}
-
-        {activeTab === 'preferences' && (
-          <div className="expert-card" style={{ padding: '2rem' }}>
-            <div className="set-card-header">
-              <h3>System Notifications & Display</h3>
-            </div>
-            <div className="set-preferences-list">
-              <div className="set-preference-item">
-                <div className="set-pref-info">
-                  <h4>Email Notifications</h4>
-                  <p>Receive email alerts for pending approvals and system updates.</p>
-                </div>
-                <label className="set-toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={preferences.emailAlerts}
-                    onChange={(e) => handlePreferenceChange('emailAlerts', e.target.checked)}
-                  />
-                  <span className="set-toggle-slider"></span>
-                </label>
-              </div>
-              
-              <div className="set-preference-item">
-                <div className="set-pref-info">
-                  <h4>Emergency Alerts</h4>
-                  <p>Get real-time UI notifications for critical and warning alerts.</p>
-                </div>
-                <label className="set-toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={preferences.emergencyAlerts}
-                    onChange={(e) => handlePreferenceChange('emergencyAlerts', e.target.checked)}
-                  />
-                  <span className="set-toggle-slider"></span>
-                </label>
-              </div>
-              
-              <div className="set-preference-item">
-                <div className="set-pref-info">
-                  <h4>Leave Request Updates</h4>
-                  <p>Get notified when leave requests are submitted or processed.</p>
-                </div>
-                <label className="set-toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={preferences.leaveUpdates}
-                    onChange={(e) => handlePreferenceChange('leaveUpdates', e.target.checked)}
-                  />
-                  <span className="set-toggle-slider"></span>
-                </label>
-              </div>
-            </div>
           </div>
         )}
       </div>

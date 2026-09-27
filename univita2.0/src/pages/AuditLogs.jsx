@@ -6,9 +6,142 @@ import FormalModal from '../components/FormalModal';
 import './AuditLogs.css';
 import { API_BASE } from '../api';
 
+
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
+
+// Human-friendly action labels
+const formatActionLabel = (action = '') => {
+  const map = {
+    BATCH_APPROVED_LEAVE: 'Batch Approved Leaves',
+    BATCH_REJECTED_LEAVE: 'Batch Rejected Leaves',
+    APPROVE_LEAVE: 'Approved Leave Request',
+    REJECT_LEAVE: 'Rejected Leave Request',
+    SUBMIT_LEAVE: 'Submitted Leave Request',
+    CANCEL_LEAVE: 'Cancelled Leave Request',
+    APPROVE_CORRECTION: 'Approved Attendance Correction',
+    REJECT_CORRECTION: 'Rejected Attendance Correction',
+    CANCEL_CORRECTION: 'Cancelled Correction Request',
+    APPROVE_APPEAL: 'Approved Attendance Appeal',
+    REJECT_APPEAL: 'Rejected Attendance Appeal',
+    SUBMIT_APPEAL: 'Submitted Attendance Appeal',
+    CANCEL_APPEAL: 'Cancelled Attendance Appeal',
+    APPROVE_OVERTIME: 'Approved Overtime Request',
+    REJECT_OVERTIME: 'Rejected Overtime Request',
+    SUBMIT_OVERTIME: 'Submitted Overtime Request',
+    CANCEL_OVERTIME: 'Cancelled Overtime Request',
+    CLOCK_IN: 'Clocked In',
+    CLOCK_OUT: 'Clocked Out',
+    LOGIN: 'Account Sign In',
+    ADMIN_RESET_PASSWORD: 'Reset User Password',
+    CREATE_EMPLOYEE: 'Created Employee Account',
+    UPDATE_EMPLOYEE: 'Updated Employee Profile',
+    DELETE_EMPLOYEE: 'Deleted Employee Account',
+    TOGGLE_EMPLOYEE_STATUS: 'Changed Employee Status',
+    CREATE_SCHEDULE: 'Created Work Schedule',
+    UPDATE_SCHEDULE: 'Updated Schedule',
+    DELETE_SCHEDULE: 'Deleted Schedule',
+    BULK_CREATE_SCHEDULES: 'Bulk Created Schedules',
+    CREATE_ALERT: 'Broadcasted Alert',
+    FINALIZE_PAYROLL: 'Finalized Payroll',
+    RUN_MONTHLY_PAYROLL: 'Processed Monthly Payroll',
+  };
+  return map[action] || action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+};
+
+// Color coding for action tags
+const getActionBadgeClass = (action = '') => {
+  const act = action.toUpperCase();
+  if (act.includes('APPROVE') || act.includes('PRESENT') || act.includes('FINALIZE')) return 'badge-success';
+  if (act.includes('REJECT') || act.includes('DELETE') || act.includes('CANCEL')) return 'badge-danger';
+  if (act.includes('CREATE') || act.includes('SUBMIT')) return 'badge-primary';
+  if (act.includes('UPDATE') || act.includes('EDIT')) return 'badge-warning';
+  return 'badge-neutral';
+};
+
+// Plain English event summaries for the Inspection Modal
+const getFriendlySummary = (log) => {
+  if (!log) return '';
+  const { action, target_type, target_id, user_email } = log;
+  const actor = user_email || 'An administrator';
+
+  switch (action) {
+    case 'BATCH_REJECTED_LEAVE':
+      return `${actor} rejected a batch of leave applications (${target_id || 'ID unspecified'}).`;
+    case 'BATCH_APPROVED_LEAVE':
+      return `${actor} approved a batch of leave applications (${target_id || 'ID unspecified'}).`;
+    case 'APPROVE_LEAVE':
+      return `${actor} approved leave request #${target_id || ''}.`;
+    case 'REJECT_LEAVE':
+      return `${actor} rejected leave request #${target_id || ''}.`;
+    case 'CANCEL_LEAVE':
+      return `${actor} cancelled leave request #${target_id || ''}.`;
+    case 'SUBMIT_LEAVE':
+      return `${actor} submitted a new leave application.`;
+    case 'APPROVE_CORRECTION':
+      return `${actor} approved attendance correction #${target_id || ''}.`;
+    case 'REJECT_CORRECTION':
+      return `${actor} rejected attendance correction #${target_id || ''}.`;
+    case 'CANCEL_CORRECTION':
+      return `${actor} cancelled attendance correction #${target_id || ''}.`;
+    case 'APPROVE_APPEAL':
+      return `${actor} approved attendance appeal #${target_id || ''}.`;
+    case 'REJECT_APPEAL':
+      return `${actor} rejected attendance appeal #${target_id || ''}.`;
+    case 'CANCEL_APPEAL':
+      return `${actor} cancelled attendance appeal #${target_id || ''}.`;
+    case 'SUBMIT_APPEAL':
+      return `${actor} submitted an attendance appeal.`;
+    case 'APPROVE_OVERTIME':
+      return `${actor} approved overtime request #${target_id || ''}.`;
+    case 'REJECT_OVERTIME':
+      return `${actor} rejected overtime request #${target_id || ''}.`;
+    case 'CANCEL_OVERTIME':
+      return `${actor} cancelled overtime request #${target_id || ''}.`;
+    case 'SUBMIT_OVERTIME':
+      return `${actor} submitted an overtime request.`;
+    case 'LOGIN':
+      return `${actor} logged into the system.`;
+    case 'CLOCK_IN':
+      return `${actor} clocked in for a scheduled shift.`;
+    case 'CLOCK_OUT':
+      return `${actor} clocked out from a scheduled shift.`;
+    case 'CREATE_SCHEDULE':
+      return `${actor} created a new schedule shift.`;
+    case 'UPDATE_SCHEDULE':
+      return `${actor} updated schedule shift #${target_id || ''}.`;
+    case 'DELETE_SCHEDULE':
+      return `${actor} removed schedule shift #${target_id || ''}.`;
+    case 'CREATE_EMPLOYEE':
+      return `${actor} registered a new employee record.`;
+    case 'UPDATE_EMPLOYEE':
+      return `${actor} updated information for employee #${target_id || ''}.`;
+    case 'DELETE_EMPLOYEE':
+      return `${actor} deleted employee account #${target_id || ''}.`;
+    default:
+      return `${actor} performed [${formatActionLabel(action)}] on ${(target_type || 'record').replace(/_/g, ' ')} (${target_id ? `ID: ${target_id}` : 'System'}).`;
+  }
+};
+
+// Formats date to Philippine Standard Time
+const formatPHT = (dateStr) => {
+  if (!dateStr) return '—';
+  const cleanStr = String(dateStr).replace(' ', 'T');
+  const d = new Date(cleanStr);
+  if (isNaN(d.getTime())) return dateStr;
+  
+  return d.toLocaleString('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+};
 
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
@@ -19,7 +152,6 @@ const AuditLogs = () => {
   const [dateTo, setDateTo] = useState('');
   const [actionFilter, setActionFilter] = useState('');
 
-  // Modal inspection state
   const [selectedLog, setSelectedLog] = useState(null);
   const [showModal, setShowModal] = useState(false);
 
@@ -87,20 +219,22 @@ const AuditLogs = () => {
   const uniqueActions = useMemo(() => [...new Set(logs.map(log => log.action))], [logs]);
 
   const exportCSV = () => {
-    const headers = ['Timestamp', 'User Account', 'Action Executed', 'Target Module', 'Origin IP'];
+    const headers = ['Timestamp (PHT)', 'User Account', 'Action Executed', 'Target Module', 'Target ID', 'Origin IP', 'Summary'];
     const rows = filteredLogs.map(log => [
-      log.created_at,
+      formatPHT(log.created_at),
       log.user_email || 'System',
-      log.action,
+      formatActionLabel(log.action),
       log.target_type || '',
-      log.ip_address || ''
+      log.target_id || '',
+      (log.ip_address || '').split(',')[0].trim(),
+      getFriendlySummary(log)
     ]);
     const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `audit_logs_${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.info('CSV export started');
@@ -173,7 +307,7 @@ const AuditLogs = () => {
             >
               <option value="">All Actions</option>
               {uniqueActions.map(action => (
-                <option key={action} value={action}>{action}</option>
+                <option key={action} value={action}>{formatActionLabel(action)}</option>
               ))}
             </select>
           </div>
@@ -190,15 +324,16 @@ const AuditLogs = () => {
               <table className="expert-table">
                 <thead>
                   <tr>
-                    <th style={{ width: '80px' }} className="text-center">Details</th>
-                    <th>User Account</th>
-                    <th>Action Executed</th>
+                    <th className="al-col-view">View</th>
+                    <th style={{ width: '220px', whiteSpace: 'nowrap' }}>Date & Time (PHT)</th>
+                    <th>User / Administrator</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedLogs.length === 0 ? (
                     <tr>
-                      <td colSpan="3">
+                      <td colSpan="4">
                         <div className="expert-empty">
                           <ShieldAlert size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
                           <p>No audit records found.</p>
@@ -209,18 +344,25 @@ const AuditLogs = () => {
                   ) : (
                     paginatedLogs.map(log => (
                       <tr key={log.id} onClick={() => handleInspect(log)} title="Click to view details" style={{ cursor: 'pointer' }}>
-                        <td className="text-center">
+                        <td className="al-col-view">
                           <button 
                             className="al-action-inspect-btn" 
                             onClick={(e) => { e.stopPropagation(); handleInspect(log); }}
-                            title="View Log Details"
+                            title="View Details"
                           >
-                            <Eye size={16} color="#475569" />
+                            <Eye size={15} color="#475569" />
                           </button>
                         </td>
-                        <td className="text-dark font-medium">{log.user_email || 'System Daemon'}</td>
+                        <td className="font-mono text-muted" style={{ whiteSpace: 'nowrap' }}>
+                          {formatPHT(log.created_at)}
+                        </td>
+                        <td className="text-dark font-medium">
+                          {log.user_email || 'System'}
+                        </td>
                         <td>
-                          <span className="al-action-tag">{log.action}</span>
+                          <span className={`al-action-badge ${getActionBadgeClass(log.action)}`}>
+                            {formatActionLabel(log.action)}
+                          </span>
                         </td>
                       </tr>
                     ))
@@ -243,9 +385,13 @@ const AuditLogs = () => {
                 </div>
 
                 <div className="expert-page-controls">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn">
+                    <ChevronLeft size={16} /> Prev
+                  </button>
                   <span className="expert-page-current">{currentPage} / {totalPages || 1}</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">
+                    Next <ChevronRight size={16} />
+                  </button>
                 </div>
               </div>
             )}
@@ -269,50 +415,60 @@ const AuditLogs = () => {
           <div className="al-modal-content-grid">
             <div className="al-modal-meta-row">
               <div>
-                <span className="al-modal-label">Timestamp</span>
-                <p className="font-mono">{new Date(selectedLog.created_at).toLocaleString()}</p>
+                <span className="al-modal-label">Timestamp (PHT)</span>
+                <p className="font-mono text-dark font-medium">{formatPHT(selectedLog.created_at)}</p>
               </div>
               <div>
                 <span className="al-modal-label">User Account</span>
-                <p className="text-dark font-semibold">{selectedLog.user_email || 'System Daemon'}</p>
+                <p className="text-dark font-semibold">{selectedLog.user_email || 'System'}</p>
               </div>
               <div>
                 <span className="al-modal-label">Action Executed</span>
-                <p><span className="al-action-tag">{selectedLog.action}</span></p>
+                <p>
+                  <span className={`al-action-badge ${getActionBadgeClass(selectedLog.action)}`}>
+                    {formatActionLabel(selectedLog.action)}
+                  </span>
+                </p>
               </div>
             </div>
 
-            {/* Conditionally render Previous State / New State or System Summary */}
-            {(selectedLog.old_value || selectedLog.new_value) ? (
+            {/* Plain English Activity Summary */}
+            <div className="al-details-box">
+              <h4>Activity Summary</h4>
+              <div className="al-summary-box">
+                {getFriendlySummary(selectedLog)}
+              </div>
+            </div>
+
+            {/* Conditionally render State Comparison if payload exists */}
+            {(selectedLog.old_value || selectedLog.new_value) && (
               <div className="al-details-grid">
                 {selectedLog.old_value && (
                   <div className="al-details-box">
-                    <h4>Previous State (Old Value)</h4>
-                    <pre className="al-summary-box">{typeof selectedLog.old_value === 'object' ? JSON.stringify(selectedLog.old_value, null, 2) : selectedLog.old_value}</pre>
+                    <h4>Previous State</h4>
+                    <pre className="al-code-box">
+                      {typeof selectedLog.old_value === 'object' ? JSON.stringify(selectedLog.old_value, null, 2) : selectedLog.old_value}
+                    </pre>
                   </div>
                 )}
                 {selectedLog.new_value && (
                   <div className="al-details-box">
-                    <h4>New State / Payload (New Value)</h4>
-                    <pre className="al-summary-box">{typeof selectedLog.new_value === 'object' ? JSON.stringify(selectedLog.new_value, null, 2) : selectedLog.new_value}</pre>
+                    <h4>New State / Changes</h4>
+                    <pre className="al-code-box">
+                      {typeof selectedLog.new_value === 'object' ? JSON.stringify(selectedLog.new_value, null, 2) : selectedLog.new_value}
+                    </pre>
                   </div>
                 )}
-              </div>
-            ) : (
-              <div className="al-details-box">
-                <h4>System Event Summary</h4>
-                <div className="al-summary-box">
-                  Successfully executed action [{selectedLog.action}] on target module [{selectedLog.target_type || 'system'}] with ID [{selectedLog.target_id || 'N/A'}]. No prior data state modifications were recorded for this transaction type.
-                </div>
               </div>
             )}
 
             <div className="al-meta-info">
-              <span>Target Module: <strong>{selectedLog.target_type || 'N/A'}</strong></span>
+              <span>Target Module: <strong>{(selectedLog.target_type || 'System').replace(/_/g, ' ')}</strong></span>
               <span>Target ID: <strong>{selectedLog.target_id || 'N/A'}</strong></span>
-              <span>Origin IP: <strong>{selectedLog.ip_address || 'N/A'}</strong></span>
+              <span>Origin IP: <strong>{(selectedLog.ip_address || 'N/A').split(',')[0].trim()}</strong></span>
             </div>
-            <div className="al-meta-info" style={{ marginTop: '0.5rem', background: '#F0FDFA', borderColor: '#CCFBF1', color: '#0F766E' }}>
+            
+            <div className="al-meta-info" style={{ marginTop: '0.25rem', background: '#F0FDFA', borderColor: '#CCFBF1', color: '#0F766E' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 <ShieldCheck size={16} /> Verified Secure System Audit Event Record
               </span>

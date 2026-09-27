@@ -1,4 +1,4 @@
-/* src/pages/Reports.css - Formal Enterprise Dashboard & Print Styling */
+/* src/pages/Reports.css - Modern Minimalist & Formal Print Architecture */
 
 .formal-rep-container {
   padding: 2rem;
@@ -12,30 +12,12 @@
 .formal-rep-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-  padding-bottom: 1.5rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.25rem;
   border-bottom: 1px solid #E2E8F0;
   flex-wrap: wrap;
   gap: 1rem;
-}
-
-.formal-rep-title-block {
-  display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-}
-
-.formal-rep-brand-icon {
-  color: #0F172A;
-  margin-top: 4px;
-}
-
-.formal-rep-title-block h2 {
-  font-size: 1.5rem;
-  font-weight: 800;
-  margin: 0 0 0.25rem 0;
-  letter-spacing: -0.02em;
 }
 
 .formal-rep-title-block p {
@@ -48,7 +30,7 @@
 .formal-rep-controls {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.85rem;
   flex-wrap: wrap;
 }
 
@@ -60,29 +42,27 @@
 
 .formal-rep-icon {
   position: absolute;
-  left: 0.8rem;
+  left: 0.85rem;
   color: #94A3B8;
   pointer-events: none;
 }
 
 .formal-rep-select {
-  width: 100%;
-  min-width: 200px;
-  padding: 0.6rem 0.6rem 0.6rem 2.2rem;
+  min-width: 210px;
+  padding: 0.65rem 1rem 0.65rem 2.4rem;
   border: 1px solid #CBD5E1;
-  border-radius: 6px;
-  font-size: 0.9rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
   font-weight: 600;
   color: #0F172A;
   background-color: #FFFFFF;
   outline: none;
   cursor: pointer;
-  appearance: auto;
 }
 
 .formal-rep-select:focus {
-  border-color: #0F172A;
-  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1);
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
 .formal-rep-btn-primary {
@@ -90,38 +70,34 @@
   color: #FFFFFF;
   border: none;
   padding: 0.65rem 1.25rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s ease;
+  height: 40px;
 }
 
 .formal-rep-btn-primary:hover:not(:disabled) {
   background: #1E293B;
 }
 
-.formal-rep-btn-primary:disabled {
-  background: #94A3B8;
-  cursor: not-allowed;
-}
-
-/* Tab Navigation */
+/* Navigation Tabs */
 .formal-rep-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 2rem;
+  gap: 0.6rem;
+  margin-bottom: 1.75rem;
 }
 
 .formal-rep-tab-btn {
-  background: transparent;
-  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
   color: #475569;
-  padding: 0.6rem 1.2rem;
+  padding: 0.55rem 1.15rem;
   border-radius: 8px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -153,26 +129,26 @@
 .formal-rep-stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .formal-rep-stat-box {
   background: #FFFFFF;
   border: 1px solid #E2E8F0;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 1.25rem;
   display: flex;
   align-items: center;
-  gap: 1rem;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+  gap: 1.15rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 
 .formal-rep-stat-icon {
   background: #F8FAFC;
-  color: #0F172A;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  color: #0D9488;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -183,7 +159,7 @@
 .formal-rep-stat-info {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.25rem;
 }
 
 .formal-rep-stat-label {
@@ -195,13 +171,13 @@
 }
 
 .formal-rep-stat-value {
-  font-size: 1.5rem;
+  font-size: 1.45rem;
   font-weight: 800;
   color: #0F172A;
   line-height: 1.2;
 }
 
-/* Charts & Tables */
+/* Charts & Cards */
 .formal-rep-chart-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -211,8 +187,8 @@
 .formal-rep-card {
   background: #FFFFFF;
   border: 1px solid #E2E8F0;
-  border-radius: 8px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
   overflow: hidden;
 }
 
@@ -224,7 +200,7 @@
 
 .formal-rep-card-header h3 {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #0F172A;
   text-transform: uppercase;
@@ -252,14 +228,15 @@
   color: #64748B;
   font-weight: 700;
   text-align: left;
-  padding: 0.75rem 1rem;
+  padding: 0.85rem 1.15rem;
   border-bottom: 1px solid #E2E8F0;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  font-size: 0.75rem;
 }
 
 .formal-rep-table td {
-  padding: 0.8rem 1rem;
+  padding: 0.85rem 1.15rem;
   border-bottom: 1px solid #F1F5F9;
   color: #334155;
   vertical-align: middle;
@@ -272,39 +249,35 @@
 .fw-600 { font-weight: 600; }
 .text-dark { color: #0F172A; }
 .text-muted { color: #64748B; }
-.formal-rep-badge { display: inline-block; padding: 0.2rem 0.6rem; background: #F1F5F9; border: 1px solid #E2E8F0; border-radius: 6px; font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; }
+.font-mono { font-family: 'SF Mono', monospace; font-size: 0.825rem; }
+.formal-rep-badge { display: inline-block; padding: 0.2rem 0.6rem; background: #F1F5F9; border: 1px solid #E2E8F0; border-radius: 6px; font-size: 0.75rem; font-weight: 700; color: #475569; }
 
 /* States */
 .formal-rep-empty { padding: 3rem 1rem; text-align: center; color: #64748B; font-size: 0.9rem; font-weight: 500; }
 .formal-rep-error { padding: 1.5rem; background: #FEF2F2; border: 1px solid #FECACA; border-radius: 8px; color: #DC2626; display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
-.formal-rep-loading { display: flex; align-items: center; justify-content: center; gap: 0.75rem; padding: 3rem; color: #0F172A; font-weight: 600; font-size: 1rem; }
-.formal-rep-spinner { width: 18px; height: 18px; border: 2.5px solid #E2E8F0; border-top-color: #0F172A; border-radius: 50%; animation: rep-spin 0.6s linear infinite; }
+.formal-rep-loading { display: flex; align-items: center; justify-content: center; gap: 0.75rem; padding: 4rem; color: #0F172A; font-weight: 600; font-size: 1rem; }
+.formal-rep-spinner { width: 18px; height: 18px; border: 2.5px solid #CBD5E1; border-top-color: #0D9488; border-radius: 50%; animation: rep-spin 0.6s linear infinite; }
 
 @keyframes rep-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1024px) {
   .formal-rep-chart-grid { grid-template-columns: 1fr; }
 }
-@media (max-width: 600px) {
-  .formal-rep-controls { width: 100%; justify-content: space-between; }
-  .formal-rep-select { min-width: unset; width: 100%; }
-}
 
-
-/* ==========================================
-   PRINT STYLES - STRICT FORMAL A4 DOCUMENT
-   ========================================== */
+/* =========================================================================
+   FORMAL A4 PRINT ENGINE (LANDSCAPE & PORTRAIT BALANCED)
+   ========================================================================= */
 .print-only { display: none; }
 
 @media print {
-  /* Setup page */
-  @page { size: A4; margin: 20mm; }
+  @page {
+    size: A4 landscape;
+    margin: 12mm 15mm;
+  }
   
-  /* Hide all app UI */
   body * { visibility: hidden !important; }
   .lay-sidebar, .lay-top-header, .formal-rep-header, .formal-rep-tabs, .screen-only { display: none !important; }
   
-  /* Show print container */
   .print-only { 
     display: block !important; 
     visibility: visible !important; 
@@ -312,37 +285,140 @@
     left: 0; 
     top: 0; 
     width: 100%; 
-    background: white; 
-    color: #000;
+    background: #FFFFFF; 
+    color: #0F172A;
+    font-family: 'Inter', -apple-system, sans-serif;
   }
   
   .print-only * { visibility: visible !important; }
 
-  /* Document Header */
-  .formal-print-header { text-align: center; margin-bottom: 2rem; }
-  .print-brand-title { font-size: 24pt; font-weight: bold; color: #000; font-family: Helvetica, Arial, sans-serif; letter-spacing: 1px; }
-  .print-brand-sub { font-size: 11pt; color: #333; margin-top: 4px; font-family: Helvetica, Arial, sans-serif; }
-  .print-brand-contact { font-size: 9pt; color: #555; margin-top: 4px; font-family: Helvetica, Arial, sans-serif; }
-  .print-divider { height: 2px; background: #000; margin: 15px 0; width: 100%; }
-  .print-doc-title { font-size: 14pt; font-weight: bold; text-transform: uppercase; margin: 0; font-family: Helvetica, Arial, sans-serif; }
-  .print-doc-meta { font-size: 10pt; color: #555; margin-top: 5px; font-family: Helvetica, Arial, sans-serif; }
+  /* Header Layout */
+  .formal-print-header { margin-bottom: 12px; }
+  .print-top-meta { display: flex; justify-content: space-between; align-items: flex-start; }
+  .print-brand-title { font-size: 16pt; font-weight: 800; color: #0F172A; margin: 0; letter-spacing: -0.02em; }
+  .print-brand-sub { font-size: 8.5pt; color: #00897B; font-weight: 700; margin: 3px 0 0 0; text-transform: uppercase; }
+  .print-brand-contact { font-size: 7pt; color: #64748B; margin: 2px 0 0 0; }
 
-  /* Formal Table */
-  .formal-print-table { width: 100%; border-collapse: collapse; margin-bottom: 3rem; font-family: Helvetica, Arial, sans-serif; font-size: 9pt; }
-  .formal-print-table th { background: #f0f0f0 !important; -webkit-print-color-adjust: exact; color: #000; font-weight: bold; text-align: left; padding: 8px 10px; border: 1px solid #000; text-transform: uppercase; }
-  .formal-print-table td { padding: 6px 10px; border: 1px solid #666; color: #000; }
-  
-  /* Prevent rows breaking across pages */
+  .print-audit-box {
+    text-align: right;
+    font-size: 7.5pt;
+    color: #334155;
+    line-height: 1.45;
+  }
+  .print-dcn { font-weight: 800; color: #0F172A; font-family: monospace; font-size: 8pt; }
+
+  .print-divider { height: 1.5px; background: #0F172A; margin: 8px 0; }
+  .print-doc-title { font-size: 11.5pt; font-weight: 800; text-align: left; margin: 0 0 6px 0; letter-spacing: 0.02em; color: #0F172A; }
+
+  .print-methodology-box {
+    background: #F8FAFC !important;
+    -webkit-print-color-adjust: exact;
+    border: 1px solid #CBD5E1;
+    padding: 6px 10px;
+    font-size: 7pt;
+    color: #334155;
+    line-height: 1.4;
+    margin-bottom: 10px;
+    border-radius: 4px;
+  }
+
+  /* Printable KPI Summary Strip */
+  .print-kpi-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .print-kpi-cell {
+    flex: 1;
+    background: #F1F5F9 !important;
+    -webkit-print-color-adjust: exact;
+    border: 1px solid #E2E8F0;
+    padding: 6px 10px;
+    font-size: 7.5pt;
+    color: #475569;
+    border-radius: 4px;
+  }
+  .print-kpi-cell strong { color: #0F172A; font-size: 8.5pt; display: block; margin-top: 2px; }
+
+  /* Formal Data Tables */
+  .formal-print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7.5pt;
+    margin-bottom: 15px;
+  }
+  .formal-print-table th {
+    background: #0F172A !important;
+    -webkit-print-color-adjust: exact;
+    color: #FFFFFF !important;
+    font-weight: 700;
+    text-align: left;
+    padding: 5px 8px;
+    border: 1px solid #0F172A;
+    font-size: 6.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .formal-print-table td {
+    padding: 4.5px 8px;
+    border: 1px solid #CBD5E1;
+    color: #0F172A;
+  }
+  .formal-print-table tr:nth-child(even) td {
+    background: #F8FAFC !important;
+    -webkit-print-color-adjust: exact;
+  }
   .formal-print-table tr { page-break-inside: avoid; }
 
-  /* Signatures */
-  .formal-print-footer { margin-top: 40px; page-break-inside: avoid; font-family: Helvetica, Arial, sans-serif; }
-  .print-signatures { display: flex; justify-content: space-between; margin-bottom: 40px; }
-  .print-signatures div { width: 28%; text-align: center; }
-  .sig-line { display: block; border-bottom: 1px solid #000; height: 30px; margin-bottom: 5px; }
-  .sig-title { font-size: 8pt; font-weight: bold; color: #000; }
+  .text-center { text-align: center; }
+  .text-right { text-align: right; }
+  .text-truncate { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* Confidentiality Footer */
-  .print-confidential { text-align: center; font-size: 8pt; font-weight: bold; color: #666; margin-bottom: 3px; }
-  .print-generated { text-align: center; font-size: 7pt; color: #888; }
+  .print-status-tag {
+    font-weight: 700;
+    font-size: 6.5pt;
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+  .tag-success { background: #ECFDF5 !important; color: #047857 !important; border: 1px solid #A7F3D0; }
+  .tag-danger { background: #FEF2F2 !important; color: #B91C1C !important; border: 1px solid #FECACA; }
+  .tag-muted { background: #F1F5F9 !important; color: #475569 !important; border: 1px solid #CBD5E1; }
+
+  /* Formal Signatures & NPC Footer */
+  .formal-print-footer {
+    margin-top: 14px;
+    page-break-inside: avoid;
+  }
+  .print-signatures {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    gap: 15px;
+  }
+  .sig-block {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    text-align: center;
+  }
+  .sig-line {
+    border-bottom: 1px solid #0F172A;
+    height: 24px;
+    margin-bottom: 4px;
+  }
+  .sig-name { font-size: 7.5pt; font-weight: 800; color: #0F172A; }
+  .sig-title { font-size: 6.5pt; color: #64748B; margin-top: 1px; }
+  .sig-date { font-size: 6.5pt; color: #475569; margin-top: 2px; }
+
+  .print-privacy-banner {
+    text-align: center;
+    border-top: 1px solid #E2E8F0;
+    padding-top: 6px;
+    font-size: 6pt;
+    color: #64748B;
+    line-height: 1.4;
+  }
+  .print-privacy-banner strong { color: #334155; font-size: 6.5pt; }
 }

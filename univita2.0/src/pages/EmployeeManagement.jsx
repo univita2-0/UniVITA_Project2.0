@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import './EmployeeManagement.css';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
   Search, Edit2, Trash2, UserCheck, AlertCircle, ChevronLeft, ChevronRight, 
-  Users, Eye, EyeOff, Plus, Copy, CheckCircle, FileText, Calendar, UploadCloud
+  Users, Eye, EyeOff, Plus, Copy, CheckCircle, FileText, Calendar, UploadCloud,
+  CreditCard, MapPin
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
@@ -15,7 +16,149 @@ const getAuthHeaders = () => ({
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const EmployeeManagement = ({ onOpenPinChange }) => {
+// Standard Philippine Geographic Directory
+const PH_REGIONS = [
+  'NCR - National Capital Region',
+  'CAR - Cordillera Administrative Region',
+  'Region I - Ilocos Region',
+  'Region II - Cagayan Valley',
+  'Region III - Central Luzon',
+  'Region IV-A - CALABARZON',
+  'MIMAROPA Region',
+  'Region V - Bicol Region',
+  'Region VI - Western Visayas',
+  'Region VII - Central Visayas',
+  'Region VIII - Eastern Visayas',
+  'Region IX - Zamboanga Peninsula',
+  'Region X - Northern Mindanao',
+  'Region XI - Davao Region',
+  'Region XII - SOCCSKSARGEN',
+  'Region XIII - Caraga',
+  'BARMM - Bangsamoro Autonomous Region'
+];
+
+const PH_PROVINCES = [
+  'Metro Manila', 'Abra', 'Agusan del Norte', 'Agusan del Sur', 'Aklan', 'Albay', 'Antique', 'Apayao', 
+  'Aurora', 'Basilan', 'Bataan', 'Batanes', 'Batangas', 'Benguet', 'Biliran', 'Bohol', 'Bukidnon', 
+  'Bulacan', 'Cagayan', 'Camarines Norte', 'Camarines Sur', 'Camiguin', 'Capiz', 'Catanduanes', 
+  'Cavite', 'Cebu', 'Cotabato', 'Davao de Oro', 'Davao del Norte', 'Davao del Sur', 'Davao Occidental', 
+  'Davao Oriental', 'Dinagat Islands', 'Eastern Samar', 'Guimaras', 'Ifugao', 'Ilocos Norte', 
+  'Ilocos Sur', 'Iloilo', 'Isabela', 'Kalinga', 'La Union', 'Laguna', 'Lanao del Norte', 'Lanao del Sur', 
+  'Leyte', 'Maguindanao', 'Marinduque', 'Masbate', 'Misamis Occidental', 'Misamis Oriental', 
+  'Mountain Province', 'Negros Occidental', 'Negros Oriental', 'Northern Samar', 'Nueva Ecija', 
+  'Nueva Vizcaya', 'Occidental Mindoro', 'Oriental Mindoro', 'Palawan', 'Pampanga', 'Pangasinan', 
+  'Quezon', 'Quirino', 'Rizal', 'Romblon', 'Samar', 'Sarangani', 'Siquijor', 'Sorsogon', 
+  'South Cotabato', 'Southern Leyte', 'Sultan Kudarat', 'Sulu', 'Surigao del Norte', 'Surigao del Sur', 
+  'Tarlac', 'Tawi-Tawi', 'Zambales', 'Zamboanga del Norte', 'Zamboanga del Sur', 'Zamboanga Sibugay'
+];
+
+const PH_CITIES = [
+  { name: 'Pasay City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1300' },
+  { name: 'Manila', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1000' },
+  { name: 'Makati City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1200' },
+  { name: 'Quezon City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1100' },
+  { name: 'Taguig City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1630' },
+  { name: 'Pasig City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1600' },
+  { name: 'Parañaque City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1700' },
+  { name: 'Mandaluyong City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1550' },
+  { name: 'Muntinlupa City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1770' },
+  { name: 'Las Piñas City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1740' },
+  { name: 'Caloocan City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1400' },
+  { name: 'Marikina City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1800' },
+  { name: 'Valenzuela City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1440' },
+  { name: 'Malabon City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1470' },
+  { name: 'Navotas City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1485' },
+  { name: 'San Juan City', province: 'Metro Manila', region: 'NCR - National Capital Region', zip: '1500' },
+  { name: 'Baguio City', province: 'Benguet', region: 'CAR - Cordillera Administrative Region', zip: '2600' },
+  { name: 'San Fernando City', province: 'Pampanga', region: 'Region III - Central Luzon', zip: '2000' },
+  { name: 'Angeles City', province: 'Pampanga', region: 'Region III - Central Luzon', zip: '2009' },
+  { name: 'Antipolo City', province: 'Rizal', region: 'Region IV-A - CALABARZON', zip: '1870' },
+  { name: 'Bacoor City', province: 'Cavite', region: 'Region IV-A - CALABARZON', zip: '4102' },
+  { name: 'Imus City', province: 'Cavite', region: 'Region IV-A - CALABARZON', zip: '4103' },
+  { name: 'Dasmariñas City', province: 'Cavite', region: 'Region IV-A - CALABARZON', zip: '4114' },
+  { name: 'Calamba City', province: 'Laguna', region: 'Region IV-A - CALABARZON', zip: '4027' },
+  { name: 'Santa Rosa City', province: 'Laguna', region: 'Region IV-A - CALABARZON', zip: '4026' },
+  { name: 'Batangas City', province: 'Batangas', region: 'Region IV-A - CALABARZON', zip: '4200' },
+  { name: 'Cebu City', province: 'Cebu', region: 'Region VII - Central Visayas', zip: '6000' },
+  { name: 'Mandaue City', province: 'Cebu', region: 'Region VII - Central Visayas', zip: '6014' },
+  { name: 'Lapu-Lapu City', province: 'Cebu', region: 'Region VII - Central Visayas', zip: '6015' },
+  { name: 'Iloilo City', province: 'Iloilo', region: 'Region VI - Western Visayas', zip: '5000' },
+  { name: 'Bacolod City', province: 'Negros Occidental', region: 'Region VI - Western Visayas', zip: '6100' },
+  { name: 'Davao City', province: 'Davao del Sur', region: 'Region XI - Davao Region', zip: '8000' },
+  { name: 'Cagayan de Oro City', province: 'Misamis Oriental', region: 'Region X - Northern Mindanao', zip: '9000' },
+  { name: 'Zamboanga City', province: 'Zamboanga del Sur', region: 'Region IX - Zamboanga Peninsula', zip: '7000' },
+  { name: 'General Santos City', province: 'South Cotabato', region: 'Region XII - SOCCSKSARGEN', zip: '9500' }
+];
+
+// Clickable Autocomplete Input Component
+const AutocompleteInput = ({ label, name, value, onChange, onSelect, suggestions = [], placeholder }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const wrapperRef = useRef(null);
+
+  const filtered = useMemo(() => {
+    if (!value) return suggestions.slice(0, 8);
+    const query = String(value).toLowerCase().trim();
+    return suggestions.filter(item => {
+      const text = typeof item === 'string' ? item : `${item.name} (${item.province || item.zip || ''})`;
+      return text.toLowerCase().includes(query);
+    }).slice(0, 8);
+  }, [value, suggestions]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div className="form-group autocomplete-wrapper" ref={wrapperRef} style={{ position: 'relative' }}>
+      <label>{label}</label>
+      <input
+        name={name}
+        value={value}
+        placeholder={placeholder}
+        autoComplete="off"
+        onFocus={() => setIsOpen(true)}
+        onChange={(e) => {
+          onChange(e);
+          setIsOpen(true);
+        }}
+      />
+      {isOpen && filtered.length > 0 && (
+        <ul className="autocomplete-dropdown">
+          {filtered.map((item, idx) => {
+            const displayText = typeof item === 'string' ? item : item.name;
+            const subText = typeof item === 'object' ? `${item.province ? item.province + ', ' : ''}${item.zip || ''}` : '';
+            return (
+              <li
+                key={idx}
+                className="autocomplete-item"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  if (onSelect) {
+                    onSelect(item);
+                  } else {
+                    onChange({ target: { name, value: displayText } });
+                  }
+                  setIsOpen(false);
+                }}
+              >
+                <span className="autocomplete-item-text">{displayText}</span>
+                {subText ? <span className="autocomplete-item-sub">{subText}</span> : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+const EmployeeManagement = () => {
   const [employees, setEmployees] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('instructors');
@@ -43,11 +186,12 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     employee_id: '', full_name: '', first_name: '', last_name: '', middle_initial: '',
     email: '', phone: '', date_of_birth: '', gender: 'Prefer not to say',
     emergency_contact_name: '', emergency_contact_phone: '',
-    street: '', city: '', state: '', postal_code: '', country: 'Philippines',
+    region: '', street: '', city: '', state: '', postal_code: '', country: 'Philippines',
     notes: '', position: 'Entry Level Simulationist', employment_type: 'Full-time',
     date_of_joining: '', account_expiry: '', status: 'active', role: 'instructor',
     salary: 32000, work_days_per_month: 22,
-    application_date: '', interview_date: '', resume_link: '', resume_file: ''
+    application_date: '', interview_date: '', resume_link: '', resume_file: '',
+    sss_number: '', pagibig_number: '', philhealth_number: '', tin_number: ''
   });
 
   const [showSoftDeleteModal, setShowSoftDeleteModal] = useState(false);
@@ -63,7 +207,8 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
   const [newEmployeeData, setNewEmployeeData] = useState({
     first_name: '', last_name: '', middle_initial: '', full_name: '', email: '', phone: '',
     position: 'Entry Level Simulationist', employment_type: 'Full-time', role: 'instructor', status: 'active',
-    salary: 32000, application_date: '', interview_date: '', date_of_joining: '', resume_link: ''
+    salary: 32000, application_date: '', interview_date: '', date_of_joining: '', resume_link: '',
+    sss_number: '', pagibig_number: '', philhealth_number: '', tin_number: ''
   });
 
   const calculateDefaultSalary = (role, position) => {
@@ -107,12 +252,12 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       const newNum = lastNum + 1;
       const newId = `E${newNum.toString().padStart(3, '0')}`;
       setGeneratedEmpId(newId);
-      setGeneratedPassword(`emp${newId.substring(1)}`);
+      setGeneratedPassword(`Univita@${newId}`);
     } catch (err) {
       const newNum = employees.length + 1;
       const newId = `E${newNum.toString().padStart(3, '0')}`;
       setGeneratedEmpId(newId);
-      setGeneratedPassword(`emp${newId.substring(1)}`);
+      setGeneratedPassword(`Univita@${newId}`);
     }
   };
 
@@ -124,7 +269,17 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
   const openEditModal = (emp) => {
     setSelectedEmployee(emp);
     
-    let appDate = '', intDate = '', resLink = '', resFile = '', parsedNotes = emp.additional_info || '';
+    let appDate = '', intDate = '', resLink = '', resFile = '', parsedNotes = '';
+    let sss = emp.sss_number || '';
+    let pagibig = emp.pagibig_number || '';
+    let philhealth = emp.philhealth_number || '';
+    let tin = emp.tin_number || '';
+    let street = emp.street_address || emp.street || '';
+    let state = emp.state_province || emp.state || '';
+    let city = emp.city || '';
+    let postal = emp.postal_code || '';
+    let region = emp.region || '';
+
     try {
       if (emp.additional_info && emp.additional_info.startsWith('{')) {
         const parsed = JSON.parse(emp.additional_info);
@@ -133,8 +288,17 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
         resLink = parsed.resume_link || '';
         resFile = parsed.resume_file || '';
         parsedNotes = parsed.notes || '';
+        if (parsed.sss_number) sss = parsed.sss_number;
+        if (parsed.pagibig_number) pagibig = parsed.pagibig_number;
+        if (parsed.philhealth_number) philhealth = parsed.philhealth_number;
+        if (parsed.tin_number) tin = parsed.tin_number;
+        if (parsed.region) region = parsed.region;
+        if (!street && (parsed.street || parsed.street_address)) street = parsed.street || parsed.street_address;
+        if (!state && (parsed.state || parsed.state_province)) state = parsed.state || parsed.state_province;
+        if (!city && parsed.city) city = parsed.city;
+        if (!postal && parsed.postal_code) postal = parsed.postal_code;
       }
-    } catch(e) {}
+    } catch (e) {}
 
     setFormData({
       employee_id: emp.employee_id || '',
@@ -148,10 +312,11 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       gender: emp.gender || 'Prefer not to say',
       emergency_contact_name: emp.emergency_contact_name || '',
       emergency_contact_phone: emp.emergency_contact_phone || '',
-      street: emp.street_address || emp.street || '',
-      city: emp.city || '',
-      state: emp.state_province || emp.state || '',
-      postal_code: emp.postal_code || '',
+      region: region,
+      street: street,
+      city: city,
+      state: state,
+      postal_code: postal,
       country: emp.country || 'Philippines',
       notes: parsedNotes,
       position: emp.position_level || emp.position || 'Entry Level Simulationist',
@@ -165,7 +330,11 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       application_date: appDate,
       interview_date: intDate,
       resume_link: resLink,
-      resume_file: resFile
+      resume_file: resFile,
+      sss_number: sss,
+      pagibig_number: pagibig,
+      philhealth_number: philhealth,
+      tin_number: tin
     });
     setEditResumeFile(null);
     setActiveTabModal('general');
@@ -223,21 +392,23 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       setActiveTabModal('profile'); return;
     }
 
-    if (formData.application_date && formData.interview_date && formData.interview_date < formData.application_date) {
-      toast.warning('Interview date cannot be before the application date.');
-      setActiveTabModal('onboarding'); return;
-    }
-    if (formData.interview_date && formData.date_of_joining && formData.date_of_joining < formData.interview_date) {
-      toast.warning('Hire date cannot be before the interview date.');
-      setActiveTabModal('onboarding'); return;
-    }
-
     try {
       const advancedInfoJSON = JSON.stringify({
         notes: (formData.notes || '').trim(),
         application_date: formData.application_date || null,
         interview_date: formData.interview_date || null,
-        resume_link: (formData.resume_link || '').trim()
+        resume_link: (formData.resume_link || '').trim(),
+        sss_number: (formData.sss_number || '').trim(),
+        pagibig_number: (formData.pagibig_number || '').trim(),
+        philhealth_number: (formData.philhealth_number || '').trim(),
+        tin_number: (formData.tin_number || '').trim(),
+        region: (formData.region || '').trim(),
+        street: (formData.street || '').trim(),
+        street_address: (formData.street || '').trim(),
+        state: (formData.state || '').trim(),
+        state_province: (formData.state || '').trim(),
+        city: (formData.city || '').trim(),
+        postal_code: (formData.postal_code || '').trim()
       });
 
       const fd = new FormData();
@@ -260,23 +431,31 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       appendSafe('gender', formData.gender);
       appendSafe('emergency_contact_name', (formData.emergency_contact_name || '').trim());
       appendSafe('emergency_contact_phone', (formData.emergency_contact_phone || '').trim());
+
+      // Send both field variations so server.js matches either key
+      appendSafe('street', (formData.street || '').trim());
       appendSafe('street_address', (formData.street || '').trim());
-      appendSafe('city', (formData.city || '').trim());
+      appendSafe('state', (formData.state || '').trim());
       appendSafe('state_province', (formData.state || '').trim());
+      appendSafe('city', (formData.city || '').trim());
       appendSafe('postal_code', (formData.postal_code || '').trim());
       appendSafe('country', (formData.country || 'Philippines').trim());
-      appendSafe('additional_info', advancedInfoJSON);
+      appendSafe('region', (formData.region || '').trim());
+
+      appendSafe('sss_number', (formData.sss_number || '').trim());
+      appendSafe('pagibig_number', (formData.pagibig_number || '').trim());
+      appendSafe('philhealth_number', (formData.philhealth_number || '').trim());
+      appendSafe('tin_number', (formData.tin_number || '').trim());
 
       appendSafe('date_of_joining', formatDateForDB(formData.date_of_joining));
       appendSafe('date_of_birth', formatDateForDB(formData.date_of_birth));
       appendSafe('account_expiry', formatDateForDB(formData.account_expiry));
+      appendSafe('additional_info', advancedInfoJSON);
 
       if (editResumeFile) {
         fd.append('resume_file', editResumeFile);
       }
 
-      // CRITICAL FIX: Simply passing getAuthHeaders() removes the manual Content-Type override
-      // This allows the browser to automatically set the boundary so Multer can read the data.
       await axios.put(`${API_BASE}/employees/${selectedEmployee.id}`, fd, getAuthHeaders());
       
       toast.success('Employee updated successfully!');
@@ -326,15 +505,15 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     if (!email || !EMAIL_REGEX.test(email)) return toast.warning('Please enter a valid Email Address.');
     if (Number(newEmployeeData.salary) < 0) return toast.warning('Salary cannot be negative.');
 
-    if (newEmployeeData.application_date && newEmployeeData.interview_date && newEmployeeData.interview_date < newEmployeeData.application_date) {
-      return toast.warning('Interview date cannot be before application date.');
-    }
-
     try {
       const advancedInfoJSON = JSON.stringify({
         application_date: newEmployeeData.application_date || null,
         interview_date: newEmployeeData.interview_date || null,
-        resume_link: newEmployeeData.resume_link.trim()
+        resume_link: (newEmployeeData.resume_link || '').trim(),
+        sss_number: (newEmployeeData.sss_number || '').trim(),
+        pagibig_number: (newEmployeeData.pagibig_number || '').trim(),
+        philhealth_number: (newEmployeeData.philhealth_number || '').trim(),
+        tin_number: (newEmployeeData.tin_number || '').trim()
       });
 
       const fd = new FormData();
@@ -357,6 +536,11 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       appendSafe('date_of_joining', newEmployeeData.date_of_joining || '');
       appendSafe('additional_info', advancedInfoJSON);
 
+      appendSafe('sss_number', (newEmployeeData.sss_number || '').trim());
+      appendSafe('pagibig_number', (newEmployeeData.pagibig_number || '').trim());
+      appendSafe('philhealth_number', (newEmployeeData.philhealth_number || '').trim());
+      appendSafe('tin_number', (newEmployeeData.tin_number || '').trim());
+
       if (newResumeFile) {
         fd.append('resume_file', newResumeFile);
       }
@@ -368,7 +552,8 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
       setNewEmployeeData({
         first_name: '', last_name: '', middle_initial: '', full_name: '', email: '', phone: '',
         position: 'Entry Level Simulationist', employment_type: 'Full-time', role: 'instructor', status: 'active',
-        salary: 32000, application_date: '', interview_date: '', date_of_joining: '', resume_link: ''
+        salary: 32000, application_date: '', interview_date: '', date_of_joining: '', resume_link: '',
+        sss_number: '', pagibig_number: '', philhealth_number: '', tin_number: ''
       });
       setNewResumeFile(null);
       setGeneratedEmpId(''); setGeneratedPassword('');
@@ -433,7 +618,6 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
     <div className="em-container">
       <div className="em-header">
         <div>
-          
           <p>Oversee directory, manage system roles, and configure employee profiles.</p>
         </div>
         <button className="btn-add" onClick={() => { generateNewEmployeeId(); setShowAddModal(true); }}>
@@ -560,8 +744,19 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
             <input placeholder="e.g. Santos" value={newEmployeeData.last_name} onChange={e => handleAddEmployeeChange('last_name', e.target.value)} />
           </div>
           <div className="modal-form-group">
+            <label>Middle Initial</label>
+            <input placeholder="e.g. D" maxLength={1} value={newEmployeeData.middle_initial} onChange={e => handleAddEmployeeChange('middle_initial', e.target.value)} />
+          </div>
+        </div>
+
+        <div className="form-row-grid">
+          <div className="modal-form-group">
             <label>Email Address <span className="req-star">*</span></label>
             <input type="email" placeholder="e.g. maria@company.com" value={newEmployeeData.email} onChange={e => handleAddEmployeeChange('email', e.target.value)} />
+          </div>
+          <div className="modal-form-group">
+            <label>Phone Number</label>
+            <input type="tel" placeholder="e.g. 09171234567" value={newEmployeeData.phone} onChange={e => handleAddEmployeeChange('phone', e.target.value)} />
           </div>
         </div>
 
@@ -600,8 +795,33 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
           </div>
         </div>
 
+        <div className="form-section-notice" style={{ marginTop: '1rem', borderLeftColor: '#059669', backgroundColor: '#ECFDF5' }}>
+          <CreditCard size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }} />
+          Government Statutory Identification (Philippines)
+        </div>
+        <div className="form-row-grid">
+          <div className="modal-form-group">
+            <label>SSS Number</label>
+            <input placeholder="e.g. 34-1234567-8" value={newEmployeeData.sss_number} onChange={e => handleAddEmployeeChange('sss_number', e.target.value)} />
+          </div>
+          <div className="modal-form-group">
+            <label>Pag-IBIG / HDMF MID</label>
+            <input placeholder="e.g. 1210-1234-5678" value={newEmployeeData.pagibig_number} onChange={e => handleAddEmployeeChange('pagibig_number', e.target.value)} />
+          </div>
+        </div>
+        <div className="form-row-grid">
+          <div className="modal-form-group">
+            <label>PhilHealth Identification No. (PIN)</label>
+            <input placeholder="e.g. 12-345678901-2" value={newEmployeeData.philhealth_number} onChange={e => handleAddEmployeeChange('philhealth_number', e.target.value)} />
+          </div>
+          <div className="modal-form-group">
+            <label>Tax Identification No. (TIN)</label>
+            <input placeholder="e.g. 123-456-789-000" value={newEmployeeData.tin_number} onChange={e => handleAddEmployeeChange('tin_number', e.target.value)} />
+          </div>
+        </div>
+
         <div className="form-section-notice" style={{ marginTop: '1rem', borderLeftColor: '#0284C7', backgroundColor: '#F0F9FF' }}>
-          Onboarding & Hiring Record (Optional)
+          Onboarding & Hiring Dates
         </div>
         <div className="form-row-grid">
           <div className="modal-form-group">
@@ -651,7 +871,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
         </div>
       </FormalModal>
 
-      {/* EDIT EMPLOYEE MODAL */}
+      {/* EDIT EMPLOYEE PROFILE MODAL */}
       <FormalModal show={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Employee Profile" wide>
         <div className="edit-employee-layout">
           <div className="edit-sidebar">
@@ -662,6 +882,7 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
               <button className={`tab-btn ${activeTabModal === 'general' ? 'active' : ''}`} onClick={() => setActiveTabModal('general')}>General</button>
               <button className={`tab-btn ${activeTabModal === 'account' ? 'active' : ''}`} onClick={() => setActiveTabModal('account')}>Account & Role</button>
               <button className={`tab-btn ${activeTabModal === 'profile' ? 'active' : ''}`} onClick={() => setActiveTabModal('profile')}>Personal Details</button>
+              <button className={`tab-btn ${activeTabModal === 'statutory' ? 'active' : ''}`} onClick={() => setActiveTabModal('statutory')}>Statutory IDs</button>
               <button className={`tab-btn ${activeTabModal === 'onboarding' ? 'active' : ''}`} onClick={() => setActiveTabModal('onboarding')}>Onboarding</button>
               <button className={`tab-btn ${activeTabModal === 'address' ? 'active' : ''}`} onClick={() => setActiveTabModal('address')}>Address</button>
             </div>
@@ -800,6 +1021,34 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
               </>
             )}
 
+            {activeTabModal === 'statutory' && (
+              <div className="statutory-tab-content">
+                <div className="form-section-notice" style={{ borderLeftColor: '#059669', backgroundColor: '#ECFDF5' }}>
+                  Philippine Mandatory Benefits & Government Contribution Identifiers.
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Social Security System (SSS) No.</label>
+                    <input name="sss_number" placeholder="e.g. 34-1234567-8" value={formData.sss_number} onChange={handleEditInputChange} />
+                  </div>
+                  <div className="form-group">
+                    <label>Pag-IBIG / HDMF MID No.</label>
+                    <input name="pagibig_number" placeholder="e.g. 1210-1234-5678" value={formData.pagibig_number} onChange={handleEditInputChange} />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>PhilHealth Identification No. (PIN)</label>
+                    <input name="philhealth_number" placeholder="e.g. 12-345678901-2" value={formData.philhealth_number} onChange={handleEditInputChange} />
+                  </div>
+                  <div className="form-group">
+                    <label>Taxpayer Identification No. (TIN)</label>
+                    <input name="tin_number" placeholder="e.g. 123-456-789-000" value={formData.tin_number} onChange={handleEditInputChange} />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeTabModal === 'onboarding' && (
               <>
                 <div className="form-row">
@@ -839,26 +1088,95 @@ const EmployeeManagement = ({ onOpenPinChange }) => {
               </>
             )}
 
+            {/* ========================================================= */}
+            {/* ADDRESS TAB (WITH REGION & INTELLIGENT AUTOCOMPLETE)      */}
+            {/* ========================================================= */}
             {activeTabModal === 'address' && (
               <div className="address-tab-content">
                 <div className="form-row">
-                  <div className="form-group">
-                    <label>Street Address</label>
-                    <input name="street" value={formData.street} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label>City</label>
-                    <input name="city" value={formData.city} onChange={handleEditInputChange} />
-                  </div>
+                  {/* REGION FIELD WITH AUTOCOMPLETE */}
+                  <AutocompleteInput
+                    label="Region"
+                    name="region"
+                    value={formData.region}
+                    placeholder="e.g. NCR - National Capital Region"
+                    suggestions={PH_REGIONS}
+                    onChange={handleEditInputChange}
+                    onSelect={(selectedRegion) => {
+                      setFormData(prev => ({
+                        ...prev,
+                        region: selectedRegion,
+                        state: selectedRegion.startsWith('NCR') ? 'Metro Manila' : prev.state
+                      }));
+                    }}
+                  />
+
+                  {/* PROVINCE / STATE FIELD WITH AUTOCOMPLETE */}
+                  <AutocompleteInput
+                    label="State / Province"
+                    name="state"
+                    value={formData.state}
+                    placeholder="e.g. Metro Manila or Cavite"
+                    suggestions={PH_PROVINCES}
+                    onChange={handleEditInputChange}
+                    onSelect={(selectedProvince) => {
+                      setFormData(prev => ({
+                        ...prev,
+                        state: selectedProvince
+                      }));
+                    }}
+                  />
                 </div>
+
                 <div className="form-row">
-                  <div className="form-group">
-                    <label>State / Province</label>
-                    <input name="state" value={formData.state} onChange={handleEditInputChange} />
-                  </div>
+                  {/* CITY FIELD WITH AUTOCOMPLETE (Auto-fills Region, Province, and Postal Code) */}
+                  <AutocompleteInput
+                    label="City / Municipality"
+                    name="city"
+                    value={formData.city}
+                    placeholder="e.g. Pasay City"
+                    suggestions={PH_CITIES}
+                    onChange={handleEditInputChange}
+                    onSelect={(selectedCity) => {
+                      setFormData(prev => ({
+                        ...prev,
+                        city: selectedCity.name,
+                        state: selectedCity.province || prev.state,
+                        region: selectedCity.region || prev.region,
+                        postal_code: selectedCity.zip || prev.postal_code
+                      }));
+                    }}
+                  />
+
+                  {/* POSTAL CODE */}
                   <div className="form-group">
                     <label>Postal Code</label>
-                    <input name="postal_code" value={formData.postal_code} onChange={handleEditInputChange} />
+                    <input
+                      name="postal_code"
+                      placeholder="e.g. 1300"
+                      value={formData.postal_code}
+                      onChange={handleEditInputChange}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Street Address</label>
+                    <input 
+                      name="street" 
+                      placeholder="e.g. 123 Taft Avenue, Unit 4B" 
+                      value={formData.street} 
+                      onChange={handleEditInputChange} 
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Country</label>
+                    <input 
+                      name="country" 
+                      value={formData.country || 'Philippines'} 
+                      onChange={handleEditInputChange} 
+                    />
                   </div>
                 </div>
               </div>

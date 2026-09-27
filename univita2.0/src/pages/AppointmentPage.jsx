@@ -1,11 +1,12 @@
-// src/pages/AppointmentPage.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import {
   Mail, Phone, MapPin, Clock, Calendar, User, MessageSquare,
   Award, Users, Plus, Trash2, ShieldCheck, X,
   Stethoscope, GraduationCap, Building2, Check, ArrowRight,
-  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, AlertCircle, Download, ChevronLeft, ChevronRight, Sparkles
+  Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, 
+  AlertCircle, Download, ChevronLeft, ChevronRight, Sparkles, ExternalLink,
+  Search, Filter, HeartHandshake, Zap
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AppointmentPage.css';
@@ -18,7 +19,6 @@ import classroom1 from '../assets/images/classroom1.png';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
 
-// Helper to reliably get local YYYY-MM-DD instead of UTC
 const getLocalTodayString = () => {
   const now = new Date();
   const year = now.getFullYear();
@@ -27,14 +27,141 @@ const getLocalTodayString = () => {
   return `${year}-${month}-${day}`;
 };
 
+// Evaluates whether admissions is currently open based on Philippine Standard Time (UTC+8)
+const checkAdmissionsStatus = () => {
+  try {
+    const phDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }));
+    const day = phDate.getDay(); // 0 is Sunday, 6 is Saturday
+    const timeNum = phDate.getHours() + phDate.getMinutes() / 60;
+
+    if (day === 0) {
+      return { 
+        isOpen: false, 
+        text: 'Admissions Closed', 
+        note: 'Closed on Sundays • Opens Monday 8:00 AM' 
+      };
+    }
+    if (day >= 1 && day <= 5) {
+      if (timeNum >= 8 && timeNum < 17) {
+        return { 
+          isOpen: true, 
+          text: 'Admissions Open', 
+          note: 'Walk-ins & scheduled visits active today' 
+        };
+      }
+      return { 
+        isOpen: false, 
+        text: 'Admissions Closed', 
+        note: timeNum < 8 ? 'Opens today at 8:00 AM' : 'Closed for the day • Opens 8:00 AM tomorrow' 
+      };
+    }
+    if (day === 6) {
+      if (timeNum >= 8 && timeNum < 12) {
+        return { 
+          isOpen: true, 
+          text: 'Admissions Open', 
+          note: 'Saturday half-day session until 12:00 PM' 
+        };
+      }
+      return { 
+        isOpen: false, 
+        text: 'Admissions Closed', 
+        note: 'Weekend hours concluded • Opens Monday 8:00 AM' 
+      };
+    }
+    return { isOpen: false, text: 'Admissions Closed', note: 'Security registration is required at arrival.' };
+  } catch (e) {
+    return { isOpen: false, text: 'Admissions Closed', note: 'Security registration is required at arrival.' };
+  }
+};
+
+const DEFAULT_COURSES = [
+  {
+    title: "Enhancement Courses (E-Learning)",
+    badge: "Flexible Self-Paced",
+    subtitle: "Self-paced digital modules designed for modern healthcare professionals.",
+    description: "Enhance your clinical expertise with comprehensive online lectures, interactive case studies, and evidence-based practice guidelines.",
+    courses: [
+      "Nursing", "Disease Epidemiology", "Sexual and Reproductive Health Education",
+      "Statistics and Data Analysis Simplified", "Emergency Preparedness and Response",
+      "Mental Health and Stress Management", "Sports Medicine", "Telemedicine",
+      "Mindfulness for well-being", "Food as Medicine"
+    ]
+  },
+  {
+    title: "AHA BLS & ACLS Training",
+    badge: "Official AHA Certified",
+    subtitle: "American Heart Association certified life support programs.",
+    description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and official AHA certification upon completion.",
+    courses: [
+      "AHA HeartCode Basic Life Support (BLS)",
+      "AHA Traditional Advanced Cardiovascular Life Support (ACLS)",
+      "AHA Combined HeartCode BLS & Traditional ACLS"
+    ]
+  },
+  {
+    title: "AHA Heartsaver | First Aid Training",
+    badge: "Emergency Certification",
+    subtitle: "Emergency response and life-saving first aid certification.",
+    description: "Equip yourself or your team with essential first aid, CPR, and AED response skills certified by the American Heart Association.",
+    courses: [
+      "AHA Heartsaver First Aid & CPR with AED (HS-CPRFA)",
+      "AHA Heartsaver Basic Life Support (HS-BLS)",
+      "AHA Heartsaver First Aid (HS-FA)"
+    ]
+  },
+  {
+    title: "PRC - CPD Courses",
+    badge: "PRC Accredited Units",
+    subtitle: "Continuing professional development for licensed medical practitioners.",
+    description: "Fulfill your professional regulatory commission requirements with accredited CPD units and advanced clinical seminars.",
+    courses: [
+      "Early Recognition of Patient Deterioration",
+      "Patient Safety Systems & Error Prevention in Acute Care",
+      "Advanced Nursing Assessment & Rapid Clinical Decision-Making"
+    ]
+  }
+];
+
+const DEFAULT_FACILITIES = [
+  { name: 'Simulation Lab', thumbnail: simulation1, images: [simulation1, simulation2, simulation3, simulation4] },
+  { name: 'Classrooms', thumbnail: classroom1, images: [classroom1] }
+];
+
+const DEFAULT_CONTACT = {
+  address: '3F & 5F Westar Building, Shaw Boulevard\nPasig City, Metro Manila',
+  phone_primary: '+63 (2) 1234 5678',
+  phone_secondary: '+63 912 345 6789',
+  email_admissions: 'admissions@hct.ph',
+  email_general: 'info@hct.ph',
+  hours_weekday: 'Mon - Fri: 8:00 AM – 5:00 PM',
+  hours_weekend: 'Saturday: 8:00 AM – 12:00 PM',
+  hours_sunday: 'Sunday: CLOSED'
+};
+
 const AppointmentPage = ({ onAdminLogin }) => {
   const [activePage, setActivePage] = useState('home');
 
-  // ---- Courses Carousel & Modal State ----
+  // Dynamic Landing Page CMS State
+  const [courseCategories, setCourseCategories] = useState(DEFAULT_COURSES);
+  const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
+  const [contactInfo, setContactInfo] = useState(DEFAULT_CONTACT);
+
+  // Live Admissions Status
+  const [admissionsStatus, setAdmissionsStatus] = useState(checkAdmissionsStatus());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setAdmissionsStatus(checkAdmissionsStatus());
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Courses Carousel & Modal State
   const [currentCourseIndex, setCurrentCourseIndex] = useState(0);
   const [selectedCourseModal, setSelectedCourseModal] = useState(null);
 
-  // ---- Appointment booking state ----
+  // Appointment booking state
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [showTimeModal, setShowTimeModal] = useState(false);
@@ -47,19 +174,55 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // ---- Careers state ----
+  // Careers state
   const [jobs, setJobs] = useState([]);
+  const [jobSearchTerm, setJobSearchTerm] = useState('');
+  const [jobDepartmentFilter, setJobDepartmentFilter] = useState('All');
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   
-  // ---- Job Details Modal state ----
+  // Job Details Modal state
   const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
 
   const [applicationForm, setApplicationForm] = useState({ full_name: '', email: '', phone: '', cover_letter: '', resume: null });
   const [submittingApplication, setSubmittingApplication] = useState(false);
 
-  // ---- Fetch Fixed Visit Reasons & Approved Appointments (public) ----
+  // Fetch Dynamic Landing Page CMS Content
+  useEffect(() => {
+    axios.get(`${API_BASE}/public/landing-content`)
+      .then(res => {
+        if (res.data) {
+          if (Array.isArray(res.data.courses_catalog) && res.data.courses_catalog.length > 0) {
+            setCourseCategories(res.data.courses_catalog);
+          }
+          if (Array.isArray(res.data.facilities_gallery) && res.data.facilities_gallery.length > 0) {
+            const baseUrl = API_BASE.replace('/api', '');
+            const mapped = res.data.facilities_gallery.map(fac => {
+              const formattedImages = (fac.images || []).map(img => 
+                (img.startsWith('http') || img.startsWith('data:') || img.startsWith('blob:')) 
+                  ? img 
+                  : `${baseUrl}${img}`
+              );
+              return {
+                name: fac.name,
+                thumbnail: formattedImages[0] || (fac.name.toLowerCase().includes('class') ? classroom1 : simulation1),
+                images: formattedImages.length > 0 ? formattedImages : (fac.name.toLowerCase().includes('class') ? [classroom1] : [simulation1])
+              };
+            });
+            setFacilities(mapped);
+          }
+          if (res.data.contact_details) {
+            setContactInfo(prev => ({ ...prev, ...res.data.contact_details }));
+          }
+        }
+      })
+      .catch(err => {
+        console.warn('Using default landing content fallback', err);
+      });
+  }, []);
+
+  // Fetch Visit Reasons & Approved Appointments
   useEffect(() => {
     axios.get(`${API_BASE}/visit-reasons`)
       .then(res => setVisitReasons(res.data))
@@ -73,12 +236,33 @@ const AppointmentPage = ({ onAdminLogin }) => {
       .catch(console.error);
   }, []);
 
-  // ---- Fetch open jobs (public) ----
+  // Fetch open jobs
   useEffect(() => {
     axios.get(`${API_BASE}/public/jobs`)
       .then(res => setJobs(res.data || []))
       .catch(console.error);
   }, []);
+
+  // Filtered jobs list based on search and department
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(job => {
+      const matchesSearch = 
+        job.title?.toLowerCase().includes(jobSearchTerm.toLowerCase()) ||
+        job.description?.toLowerCase().includes(jobSearchTerm.toLowerCase()) ||
+        job.department?.toLowerCase().includes(jobSearchTerm.toLowerCase()) ||
+        job.location?.toLowerCase().includes(jobSearchTerm.toLowerCase());
+      
+      const matchesDept = jobDepartmentFilter === 'All' || 
+        (job.department || 'General').toLowerCase() === jobDepartmentFilter.toLowerCase();
+
+      return matchesSearch && matchesDept;
+    });
+  }, [jobs, jobSearchTerm, jobDepartmentFilter]);
+
+  const uniqueDepartments = useMemo(() => {
+    const depts = new Set(jobs.map(j => j.department || 'General'));
+    return ['All', ...Array.from(depts)];
+  }, [jobs]);
 
   const showToast = (message, isError = false) => {
     setToastMessage({ message, isError });
@@ -103,12 +287,13 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setMobileMenuOpen(false);
   };
 
-  // ---- Course Carousel Handlers ----
   const nextCourse = () => {
+    if (courseCategories.length === 0) return;
     setCurrentCourseIndex(prev => (prev + 1) % courseCategories.length);
   };
 
   const prevCourse = () => {
+    if (courseCategories.length === 0) return;
     setCurrentCourseIndex(prev => (prev - 1 + courseCategories.length) % courseCategories.length);
   };
 
@@ -130,7 +315,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
     setAdditionalVisitors(updated);
   };
 
-  // ----- BULK COMPANION CSV LOGIC -----
   const downloadCompanionTemplate = () => {
     const content = "Companion Full Name\nJuan Dela Cruz\nMaria Santos\n";
     const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
@@ -206,7 +390,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
     return false;
   };
 
-  // ---- IMPROVED APPOINTMENT VALIDATION FLOW ----
   const handleSubmit = async (e) => {
     e.preventDefault();
     const { name, email, phone, date, time, message } = formData;
@@ -331,7 +514,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
     }
   };
 
-  // ---- IMPROVED JOB APPLICATION VALIDATION FLOW ----
   const submitApplication = async (e) => {
     e.preventDefault();
     const { full_name, email, phone, resume } = applicationForm;
@@ -378,56 +560,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
     }
   };
 
-  const courseCategories = [
-    {
-      title: "Enhancement Courses (E-Learning)",
-      subtitle: "Self-paced digital modules designed for modern healthcare professionals.",
-      description: "Enhance your clinical expertise with comprehensive online lectures, interactive case studies, and evidence-based practice guidelines.",
-      courses: [
-        "Nursing", "Disease Epidemiology", "Sexual and Reproductive Health Education",
-        "Statistics and Data Analysis Simplified", "Emergency Preparedness and Response",
-        "Mental Health and Stress Management", "Sports Medicine", "Telemedicine",
-        "Mindfulness for well-being", "Food as Medicine"
-      ]
-    },
-    {
-      title: "AHA BLS & ACLS Training",
-      subtitle: "American Heart Association certified life support programs.",
-      description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and official AHA certification upon completion.",
-      courses: [
-        "AHA HeartCode Basic Life Support (BLS)",
-        "AHA Traditional Advanced Cardiovascular Life Support (ACLS)",
-        "AHA Combined HeartCode BLS & Traditional ACLS"
-      ]
-    },
-    {
-      title: "AHA Heartsaver | First Aid Training",
-      subtitle: "Emergency response and life-saving first aid certification.",
-      description: "Equip yourself or your team with essential first aid, CPR, and AED response skills certified by the American Heart Association.",
-      courses: [
-        "AHA Heartsaver First Aid & CPR with AED (HS-CPRFA)",
-        "AHA Heartsaver Basic Life Support (HS-BLS)",
-        "AHA Heartsaver First Aid (HS-FA)"
-      ]
-    },
-    {
-      title: "PRC - CPD Courses",
-      subtitle: "Continuing professional development for licensed medical practitioners.",
-      description: "Fulfill your professional regulatory commission requirements with accredited CPD units and advanced clinical seminars.",
-      courses: [
-        "Early Recognition of Patient Deterioration",
-        "Patient Safety Systems & Error Prevention in Acute Care",
-        "Advanced Nursing Assessment & Rapid Clinical Decision-Making"
-      ]
-    }
-  ];
-
-  const activeCourse = courseCategories[currentCourseIndex];
-
-  const facilities = [
-    { name: 'Simulation Lab', thumbnail: simulation1, images: [simulation1, simulation2, simulation3, simulation4] },
-    { name: 'Classrooms', thumbnail: classroom1, images: [classroom1] }
-  ];
+  const activeCourse = courseCategories[currentCourseIndex] || courseCategories[0] || null;
 
   return (
     <div className="ap-landing">
@@ -442,11 +575,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </div>
           
           <nav className="ap-nav-desktop">
-            <a className="ap-nav-link" onClick={() => { setActivePage('home'); window.scrollTo(0,0); }}>Home</a>
+            <a className="ap-nav-link" onClick={() => { setActivePage('home'); window.scrollTo(0, 0); }}>Home</a>
             <a className="ap-nav-link" onClick={() => scrollToSection('about')}>About</a>
             <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
             <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
-            <a className="ap-nav-link" onClick={() => setActivePage('careers')}>Careers</a>
+            <a className="ap-nav-link" onClick={() => { setActivePage('careers'); window.scrollTo(0, 0); }}>Careers</a>
           </nav>
           
           <div className="ap-header-actions">
@@ -475,11 +608,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
           
           <div className="ap-nav-body">
             <div className="ap-nav-list">
-              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); setMobileMenuOpen(false); window.scrollTo(0,0); }}>Home</a>
+              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); setMobileMenuOpen(false); window.scrollTo(0, 0); }}>Home</a>
               <a className="ap-mobile-nav-link" onClick={() => scrollToSection('about')}>About</a>
               <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
               <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
-              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('careers'); setMobileMenuOpen(false); }}>Careers</a>
+              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('careers'); setMobileMenuOpen(false); window.scrollTo(0, 0); }}>Careers</a>
             </div>
             
             <div className="ap-nav-divider"></div>
@@ -563,45 +696,104 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
-          {/* COURSES (INTERACTIVE CAROUSEL MATCHING REFERENCE) */}
+          {/* INTERACTIVE COURSES SECTION */}
           <section id="courses" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
-                <span className="ap-tag">Our Programs</span>
-                <h2>Interactive Course Catalog</h2>
-                <p>Browse through our training categories using the arrows below and click any card to view available sub-courses.</p>
+                <span className="ap-tag">Educational Programs</span>
+                <h2>Clinical Education & Certification Programs</h2>
+                <p>Choose an academic track below or use the controls to explore specialized clinical certifications, CPD units, and simulation modules.</p>
               </div>
 
-              <div className="ap-courses-carousel-wrapper">
-                <button className="ap-carousel-arrow" onClick={prevCourse} aria-label="Previous Course">
-                  <ChevronLeft size={36} />
-                </button>
-
-                <div className="ap-carousel-card" onClick={() => setSelectedCourseModal(activeCourse)} role="button">
-                  <div className="ap-carousel-card-content">
-                    <GraduationCap size={48} className="ap-carousel-icon" />
-                    <h3>{activeCourse.title}</h3>
-                    <p className="ap-carousel-subtitle">{activeCourse.subtitle}</p>
-                    <p className="ap-carousel-desc">{activeCourse.description}</p>
-                    <span className="ap-carousel-hint">Click card to view available courses <ArrowRight size={14} /></span>
-                  </div>
-                </div>
-
-                <button className="ap-carousel-arrow" onClick={nextCourse} aria-label="Next Course">
-                  <ChevronRight size={36} />
-                </button>
-              </div>
-
-              <div className="ap-carousel-dots">
-                {courseCategories.map((_, idx) => (
-                  <button 
-                    key={idx} 
-                    className={`ap-dot ${idx === currentCourseIndex ? 'active' : ''}`}
+              {/* Instant Category Navigation Pills */}
+              <div className="ap-course-category-pills">
+                {courseCategories.map((cat, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={`ap-category-pill-btn ${idx === currentCourseIndex ? 'active' : ''}`}
                     onClick={() => setCurrentCourseIndex(idx)}
-                    aria-label={`Slide ${idx + 1}`}
-                  />
+                  >
+                    <span>{cat.title.split('(')[0].trim()}</span>
+                    <span className="ap-pill-counter">{cat.courses ? cat.courses.length : 0}</span>
+                  </button>
                 ))}
               </div>
+
+              {/* Enhanced Showcase Card */}
+              {courseCategories.length > 0 && activeCourse && (
+                <div className="ap-showcase-container">
+                  <button className="ap-carousel-nav-btn prev" onClick={prevCourse} aria-label="Previous Course">
+                    <ChevronLeft size={28} />
+                  </button>
+
+                  <div className="ap-showcase-card">
+                    <div className="ap-showcase-header">
+                      <div className="ap-showcase-badge">
+                        <Sparkles size={14} />
+                        <span>{activeCourse.badge || 'Accredited Healthcare Track'}</span>
+                      </div>
+                      <span className="ap-showcase-count">
+                        {(activeCourse.courses || []).length} Specialized Modules
+                      </span>
+                    </div>
+
+                    <div className="ap-showcase-body">
+                      <div className="ap-showcase-icon-box">
+                        <GraduationCap size={36} />
+                      </div>
+                      <h3 className="ap-showcase-title">{activeCourse.title}</h3>
+                      <p className="ap-showcase-subtitle">{activeCourse.subtitle}</p>
+                      <p className="ap-showcase-desc">{activeCourse.description}</p>
+
+                      <div className="ap-showcase-preview-area">
+                        <span className="ap-preview-label">Curriculum Highlights:</span>
+                        <div className="ap-preview-tags">
+                          {(activeCourse.courses || []).slice(0, 5).map((courseName, cIdx) => (
+                            <span key={cIdx} className="ap-preview-tag">
+                              <Check size={12} className="tag-check" /> {courseName}
+                            </span>
+                          ))}
+                          {(activeCourse.courses || []).length > 5 && (
+                            <span className="ap-preview-tag-more">
+                              +{(activeCourse.courses.length - 5)} more modules
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="ap-showcase-action-bar">
+                        <button 
+                          type="button" 
+                          className="btn-ap-showcase-explore"
+                          onClick={() => setSelectedCourseModal(activeCourse)}
+                        >
+                          <BookOpen size={18} />
+                          <span>View Full Curriculum & Course Details</span>
+                          <ArrowRight size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button className="ap-carousel-nav-btn next" onClick={nextCourse} aria-label="Next Course">
+                    <ChevronRight size={28} />
+                  </button>
+                </div>
+              )}
+
+              {courseCategories.length > 1 && (
+                <div className="ap-carousel-dots">
+                  {courseCategories.map((_, idx) => (
+                    <button 
+                      key={idx} 
+                      className={`ap-dot ${idx === currentCourseIndex ? 'active' : ''}`}
+                      onClick={() => setCurrentCourseIndex(idx)}
+                      aria-label={`Slide ${idx + 1}`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </section>
 
@@ -632,34 +824,83 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
-          {/* CONTACT */}
+          {/* CONTACT & INQUIRY SECTION */}
           <section id="contact" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
-                <span className="ap-tag">Get In Touch</span>
-                <h2>Contact Our Team</h2>
-                <p>Have questions about our programs or admissions? Reach out to our team and we'll get back to you promptly.</p>
+                <span className="ap-tag">Contact</span>
+                <h2>Get in Touch</h2>
+                <p>Have questions about training schedules or admissions? Reach out to our team directly.</p>
               </div>
-              <div className="ap-contact-grid">
-                <div className="ap-contact-card stagger-1">
-                  <div className="ap-contact-icon"><MapPin size={28} /></div>
-                  <h3>Visit Our Campus</h3>
-                  <p>123 Healthcare Avenue<br />Pasay City, Metro Manila</p>
+
+              <div className="ap-modern-contact-grid">
+                {/* 1. Address Card */}
+                <div className="ap-modern-contact-card">
+                  <div className="ap-card-icon-bubble">
+                    <MapPin size={22} />
+                  </div>
+                  <h3 className="ap-card-contact-title">Campus Location</h3>
+                  <p className="ap-card-contact-desc">
+                    HCT Academy Pasig City<br />
+                    3F & 5F Westar Building, Shaw Boulevard<br />
+                    Pasig City, Metro Manila
+                  </p>
+                  <a 
+                    href={`https://maps.google.com/?q=${encodeURIComponent('HCT Academy, 3F & 5F Westar Building, Shaw Boulevard, Pasig City')}`} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    className="ap-card-action-link"
+                  >
+                    <span>Get directions</span> <ExternalLink size={13} />
+                  </a>
                 </div>
-                <div className="ap-contact-card stagger-2">
-                  <div className="ap-contact-icon"><Phone size={28} /></div>
-                  <h3>Call Us</h3>
-                  <p>+63 (2) 1234 5678<br />+63 912 345 6789</p>
+
+                {/* 2. Call Us Card */}
+                <div className="ap-modern-contact-card">
+                  <div className="ap-card-icon-bubble">
+                    <Phone size={22} />
+                  </div>
+                  <h3 className="ap-card-contact-title">Phone</h3>
+                  <p className="ap-card-contact-desc">
+                    {contactInfo.phone_primary}<br />
+                    {contactInfo.phone_secondary}
+                  </p>
+                  <a href={`tel:${contactInfo.phone_primary.replace(/[^0-9+]/g, '')}`} className="ap-card-action-link">
+                    <span>Call hotline</span> <ArrowRight size={13} />
+                  </a>
                 </div>
-                <div className="ap-contact-card stagger-3">
-                  <div className="ap-contact-icon"><Mail size={28} /></div>
-                  <h3>Email Us</h3>
-                  <p>admissions@hct.ph<br />info@hct.ph</p>
+
+                {/* 3. Email Card */}
+                <div className="ap-modern-contact-card">
+                  <div className="ap-card-icon-bubble">
+                    <Mail size={22} />
+                  </div>
+                  <h3 className="ap-card-contact-title">Email</h3>
+                  <p className="ap-card-contact-desc">
+                    {contactInfo.email_admissions}<br />
+                    {contactInfo.email_general}
+                  </p>
+                  <a href={`mailto:${contactInfo.email_admissions}`} className="ap-card-action-link">
+                    <span>Send message</span> <ArrowRight size={13} />
+                  </a>
                 </div>
-                <div className="ap-contact-card stagger-4">
-                  <div className="ap-contact-icon"><Clock size={28} /></div>
-                  <h3>Office Hours</h3>
-                  <p>Mon - Fri: 8:00 AM – 5:00 PM<br />Saturday: 8:00 AM – 12:00 PM</p>
+
+                {/* 4. Office Hours Card */}
+                <div className="ap-modern-contact-card">
+                  <div className="ap-card-icon-bubble">
+                    <Clock size={22} />
+                  </div>
+                  <div className={admissionsStatus.isOpen ? "ap-status-pill-open" : "ap-status-pill-closed"}>
+                    <span className={admissionsStatus.isOpen ? "status-ping" : "status-ping-closed"} />
+                    <span>{admissionsStatus.text}</span>
+                  </div>
+                  <h3 className="ap-card-contact-title">Hours</h3>
+                  <p className="ap-card-contact-desc">
+                    {contactInfo.hours_weekday}<br />
+                    {contactInfo.hours_weekend}<br />
+                    Sunday: Closed
+                  </p>
+                  <span className="ap-hours-subtext">{admissionsStatus.note}</span>
                 </div>
               </div>
             </div>
@@ -667,55 +908,173 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </>
       )}
 
-      {/* CAREERS PAGE */}
+      {/* ========================================================= */}
+      {/* REDESIGNED MODERN CAREERS PAGE                            */}
+      {/* ========================================================= */}
       {activePage === 'careers' && (
-        <section id="careers" className="ap-section ap-bg-gray min-h-screen pt-40">
-          <div className="ap-container">
-            <div className="ap-section-header">
-              <span className="ap-tag">Join Our Team</span>
-              <h2>Careers at HCT Academy</h2>
-              <p>Explore open positions and become part of a leading, innovative healthcare education institution.</p>
-            </div>
-            <div className="ap-job-listings">
-              {jobs.length === 0 ? (
-                <div className="ap-empty-state">
-                  <Briefcase size={56} className="ap-empty-icon" />
-                  <p>No open positions at the moment.</p>
-                  <span>Please check back later for new opportunities.</span>
+        <div className="ap-careers-page-wrapper">
+          {/* Careers Hero Banner */}
+          <section className="ap-careers-hero">
+            <div className="ap-container">
+              <div className="ap-careers-hero-content">
+                <span className="ap-careers-tag">
+                  <Sparkles size={14} /> Join Our Medical Faculty & Staff
+                </span>
+                <h1 className="ap-careers-headline">
+                  Shape the Future of <span className="text-teal-gradient">Clinical Education</span>
+                </h1>
+                <p className="ap-careers-lead">
+                  Join a passionate team of doctors, clinical simulationists, and academic professionals dedicated to developing the next generation of healthcare leaders in the Philippines.
+                </p>
+              </div>
+
+              {/* Value Proposition Pills */}
+              <div className="ap-careers-perks-strip">
+                <div className="ap-perk-item">
+                  <div className="ap-perk-icon-wrap"><Award size={20} /></div>
+                  <div>
+                    <h5>CPD Accreditation</h5>
+                    <p>Free continuing medical development units</p>
+                  </div>
                 </div>
-              ) : (
-                <div className="ap-jobs-grid">
-                  {jobs.map((job, idx) => (
-                    <div key={job.id} className={`ap-job-card stagger-${(idx % 3) + 1}`}>
-                      <div className="ap-job-header">
-                        <div className="ap-job-icon"><Briefcase size={24} /></div>
-                        <h3>{job.title}</h3>
-                      </div>
-                      
-                      <div className="ap-job-meta">
-                        <span><Building2 size={16} /> {job.department || 'General'}</span>
-                        <span><Clock size={16} /> {job.employment_type}</span>
-                      </div>
-                      
-                      <p className="ap-job-desc">
-                        {job.description?.length > 140 ? `${job.description.substring(0, 140)}...` : job.description}
-                      </p>
-                      
-                      <div className="ap-job-actions">
-                        <button className="btn-ap-outline-sm" onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}>
-                          See Details
-                        </button>
-                        <button className="btn-ap-primary-sm" onClick={() => openApplyModal(job)}>
-                          Apply Now
-                        </button>
-                      </div>
-                    </div>
+                <div className="ap-perk-item">
+                  <div className="ap-perk-icon-wrap"><Zap size={20} /></div>
+                  <div>
+                    <h5>Advanced Sim Labs</h5>
+                    <p>High-fidelity mannequins and clinical tech</p>
+                  </div>
+                </div>
+                <div className="ap-perk-item">
+                  <div className="ap-perk-icon-wrap"><HeartHandshake size={20} /></div>
+                  <div>
+                    <h5>Competitive Compensation</h5>
+                    <p>Government statutory benefits & overtime pay</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Job Listings & Interactive Filtering */}
+          <section className="ap-section ap-bg-gray" style={{ paddingTop: '3.5rem' }}>
+            <div className="ap-container">
+              
+              {/* Search & Filter Toolbar */}
+              <div className="ap-jobs-toolbar">
+                <div className="ap-jobs-search-box">
+                  <Search size={18} className="search-icon" />
+                  <input 
+                    type="text" 
+                    placeholder="Search by job title, department, or keywords..."
+                    value={jobSearchTerm}
+                    onChange={(e) => setJobSearchTerm(e.target.value)}
+                  />
+                  {jobSearchTerm && (
+                    <button className="clear-btn" onClick={() => setJobSearchTerm('')}>
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Department Filter Tabs */}
+                <div className="ap-dept-filter-tabs">
+                  <Filter size={15} className="filter-icon" />
+                  {uniqueDepartments.map(dept => (
+                    <button
+                      key={dept}
+                      type="button"
+                      className={`ap-dept-btn ${jobDepartmentFilter === dept ? 'active' : ''}`}
+                      onClick={() => setJobDepartmentFilter(dept)}
+                    >
+                      {dept}
+                    </button>
                   ))}
                 </div>
-              )}
+              </div>
+
+              {/* Active Results Counter */}
+              <div className="ap-jobs-counter-strip">
+                <p>Showing <strong>{filteredJobs.length}</strong> available career opportunit{filteredJobs.length === 1 ? 'y' : 'ies'}</p>
+              </div>
+
+              {/* Job Listings Grid */}
+              <div className="ap-job-listings">
+                {filteredJobs.length === 0 ? (
+                  <div className="ap-careers-empty-card">
+                    <Briefcase size={54} className="ap-careers-empty-icon" />
+                    <h3>No Open Positions Found</h3>
+                    <p>We couldn't find any job openings matching your current search or filter criteria.</p>
+                    <button 
+                      className="btn-ap-secondary"
+                      onClick={() => { setJobSearchTerm(''); setJobDepartmentFilter('All'); }}
+                    >
+                      Clear Filters
+                    </button>
+                  </div>
+                ) : (
+                  <div className="ap-modern-jobs-grid">
+                    {filteredJobs.map((job) => (
+                      <div key={job.id} className="ap-modern-job-card">
+                        
+                        {/* Card Header */}
+                        <div className="ap-job-top-bar">
+                          <span className="ap-job-dept-badge">
+                            <Building2 size={13} /> {job.department || 'General Faculty'}
+                          </span>
+                          <span className="ap-job-type-pill">
+                            <Clock size={13} /> {job.employment_type || 'Full-time'}
+                          </span>
+                        </div>
+
+                        <h3 className="ap-job-card-title">{job.title}</h3>
+
+                        {/* Metadata Tags */}
+                        <div className="ap-job-chips-row">
+                          <span className="ap-job-chip">
+                            <MapPin size={13} /> {job.location_type || 'On-site'} • {job.location || 'Pasig City'}
+                          </span>
+                          {(job.salary_min || job.salary_max) && (
+                            <span className="ap-job-chip salary">
+                              <DollarSign size={13} /> 
+                              ₱{Number(job.salary_min || 0).toLocaleString()}
+                              {job.salary_max ? ` - ₱${Number(job.salary_max).toLocaleString()}` : ''} / mo
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="ap-job-excerpt">
+                          {job.description?.length > 150 ? `${job.description.substring(0, 150)}...` : job.description}
+                        </p>
+
+                        {/* Action Buttons */}
+                        <div className="ap-job-card-footer">
+                          <button 
+                            type="button" 
+                            className="btn-ap-job-details"
+                            onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}
+                          >
+                            <span>Read Overview</span>
+                            <ArrowRight size={14} />
+                          </button>
+                          <button 
+                            type="button" 
+                            className="btn-ap-job-apply"
+                            onClick={() => openApplyModal(job)}
+                          >
+                            <FileText size={15} />
+                            <span>Apply Now</span>
+                          </button>
+                        </div>
+
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       )}
 
       {/* FOOTER */}
@@ -738,14 +1097,14 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-footer-links">
             <h4>Portal & Info</h4>
             <a onClick={() => setShowAppointmentModal(true)}>Book Appointment</a>
-            <a onClick={() => { setActivePage('careers'); window.scrollTo(0,0); }}>Careers</a>
+            <a onClick={() => { setActivePage('careers'); window.scrollTo(0, 0); }}>Careers</a>
             <a href="#">Privacy Policy</a>
             <a href="#">Terms of Service</a>
           </div>
           <div className="ap-footer-contact">
             <h4>Connect With Us</h4>
-            <p><Mail size={16}/> info@hct.ph</p>
-            <p><Phone size={16}/> +63 (2) 1234 5678</p>
+            <p><Mail size={16}/> {contactInfo.email_general}</p>
+            <p><Phone size={16}/> {contactInfo.phone_primary}</p>
           </div>
         </div>
         <div className="ap-footer-bottom">
@@ -758,19 +1117,30 @@ const AppointmentPage = ({ onAdminLogin }) => {
         <div className="ap-modal-overlay" onClick={() => setSelectedCourseModal(null)}>
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
-              <h2>{selectedCourseModal.title}</h2>
+              <div>
+                <h2>{selectedCourseModal.title}</h2>
+                <span className="ap-modal-badge">{selectedCourseModal.badge || 'Accredited Curriculum'}</span>
+              </div>
               <button className="ap-btn-close" onClick={() => setSelectedCourseModal(null)}><X size={24} /></button>
             </div>
             <p className="ap-time-modal-subtitle">{selectedCourseModal.description}</p>
+            
+            <div className="ap-modal-section-title">Available Modules & Syllabi:</div>
             <div className="ap-subcourses-list">
-              {selectedCourseModal.courses.map((course, i) => (
+              {(selectedCourseModal.courses || []).map((course, i) => (
                 <div key={i} className="ap-subcourse-item">
-                  <BookOpen size={18} className="ap-subcourse-icon" />
-                  <span>{course}</span>
+                  <div className="ap-subcourse-item-left">
+                    <BookOpen size={18} className="ap-subcourse-icon" />
+                    <span>{course}</span>
+                  </div>
+                  <span className="ap-subcourse-tag">Active Module</span>
                 </div>
               ))}
             </div>
             <div className="ap-modal-footer" style={{ marginTop: '2rem' }}>
+              <button type="button" className="btn-ap-primary" onClick={() => { setSelectedCourseModal(null); setShowAppointmentModal(true); }}>
+                Inquire & Book Visit
+              </button>
               <button type="button" className="btn-ap-cancel" onClick={() => setSelectedCourseModal(null)}>Close</button>
             </div>
           </div>
@@ -1022,7 +1392,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <button className="ap-btn-close" onClick={() => setShowApplyModal(false)}><X size={24} /></button>
             </div>
             <form onSubmit={submitApplication} className="ap-form">
-              
               <div className="ap-form-group">
                 <label>Full Name <span className="text-danger">*</span></label>
                 <input type="text" name="full_name" value={applicationForm.full_name} onChange={handleApplicationChange} placeholder="e.g. Maria Santos" required />
@@ -1084,7 +1453,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <button className="ap-btn-close" onClick={() => setSelectedFacility(null)}><X size={28} /></button>
             </div>
             <div className="ap-gallery-grid">
-              {selectedFacility.images.map((img, idx) => (
+              {(selectedFacility.images || []).map((img, idx) => (
                 <div key={idx} className="ap-gallery-img-box">
                   <img src={img} alt={`${selectedFacility.name} ${idx + 1}`} />
                 </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Download, Calendar, FileText, CheckCircle, Clock, ShieldCheck, Building } from 'lucide-react';
+import { Download, Calendar, FileText, CheckCircle, Clock, ShieldCheck, Award, Users, ShieldAlert } from 'lucide-react';
 import './ComplianceReports.css';
 import { API_BASE } from '../api';
 
@@ -17,7 +17,7 @@ const ComplianceReports = () => {
 
   useEffect(() => {
     const saved = localStorage.getItem('last_compliance_report');
-    if (saved) setLastGenerated(new Date(parseInt(saved)));
+    if (saved) setLastGenerated(new Date(parseInt(saved, 10)));
   }, []);
 
   const generateReport = async () => {
@@ -29,24 +29,25 @@ const ComplianceReports = () => {
         ...getAuthHeaders()
       });
 
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `HCT_Attendance_Compliance_${year}_${String(month).padStart(2, '0')}.pdf`);
+      link.setAttribute('download', `HCT_Attendance_Report_${year}_${String(month).padStart(2, '0')}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
 
       const now = Date.now();
-      localStorage.setItem('last_compliance_report', now);
+      localStorage.setItem('last_compliance_report', now.toString());
       setLastGenerated(new Date(now));
 
-      toast.success('Official report downloaded securely.');
+      toast.success('Attendance & Timekeeping Report downloaded.');
     } catch (err) {
       console.error(err);
-      let errorMsg = 'Failed to generate report. Please try again.';
+      let errorMsg = 'Failed to generate attendance report.';
       if (err.response?.status === 401) errorMsg = 'Session expired. Please log in again.';
+      else if (err.response?.status === 404) errorMsg = 'No active instructor records found for this period.';
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -63,15 +64,13 @@ const ComplianceReports = () => {
     <div className="formal-cr-container">
       <div className="formal-cr-header">
         <div className="formal-cr-title-block">
-          
           <div>
-            
-            <p>Generate official, audit-ready PDF documents for internal review and external accreditation.</p>
+            <p>Generate monthly attendance summaries and DTR timekeeping reports for faculty review and institutional compliance.</p>
           </div>
         </div>
         <div className="formal-cr-security-badge">
           <ShieldCheck size={16} />
-          <span>Strict Audit Trail Enabled</span>
+          <span>DOLE & NPC Data Compliant</span>
         </div>
       </div>
 
@@ -79,7 +78,7 @@ const ComplianceReports = () => {
         {/* Left: Configuration */}
         <div className="formal-cr-card">
           <div className="formal-cr-card-header">
-            <h3>Report Parameters</h3>
+            <h3>Report Scope Parameters</h3>
           </div>
           <div className="formal-cr-card-body">
             <div className="formal-cr-form-row">
@@ -89,7 +88,7 @@ const ComplianceReports = () => {
                   <Calendar size={16} className="formal-cr-icon" />
                   <select 
                     value={month} 
-                    onChange={e => setMonth(parseInt(e.target.value))} 
+                    onChange={e => setMonth(parseInt(e.target.value, 10))} 
                     disabled={loading}
                   >
                     {monthNames.map((name, idx) => (
@@ -105,7 +104,7 @@ const ComplianceReports = () => {
                   <Calendar size={16} className="formal-cr-icon" />
                   <select 
                     value={year} 
-                    onChange={e => setYear(parseInt(e.target.value))} 
+                    onChange={e => setYear(parseInt(e.target.value, 10))} 
                     disabled={loading}
                   >
                     {years.map(y => (
@@ -134,11 +133,11 @@ const ComplianceReports = () => {
               <button className="formal-cr-btn-primary" onClick={generateReport} disabled={loading}>
                 {loading ? (
                   <>
-                    <span className="formal-cr-spinner"></span> Compiling Document...
+                    <span className="formal-cr-spinner"></span> Compiling DTR Report...
                   </>
                 ) : (
                   <>
-                    <Download size={16} /> Export Official PDF
+                    <Download size={16} /> Export Monthly Report (PDF)
                   </>
                 )}
               </button>
@@ -149,33 +148,40 @@ const ComplianceReports = () => {
         {/* Right: Output Specifications */}
         <div className="formal-cr-card">
           <div className="formal-cr-card-header">
-            <h3>Document Specifications</h3>
+            <h3>Auditing Methodology & Document Specifications</h3>
           </div>
           <div className="formal-cr-card-body bg-light">
             <p className="formal-cr-specs-desc">
-              The generated PDF complies with standard HR auditing formats. It aggregates data strictly from verified system logs.
+              The generated landscape document complies with standard HR timekeeping and NPC privacy standards:
             </p>
 
             <ul className="formal-cr-specs-list">
               <li>
-                <FileText size={16} className="specs-icon" />
+                <Award size={18} className="specs-icon" />
                 <div>
-                  <strong>Instructor Compliance Matrix</strong>
-                  <span>Calculates actual attendance against scheduled shifts to generate a strict SLA percentage.</span>
+                  <strong>Approved Leave Adjustment</strong>
+                  <span>Attendance Rate = Present ÷ (Scheduled − Approved Leave) × 100. Approved leave is excluded from expected shifts.</span>
                 </div>
               </li>
               <li>
-                <FileText size={16} className="specs-icon" />
+                <FileText size={18} className="specs-icon" />
                 <div>
-                  <strong>Incident Breakdown</strong>
-                  <span>Itemizes authorized leaves, late arrivals (exceeding 15 mins), and unexcused absences.</span>
+                  <strong>Unscheduled Faculty Handling</strong>
+                  <span>Instructors with zero scheduled shifts are reported as N/A rather than flagged as non-compliant.</span>
                 </div>
               </li>
               <li>
-                <FileText size={16} className="specs-icon" />
+                <Users size={18} className="specs-icon" />
                 <div>
-                  <strong>Executive Summary</strong>
-                  <span>Provides a top-level departmental health metric for management review.</span>
+                  <strong>Unexcused Absence Itemization</strong>
+                  <span>Separates authorized leaves from unexcused absences and records late arrivals independently.</span>
+                </div>
+              </li>
+              <li>
+                <ShieldAlert size={18} className="specs-icon" />
+                <div>
+                  <strong>DTR Timekeeping Reference & NPC Notice</strong>
+                  <span>Includes primary biometric/geofence references and strict statutory data privacy handling clauses.</span>
                 </div>
               </li>
             </ul>

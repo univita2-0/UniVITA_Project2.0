@@ -71,6 +71,7 @@ const menuConfig = [
       { id: 'audit-logs', label: 'Audit Logs', path: 'audit-logs', roles: ['admin'] },
       { id: 'role-management', label: 'Role Management', path: 'role-management', roles: ['admin'] },
       { id: 'system-config', label: 'System Config', path: 'system-config', roles: ['admin'] },
+      { id: 'landing-cms', label: 'Landing Page CMS', path: 'landing-cms', roles: ['admin'] }
     ],
     roles: ['admin']
   }

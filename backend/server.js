@@ -28,6 +28,35 @@ app.set('trust proxy', 1);
 
 const envOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [];
 
+// ============================================
+// DYNAMIC SYSTEM CONFIGURATION ENGINE
+// ============================================
+let systemConfigCache = {
+  password_expiry_days: 365,
+  otp_expiry_minutes: 5,
+  geofence_default_radius: 200,
+  max_login_attempts: 5
+};
+
+const FAILED_LOGIN_ATTEMPTS = new Map(); 
+
+async function getSystemConfig() {
+  try {
+    const [rows] = await db.promise().query(
+      "SELECT password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts FROM system_config WHERE id = 1"
+    );
+    if (rows && rows.length > 0) {
+      systemConfigCache = rows[0];
+    }
+  } catch (err) {
+    
+  }
+  return systemConfigCache;
+}
+
+
+getSystemConfig();
+
 
 const allowedOrigins = [
   'https://univitahct.tech',        
@@ -327,9 +356,18 @@ function logVisitorHistory(visitorId, visitorName, bleId, floor, currentRoom, ev
 
 function logAction(userId, action, targetType, targetId, req, oldValue = null, newValue = null) {
   if (!userId) return;
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || null;
-  const userAgent = req.headers['user-agent'] || null;
-  const sql = `INSERT INTO audit_logs (user_id, action, target_type, target_id, old_value, new_value, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  
+  // Extract primary client IP (strip out proxy/load balancer chains)
+  const rawIp = req?.headers?.['x-forwarded-for'] || req?.socket?.remoteAddress || null;
+  const ip = rawIp ? rawIp.split(',')[0].trim() : null;
+  const userAgent = req?.headers?.['user-agent'] || null;
+  const phNow = getPHDateTime(); // Explicit Philippine Standard Time
+
+  const sql = `
+    INSERT INTO audit_logs 
+      (user_id, action, target_type, target_id, old_value, new_value, ip_address, user_agent, created_at) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
   
   db.query(sql, [
     userId, 
@@ -339,7 +377,8 @@ function logAction(userId, action, targetType, targetId, req, oldValue = null, n
     oldValue ? JSON.stringify(oldValue) : null, 
     newValue ? JSON.stringify(newValue) : null, 
     ip, 
-    userAgent
+    userAgent,
+    phNow
   ], (err) => {
     if (err) console.error('Failed to insert audit log:', err);
   });
@@ -492,53 +531,63 @@ const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 10
 // 1. AUTHENTICATION & OTP
 // ============================================
 
-app.post('/api/auth/send-otp', otpLimiter, (req, res) => {
+app.post('/api/auth/send-otp', otpLimiter, async (req, res) => {
   console.log("OTP request received for:", req.body.email);
   const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
-  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
-    if (err) {
-      console.error("DB error:", err);
-      return res.status(500).json({ success: false, message: err.message });
-    }
-    if (results.length === 0) {
-      return res.status(404).json({ success: false, message: 'No active account found with that email.' });
-    }
+  try {
+    const cfg = typeof getSystemConfig === 'function' 
+      ? await getSystemConfig() 
+      : { otp_expiry_minutes: 5 };
+    const otpMinutes = Number(cfg.otp_expiry_minutes) || 5;
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 5 * 60 * 1000;
-    OTP_STORE[email] = { otp, expiresAt };
-    console.log(`[OTP] ${email} -> ${otp}`);
-
-    try {
-      const { data, error } = await resend.emails.send({
-      from: 'UniVITA Security <no-reply@univitahct.tech>', 
-      to: [email],
-      subject: 'Your OTP Code - UniVITA',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <h2 style="color: #0f172a; margin-top: 0;">Login Verification Code</h2>
-            <p style="color: #475569; font-size: 14px;">Use the following one-time password (OTP) to complete your sign-in. This code is valid for 5 minutes.</p>
-            <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 15px; text-align: center; border-radius: 6px; margin: 20px 0;">
-              <span style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #0d9488;">${otp}</span>
-            </div>
-            <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">If you did not request this code, please ignore this email.</p>
-          </div>
-        `
-      });
-
-      if (error) {
-        console.error('Resend API Error:', error);
-        return res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
+    db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
+      if (err) {
+        console.error("DB error:", err);
+        return res.status(500).json({ success: false, message: err.message });
+      }
+      if (results.length === 0) {
+        return res.status(404).json({ success: false, message: 'No active account found with that email.' });
       }
 
-      res.json({ success: true, message: 'OTP sent to your email.' });
-    } catch (err) {
-      console.error('Unexpected email error:', err);
-      return res.status(500).json({ success: false, message: 'Server error while sending OTP.' });
-    }
-  });
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + otpMinutes * 60 * 1000;
+      OTP_STORE[email] = { otp, expiresAt };
+      console.log(`[OTP] ${email} -> ${otp} (expires in ${otpMinutes}m)`);
+
+      try {
+        const { data, error } = await resend.emails.send({
+          from: 'UniVITA Security <no-reply@univitahct.tech>', 
+          to: [email],
+          subject: 'Your OTP Code - UniVITA',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+              <h2 style="color: #0f172a; margin-top: 0;">Login Verification Code</h2>
+              <p style="color: #475569; font-size: 14px;">Use the following one-time password (OTP) to complete your sign-in. This code is valid for ${otpMinutes} minute${otpMinutes > 1 ? 's' : ''}.</p>
+              <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 15px; text-align: center; border-radius: 6px; margin: 20px 0;">
+                <span style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #0d9488;">${otp}</span>
+              </div>
+              <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">If you did not request this code, please ignore this email.</p>
+            </div>
+          `
+        });
+
+        if (error) {
+          console.error('Resend API Error:', error);
+          return res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
+        }
+
+        res.json({ success: true, message: 'OTP sent to your email.' });
+      } catch (err) {
+        console.error('Unexpected email error:', err);
+        return res.status(500).json({ success: false, message: 'Server error while sending OTP.' });
+      }
+    });
+  } catch (configErr) {
+    console.error("Config fetch error in send-otp:", configErr);
+    res.status(500).json({ success: false, message: 'Server error retrieving system configuration.' });
+  }
 });
 
 app.post('/api/auth/verify-otp', otpLimiter, (req, res) => {
@@ -589,55 +638,65 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   const isMobile = req.body.isMobile;
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
-  db.query("SELECT id, role FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: err.message });
-    if (results.length === 0) {
-      return res.status(404).json({ success: false, message: 'No active account found with that email.' });
-    }
+  try {
+    const cfg = typeof getSystemConfig === 'function' 
+      ? await getSystemConfig() 
+      : { otp_expiry_minutes: 5 };
+    const otpMinutes = Number(cfg.otp_expiry_minutes) || 5;
 
-    const user = results[0];
-    
-    // 🔴 STRICT ROLE RESTRICTIONS FOR RECOVERY
-    if (isMobile && user.role !== 'instructor') {
-      return res.status(403).json({ success: false, message: 'This account does not have access.' });
-    }
-    if (!isMobile && user.role === 'instructor') {
-      return res.status(403).json({ success: false, message: 'This account does not have access.' });
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 5 * 60 * 1000;
-    OTP_STORE[email] = { otp, expiresAt };
-    console.log(`[PASSWORD RESET OTP] ${email} → ${otp}`);
-
-    try {
-      const { data, error } = await resend.emails.send({
-        from: 'UniVITA Security <no-reply@univitahct.tech>',
-        to: [email],
-        subject: 'Password Reset OTP - UniVITA',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <h2 style="color: #0f172a; margin-top: 0;">Password Reset Code</h2>
-            <p style="color: #475569; font-size: 14px;">Use the following one-time password (OTP) to reset your password. This code is valid for 5 minutes.</p>
-            <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 15px; text-align: center; border-radius: 6px; margin: 20px 0;">
-              <span style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #0d9488;">${otp}</span>
-            </div>
-            <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">If you did not request this, please ignore this email.</p>
-          </div>
-        `
-      });
-
-      if (error) {
-        console.error('Resend API Error:', error);
-        return res.status(500).json({ success: false, message: 'Failed to send password reset email.' });
+    db.query("SELECT id, role FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
+      if (err) return res.status(500).json({ success: false, message: err.message });
+      if (results.length === 0) {
+        return res.status(404).json({ success: false, message: 'No active account found with that email.' });
       }
 
-      res.json({ success: true, message: 'OTP sent to your email.' });
-    } catch (err) {
-      console.error('Unexpected email error:', err);
-      return res.status(500).json({ success: false, message: 'Server error while sending reset OTP.' });
-    }
-  });
+      const user = results[0];
+      
+      // 🔴 STRICT ROLE RESTRICTIONS FOR RECOVERY
+      if (isMobile && user.role !== 'instructor') {
+        return res.status(403).json({ success: false, message: 'This account does not have access.' });
+      }
+      if (!isMobile && user.role === 'instructor') {
+        return res.status(403).json({ success: false, message: 'This account does not have access.' });
+      }
+
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + otpMinutes * 60 * 1000;
+      OTP_STORE[email] = { otp, expiresAt };
+      console.log(`[PASSWORD RESET OTP] ${email} → ${otp} (expires in ${otpMinutes}m)`);
+
+      try {
+        const { data, error } = await resend.emails.send({
+          from: 'UniVITA Security <no-reply@univitahct.tech>',
+          to: [email],
+          subject: 'Password Reset OTP - UniVITA',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+              <h2 style="color: #0f172a; margin-top: 0;">Password Reset Code</h2>
+              <p style="color: #475569; font-size: 14px;">Use the following one-time password (OTP) to reset your password. This code is valid for ${otpMinutes} minute${otpMinutes > 1 ? 's' : ''}.</p>
+              <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 15px; text-align: center; border-radius: 6px; margin: 20px 0;">
+                <span style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #0d9488;">${otp}</span>
+              </div>
+              <p style="color: #94a3b8; font-size: 12px; margin-bottom: 0;">If you did not request this, please ignore this email.</p>
+            </div>
+          `
+        });
+
+        if (error) {
+          console.error('Resend API Error:', error);
+          return res.status(500).json({ success: false, message: 'Failed to send password reset email.' });
+        }
+
+        res.json({ success: true, message: 'OTP sent to your email.' });
+      } catch (err) {
+        console.error('Unexpected email error:', err);
+        return res.status(500).json({ success: false, message: 'Server error while sending reset OTP.' });
+      }
+    });
+  } catch (configErr) {
+    console.error("Config fetch error in forgot-password:", configErr);
+    res.status(500).json({ success: false, message: 'Server error retrieving system configuration.' });
+  }
 });
 
 app.post('/api/auth/verify-reset-otp', otpLimiter, (req, res) => {
@@ -691,14 +750,33 @@ app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
 
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-app.post('/api/login', loginLimiter, (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
   const { email, password, isMobile } = req.body;
+  const cfg = typeof getSystemConfig === 'function' 
+    ? await getSystemConfig() 
+    : { password_expiry_days: 365, max_login_attempts: 5 };
   
   if (!email || !password) {
     return res.status(400).json({ success: false, message: 'Email and password are required.' });
   }
 
-  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
+  const cleanEmail = String(email).trim().toLowerCase();
+
+  // 1. Check Max Login Attempts Lockout
+  const attemptRecord = FAILED_LOGIN_ATTEMPTS.get(cleanEmail);
+  if (attemptRecord && attemptRecord.lockedUntil) {
+    if (Date.now() < attemptRecord.lockedUntil) {
+      const remainingMins = Math.ceil((attemptRecord.lockedUntil - Date.now()) / 60000);
+      return res.status(429).json({ 
+        success: false, 
+        message: `Account temporarily locked due to ${cfg.max_login_attempts} failed login attempts. Please try again in ${remainingMins} minute(s).` 
+      });
+    } else {
+      FAILED_LOGIN_ATTEMPTS.delete(cleanEmail);
+    }
+  }
+
+  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [cleanEmail], async (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
     
     // 1. Email is incorrect or inactive:
@@ -714,9 +792,29 @@ app.post('/api/login', loginLimiter, (req, res) => {
       const hashed = await bcrypt.hash(password, 10);
       db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
     } else if (!match) {
-      // 3. Email is valid, but password does not match:
-      return res.status(401).json({ success: false, message: 'Incorrect password.' });
+      // Record and escalate failed attempts against System Config limit
+      const current = FAILED_LOGIN_ATTEMPTS.get(cleanEmail) || { count: 0, lockedUntil: null };
+      current.count += 1;
+
+      if (current.count >= cfg.max_login_attempts) {
+        current.lockedUntil = Date.now() + 15 * 60 * 1000; // 15-minute security lockout
+        FAILED_LOGIN_ATTEMPTS.set(cleanEmail, current);
+        return res.status(429).json({
+          success: false,
+          message: `Too many failed attempts. Security threshold (${cfg.max_login_attempts}) reached. Account locked for 15 minutes.`
+        });
+      }
+
+      FAILED_LOGIN_ATTEMPTS.set(cleanEmail, current);
+      const remainingAttempts = cfg.max_login_attempts - current.count;
+      return res.status(401).json({ 
+        success: false, 
+        message: `Incorrect password. ${remainingAttempts} attempt(s) remaining before security lockout.` 
+      });
     }
+
+    // Reset failed counter on successful password match
+    FAILED_LOGIN_ATTEMPTS.delete(cleanEmail);
 
     // 🔴 MOBILE APP ROLE RESTRICTION: Block Admin/HR/Security from Mobile
     if (isMobile && user.role !== 'instructor') {
@@ -730,16 +828,18 @@ app.post('/api/login', loginLimiter, (req, res) => {
     
     logAction(user.id, 'LOGIN', 'user', user.id, req);
     
+    // 3. Dynamic Password Expiry Evaluation based on System Config
     const daysSinceChange = user.password_last_changed
       ? Math.floor((Date.now() - new Date(user.password_last_changed).getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
-    if (daysSinceChange >= 365) {
+    const expiryLimit = cfg.password_expiry_days ?? 365;
+    if (expiryLimit > 0 && daysSinceChange >= expiryLimit) {
       const tempToken = jwt.sign({ id: user.id, email: user.email, purpose: 'password-reset' }, JWT_SECRET, { expiresIn: '15m' });
       return res.json({
         success: true,
         requiresPasswordReset: true,
-        message: "Your password has expired. Please renew it to continue.",
+        message: `Your password has expired (${daysSinceChange} days old; policy limit: ${expiryLimit} days). Please renew it to continue.`,
         tempToken,
         user: { id: user.id, role: user.role }
       });
@@ -2616,6 +2716,7 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       last_name: 'last_name',
       email: 'email',
       phone: 'phone_number',
+      phone_number: 'phone_number',
       position_level: 'position_level',
       contract_type: 'contract_type',
       status: 'status',
@@ -2630,13 +2731,16 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       emergency_contact_name: 'emergency_contact_name',
       emergency_contact_phone: 'emergency_contact_phone',
       street: 'street_address',
+      street_address: 'street_address',
       city: 'city',
       state: 'state_province',
+      state_province: 'state_province',
       postal_code: 'postal_code',
       country: 'country',
       additional_info: 'additional_info',
       middle_initial: 'middle_initial',
       account_expiry: 'account_expiration_date',
+      account_expiration_date: 'account_expiration_date',
       position: 'position',
     };
 
@@ -2645,12 +2749,13 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
 
     const setClauses = [];
     const values = [];
+    const handledColumns = new Set();
     
     for (const [frontField, dbField] of Object.entries(fieldMapping)) {
-      if (updates[frontField] !== undefined) {
+      if (updates[frontField] !== undefined && !handledColumns.has(dbField)) {
+        handledColumns.add(dbField);
         let val = updates[frontField];
         
-        // CRITICAL FIX: Convert empty strings to 0 for numbers, or NULL for dates to prevent DB strict mode crashes
         if (dateColumns.includes(dbField) && val === '') {
           val = null;
         } else if (numColumns.includes(dbField) && val === '') {
@@ -4462,7 +4567,7 @@ app.delete('/api/school-locations/:id', authenticateToken, async (req, res) => {
 
 app.get('/api/reports/compliance/attendance-compliance', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to view this report.' });
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR authorization required.' });
   }
 
   const { month, year } = req.query;
@@ -4471,238 +4576,338 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
   }
 
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endDate = new Date(year, month, 0).toISOString().slice(0, 10);
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
   try {
     const [rows] = await db.promise().query(`
       SELECT 
         u.employee_id,
         u.full_name,
-        COUNT(DISTINCT s.date) AS scheduled_days,
-        COUNT(DISTINCT CASE WHEN a.status IN ('present', 'late') THEN a.date END) AS present_days,
-        COALESCE(SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END), 0) AS late_count,
-        COALESCE(COUNT(DISTINCT CASE WHEN a.status = 'on leave' THEN a.date END), 0) AS leave_days
+        COALESCE(u.position_level, 'Simulationist') AS position_level,
+        COUNT(DISTINCT s.id) AS scheduled_shifts,
+        COALESCE(SUM(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60), 0) AS scheduled_hours,
+        COUNT(DISTINCT CASE 
+          WHEN a.status IN ('present', 'late', 'completed') OR (a.time_in IS NOT NULL AND a.time_out IS NOT NULL) 
+          THEN s.id 
+        END) AS present_shifts,
+        COALESCE(SUM(
+          CASE 
+            WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--'
+            THEN TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60
+            ELSE 0
+          END
+        ), 0) AS rendered_hours,
+        COALESCE(SUM(
+          CASE 
+            WHEN a.status = 'late' OR (a.time_in IS NOT NULL AND s.start_time IS NOT NULL AND a.time_in > ADDTIME(s.start_time, '00:15:00')) 
+            THEN 1 
+            ELSE 0 
+          END
+        ), 0) AS late_count,
+        COALESCE(SUM(
+          CASE 
+            WHEN a.time_in IS NOT NULL AND s.start_time IS NOT NULL AND a.time_in > s.start_time
+            THEN TIMESTAMPDIFF(MINUTE, s.start_time, a.time_in)
+            ELSE 0
+          END
+        ), 0) AS total_late_minutes,
+        (
+          SELECT COUNT(DISTINCT lr.request_date) 
+          FROM leave_requests lr 
+          WHERE (lr.user_id = u.employee_id OR lr.user_id = u.id) 
+            AND lr.status = 'Approved' 
+            AND lr.request_date BETWEEN ? AND ?
+        ) AS leave_days,
+        (
+          SELECT COALESCE(SUM(TIMESTAMPDIFF(MINUTE, o.start_time, o.end_time) / 60), 0)
+          FROM overtime_requests o
+          WHERE (o.user_id = u.id OR o.user_id = u.employee_id)
+            AND o.status = 'approved'
+            AND o.date BETWEEN ? AND ?
+        ) AS overtime_hours
       FROM users u
-      LEFT JOIN schedules s ON u.employee_id = s.user_id AND s.date BETWEEN ? AND ?
-      LEFT JOIN attendance a ON u.employee_id = a.user_id AND a.date BETWEEN ? AND ?
-      WHERE u.role = 'instructor' AND u.status = 'active'
+      LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND s.date BETWEEN ? AND ?
+      LEFT JOIN attendance a ON s.id = a.schedule_id
+      WHERE LOWER(u.role) = 'instructor' AND u.status = 'active'
       GROUP BY u.id
       ORDER BY u.full_name ASC
-    `, [startDate, endDate, startDate, endDate]);
+    `, [startDate, endDate, startDate, endDate, startDate, endDate]);
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'No active instructors found for the selected period.' });
     }
 
     const reportData = rows.map(row => {
-      const scheduled = Number(row.scheduled_days) || 0;
-      const present = Number(row.present_days) || 0;
-      const late = Number(row.late_count) || 0;
-      const leave = Number(row.leave_days) || 0;
-      const absent = Math.max(0, scheduled - present - leave);
-      const complianceRate = scheduled > 0 ? (present / scheduled) * 100 : 0;
+      const scheduledShifts = Number(row.scheduled_shifts) || 0;
+      const presentShifts = Number(row.present_shifts) || 0;
+      const lateCount = Number(row.late_count) || 0;
+      const leaveDays = Number(row.leave_days) || 0;
+      
+      // Expected Shifts excludes approved leaves
+      const expectedShifts = Math.max(0, scheduledShifts - leaveDays);
+      const unexcused = Math.max(0, expectedShifts - presentShifts);
+      
+      const schedHours = Number(row.scheduled_hours) || 0;
+      const actHours = Number(row.rendered_hours) || 0;
+      const otHours = Number(row.overtime_hours) || 0;
+
+      // Rate Calculation Logic
+      let attendanceRateText = 'N/A';
+      let auditStatus = 'NO SCHEDULE';
+      let rateNumber = null;
+
+      if (scheduledShifts === 0) {
+        attendanceRateText = 'N/A';
+        auditStatus = 'NO SCHEDULE';
+      } else if (expectedShifts === 0 && leaveDays > 0) {
+        attendanceRateText = '100.0%';
+        auditStatus = 'EXCUSED LEAVE';
+        rateNumber = 100;
+      } else if (expectedShifts > 0) {
+        const calculatedRate = Math.min(100, (presentShifts / expectedShifts) * 100);
+        rateNumber = calculatedRate;
+        attendanceRateText = `${calculatedRate.toFixed(1)}%`;
+        if (calculatedRate >= 95) auditStatus = 'EXCELLENT';
+        else if (calculatedRate >= 80) auditStatus = 'COMPLIANT';
+        else auditStatus = 'DEFICIENT';
+      }
+
       return {
         employee_id: row.employee_id || '—',
         full_name: row.full_name || 'Unknown',
-        scheduled_days: scheduled,
-        present_days: present,
-        late_days: late,
-        leave_days: leave,
-        absent_days: absent,
-        compliance_rate: complianceRate.toFixed(1)
+        position: (row.position_level || 'Simulationist').substring(0, 22),
+        scheduled_shifts: scheduledShifts,
+        present_shifts: presentShifts,
+        late_count: lateCount,
+        total_late_mins: Math.round(row.total_late_minutes || 0),
+        leave_days: leaveDays,
+        unexcused_absences: unexcused,
+        scheduled_hours: schedHours.toFixed(1),
+        rendered_hours: actHours.toFixed(1),
+        overtime_hours: otHours.toFixed(1),
+        attendance_rate: attendanceRateText,
+        rate_number: rateNumber,
+        audit_status: auditStatus
       };
     });
 
     const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ margin: 40, size: 'A4' }); // Narrower margins for formal look
+    // LANDSCAPE A4: Width 841.89 pt x Height 595.28 pt
+    const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
     
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=HCT_Attendance_Compliance_${year}_${String(month).padStart(2,'0')}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=HCT_Attendance_Report_${year}_${String(month).padStart(2,'0')}.pdf`);
     doc.pipe(res);
 
-    // --- FORMAL HEADER ---
-    doc.fontSize(22).font('Helvetica-Bold').fillColor('#0F172A').text('HCT ACADEMY', { align: 'center' });
-    doc.fontSize(10).font('Helvetica').fillColor('#475569').text('Healthcare Training Center', { align: 'center' });
-    doc.fontSize(9).text('123 Healthcare Avenue, Pasay City, Metro Manila | Tel: (02) 8123-4567', { align: 'center' });
-    doc.moveDown(1);
+    const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
+    const phtNow = getPHDateTime();
+    const reportRefId = `DTR-AUD-${year}${String(month).padStart(2, '0')}-${Date.now().toString().slice(-4)}`;
+
+    // ----------------------------------------------------
+    // 1. INSTITUTIONAL LETTERHEAD & TITLE
+    // ----------------------------------------------------
+    doc.fontSize(15).font('Helvetica-Bold').fillColor('#0F172A').text('HCT ACADEMY - HEALTHCARE TRAINING CENTER', 36, 34);
+    doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#00897B').text('MONTHLY ATTENDANCE & TIMEKEEPING REPORT', 36, 51);
+    doc.fontSize(7.5).font('Helvetica').fillColor('#64748B').text('Healthcare Simulation & Clinical Training Faculty | 123 Healthcare Avenue, Pasay City, Metro Manila', 36, 62);
+
+    // Meta box top-right
+    doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0F172A').text(`REPORT ID: ${reportRefId}`, 580, 34, { align: 'right' });
+    doc.fontSize(7).font('Helvetica').fillColor('#475569').text(`Reporting Period: ${monthName} 1–${lastDay}, ${year}`, 580, 44, { align: 'right' });
+    doc.text(`Department: Simulation & Clinical Faculty`, 580, 54, { align: 'right' });
+    doc.text(`Source Module: UniVITA ISMS Timekeeping & Geofence DTR Engine`, 580, 64, { align: 'right' });
+    doc.text(`Generated (PHT): ${phtNow}`, 580, 74, { align: 'right' });
+
+    doc.moveTo(36, 86).lineTo(805, 86).lineWidth(1).stroke('#CBD5E1');
+
+    // ----------------------------------------------------
+    // 2. EXECUTIVE SUMMARY TILES
+    // ----------------------------------------------------
+    const totalInstructors = reportData.length;
+    const sumSchedShifts = reportData.reduce((acc, r) => acc + r.scheduled_shifts, 0);
+    const sumPresentShifts = reportData.reduce((acc, r) => acc + r.present_shifts, 0);
+    const sumLeaves = reportData.reduce((acc, r) => acc + r.leave_days, 0);
+    const sumExpectedShifts = Math.max(0, sumSchedShifts - sumLeaves);
+    const sumLates = reportData.reduce((acc, r) => acc + r.late_count, 0);
+    const sumAbsences = reportData.reduce((acc, r) => acc + r.unexcused_absences, 0);
+    const sumSchedHours = reportData.reduce((acc, r) => acc + parseFloat(r.scheduled_hours), 0);
+    const sumRenderedHours = reportData.reduce((acc, r) => acc + parseFloat(r.rendered_hours), 0);
     
-    doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(1.5).stroke('#CBD5E1');
-    doc.moveDown(1.5);
+    const overallAttendanceRate = sumExpectedShifts > 0 
+      ? ((sumPresentShifts / sumExpectedShifts) * 100).toFixed(1) 
+      : 'N/A';
 
-    // --- DOCUMENT TITLE ---
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('#0F172A').text('OFFICIAL ATTENDANCE COMPLIANCE REPORT', { align: 'center', characterSpacing: 1 });
-    const monthName = new Date(year, month-1).toLocaleString('default', { month: 'long' });
-    doc.fontSize(10).font('Helvetica').fillColor('#64748B').text(`Reporting Period: ${monthName} ${year}`, { align: 'center' });
-    doc.moveDown(2);
+    const tileWidth = 183;
+    const tileHeight = 40;
+    const tileY = 94;
 
-    // --- TABLE CONFIGURATION ---
-    const startX = 40;
-    const colWidths = [50, 165, 60, 55, 45, 45, 60]; // Adjusted to fit 515 width
-    const headers = ['EMP ID', 'INSTRUCTOR NAME', 'SCHED', 'PRESENT', 'LATE', 'LEAVE', 'COMP RATE'];
-    const rowHeight = 24;
-    let currentY = doc.y;
+    // Tile 1: Headcount
+    doc.rect(36, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
+    doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('AUDITED FACULTY HEADCOUNT', 46, tileY + 6);
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(13).text(`${totalInstructors} Instructors`, 46, tileY + 18);
 
-    // --- TABLE HEADER ROW ---
-    doc.rect(startX, currentY, 515, rowHeight).fillAndStroke('#F1F5F9', '#CBD5E1');
-    doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
-    
-    headers.forEach((h, i) => {
-      let x = startX;
-      for (let j = 0; j < i; j++) x += colWidths[j];
-      const alignObj = (i === 1) ? { align: 'left' } : { align: 'center' };
-      const xOffset = (i === 1) ? 5 : 0; // Padding for text
-      doc.text(h, x + xOffset, currentY + 7, { width: colWidths[i] - (xOffset*2), ...alignObj });
-      if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).lineWidth(0.5).stroke('#CBD5E1');
-    });
-    
-    currentY += rowHeight;
-    doc.font('Helvetica').fontSize(9);
+    // Tile 2: Hours Comparison
+    doc.rect(231, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
+    doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('INSTRUCTION HOURS (SCHED VS RENDERED)', 241, tileY + 6);
+    doc.fillColor('#00897B').font('Helvetica-Bold').fontSize(12).text(`${sumRenderedHours.toFixed(1)} / ${sumSchedHours.toFixed(1)} hrs`, 241, tileY + 18);
 
-    // --- TABLE DATA ROWS ---
-    let alternate = false;
-    for (const emp of reportData) {
-      if (currentY > 740) {
-        doc.addPage();
-        currentY = 40;
-        
-        // Redraw Header on new page
-        doc.rect(startX, currentY, 515, rowHeight).fillAndStroke('#F1F5F9', '#CBD5E1');
-        doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
-        headers.forEach((h, i) => {
-          let x = startX;
-          for (let j = 0; j < i; j++) x += colWidths[j];
-          const alignObj = (i === 1) ? { align: 'left' } : { align: 'center' };
-          doc.text(h, x + (i===1?5:0), currentY + 7, { width: colWidths[i] - (i===1?10:0), ...alignObj });
-          if (i > 0) doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).stroke('#CBD5E1');
-        });
-        currentY += rowHeight;
-        doc.font('Helvetica').fontSize(9);
-      }
+    // Tile 3: Incidents
+    doc.rect(426, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
+    doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('RECORDED INCIDENTS (MONTHLY)', 436, tileY + 6);
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(11).text(`${sumLates} Lates | ${sumLeaves} Leaves | ${sumAbsences} Unexcused`, 436, tileY + 19);
 
-      // Draw Row Background
-      if (alternate) {
-        doc.rect(startX, currentY, 515, rowHeight).fill('#F8FAFC');
-      }
-      doc.rect(startX, currentY, 515, rowHeight).stroke('#CBD5E1');
-      doc.fillColor('#0F172A');
+    // Tile 4: Attendance Rate
+    const slaColor = overallAttendanceRate !== 'N/A' && parseFloat(overallAttendanceRate) >= 85 ? '#059669' : '#DC2626';
+    doc.rect(621, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
+    doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('DEPARTMENTAL ATTENDANCE RATE', 631, tileY + 6);
+    doc.fillColor(slaColor).font('Helvetica-Bold').fontSize(13).text(`${overallAttendanceRate}%`, 631, tileY + 18);
 
-      let x = startX;
+    // ----------------------------------------------------
+    // 3. METHODOLOGY & DTR REFERENCE BOX
+    // ----------------------------------------------------
+    const methY = 140;
+    doc.rect(36, methY, 769, 28).fillAndStroke('#F1F5F9', '#CBD5E1');
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7).text('AUDIT METHODOLOGY & DTR SOURCE RECORD REFERENCE:', 44, methY + 5);
+    doc.font('Helvetica').fontSize(6.5).fillColor('#334155').text(
+      '• Formula: Attendance Rate = [Present Shifts ÷ (Scheduled Shifts − Approved Leave)] × 100. Approved leaves are excused and excluded from expected attendance denominator.\n' +
+      '• Statutory DTR Reference: Compiled from Daily Time Record (DTR) logs, biometrics, and geofenced mobile clock-in/out records pursuant to DOLE Labor Standards & Section 2, Rule X of the Omnibus Rules Implementing the Labor Code.',
+      44, methY + 13, { width: 753, lineGap: 1.5 }
+    );
+
+    // ----------------------------------------------------
+    // 4. TABLE STRUCTURE (769 pt total width)
+    // ----------------------------------------------------
+    const tableTop = 176;
+    const colWidths = [48, 130, 90, 42, 42, 42, 44, 55, 52, 52, 44, 62, 66];
+    const headers = [
+      'EMP ID', 'INSTRUCTOR NAME', 'POSITION / TITLE', 'SCHED', 'PRES', 'LATE', 
+      'LEAVE', 'UNEXC ABS', 'SCHED HRS', 'REND HRS', 'OT HRS', 'ATT RATE', 'STATUS'
+    ];
+    const rowHeight = 18;
+    let currentY = tableTop;
+
+    const drawTableHeader = (y) => {
+      doc.rect(36, y, 769, rowHeight).fillAndStroke('#0F172A', '#0F172A');
+      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(6.5);
       
-      // EMP ID
-      doc.text(emp.employee_id, x, currentY + 7, { width: colWidths[0], align: 'center' });
-      doc.moveTo(x + colWidths[0], currentY).lineTo(x + colWidths[0], currentY + rowHeight).stroke('#CBD5E1');
-      x += colWidths[0];
+      let x = 36;
+      headers.forEach((h, i) => {
+        const align = (i === 1 || i === 2) ? 'left' : 'center';
+        const offset = (i === 1 || i === 2) ? 4 : 0;
+        doc.text(h, x + offset, y + 5.5, { width: colWidths[i] - (offset * 2), align });
+        x += colWidths[i];
+      });
+    };
 
-      // NAME
-      doc.text(emp.full_name.substring(0, 30), x + 5, currentY + 7, { width: colWidths[1] - 10, align: 'left' });
-      doc.moveTo(x + colWidths[1], currentY).lineTo(x + colWidths[1], currentY + rowHeight).stroke('#CBD5E1');
-      x += colWidths[1];
+    drawTableHeader(currentY);
+    currentY += rowHeight;
 
-      // SCHEDULED
-      doc.text(emp.scheduled_days.toString(), x, currentY + 7, { width: colWidths[2], align: 'center' });
-      doc.moveTo(x + colWidths[2], currentY).lineTo(x + colWidths[2], currentY + rowHeight).stroke('#CBD5E1');
-      x += colWidths[2];
+    // ----------------------------------------------------
+    // 5. EMPLOYEE DATA ROWS
+    // ----------------------------------------------------
+    reportData.forEach((emp, index) => {
+      if (currentY > 480) {
+        doc.addPage();
+        currentY = 36;
+        drawTableHeader(currentY);
+        currentY += rowHeight;
+      }
 
-      // PRESENT
-      doc.text(emp.present_days.toString(), x, currentY + 7, { width: colWidths[3], align: 'center' });
-      doc.moveTo(x + colWidths[3], currentY).lineTo(x + colWidths[3], currentY + rowHeight).stroke('#CBD5E1');
-      x += colWidths[3];
+      const isEven = index % 2 === 0;
+      doc.rect(36, currentY, 769, rowHeight).fillAndStroke(isEven ? '#FFFFFF' : '#F8FAFC', '#E2E8F0');
+      doc.fontSize(7).font('Helvetica');
 
-      // LATE
-      if(emp.late_days > 0) doc.fillColor('#DC2626'); // Highlight lates in red
-      doc.text(emp.late_days.toString(), x, currentY + 7, { width: colWidths[4], align: 'center' });
-      doc.fillColor('#0F172A');
-      doc.moveTo(x + colWidths[4], currentY).lineTo(x + colWidths[4], currentY + rowHeight).stroke('#CBD5E1');
-      x += colWidths[4];
+      let x = 36;
+      const values = [
+        emp.employee_id,
+        emp.full_name,
+        emp.position,
+        emp.scheduled_shifts.toString(),
+        emp.present_shifts.toString(),
+        emp.late_count.toString(),
+        emp.leave_days.toString(),
+        emp.unexcused_absences.toString(),
+        `${emp.scheduled_hours}h`,
+        `${emp.rendered_hours}h`,
+        `${emp.overtime_hours}h`,
+        emp.attendance_rate,
+        emp.audit_status
+      ];
 
-      // LEAVE
-      doc.text(emp.leave_days.toString(), x, currentY + 7, { width: colWidths[5], align: 'center' });
-      doc.moveTo(x + colWidths[5], currentY).lineTo(x + colWidths[5], currentY + rowHeight).stroke('#CBD5E1');
-      x += colWidths[5];
+      values.forEach((val, i) => {
+        const align = (i === 1 || i === 2) ? 'left' : 'center';
+        const offset = (i === 1 || i === 2) ? 4 : 0;
+        
+        doc.fillColor('#0F172A');
+        if (i === 0) {
+          doc.font('Helvetica-Bold');
+        } else if (i === 5 && emp.late_count > 0) {
+          doc.fillColor('#B45309').font('Helvetica-Bold');
+        } else if (i === 7 && emp.unexcused_absences > 0) {
+          doc.fillColor('#DC2626').font('Helvetica-Bold');
+        } else if (i === 11) {
+          doc.font('Helvetica-Bold');
+          if (emp.attendance_rate === 'N/A') doc.fillColor('#64748B');
+          else if (emp.rate_number >= 95) doc.fillColor('#059669');
+          else if (emp.rate_number < 80) doc.fillColor('#DC2626');
+          else doc.fillColor('#0F172A');
+        } else if (i === 12) {
+          doc.font('Helvetica-Bold');
+          if (emp.audit_status === 'NO SCHEDULE') doc.fillColor('#64748B');
+          else if (emp.audit_status === 'EXCELLENT' || emp.audit_status === 'EXCUSED LEAVE') doc.fillColor('#059669');
+          else if (emp.audit_status === 'DEFICIENT') doc.fillColor('#DC2626');
+          else doc.fillColor('#2563EB');
+        } else {
+          doc.font('Helvetica');
+        }
 
-      // COMP RATE
-      const rate = parseFloat(emp.compliance_rate);
-      if (rate < 85) doc.fillColor('#DC2626');
-      else if (rate === 100) doc.fillColor('#059669');
-      doc.font('Helvetica-Bold').text(`${rate.toFixed(1)}%`, x, currentY + 7, { width: colWidths[6], align: 'center' });
-      doc.font('Helvetica').fillColor('#0F172A');
+        doc.text(val, x + offset, currentY + 5, { width: colWidths[i] - (offset * 2), align });
+        x += colWidths[i];
+      });
 
       currentY += rowHeight;
-      alternate = !alternate;
-    }
+    });
 
-    doc.moveDown(3);
+    // ----------------------------------------------------
+    // 6. TRIPARTITE SIGN-OFF BLOCK
+    // ----------------------------------------------------
+    if (currentY > 440) { doc.addPage(); currentY = 40; }
 
-    // --- FORMAL EXECUTIVE SUMMARY BOX ---
-    currentY = doc.y;
-    if (currentY > 650) { doc.addPage(); currentY = 40; }
+    currentY += 12;
+    const signColWidth = 230;
 
-    const totalScheduled = reportData.reduce((s, e) => s + e.scheduled_days, 0);
-    const totalPresent = reportData.reduce((s, e) => s + e.present_days, 0);
-    const totalLate = reportData.reduce((s, e) => s + e.late_days, 0);
-    const totalLeave = reportData.reduce((s, e) => s + e.leave_days, 0);
-    const totalAbsent = totalScheduled - totalPresent - totalLeave;
-    const overallRate = totalScheduled > 0 ? (totalPresent / totalScheduled) * 100 : 0;
+    // Prepared By
+    doc.moveTo(36, currentY + 22).lineTo(36 + signColWidth, currentY + 22).lineWidth(0.8).stroke('#0F172A');
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('PREPARED BY: HR COMPLIANCE OFFICER', 36, currentY + 26);
+    doc.font('Helvetica').fontSize(6.5).fillColor('#64748B').text('Records & Timekeeping Specialist | Date: ____________', 36, currentY + 36);
 
-    // Draw Summary Box
-    doc.rect(startX, currentY, 515, 120).fillAndStroke('#F8FAFC', '#CBD5E1');
-    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(10);
-    doc.text('EXECUTIVE DEPARTMENT SUMMARY', startX + 15, currentY + 15);
-    
-    doc.moveTo(startX + 15, currentY + 30).lineTo(startX + 500, currentY + 30).lineWidth(0.5).stroke('#CBD5E1');
-    
-    let sumY = currentY + 40;
-    doc.font('Helvetica').fontSize(9);
-    
-    // Column 1
-    doc.text('Total Scheduled Shifts:', startX + 15, sumY);
-    doc.font('Helvetica-Bold').text(totalScheduled.toString(), startX + 140, sumY);
-    
-    doc.font('Helvetica').text('Total Shifts Attended:', startX + 15, sumY + 15);
-    doc.font('Helvetica-Bold').fillColor('#059669').text(totalPresent.toString(), startX + 140, sumY + 15).fillColor('#0F172A');
-    
-    doc.font('Helvetica').text('Total Approved Leaves:', startX + 15, sumY + 30);
-    doc.font('Helvetica-Bold').text(totalLeave.toString(), startX + 140, sumY + 30);
+    // Reviewed By
+    doc.moveTo(305, currentY + 22).lineTo(305 + signColWidth, currentY + 22).stroke('#0F172A');
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('REVIEWED BY: DEAN / SIMULATION HEAD', 305, currentY + 26);
+    doc.font('Helvetica').fontSize(6.5).fillColor('#64748B').text('Academic & Clinical Faculty Division | Date: ____________', 305, currentY + 36);
 
-    // Column 2
-    doc.font('Helvetica').text('Total Late Incidents:', startX + 250, sumY);
-    doc.font('Helvetica-Bold').fillColor(totalLate > 0 ? '#DC2626' : '#0F172A').text(totalLate.toString(), startX + 360, sumY).fillColor('#0F172A');
-    
-    doc.font('Helvetica').text('Total Unexcused Absences:', startX + 250, sumY + 15);
-    doc.font('Helvetica-Bold').fillColor(totalAbsent > 0 ? '#DC2626' : '#0F172A').text(totalAbsent.toString(), startX + 360, sumY + 15).fillColor('#0F172A');
+    // Approved By
+    doc.moveTo(575, currentY + 22).lineTo(575 + signColWidth, currentY + 22).stroke('#0F172A');
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('APPROVED BY: EXECUTIVE VICE PRESIDENT', 575, currentY + 26);
+    doc.font('Helvetica').fontSize(6.5).fillColor('#64748B').text('HCT Academy Executive Directorate | Date: ____________', 575, currentY + 36);
 
-    // Overall Compliance
-    doc.font('Helvetica-Bold').fontSize(10).text('Overall Department Compliance:', startX + 250, sumY + 45);
-    const rateColor = overallRate >= 85 ? '#059669' : '#DC2626';
-    doc.fontSize(14).fillColor(rateColor).text(`${overallRate.toFixed(1)}%`, startX + 430, sumY + 42);
-    doc.fillColor('#0F172A');
-
-    doc.moveDown(5);
-
-    // --- SIGNATURE BLOCK ---
-    currentY = doc.y;
-    if (currentY > 700) { doc.addPage(); currentY = 50; }
-
-    doc.moveTo(startX, currentY).lineTo(startX + 140, currentY).lineWidth(1).stroke('#0F172A');
-    doc.moveTo(startX + 187, currentY).lineTo(startX + 327, currentY).stroke('#0F172A');
-    doc.moveTo(startX + 375, currentY).lineTo(startX + 515, currentY).stroke('#0F172A');
-    
-    doc.font('Helvetica-Bold').fontSize(8);
-    doc.text('Prepared By (HR Admin)', startX, currentY + 5, { width: 140, align: 'center' });
-    doc.text('Reviewed By (Department Head)', startX + 187, currentY + 5, { width: 140, align: 'center' });
-    doc.text('Approved By (Director)', startX + 375, currentY + 5, { width: 140, align: 'center' });
-
-    // --- FOOTER ---
-    const dateStr = new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila', dateStyle: 'full', timeStyle: 'short' });
-    doc.fontSize(7).font('Helvetica').fillColor('#94A3B8');
-    doc.text(`CONFIDENTIAL - SYSTEM GENERATED DOCUMENT`, 40, 780, { align: 'center' });
-    doc.text(`Generated on ${dateStr} via UniVITA Analytics`, 40, 790, { align: 'center' });
+    // ----------------------------------------------------
+    // 7. NATIONAL PRIVACY COMMISSION (NPC) COMPLIANT NOTICE
+    // ----------------------------------------------------
+    const footerY = 554;
+    doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#475569');
+    doc.text('CONFIDENTIAL - AUTHORIZED HR AND MANAGEMENT USE ONLY', 36, footerY, { align: 'center', width: 769 });
+    doc.fontSize(6).font('Helvetica').fillColor('#64748B');
+    doc.text(
+      'Contains employee attendance information. Handle, retain, and disclose strictly according to HCT Academy\'s privacy and records-management policies and the Philippine Data Privacy Act of 2012 (RA 10173).',
+      36, footerY + 8, { align: 'center', width: 769 }
+    );
 
     doc.end();
   } catch (err) {
-    console.error('PDF generation error:', err);
+    console.error('Compliance PDF generation error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ success: false, message: 'Server failed to generate the compliance report.' });
+      res.status(500).json({ success: false, message: 'Server failed to generate the attendance report.' });
     }
   }
 });
@@ -5000,15 +5205,28 @@ app.get('/api/payroll/access-logs', authenticateToken, (req, res) => {
 app.get('/api/audit-logs', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const sql = `
-    SELECT al.*, u.email as user_email
+    SELECT 
+      al.id,
+      al.user_id,
+      al.action,
+      al.target_type,
+      al.target_id,
+      al.old_value,
+      al.new_value,
+      al.ip_address,
+      al.user_agent,
+      DATE_FORMAT(al.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      u.email AS user_email,
+      u.full_name AS user_name,
+      u.role AS user_role
     FROM audit_logs al
     LEFT JOIN users u ON al.user_id = u.id
-    ORDER BY al.created_at DESC
+    ORDER BY al.id DESC
     LIMIT 2000
   `;
   db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
+    res.json(results || []);
   });
 });
 
@@ -5062,12 +5280,10 @@ db.query(createConfigTable, (err) => {
   }
 });
 
-app.get('/api/system-config', authenticateToken, (req, res) => {
+app.get('/api/system-config', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  db.query("SELECT password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts FROM system_config WHERE id = 1", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results[0] || { password_expiry_days: 365, otp_expiry_minutes: 5, geofence_default_radius: 200, max_login_attempts: 5 });
-  });
+  const cfg = await getSystemConfig();
+  res.json(cfg);
 });
 
 app.put('/api/system-config', authenticateToken, async (req, res) => {
@@ -5077,18 +5293,17 @@ app.put('/api/system-config', authenticateToken, async (req, res) => {
   
   const { password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts } = req.body;
   
-  // Strict Input Validation to prevent system-breaking configurations
-  if (password_expiry_days === undefined || password_expiry_days < 0) {
-    return res.status(400).json({ success: false, message: 'Password expiry days cannot be negative.' });
+  if (password_expiry_days === undefined || password_expiry_days < 0 || password_expiry_days > 1095) {
+    return res.status(400).json({ success: false, message: 'Password expiry days must be between 0 (disabled) and 1095 days.' });
   }
-  if (!otp_expiry_minutes || otp_expiry_minutes < 1) {
-    return res.status(400).json({ success: false, message: 'OTP expiry must be at least 1 minute.' });
+  if (!otp_expiry_minutes || otp_expiry_minutes < 1 || otp_expiry_minutes > 60) {
+    return res.status(400).json({ success: false, message: 'OTP expiry must be between 1 and 60 minutes.' });
   }
-  if (!geofence_default_radius || geofence_default_radius < 50) {
-    return res.status(400).json({ success: false, message: 'Geofence default radius must be at least 50 meters to account for GPS drift.' });
+  if (!geofence_default_radius || geofence_default_radius < 50 || geofence_default_radius > 2000) {
+    return res.status(400).json({ success: false, message: 'Geofence radius must be between 50 and 2000 meters.' });
   }
-  if (!max_login_attempts || max_login_attempts < 1) {
-    return res.status(400).json({ success: false, message: 'Max login attempts must be at least 1.' });
+  if (!max_login_attempts || max_login_attempts < 1 || max_login_attempts > 10) {
+    return res.status(400).json({ success: false, message: 'Max login attempts must be between 1 and 10.' });
   }
 
   try {
@@ -5101,10 +5316,16 @@ app.put('/api/system-config', authenticateToken, async (req, res) => {
       
     await db.promise().query(sql, [password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts]);
     
-    // Log the configuration change
-    logAction(req.user.id, 'UPDATE_SYSTEM_CONFIG', 'system_config', 1, req, null, req.body);
-    
-    res.json({ success: true, message: 'System configuration saved successfully.' });
+    // Update live memory cache immediately so all routes reflect changes with zero restarts
+    systemConfigCache = {
+      password_expiry_days: Number(password_expiry_days),
+      otp_expiry_minutes: Number(otp_expiry_minutes),
+      geofence_default_radius: Number(geofence_default_radius),
+      max_login_attempts: Number(max_login_attempts)
+    };
+
+    logAction(req.user.id, 'UPDATE_SYSTEM_CONFIG', 'system_config', 1, req, null, systemConfigCache);
+    res.json({ success: true, message: 'System configuration saved and actively enforced.' });
   } catch (err) {
     console.error("System config update error:", err);
     res.status(500).json({ success: false, message: 'Server error while updating configuration.' });
@@ -6325,6 +6546,65 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
     console.error("Cancel Correction DB Error:", err);
     res.status(500).json({ success: false, message: err.message || "Server error." });
   }
+});
+
+
+// 1. Multer setup for Facility Image Uploads
+const facilityDir = path.join(uploadsPath, 'facilities');
+if (!fs.existsSync(facilityDir)) fs.mkdirSync(facilityDir, { recursive: true });
+
+const uploadFacility = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, facilityDir),
+    filename: (req, file, cb) => {
+      const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      cb(null, `facility_${unique}${path.extname(file.originalname)}`);
+    }
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
+
+// 2. PUBLIC ENDPOINT: Fetch all landing page content
+app.get('/api/public/landing-content', async (req, res) => {
+  try {
+    const [rows] = await db.promise().query("SELECT content_key, content_value FROM landing_content");
+    const formatted = {};
+    rows.forEach(r => {
+      formatted[r.content_key] = typeof r.content_value === 'string' ? JSON.parse(r.content_value) : r.content_value;
+    });
+    res.json(formatted);
+  } catch (err) {
+    console.error("Failed to fetch landing content:", err);
+    res.status(500).json({ error: "Could not load content" });
+  }
+});
+
+// 3. ADMIN ENDPOINT: Update text sections (Contact info, Courses)
+app.put('/api/admin/landing-content/:key', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const { key } = req.params;
+  const { data } = req.body;
+
+  try {
+    await db.promise().query(
+      "INSERT INTO landing_content (content_key, content_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE content_value = ?",
+      [key, JSON.stringify(data), JSON.stringify(data)]
+    );
+    logAction(req.user.id, 'UPDATE_LANDING_CONTENT', 'landing_content', key, req);
+    res.json({ success: true, message: 'Landing content updated successfully' });
+  } catch (err) {
+    console.error("Update landing content error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. ADMIN ENDPOINT: Upload Facility Image
+app.post('/api/admin/landing/facilities/upload', authenticateToken, uploadFacility.single('image'), async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+
+  const relativePath = `/uploads/facilities/${req.file.filename}`;
+  res.json({ success: true, url: relativePath });
 });
 
 

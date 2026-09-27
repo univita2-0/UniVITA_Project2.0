@@ -1,8 +1,7 @@
-// src/pages/SystemConfig.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Save, RefreshCw, ShieldCheck, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Save, RefreshCw, ShieldCheck, RotateCcw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import './SystemConfig.css';
 import { API_BASE } from '../api';
 
@@ -45,20 +44,19 @@ const SystemConfig = () => {
   };
 
   const handleSave = async () => {
-    // ---- Strict Validation Flow ----
     const pwdExpiry = parseInt(config.password_expiry_days, 10);
     const otpExpiry = parseInt(config.otp_expiry_minutes, 10);
     const radius = parseInt(config.geofence_default_radius, 10);
     const maxAttempts = parseInt(config.max_login_attempts, 10);
 
     if (isNaN(pwdExpiry) || pwdExpiry < 0 || pwdExpiry > 1095) {
-      return toast.error('Password expiry must be between 0 (disabled) and 1095 days (3 years).');
+      return toast.error('Password expiry must be between 0 (disabled) and 1095 days.');
     }
     if (isNaN(otpExpiry) || otpExpiry < 1 || otpExpiry > 60) {
       return toast.error('OTP expiry must be between 1 and 60 minutes.');
     }
     if (isNaN(radius) || radius < 50 || radius > 2000) {
-      return toast.error('Geofence radius must be between 50 and 2000 meters to account for GPS drift.');
+      return toast.error('Geofence radius must be between 50 and 2000 meters.');
     }
     if (isNaN(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) {
       return toast.error('Max login attempts must be between 1 and 10.');
@@ -73,7 +71,7 @@ const SystemConfig = () => {
         max_login_attempts: maxAttempts
       };
       const res = await axios.put(`${API_BASE}/system-config`, payload, getAuthHeaders());
-      toast.success(res.data.message || 'System configuration successfully updated.');
+      toast.success(res.data.message || 'System configuration actively applied.');
     } catch (err) {
       const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Failed to save configuration.';
       toast.error(errorMsg);
@@ -84,7 +82,7 @@ const SystemConfig = () => {
 
   const handleResetDefaults = () => {
     setConfig(DEFAULT_CONFIG);
-    toast.info('Loaded default settings. Click "Save Configuration" to apply.');
+    toast.info('Loaded standard security defaults. Click "Save Configuration" to apply.');
   };
 
   if (loading) return <div className="expert-loading">Loading system parameters...</div>;
@@ -94,9 +92,12 @@ const SystemConfig = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            
             <p className="expert-subtitle">Manage global security policies, authentication timeouts, and geofence parameters.</p>
           </div>
+        </div>
+        <div className="sc-active-indicator">
+          <CheckCircle2 size={16} color="#059669" />
+          <span>Core Security Engine: Enforced</span>
         </div>
       </div>
 
@@ -104,6 +105,13 @@ const SystemConfig = () => {
         <div className="set-card-header">
           <ShieldCheck size={20} className="set-icon-accent" />
           <h3>Global Security & Geofence Policies</h3>
+        </div>
+
+        <div className="sc-banner">
+          <ShieldCheck size={18} color="#0D9488" />
+          <div>
+            <strong>Active Policy Enforcement:</strong> Changes applied here dynamically dictate OTP expirations, strict lockout thresholds, and geofence boundaries without requiring server restarts.
+          </div>
         </div>
         
         <div className="sc-form-grid">
@@ -117,7 +125,7 @@ const SystemConfig = () => {
               min="0"
               max="1095"
             />
-            <span className="set-hint">Set to 0 to disable expiration (Max 1095 days).</span>
+            <span className="set-hint">Set to 0 to disable automatic expiration (Policy max: 1095 days).</span>
           </div>
 
           <div className="set-form-group">
@@ -130,7 +138,7 @@ const SystemConfig = () => {
               min="1"
               max="60"
             />
-            <span className="set-hint">Time allowed before a login verification code expires (1–60 mins).</span>
+            <span className="set-hint">Duration before email verification codes expire (1–60 mins).</span>
           </div>
 
           <div className="set-form-group">
@@ -143,7 +151,7 @@ const SystemConfig = () => {
               min="50"
               max="2000"
             />
-            <span className="set-hint">Allowed distance threshold for GPS attendance clock-ins (50–2000m).</span>
+            <span className="set-hint">Distance threshold for mobile GPS campus clock-ins (50–2000m).</span>
           </div>
 
           <div className="set-form-group">
@@ -156,7 +164,7 @@ const SystemConfig = () => {
               min="1"
               max="10"
             />
-            <span className="set-hint">Failed attempts before automated IP/account security lockout (1–10).</span>
+            <span className="set-hint">Failed password attempts before a 15-minute account lockout (1–10).</span>
           </div>
         </div>
 

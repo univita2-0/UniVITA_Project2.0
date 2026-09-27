@@ -1,0 +1,355 @@
+/* src/pages/LandingPageManagement.css */
+
+.lpm-container {
+  padding: 2rem;
+  background: #F8FAFC;
+  min-height: 100vh;
+  font-family: 'Inter', -apple-system, sans-serif;
+  color: #0F172A;
+}
+
+.lpm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid #E2E8F0;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.lpm-header h2 {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0F172A;
+  margin: 0 0 0.25rem 0;
+  letter-spacing: -0.02em;
+}
+
+.lpm-header p {
+  color: #64748B;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* Tabs */
+.lpm-tabs-bar {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.lpm-tab-btn {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  color: #475569;
+  padding: 0.65rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.lpm-tab-btn:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+.lpm-tab-btn.active {
+  background: #0F172A;
+  color: #FFFFFF;
+  border-color: #0F172A;
+}
+
+/* Cards */
+.lpm-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  padding: 1.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  margin-bottom: 1.5rem;
+}
+
+.lpm-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.lpm-card-header h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0;
+}
+
+.lpm-tag {
+  background: #ECFDF5;
+  color: #047857;
+  border: 1px solid #A7F3D0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.65rem;
+  border-radius: 99px;
+  text-transform: uppercase;
+}
+
+/* Form Grid */
+.lpm-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+.lpm-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.lpm-form-group.full-width {
+  grid-column: 1 / -1;
+}
+
+.lpm-form-group label {
+  font-size: 0.775rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+}
+
+.lpm-form-group input, 
+.lpm-form-group textarea {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #0F172A;
+  background: #FFFFFF;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.lpm-form-group input:focus, 
+.lpm-form-group textarea:focus {
+  border-color: #0D9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
+}
+
+.lpm-hint {
+  font-size: 0.75rem;
+  color: #94A3B8;
+  margin-top: 0.2rem;
+}
+
+/* Sub-courses Chips Box */
+.lpm-subcourses-box {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+.lpm-subcourses-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748B;
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.lpm-chips-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.lpm-course-chip {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: 6px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1E293B;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lpm-course-chip button {
+  background: none;
+  border: none;
+  color: #DC2626;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lpm-add-chip-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.lpm-add-chip-row input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #CBD5E1;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+/* Photos Grid */
+.lpm-facility-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1.25rem;
+}
+
+.lpm-photo-box {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #E2E8F0;
+  height: 140px;
+  background: #F1F5F9;
+}
+
+.lpm-photo-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lpm-photo-del-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(220, 38, 38, 0.9);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.lpm-photo-del-btn:hover {
+  background: #DC2626;
+  transform: scale(1.05);
+}
+
+.lpm-cover-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  color: #FFFFFF;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Actions */
+.lpm-card-actions, 
+.lpm-bottom-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.lpm-bottom-actions {
+  justify-content: space-between;
+}
+
+.lpm-btn-primary {
+  background: #0F172A;
+  color: #FFFFFF;
+  border: none;
+  padding: 0.65rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.lpm-btn-primary:hover:not(:disabled) {
+  background: #1E293B;
+}
+
+.lpm-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.lpm-btn-secondary {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  color: #334155;
+  padding: 0.65rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.lpm-btn-secondary:hover {
+  background: #F8FAFC;
+  color: #0F172A;
+}
+
+.lpm-btn-danger-icon {
+  background: none;
+  border: none;
+  color: #94A3B8;
+  cursor: pointer;
+  padding: 0.4rem;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.lpm-btn-danger-icon:hover {
+  color: #DC2626;
+  background: #FEF2F2;
+}
+
+@media (max-width: 768px) {
+  .lpm-container { padding: 1.25rem; }
+  .lpm-form-grid { grid-template-columns: 1fr; }
+  .lpm-bottom-actions { flex-direction: column; }
+}
