@@ -6598,13 +6598,24 @@ app.put('/api/admin/landing-content/:key', authenticateToken, async (req, res) =
   }
 });
 
-// 4. ADMIN ENDPOINT: Upload Facility Image
-app.post('/api/admin/landing/facilities/upload', authenticateToken, uploadFacility.single('image'), async (req, res) => {
+// ADMIN ENDPOINT: Bulk Upload Facility Images (Supports 1 or multiple files)
+app.post('/api/admin/landing/facilities/upload', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
 
-  const relativePath = `/uploads/facilities/${req.file.filename}`;
-  res.json({ success: true, url: relativePath });
+  uploadFacility.array('images', 20)(req, res, (err) => {
+    if (err) {
+      console.error("Facility upload error:", err);
+      return res.status(400).json({ error: err.message });
+    }
+
+    const files = req.files || (req.file ? [req.file] : []);
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: 'No image uploaded' });
+    }
+
+    const urls = files.map(file => `/uploads/facilities/${file.filename}`);
+    res.json({ success: true, urls, url: urls[0] });
+  });
 });
 
 

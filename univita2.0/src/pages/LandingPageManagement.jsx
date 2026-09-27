@@ -3,23 +3,37 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 import { 
   Phone, Mail, MapPin, Clock, BookOpen, Plus, Trash2, 
-  Upload, Save, Image as ImageIcon, Sparkles, RotateCcw, Building2
+  Upload, Save, Image as ImageIcon, RotateCcw
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './LandingPageManagement.css';
-
-// Default assets matching AppointmentPage.jsx
-import simulation1 from '../assets/images/simulation1.png';
-import simulation2 from '../assets/images/simulation2.png';
-import simulation3 from '../assets/images/simulation3.png';
-import simulation4 from '../assets/images/simulation4.png';
-import classroom1 from '../assets/images/classroom1.png';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Exact live baseline from AppointmentPage.jsx
+const getBackendBaseUrl = () => {
+  if (API_BASE && (API_BASE.startsWith('http://') || API_BASE.startsWith('https://'))) {
+    return API_BASE.replace(/\/api\/?$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:5000';
+    }
+  }
+  return 'https://api.univitahct.tech';
+};
+
+const resolveImageSrc = (imgUrl) => {
+  if (!imgUrl) return '';
+  if (typeof imgUrl !== 'string') return '';
+  if (imgUrl.startsWith('http://') || imgUrl.startsWith('https://') || imgUrl.startsWith('data:') || imgUrl.startsWith('blob:')) {
+    return imgUrl;
+  }
+  const clean = imgUrl.startsWith('/') ? imgUrl : `/${imgUrl}`;
+  return `${getBackendBaseUrl()}${clean}`;
+};
+
 const DEFAULT_CONTACT = {
   address: '3F & 5F Westar Building, Shaw Boulevard\nPasig City, Metro Manila',
   phone_primary: '+63 (2) 1234 5678',
@@ -80,14 +94,8 @@ const DEFAULT_COURSES = [
 ];
 
 const DEFAULT_FACILITIES = [
-  { 
-    name: 'Simulation Lab', 
-    images: [simulation1, simulation2, simulation3, simulation4] 
-  },
-  { 
-    name: 'Classrooms', 
-    images: [classroom1] 
-  }
+  { name: 'Simulation Lab', images: [] },
+  { name: 'Classrooms', images: [] }
 ];
 
 const LandingPageManagement = () => {
@@ -95,7 +103,6 @@ const LandingPageManagement = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // States initialized with AppointmentPage baseline
   const [contact, setContact] = useState(DEFAULT_CONTACT);
   const [courses, setCourses] = useState(DEFAULT_COURSES);
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
@@ -120,47 +127,88 @@ const LandingPageManagement = () => {
         }
       }
     } catch (err) {
-      console.log('Using default AppointmentPage display as fallback baseline');
+      console.log('No previous landing content found, using initial state.');
     } finally {
       setLoading(false);
     }
   };
 
-  const saveSection = async (key, data) => {
+  // Silent parameter suppresses the redundant "Saved successfully!" toast when auto-saving
+  const saveSection = async (key, data, silent = false) => {
     setSaving(true);
     try {
       await axios.put(`${API_BASE}/admin/landing-content/${key}`, { data }, getAuthHeaders());
-      toast.success('Landing page updated successfully!');
+      if (!silent) {
+        toast.success('Saved successfully!');
+      }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to save changes to database.');
+      toast.error(err.response?.data?.error || 'Failed to save changes.');
     } finally {
       setSaving(false);
     }
   };
 
-  // Facility Image Upload
-  const handleUploadFacilityImage = async (facilityIndex, file) => {
-    if (!file) return;
+  // BULK UPLOAD HANDLER: Uploads multiple files at once without duplicate toasts
+  const handleUploadFacilityImages = async (facilityIndex, fileList) => {
+    if (!fileList || fileList.length === 0) return;
+
+    for (let file of fileList) {
+      if (!file.type.startsWith('image/')) {
+        toast.error(`"${file.name}" is not a valid image file.`);
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(`"${file.name}" exceeds the 10MB limit.`);
+        return;
+      }
+    }
+
     const fd = new FormData();
-    fd.append('image', file);
+    fileList.forEach(file => {
+      fd.append('images', file);
+    });
+
     try {
       const res = await axios.post(`${API_BASE}/admin/landing/facilities/upload`, fd, getAuthHeaders());
-      const updated = [...facilities];
-      updated[facilityIndex].images.push(res.data.url);
-      setFacilities(updated);
-      await saveSection('facilities_gallery', updated);
+      const uploadedUrls = res.data?.urls || (res.data?.url ? [res.data.url] : []);
+
+      if (uploadedUrls.length > 0) {
+        const targetFacility = facilities[facilityIndex];
+        const existingImages = Array.isArray(targetFacility.images) ? [...targetFacility.images] : [];
+        const updatedImages = [...existingImages, ...uploadedUrls];
+
+        const updatedFacilities = facilities.map((fac, idx) =>
+          idx === facilityIndex ? { ...fac, images: updatedImages } : fac
+        );
+
+        setFacilities(updatedFacilities);
+        await saveSection('facilities_gallery', updatedFacilities, true);
+
+        toast.success(
+          uploadedUrls.length > 1
+            ? `Added ${uploadedUrls.length} photos to ${targetFacility.name}.`
+            : `Photo added to ${targetFacility.name}.`
+        );
+      }
     } catch (err) {
-      toast.error('Image upload failed.');
+      console.error(err);
+      toast.error('Image upload failed. Please verify server connection.');
     }
   };
 
-  const removeFacilityImage = (facilityIndex, imgIndex) => {
-    const updated = [...facilities];
-    updated[facilityIndex].images = updated[facilityIndex].images.filter((_, i) => i !== imgIndex);
-    setFacilities(updated);
+  const removeFacilityImage = async (facilityIndex, imgIndex) => {
+    const targetFacility = facilities[facilityIndex];
+    const updatedImages = targetFacility.images.filter((_, i) => i !== imgIndex);
+
+    const updatedFacilities = facilities.map((fac, idx) =>
+      idx === facilityIndex ? { ...fac, images: updatedImages } : fac
+    );
+
+    setFacilities(updatedFacilities);
+    await saveSection('facilities_gallery', updatedFacilities, true);
+    toast.info('Photo removed.');
   };
 
-  // Course Helpers
   const addCourseCategory = () => {
     setCourses([
       ...courses, 
@@ -187,21 +235,12 @@ const LandingPageManagement = () => {
     setCourses(updated);
   };
 
-  const resolveImageSrc = (imgUrl) => {
-    if (!imgUrl) return simulation1;
-    if (typeof imgUrl === 'string' && imgUrl.startsWith('/uploads')) {
-      return `${API_BASE.replace('/api', '')}${imgUrl}`;
-    }
-    return imgUrl;
-  };
-
   return (
     <div className="lpm-container">
-      {/* Header */}
       <div className="lpm-header">
         <div>
           
-          <p>Manage the public appointment page, course directory, facility photos, and Pasig City campus details.</p>
+          <p>Manage the public appointment page, course directory, facility photos, and campus details.</p>
         </div>
         <button 
           className="lpm-btn-secondary" 
@@ -209,7 +248,7 @@ const LandingPageManagement = () => {
             setContact(DEFAULT_CONTACT);
             setCourses(DEFAULT_COURSES);
             setFacilities(DEFAULT_FACILITIES);
-            toast.info('Restored default values from AppointmentPage. Click Save to commit.');
+            toast.info('Restored default values. Click Save to commit.');
           }}
           title="Restore baseline defaults"
         >
@@ -217,7 +256,6 @@ const LandingPageManagement = () => {
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="lpm-tabs-bar">
         <button className={`lpm-tab-btn ${activeTab === 'contact' ? 'active' : ''}`} onClick={() => setActiveTab('contact')}>
            Contact Details & Hours
@@ -230,7 +268,7 @@ const LandingPageManagement = () => {
         </button>
       </div>
 
-      {/* TAB 1: CONTACT DETAILS & HOURS */}
+      {/* TAB 1: CONTACT DETAILS */}
       {activeTab === 'contact' && (
         <div className="lpm-card">
           <div className="lpm-card-header">
@@ -397,7 +435,6 @@ const LandingPageManagement = () => {
                 </div>
               </div>
 
-              {/* Sub-Courses Chips */}
               <div className="lpm-subcourses-box">
                 <label className="lpm-subcourses-title">Included Modules / Syllabi:</label>
                 <div className="lpm-chips-list">
@@ -454,7 +491,7 @@ const LandingPageManagement = () => {
         </div>
       )}
 
-      {/* TAB 3: FACILITY GALLERIES */}
+      {/* TAB 3: FACILITY GALLERIES (BULK UPLOAD & NO FORCED HARDCODED IMAGES) */}
       {activeTab === 'facilities' && (
         <div className="lpm-facilities-stack">
           {facilities.map((fac, idx) => (
@@ -467,32 +504,50 @@ const LandingPageManagement = () => {
                   </span>
                 </div>
                 <label className="lpm-btn-secondary" style={{ cursor: 'pointer' }}>
-                  <Upload size={16} /> Upload New Photo
+                  <Upload size={16} /> Upload Photos
                   <input 
                     type="file" 
                     accept="image/*" 
+                    multiple 
                     style={{ display: 'none' }} 
-                    onChange={e => handleUploadFacilityImage(idx, e.target.files[0])} 
+                    onChange={e => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        handleUploadFacilityImages(idx, Array.from(e.target.files));
+                        e.target.value = '';
+                      }
+                    }} 
                   />
                 </label>
               </div>
 
               {/* Photos Grid */}
               <div className="lpm-facility-photos-grid">
-                {(fac.images || []).map((imgUrl, imgIdx) => (
-                  <div key={imgIdx} className="lpm-photo-box">
-                    <img src={resolveImageSrc(imgUrl)} alt={`${fac.name} ${imgIdx + 1}`} />
-                    <button 
-                      type="button" 
-                      className="lpm-photo-del-btn" 
-                      onClick={() => removeFacilityImage(idx, imgIdx)}
-                      title="Remove Photo"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                    {imgIdx === 0 && <span className="lpm-cover-badge">Thumbnail</span>}
+                {(fac.images || []).length === 0 ? (
+                  <div className="lpm-no-photos">
+                    <p>No photos uploaded yet for {fac.name}. Click "Upload Photos" above to add images.</p>
                   </div>
-                ))}
+                ) : (
+                  (fac.images || []).map((imgUrl, imgIdx) => (
+                    <div key={imgIdx} className="lpm-photo-box">
+                      <img 
+                        src={resolveImageSrc(imgUrl)} 
+                        alt={`${fac.name} ${imgIdx + 1}`} 
+                        onError={(e) => {
+                          e.currentTarget.style.opacity = '0.3';
+                        }}
+                      />
+                      <button 
+                        type="button" 
+                        className="lpm-photo-del-btn" 
+                        onClick={() => removeFacilityImage(idx, imgIdx)}
+                        title="Remove Photo"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      {imgIdx === 0 && <span className="lpm-cover-badge">Thumbnail</span>}
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           ))}

@@ -1,20 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import {
-  Mail, Phone, MapPin, Clock, Calendar, User, MessageSquare,
+  Mail, Phone, MapPin, Clock, Calendar, User,
   Award, Users, Plus, Trash2, ShieldCheck, X,
   Stethoscope, GraduationCap, Building2, Check, ArrowRight,
   Briefcase, FileText, Upload, Camera, BookOpen, DollarSign, Menu, 
   AlertCircle, Download, ChevronLeft, ChevronRight, Sparkles, ExternalLink,
-  Search, Filter, HeartHandshake, Zap
+  Search, HeartHandshake, Zap
 } from 'lucide-react';
 import { API_BASE } from '../api';
 import './AppointmentPage.css';
-import simulation1 from '../assets/images/simulation1.png';
-import simulation2 from '../assets/images/simulation2.png';
-import simulation3 from '../assets/images/simulation3.png';
-import simulation4 from '../assets/images/simulation4.png';
-import classroom1 from '../assets/images/classroom1.png';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
@@ -27,11 +22,32 @@ const getLocalTodayString = () => {
   return `${year}-${month}-${day}`;
 };
 
-// Evaluates whether admissions is currently open based on Philippine Standard Time (UTC+8)
+const getBackendBaseUrl = () => {
+  if (API_BASE && (API_BASE.startsWith('http://') || API_BASE.startsWith('https://'))) {
+    return API_BASE.replace(/\/api\/?$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:5000';
+    }
+  }
+  return 'https://api.univitahct.tech';
+};
+
+const resolveMediaUrl = (img) => {
+  if (!img) return '';
+  if (typeof img !== 'string') return '';
+  if (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('data:') || img.startsWith('blob:')) {
+    return img;
+  }
+  const clean = img.startsWith('/') ? img : `/${img}`;
+  return `${getBackendBaseUrl()}${clean}`;
+};
+
 const checkAdmissionsStatus = () => {
   try {
     const phDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }));
-    const day = phDate.getDay(); // 0 is Sunday, 6 is Saturday
+    const day = phDate.getDay();
     const timeNum = phDate.getHours() + phDate.getMinutes() / 60;
 
     if (day === 0) {
@@ -60,7 +76,7 @@ const checkAdmissionsStatus = () => {
         return { 
           isOpen: true, 
           text: 'Admissions Open', 
-          note: 'Saturday half-day session until 12:00 PM' 
+          note: 'Saturday session until 12:00 PM' 
         };
       }
       return { 
@@ -79,8 +95,8 @@ const DEFAULT_COURSES = [
   {
     title: "Enhancement Courses (E-Learning)",
     badge: "Flexible Self-Paced",
-    subtitle: "Self-paced digital modules designed for modern healthcare professionals.",
-    description: "Enhance your clinical expertise with comprehensive online lectures, interactive case studies, and evidence-based practice guidelines.",
+    subtitle: "Self-paced digital modules designed for healthcare professionals.",
+    description: "Enhance clinical expertise with interactive case studies, evidence-based practices, and flexible digital modules.",
     courses: [
       "Nursing", "Disease Epidemiology", "Sexual and Reproductive Health Education",
       "Statistics and Data Analysis Simplified", "Emergency Preparedness and Response",
@@ -90,9 +106,9 @@ const DEFAULT_COURSES = [
   },
   {
     title: "AHA BLS & ACLS Training",
-    badge: "Official AHA Certified",
+    badge: "AHA Certified",
     subtitle: "American Heart Association certified life support programs.",
-    description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and official AHA certification upon completion.",
+    description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and AHA certification upon completion.",
     courses: [
       "AHA HeartCode Basic Life Support (BLS)",
       "AHA Traditional Advanced Cardiovascular Life Support (ACLS)",
@@ -112,9 +128,9 @@ const DEFAULT_COURSES = [
   },
   {
     title: "PRC - CPD Courses",
-    badge: "PRC Accredited Units",
+    badge: "PRC Accredited",
     subtitle: "Continuing professional development for licensed medical practitioners.",
-    description: "Fulfill your professional regulatory commission requirements with accredited CPD units and advanced clinical seminars.",
+    description: "Fulfill regulatory commission requirements with accredited CPD units and advanced clinical seminars.",
     courses: [
       "Early Recognition of Patient Deterioration",
       "Patient Safety Systems & Error Prevention in Acute Care",
@@ -124,8 +140,8 @@ const DEFAULT_COURSES = [
 ];
 
 const DEFAULT_FACILITIES = [
-  { name: 'Simulation Lab', thumbnail: simulation1, images: [simulation1, simulation2, simulation3, simulation4] },
-  { name: 'Classrooms', thumbnail: classroom1, images: [classroom1] }
+  { name: 'Simulation Lab', images: [] },
+  { name: 'Classrooms', images: [] }
 ];
 
 const DEFAULT_CONTACT = {
@@ -141,13 +157,11 @@ const DEFAULT_CONTACT = {
 
 const AppointmentPage = ({ onAdminLogin }) => {
   const [activePage, setActivePage] = useState('home');
+  const [activeNav, setActiveNav] = useState('home');
 
-  // Dynamic Landing Page CMS State
   const [courseCategories, setCourseCategories] = useState(DEFAULT_COURSES);
   const [facilities, setFacilities] = useState(DEFAULT_FACILITIES);
   const [contactInfo, setContactInfo] = useState(DEFAULT_CONTACT);
-
-  // Live Admissions Status
   const [admissionsStatus, setAdmissionsStatus] = useState(checkAdmissionsStatus());
 
   useEffect(() => {
@@ -157,15 +171,44 @@ const AppointmentPage = ({ onAdminLogin }) => {
     return () => clearInterval(timer);
   }, []);
 
-  // Courses Carousel & Modal State
+  useEffect(() => {
+    if (activePage !== 'home') {
+      setActiveNav('careers');
+      return;
+    }
+
+    const handleScroll = () => {
+      const sections = ['home', 'about', 'courses', 'facilities', 'contact'];
+      const scrollPosition = window.scrollY + 120;
+
+      for (let i = sections.length - 1; i >= 0; i--) {
+        const el = document.getElementById(sections[i]);
+        if (el && scrollPosition >= el.offsetTop) {
+          setActiveNav(sections[i]);
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [activePage]);
+
   const [currentCourseIndex, setCurrentCourseIndex] = useState(0);
   const [selectedCourseModal, setSelectedCourseModal] = useState(null);
 
-  // Appointment booking state
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
-  const [showTimeModal, setShowTimeModal] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', date: '', time: '', message: '' });
+
+  // 3-Column Dropdown Time Picker State
+  const [showTimeDropdown, setShowTimeDropdown] = useState(false);
+  const [selectedHour, setSelectedHour] = useState('09');
+  const [selectedMinute, setSelectedMinute] = useState('00');
+  const [selectedPeriod, setSelectedPeriod] = useState('AM');
+  const timePickerRef = useRef(null);
+
   const [isMultipleVisitors, setIsMultipleVisitors] = useState(false);
   const [additionalVisitors, setAdditionalVisitors] = useState([]);
   const [visitReasons, setVisitReasons] = useState([]);
@@ -174,21 +217,61 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Careers state
   const [jobs, setJobs] = useState([]);
   const [jobSearchTerm, setJobSearchTerm] = useState('');
   const [jobDepartmentFilter, setJobDepartmentFilter] = useState('All');
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
-  
-  // Job Details Modal state
   const [showJobDetailsModal, setShowJobDetailsModal] = useState(false);
   const [selectedJobDetails, setSelectedJobDetails] = useState(null);
-
   const [applicationForm, setApplicationForm] = useState({ full_name: '', email: '', phone: '', cover_letter: '', resume: null });
   const [submittingApplication, setSubmittingApplication] = useState(false);
 
-  // Fetch Dynamic Landing Page CMS Content
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (timePickerRef.current && !timePickerRef.current.contains(event.target)) {
+        setShowTimeDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const applyTimeSelection = (h12, min, period) => {
+    let h = parseInt(h12, 10);
+    if (isNaN(h)) h = 9;
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    const time24 = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+    setFormData(prev => ({ ...prev, time: time24 }));
+  };
+
+  const handleHourClick = (h) => {
+    setSelectedHour(h);
+    applyTimeSelection(h, selectedMinute, selectedPeriod);
+  };
+
+  const handleMinuteClick = (m) => {
+    setSelectedMinute(m);
+    applyTimeSelection(selectedHour, m, selectedPeriod);
+  };
+
+  const handlePeriodClick = (p) => {
+    setSelectedPeriod(p);
+    applyTimeSelection(selectedHour, selectedMinute, p);
+  };
+
+  const handleCompanionCheckboxToggle = (e) => {
+    const checked = e.target.checked;
+    setIsMultipleVisitors(checked);
+    if (checked && additionalVisitors.length === 0) {
+      setAdditionalVisitors([{ name: '' }]);
+    } else if (!checked) {
+      setAdditionalVisitors([]);
+    }
+  };
+
+  // Purely dynamic facility images loaded from CMS
   useEffect(() => {
     axios.get(`${API_BASE}/public/landing-content`)
       .then(res => {
@@ -197,17 +280,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
             setCourseCategories(res.data.courses_catalog);
           }
           if (Array.isArray(res.data.facilities_gallery) && res.data.facilities_gallery.length > 0) {
-            const baseUrl = API_BASE.replace('/api', '');
             const mapped = res.data.facilities_gallery.map(fac => {
-              const formattedImages = (fac.images || []).map(img => 
-                (img.startsWith('http') || img.startsWith('data:') || img.startsWith('blob:')) 
-                  ? img 
-                  : `${baseUrl}${img}`
-              );
+              const formattedImages = (fac.images || []).map(img => resolveMediaUrl(img));
               return {
                 name: fac.name,
-                thumbnail: formattedImages[0] || (fac.name.toLowerCase().includes('class') ? classroom1 : simulation1),
-                images: formattedImages.length > 0 ? formattedImages : (fac.name.toLowerCase().includes('class') ? [classroom1] : [simulation1])
+                thumbnail: formattedImages[0] || '',
+                images: formattedImages
               };
             });
             setFacilities(mapped);
@@ -222,7 +300,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
       });
   }, []);
 
-  // Fetch Visit Reasons & Approved Appointments
   useEffect(() => {
     axios.get(`${API_BASE}/visit-reasons`)
       .then(res => setVisitReasons(res.data))
@@ -236,14 +313,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
       .catch(console.error);
   }, []);
 
-  // Fetch open jobs
   useEffect(() => {
     axios.get(`${API_BASE}/public/jobs`)
       .then(res => setJobs(res.data || []))
       .catch(console.error);
   }, []);
 
-  // Filtered jobs list based on search and department
   const filteredJobs = useMemo(() => {
     return jobs.filter(job => {
       const matchesSearch = 
@@ -274,16 +349,34 @@ const AppointmentPage = ({ onAdminLogin }) => {
   };
 
   const scrollToSection = (id) => {
-    setActivePage('home');
-    setTimeout(() => {
+    setActiveNav(id);
+    if (activePage !== 'home') {
+      setActivePage('home');
+      setTimeout(() => {
+        const element = document.getElementById(id);
+        if (element) {
+          const headerOffset = 75; 
+          const elementPosition = element.getBoundingClientRect().top;
+          const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+          window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+        }
+      }, 120);
+    } else {
       const element = document.getElementById(id);
       if (element) {
-        const headerOffset = 85; 
+        const headerOffset = 75; 
         const elementPosition = element.getBoundingClientRect().top;
         const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
         window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
       }
-    }, 100);
+    }
+    setMobileMenuOpen(false);
+  };
+
+  const navigateToCareers = () => {
+    setActivePage('careers');
+    setActiveNav('careers');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     setMobileMenuOpen(false);
   };
 
@@ -299,7 +392,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
   const addVisitorRow = () => {
     if (additionalVisitors.length >= 5) {
-      showToast('Maximum of 5 companions allowed manually. For more than 5, please use the CSV upload.', true);
+      showToast('Maximum of 5 companions allowed manually. For more than 5, please download the template and upload your CSV list.', true);
       return;
     }
     setAdditionalVisitors([...additionalVisitors, { name: '' }]);
@@ -337,9 +430,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       const newCompanions = [];
       
       let startIndex = 0;
-      if (rows[0].toLowerCase().includes('name')) {
-        startIndex = 1;
-      }
+      if (rows[0].toLowerCase().includes('name')) startIndex = 1;
       for (let i = startIndex; i < rows.length; i++) {
         const cols = rows[i].split(',');
         if (cols[0] && cols[0].trim()) {
@@ -348,7 +439,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       }
       
       if (newCompanions.length > 0) {
-        setAdditionalVisitors(prev => [...prev, ...newCompanions]);
+        setAdditionalVisitors(newCompanions);
         showToast(`Successfully added ${newCompanions.length} companions from CSV.`);
       } else {
         showToast(`No valid companions found in CSV.`, true);
@@ -358,38 +449,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
     reader.readAsText(file);
   };
 
-  const availableTimeSlots = [
-    { label: '8:00 AM', value: '08:00' },
-    { label: '9:00 AM', value: '09:00' },
-    { label: '10:00 AM', value: '10:00' },
-    { label: '11:00 AM', value: '11:00' },
-    { label: '1:00 PM', value: '13:00' },
-    { label: '2:00 PM', value: '14:00' },
-    { label: '3:00 PM', value: '15:00' },
-    { label: '4:00 PM', value: '16:00' },
-    { label: '5:00 PM', value: '17:00' }
-  ];
-
-  const handleSelectTimeSlot = (timeVal) => {
-    setFormData({ ...formData, time: timeVal });
-    setShowTimeModal(false);
-  };
-
-  const isPastSlot = (slotTimeStr) => {
-    if (!formData.date) return false;
-    const localToday = getLocalTodayString();
-    if (formData.date === localToday) {
-      const now = new Date();
-      const [slotHour, slotMinute] = slotTimeStr.split(':').map(Number);
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
-      if (currentHour > slotHour || (currentHour === slotHour && currentMinute >= slotMinute)) {
-        return true;
-      }
-    }
-    return false;
-  };
-
+  // STRICT VALIDATION
   const handleSubmit = async (e) => {
     e.preventDefault();
     const { name, email, phone, date, time, message } = formData;
@@ -411,43 +471,38 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
     const localToday = getLocalTodayString();
     const now = new Date();
-    const currentTimeStr = now.toTimeString().substring(0, 5); 
+    const currentH = now.getHours();
+    const currentM = now.getMinutes();
+    const currentTimeStr = `${String(currentH).padStart(2, '0')}:${String(currentM).padStart(2, '0')}`;
 
     if (date < localToday) {
       showToast('You cannot book an appointment for a past date.', true);
       return;
     }
 
-    if (date === localToday && time < currentTimeStr) {
-      showToast('You cannot book an appointment for a time that has already passed today.', true);
-      return;
-    }
-
-    const hour = parseInt(time.split(':')[0], 10);
-    if (hour < 8 || hour > 17) {
-      showToast('Please select a time within office hours (8:00 AM - 5:00 PM).', true);
+    if (date === localToday && time <= currentTimeStr) {
+      showToast('You cannot select a time that has already passed earlier today.', true);
       return;
     }
 
     const isConflict = bookedSlots.some(slot => {
       const slotDate = slot.visit_date ? slot.visit_date.split('T')[0] : '';
       const slotTime = slot.visit_time ? slot.visit_time.substring(0, 5) : '';
-      const formTime = time.substring(0, 5);
-      return slotDate === date && slotTime === formTime;
+      return slotDate === date && slotTime === time;
     });
 
     if (isConflict) {
-      showToast('This date and time slot is already booked and unavailable. Please choose another time.', true);
+      showToast('This date and time slot is already booked. Please choose another time.', true);
       return;
     }
 
     if (isMultipleVisitors) {
       if (additionalVisitors.length === 0) {
-        showToast('Please add at least one companion or uncheck the companion option.', true);
+        showToast('Please add at least one companion name or uncheck the companion option.', true);
         return;
       }
       if (additionalVisitors.some(v => !v.name.trim())) {
-        showToast('Please provide names for all additional companions.', true);
+        showToast('Please provide names for all accompanying visitors.', true);
         return;
       }
     }
@@ -500,11 +555,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         e.target.value = '';
         return;
       }
-      const allowedTypes = [
-        'application/pdf', 
-        'application/msword', 
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      ];
+      const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
       if (!allowedTypes.includes(file.type)) {
         showToast('Only PDF, DOC, or DOCX files are allowed.', true);
         e.target.value = '';
@@ -544,7 +595,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
       fd.append('resume', resume);
 
       const res = await axios.post(`${API_BASE}/jobs/apply`, fd);
-
       if (res.data.success) {
         showToast('Application submitted successfully!');
         setShowApplyModal(false);
@@ -567,19 +617,44 @@ const AppointmentPage = ({ onAdminLogin }) => {
       {/* HEADER */}
       <header className="ap-header">
         <div className="ap-header-container">
-          <div className="ap-brand" onClick={() => setActivePage('home')}>
+          <div className="ap-brand" onClick={() => scrollToSection('home')}>
             <div className="ap-brand-icon-wrapper">
-              <Stethoscope size={28} />
+              <Stethoscope size={24} />
             </div>
             <span className="ap-brand-name">HCT Academy</span>
           </div>
           
           <nav className="ap-nav-desktop">
-            <a className="ap-nav-link" onClick={() => { setActivePage('home'); window.scrollTo(0, 0); }}>Home</a>
-            <a className="ap-nav-link" onClick={() => scrollToSection('about')}>About</a>
-            <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
-            <a className="ap-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
-            <a className="ap-nav-link" onClick={() => { setActivePage('careers'); window.scrollTo(0, 0); }}>Careers</a>
+            <a 
+              className={`ap-nav-link ${activePage === 'home' && activeNav === 'home' ? 'active' : ''}`} 
+              onClick={() => scrollToSection('home')}
+            >
+              Home
+            </a>
+            <a 
+              className={`ap-nav-link ${activePage === 'home' && activeNav === 'about' ? 'active' : ''}`} 
+              onClick={() => scrollToSection('about')}
+            >
+              About
+            </a>
+            <a 
+              className={`ap-nav-link ${activePage === 'home' && activeNav === 'courses' ? 'active' : ''}`} 
+              onClick={() => scrollToSection('courses')}
+            >
+              Courses
+            </a>
+            <a 
+              className={`ap-nav-link ${activePage === 'home' && activeNav === 'facilities' ? 'active' : ''}`} 
+              onClick={() => scrollToSection('facilities')}
+            >
+              Facilities
+            </a>
+            <a 
+              className={`ap-nav-link ${activePage === 'careers' || activeNav === 'careers' ? 'active' : ''}`} 
+              onClick={navigateToCareers}
+            >
+              Careers
+            </a>
           </nav>
           
           <div className="ap-header-actions">
@@ -590,33 +665,31 @@ const AppointmentPage = ({ onAdminLogin }) => {
               </button>
             </div>
             <button className="ap-mobile-toggle" onClick={() => setMobileMenuOpen(true)}>
-              <Menu size={24} />
+              <Menu size={22} />
             </button>
           </div>
         </div>
       </header>
 
-      {/* MOBILE MENU DRAWER */}
+      {/* MOBILE MENU */}
       <div className={`ap-mobile-menu ${mobileMenuOpen ? 'open' : ''}`} onClick={() => setMobileMenuOpen(false)}>
         <nav className="ap-mobile-nav" onClick={(e) => e.stopPropagation()}>
           <div className="ap-nav-header">
             <h3 className="ap-mobile-brand">Menu</h3>
             <button className="ap-nav-close" onClick={() => setMobileMenuOpen(false)}>
-              <X size={24} />
+              <X size={22} />
             </button>
           </div>
           
           <div className="ap-nav-body">
             <div className="ap-nav-list">
-              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); setMobileMenuOpen(false); window.scrollTo(0, 0); }}>Home</a>
-              <a className="ap-mobile-nav-link" onClick={() => scrollToSection('about')}>About</a>
-              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); scrollToSection('courses'); }}>Courses</a>
-              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('home'); scrollToSection('facilities'); }}>Facilities</a>
-              <a className="ap-mobile-nav-link" onClick={() => { setActivePage('careers'); setMobileMenuOpen(false); window.scrollTo(0, 0); }}>Careers</a>
+              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'home' ? 'active' : ''}`} onClick={() => scrollToSection('home')}>Home</a>
+              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'about' ? 'active' : ''}`} onClick={() => scrollToSection('about')}>About</a>
+              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'courses' ? 'active' : ''}`} onClick={() => scrollToSection('courses')}>Courses</a>
+              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'facilities' ? 'active' : ''}`} onClick={() => scrollToSection('facilities')}>Facilities</a>
+              <a className={`ap-mobile-nav-link ${activePage === 'careers' ? 'active' : ''}`} onClick={navigateToCareers}>Careers</a>
             </div>
-            
             <div className="ap-nav-divider"></div>
-            
             <div className="ap-nav-actions-mobile">
               <button className="btn-ap-primary-mobile" onClick={() => { setShowAppointmentModal(true); setMobileMenuOpen(false); }}>Book Visit</button>
               <button className="btn-ap-outline-mobile" onClick={onAdminLogin} title="Admin Portal">
@@ -627,19 +700,23 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </nav>
       </div>
 
-      {/* HOME PAGE SECTIONS */}
+      {/* HOME PAGE */}
       {activePage === 'home' && (
         <>
-          {/* HERO */}
+          {/* HERO SECTION - PROMINENT 100vh FULL VIEWPORT */}
           <section id="home" className="ap-hero-section">
             <div className="ap-hero-grid">
               <div className="ap-hero-text">
-                <span className="ap-hero-badge">Philippines' Premier Healthcare Academy</span>
+                <span className="ap-hero-badge">
+                  <Sparkles size={16} /> Philippines' Premier Healthcare Academy
+                </span>
                 <h1 className="ap-hero-title">
                   <span className="text-white">Shaping Tomorrow's</span><br />
                   <span className="text-accent">Healthcare Heroes</span>
                 </h1>
-                <p className="ap-hero-subtitle">Experience world-class simulation-based training, expert instructors, and a curriculum designed to produce compassionate, competent professionals.</p>
+                <p className="ap-hero-subtitle">
+                  Experience world-class clinical simulation-based training, renowned medical instructors, and a curriculum engineered to produce competent, compassionate healthcare leaders.
+                </p>
                 <div className="ap-hero-actions">
                   <button className="btn-ap-primary-large" onClick={() => setShowAppointmentModal(true)}>
                     <Calendar size={20} /> Schedule a Visit
@@ -649,19 +726,20 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   </button>
                 </div>
               </div>
+
               <div className="ap-hero-visual">
                 <div className="ap-floating-panel">
                   <div className="ap-floating-item float-1">
-                    <div className="ap-float-icon"><ShieldCheck size={24} /></div>
-                    <div><h4>Safe Campus</h4><p>BLE-powered visitor monitoring</p></div>
+                    <div className="ap-float-icon"><ShieldCheck size={30} /></div>
+                    <div><h4>Safe & Monitored Campus</h4><p>BLE-powered visitor positioning & security</p></div>
                   </div>
                   <div className="ap-floating-item float-2">
-                    <div className="ap-float-icon"><Users size={24} /></div>
-                    <div><h4>Industry Experts</h4><p>Professional healthcare instructors</p></div>
+                    <div className="ap-float-icon"><Users size={30} /></div>
+                    <div><h4>Expert Medical Faculty</h4><p>Actively practicing physicians & nurse clinicians</p></div>
                   </div>
                   <div className="ap-floating-item float-3">
-                    <div className="ap-float-icon"><GraduationCap size={24} /></div>
-                    <div><h4>Career Ready</h4><p>Simulation-based medical training</p></div>
+                    <div className="ap-float-icon"><GraduationCap size={30} /></div>
+                    <div><h4>Accredited Simulation Training</h4><p>High-fidelity patient simulation laboratories</p></div>
                   </div>
                 </div>
               </div>
@@ -678,17 +756,17 @@ const AppointmentPage = ({ onAdminLogin }) => {
               </div>
               <div className="ap-features-grid">
                 <div className="ap-feature-card stagger-1">
-                  <div className="ap-feature-icon"><Award size={28} /></div>
+                  <div className="ap-feature-icon"><Award size={24} /></div>
                   <h4>Accredited Programs</h4>
                   <p>CHED-recognized curricula meticulously aligned with global healthcare standards and best practices.</p>
                 </div>
                 <div className="ap-feature-card stagger-2">
-                  <div className="ap-feature-icon"><Users size={28} /></div>
+                  <div className="ap-feature-icon"><Users size={24} /></div>
                   <h4>Expert Instructors</h4>
                   <p>Learn directly from actively practicing doctors and nurses bringing decades of real-world experience.</p>
                 </div>
                 <div className="ap-feature-card stagger-3">
-                  <div className="ap-feature-icon"><Building2 size={28} /></div>
+                  <div className="ap-feature-icon"><Building2 size={24} /></div>
                   <h4>Modern Facilities</h4>
                   <p>Immersive learning through state-of-the-art simulation labs, smart classrooms, and clinical equipment.</p>
                 </div>
@@ -696,88 +774,74 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
-          {/* INTERACTIVE COURSES SECTION */}
+          {/* COURSES DIRECTORY */}
           <section id="courses" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Educational Programs</span>
                 <h2>Clinical Education & Certification Programs</h2>
-                <p>Choose an academic track below or use the controls to explore specialized clinical certifications, CPD units, and simulation modules.</p>
+                <p>Explore accredited clinical certifications, life support programs, and continuing professional development modules.</p>
               </div>
 
-              {/* Instant Category Navigation Pills */}
-              <div className="ap-course-category-pills">
+              <div className="ap-clean-track-tabs">
                 {courseCategories.map((cat, idx) => (
                   <button
                     key={idx}
                     type="button"
-                    className={`ap-category-pill-btn ${idx === currentCourseIndex ? 'active' : ''}`}
+                    className={`ap-track-tab-btn ${idx === currentCourseIndex ? 'active' : ''}`}
                     onClick={() => setCurrentCourseIndex(idx)}
                   >
                     <span>{cat.title.split('(')[0].trim()}</span>
-                    <span className="ap-pill-counter">{cat.courses ? cat.courses.length : 0}</span>
+                    <span className="ap-track-badge">{(cat.courses || []).length}</span>
                   </button>
                 ))}
               </div>
 
-              {/* Enhanced Showcase Card */}
               {courseCategories.length > 0 && activeCourse && (
-                <div className="ap-showcase-container">
-                  <button className="ap-carousel-nav-btn prev" onClick={prevCourse} aria-label="Previous Course">
-                    <ChevronLeft size={28} />
+                <div className="ap-clean-showcase-wrap">
+                  <button className="ap-arrow-ctrl prev" onClick={prevCourse} aria-label="Previous Program">
+                    <ChevronLeft size={22} />
                   </button>
 
-                  <div className="ap-showcase-card">
-                    <div className="ap-showcase-header">
-                      <div className="ap-showcase-badge">
-                        <Sparkles size={14} />
-                        <span>{activeCourse.badge || 'Accredited Healthcare Track'}</span>
-                      </div>
-                      <span className="ap-showcase-count">
-                        {(activeCourse.courses || []).length} Specialized Modules
-                      </span>
+                  <div className="ap-clean-course-card">
+                    <div className="ap-clean-card-meta">
+                      <span className="ap-clean-card-badge">{activeCourse.badge || 'Accredited Track'}</span>
+                      <span className="ap-clean-card-count">{(activeCourse.courses || []).length} Modules</span>
                     </div>
 
-                    <div className="ap-showcase-body">
-                      <div className="ap-showcase-icon-box">
-                        <GraduationCap size={36} />
-                      </div>
-                      <h3 className="ap-showcase-title">{activeCourse.title}</h3>
-                      <p className="ap-showcase-subtitle">{activeCourse.subtitle}</p>
-                      <p className="ap-showcase-desc">{activeCourse.description}</p>
+                    <h3 className="ap-clean-card-title">{activeCourse.title}</h3>
+                    <p className="ap-clean-card-sub">{activeCourse.subtitle}</p>
+                    <p className="ap-clean-card-desc">{activeCourse.description}</p>
 
-                      <div className="ap-showcase-preview-area">
-                        <span className="ap-preview-label">Curriculum Highlights:</span>
-                        <div className="ap-preview-tags">
-                          {(activeCourse.courses || []).slice(0, 5).map((courseName, cIdx) => (
-                            <span key={cIdx} className="ap-preview-tag">
-                              <Check size={12} className="tag-check" /> {courseName}
-                            </span>
-                          ))}
-                          {(activeCourse.courses || []).length > 5 && (
-                            <span className="ap-preview-tag-more">
-                              +{(activeCourse.courses.length - 5)} more modules
-                            </span>
-                          )}
-                        </div>
+                    <div className="ap-clean-modules-preview">
+                      <span className="ap-clean-preview-heading">Featured Topics & Syllabi</span>
+                      <div className="ap-clean-chip-row">
+                        {(activeCourse.courses || []).slice(0, 4).map((cName, cIdx) => (
+                          <span key={cIdx} className="ap-clean-module-chip">
+                            <Check size={13} className="chip-check" /> {cName}
+                          </span>
+                        ))}
+                        {(activeCourse.courses || []).length > 4 && (
+                          <span className="ap-clean-more-chip">
+                            +{(activeCourse.courses.length - 4)} more
+                          </span>
+                        )}
                       </div>
+                    </div>
 
-                      <div className="ap-showcase-action-bar">
-                        <button 
-                          type="button" 
-                          className="btn-ap-showcase-explore"
-                          onClick={() => setSelectedCourseModal(activeCourse)}
-                        >
-                          <BookOpen size={18} />
-                          <span>View Full Curriculum & Course Details</span>
-                          <ArrowRight size={18} />
-                        </button>
-                      </div>
+                    <div className="ap-clean-card-footer">
+                      <button 
+                        type="button" 
+                        className="btn-ap-clean-curriculum"
+                        onClick={() => setSelectedCourseModal(activeCourse)}
+                      >
+                        <BookOpen size={16} /> View Complete Curriculum
+                      </button>
                     </div>
                   </div>
 
-                  <button className="ap-carousel-nav-btn next" onClick={nextCourse} aria-label="Next Course">
-                    <ChevronRight size={28} />
+                  <button className="ap-arrow-ctrl next" onClick={nextCourse} aria-label="Next Program">
+                    <ChevronRight size={22} />
                   </button>
                 </div>
               )}
@@ -797,7 +861,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
-          {/* FACILITIES */}
+          {/* FACILITIES - CENTERED, LARGER CARDS (100% DRIVEN BY CMS) */}
           <section id="facilities" className="ap-section ap-bg-white">
             <div className="ap-container">
               <div className="ap-section-header">
@@ -805,26 +869,47 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 <h2>World-Class Facilities</h2>
                 <p>Explore our modern learning environments specifically designed for hands-on healthcare education.</p>
               </div>
+
               <div className="ap-facilities-grid">
-                {facilities.map((fac, idx) => (
-                  <div key={idx} className={`ap-facility-card stagger-${idx + 1}`} onClick={() => setSelectedFacility(fac)}>
-                    <div className="ap-facility-img-wrapper">
-                      <img src={fac.thumbnail} alt={fac.name} className="ap-facility-img" />
-                      <div className="ap-facility-overlay">
-                        <Camera size={28} color="white" />
-                        <span>View Gallery</span>
+                {facilities.map((fac, idx) => {
+                  const hasImages = Array.isArray(fac.images) && fac.images.length > 0;
+                  const thumbnailSrc = fac.thumbnail || (hasImages ? fac.images[0] : '');
+                  const totalCount = hasImages ? fac.images.length : 0;
+
+                  return (
+                    <div key={idx} className={`ap-facility-card stagger-${idx + 1}`} onClick={() => setSelectedFacility(fac)}>
+                      <div className="ap-facility-img-wrapper">
+                        {thumbnailSrc ? (
+                          <img 
+                            src={thumbnailSrc} 
+                            alt={fac.name} 
+                            className="ap-facility-img" 
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div className="ap-facility-placeholder">
+                            <Camera size={36} />
+                            <span>No Photo Uploaded</span>
+                          </div>
+                        )}
+                        <div className="ap-facility-overlay">
+                          <Camera size={26} color="white" />
+                          <span>{totalCount > 0 ? `View ${totalCount} Photo${totalCount === 1 ? '' : 's'}` : 'View Gallery'}</span>
+                        </div>
+                      </div>
+                      <div className="ap-facility-name">
+                        <span>{fac.name}</span>
                       </div>
                     </div>
-                    <div className="ap-facility-name">
-                      <span>{fac.name}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </section>
 
-          {/* CONTACT & INQUIRY SECTION */}
+          {/* CONTACT SECTION */}
           <section id="contact" className="ap-section ap-bg-gray">
             <div className="ap-container">
               <div className="ap-section-header">
@@ -834,32 +919,21 @@ const AppointmentPage = ({ onAdminLogin }) => {
               </div>
 
               <div className="ap-modern-contact-grid">
-                {/* 1. Address Card */}
                 <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble">
-                    <MapPin size={22} />
-                  </div>
+                  <div className="ap-card-icon-bubble"><MapPin size={20} /></div>
                   <h3 className="ap-card-contact-title">Campus Location</h3>
                   <p className="ap-card-contact-desc">
                     HCT Academy Pasig City<br />
                     3F & 5F Westar Building, Shaw Boulevard<br />
                     Pasig City, Metro Manila
                   </p>
-                  <a 
-                    href={`https://maps.google.com/?q=${encodeURIComponent('HCT Academy, 3F & 5F Westar Building, Shaw Boulevard, Pasig City')}`} 
-                    target="_blank" 
-                    rel="noreferrer" 
-                    className="ap-card-action-link"
-                  >
+                  <a href={`https://maps.google.com/?q=${encodeURIComponent('HCT Academy, 3F & 5F Westar Building, Shaw Boulevard, Pasig City')}`} target="_blank" rel="noreferrer" className="ap-card-action-link">
                     <span>Get directions</span> <ExternalLink size={13} />
                   </a>
                 </div>
 
-                {/* 2. Call Us Card */}
                 <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble">
-                    <Phone size={22} />
-                  </div>
+                  <div className="ap-card-icon-bubble"><Phone size={20} /></div>
                   <h3 className="ap-card-contact-title">Phone</h3>
                   <p className="ap-card-contact-desc">
                     {contactInfo.phone_primary}<br />
@@ -870,11 +944,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   </a>
                 </div>
 
-                {/* 3. Email Card */}
                 <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble">
-                    <Mail size={22} />
-                  </div>
+                  <div className="ap-card-icon-bubble"><Mail size={20} /></div>
                   <h3 className="ap-card-contact-title">Email</h3>
                   <p className="ap-card-contact-desc">
                     {contactInfo.email_admissions}<br />
@@ -885,11 +956,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   </a>
                 </div>
 
-                {/* 4. Office Hours Card */}
                 <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble">
-                    <Clock size={22} />
-                  </div>
+                  <div className="ap-card-icon-bubble"><Clock size={20} /></div>
                   <div className={admissionsStatus.isOpen ? "ap-status-pill-open" : "ap-status-pill-closed"}>
                     <span className={admissionsStatus.isOpen ? "status-ping" : "status-ping-closed"} />
                     <span>{admissionsStatus.text}</span>
@@ -908,82 +976,58 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </>
       )}
 
-      {/* ========================================================= */}
-      {/* REDESIGNED MODERN CAREERS PAGE                            */}
-      {/* ========================================================= */}
+      {/* CAREERS PAGE */}
       {activePage === 'careers' && (
         <div className="ap-careers-page-wrapper">
-          {/* Careers Hero Banner */}
-          <section className="ap-careers-hero">
+          <section className="ap-careers-hero-clean">
             <div className="ap-container">
-              <div className="ap-careers-hero-content">
-                <span className="ap-careers-tag">
-                  <Sparkles size={14} /> Join Our Medical Faculty & Staff
-                </span>
-                <h1 className="ap-careers-headline">
-                  Shape the Future of <span className="text-teal-gradient">Clinical Education</span>
-                </h1>
-                <p className="ap-careers-lead">
-                  Join a passionate team of doctors, clinical simulationists, and academic professionals dedicated to developing the next generation of healthcare leaders in the Philippines.
-                </p>
+              <div className="ap-careers-header-box">
+                <span className="ap-tag">Careers at HCT Academy</span>
+                <h1>Join Our Faculty & Clinical Team</h1>
+                <p>Help educate and inspire the next generation of healthcare professionals with modern clinical simulation tools and institutional growth opportunities.</p>
               </div>
 
-              {/* Value Proposition Pills */}
-              <div className="ap-careers-perks-strip">
-                <div className="ap-perk-item">
-                  <div className="ap-perk-icon-wrap"><Award size={20} /></div>
-                  <div>
-                    <h5>CPD Accreditation</h5>
-                    <p>Free continuing medical development units</p>
-                  </div>
+              <div className="ap-clean-perks-bar">
+                <div className="ap-clean-perk">
+                  <Award size={18} className="perk-icon" />
+                  <span>CPD Medical Units Provided</span>
                 </div>
-                <div className="ap-perk-item">
-                  <div className="ap-perk-icon-wrap"><Zap size={20} /></div>
-                  <div>
-                    <h5>Advanced Sim Labs</h5>
-                    <p>High-fidelity mannequins and clinical tech</p>
-                  </div>
+                <div className="ap-clean-perk">
+                  <Zap size={18} className="perk-icon" />
+                  <span>Advanced Simulation Labs</span>
                 </div>
-                <div className="ap-perk-item">
-                  <div className="ap-perk-icon-wrap"><HeartHandshake size={20} /></div>
-                  <div>
-                    <h5>Competitive Compensation</h5>
-                    <p>Government statutory benefits & overtime pay</p>
-                  </div>
+                <div className="ap-clean-perk">
+                  <HeartHandshake size={18} className="perk-icon" />
+                  <span>Statutory Benefits & Overtime</span>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* Job Listings & Interactive Filtering */}
-          <section className="ap-section ap-bg-gray" style={{ paddingTop: '3.5rem' }}>
+          <section className="ap-section ap-bg-gray" style={{ paddingTop: '2.5rem' }}>
             <div className="ap-container">
-              
-              {/* Search & Filter Toolbar */}
-              <div className="ap-jobs-toolbar">
-                <div className="ap-jobs-search-box">
-                  <Search size={18} className="search-icon" />
+              <div className="ap-clean-filter-bar">
+                <div className="ap-clean-search-input">
+                  <Search size={16} className="search-icon" />
                   <input 
                     type="text" 
-                    placeholder="Search by job title, department, or keywords..."
+                    placeholder="Search roles, skills, or departments..."
                     value={jobSearchTerm}
                     onChange={(e) => setJobSearchTerm(e.target.value)}
                   />
                   {jobSearchTerm && (
-                    <button className="clear-btn" onClick={() => setJobSearchTerm('')}>
-                      <X size={16} />
+                    <button className="clear-btn" onClick={() => setJobSearchTerm('')} aria-label="Clear Search">
+                      <X size={14} />
                     </button>
                   )}
                 </div>
 
-                {/* Department Filter Tabs */}
-                <div className="ap-dept-filter-tabs">
-                  <Filter size={15} className="filter-icon" />
+                <div className="ap-clean-dept-pills">
                   {uniqueDepartments.map(dept => (
                     <button
                       key={dept}
                       type="button"
-                      className={`ap-dept-btn ${jobDepartmentFilter === dept ? 'active' : ''}`}
+                      className={`ap-dept-chip ${jobDepartmentFilter === dept ? 'active' : ''}`}
                       onClick={() => setJobDepartmentFilter(dept)}
                     >
                       {dept}
@@ -992,83 +1036,68 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 </div>
               </div>
 
-              {/* Active Results Counter */}
-              <div className="ap-jobs-counter-strip">
-                <p>Showing <strong>{filteredJobs.length}</strong> available career opportunit{filteredJobs.length === 1 ? 'y' : 'ies'}</p>
+              <div className="ap-clean-count-label">
+                <span>{filteredJobs.length} available position{filteredJobs.length === 1 ? '' : 's'}</span>
               </div>
 
-              {/* Job Listings Grid */}
-              <div className="ap-job-listings">
+              <div className="ap-clean-jobs-grid">
                 {filteredJobs.length === 0 ? (
-                  <div className="ap-careers-empty-card">
-                    <Briefcase size={54} className="ap-careers-empty-icon" />
-                    <h3>No Open Positions Found</h3>
-                    <p>We couldn't find any job openings matching your current search or filter criteria.</p>
+                  <div className="ap-clean-empty-state">
+                    <Briefcase size={44} className="empty-icon" />
+                    <h4>No Openings Found</h4>
+                    <p>There are currently no job postings matching your selected filters.</p>
                     <button 
                       className="btn-ap-secondary"
                       onClick={() => { setJobSearchTerm(''); setJobDepartmentFilter('All'); }}
                     >
-                      Clear Filters
+                      Clear Search Filters
                     </button>
                   </div>
                 ) : (
-                  <div className="ap-modern-jobs-grid">
-                    {filteredJobs.map((job) => (
-                      <div key={job.id} className="ap-modern-job-card">
-                        
-                        {/* Card Header */}
-                        <div className="ap-job-top-bar">
-                          <span className="ap-job-dept-badge">
-                            <Building2 size={13} /> {job.department || 'General Faculty'}
-                          </span>
-                          <span className="ap-job-type-pill">
-                            <Clock size={13} /> {job.employment_type || 'Full-time'}
-                          </span>
-                        </div>
-
-                        <h3 className="ap-job-card-title">{job.title}</h3>
-
-                        {/* Metadata Tags */}
-                        <div className="ap-job-chips-row">
-                          <span className="ap-job-chip">
-                            <MapPin size={13} /> {job.location_type || 'On-site'} • {job.location || 'Pasig City'}
-                          </span>
-                          {(job.salary_min || job.salary_max) && (
-                            <span className="ap-job-chip salary">
-                              <DollarSign size={13} /> 
-                              ₱{Number(job.salary_min || 0).toLocaleString()}
-                              {job.salary_max ? ` - ₱${Number(job.salary_max).toLocaleString()}` : ''} / mo
-                            </span>
-                          )}
-                        </div>
-
-                        <p className="ap-job-excerpt">
-                          {job.description?.length > 150 ? `${job.description.substring(0, 150)}...` : job.description}
-                        </p>
-
-                        {/* Action Buttons */}
-                        <div className="ap-job-card-footer">
-                          <button 
-                            type="button" 
-                            className="btn-ap-job-details"
-                            onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}
-                          >
-                            <span>Read Overview</span>
-                            <ArrowRight size={14} />
-                          </button>
-                          <button 
-                            type="button" 
-                            className="btn-ap-job-apply"
-                            onClick={() => openApplyModal(job)}
-                          >
-                            <FileText size={15} />
-                            <span>Apply Now</span>
-                          </button>
-                        </div>
-
+                  filteredJobs.map((job) => (
+                    <div key={job.id} className="ap-clean-job-card">
+                      <div className="ap-job-card-top">
+                        <span className="ap-job-dept-tag">{job.department || 'General'}</span>
+                        <span className="ap-job-worktype-tag">{job.employment_type || 'Full-time'}</span>
                       </div>
-                    ))}
-                  </div>
+
+                      <h3 className="ap-clean-job-title">{job.title}</h3>
+
+                      <div className="ap-clean-job-details-row">
+                        <span className="ap-clean-meta-item">
+                          <MapPin size={13} /> {job.location_type || 'On-site'} • {job.location || 'Pasig City'}
+                        </span>
+                        {(job.salary_min || job.salary_max) && (
+                          <span className="ap-clean-meta-item salary">
+                            <DollarSign size={13} /> 
+                            ₱{Number(job.salary_min || 0).toLocaleString()}
+                            {job.salary_max ? ` - ₱${Number(job.salary_max).toLocaleString()}` : ''} / mo
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="ap-clean-job-desc">
+                        {job.description?.length > 130 ? `${job.description.substring(0, 130)}...` : job.description}
+                      </p>
+
+                      <div className="ap-clean-job-actions">
+                        <button 
+                          type="button" 
+                          className="btn-ap-clean-overview"
+                          onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}
+                        >
+                          View Details
+                        </button>
+                        <button 
+                          type="button" 
+                          className="btn-ap-clean-apply"
+                          onClick={() => openApplyModal(job)}
+                        >
+                          Apply Now
+                        </button>
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
 
@@ -1082,29 +1111,29 @@ const AppointmentPage = ({ onAdminLogin }) => {
         <div className="ap-footer-grid">
           <div className="ap-footer-brand">
             <div className="ap-footer-logo">
-              <Stethoscope size={32} />
+              <Stethoscope size={28} />
               <h3>HCT Academy</h3>
             </div>
-            <p>Leading healthcare education provider committed to excellence, compassion, and continuous innovation.</p>
+            <p>Healthcare simulation and training academy providing accredited professional certifications and life-support education.</p>
           </div>
           <div className="ap-footer-links">
             <h4>Quick Links</h4>
-            <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('home'), 100); }}>Home</a>
-            <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('about'), 100); }}>About</a>
-            <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('courses'), 100); }}>Courses</a>
-            <a onClick={() => { setActivePage('home'); setTimeout(() => scrollToSection('facilities'), 100); }}>Facilities</a>
+            <a onClick={() => scrollToSection('home')}>Home</a>
+            <a onClick={() => scrollToSection('about')}>About</a>
+            <a onClick={() => scrollToSection('courses')}>Courses</a>
+            <a onClick={() => scrollToSection('facilities')}>Facilities</a>
           </div>
           <div className="ap-footer-links">
             <h4>Portal & Info</h4>
             <a onClick={() => setShowAppointmentModal(true)}>Book Appointment</a>
-            <a onClick={() => { setActivePage('careers'); window.scrollTo(0, 0); }}>Careers</a>
+            <a onClick={navigateToCareers}>Careers</a>
             <a href="#">Privacy Policy</a>
             <a href="#">Terms of Service</a>
           </div>
           <div className="ap-footer-contact">
             <h4>Connect With Us</h4>
-            <p><Mail size={16}/> {contactInfo.email_general}</p>
-            <p><Phone size={16}/> {contactInfo.phone_primary}</p>
+            <p><Mail size={15}/> {contactInfo.email_general}</p>
+            <p><Phone size={15}/> {contactInfo.phone_primary}</p>
           </div>
         </div>
         <div className="ap-footer-bottom">
@@ -1121,19 +1150,19 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 <h2>{selectedCourseModal.title}</h2>
                 <span className="ap-modal-badge">{selectedCourseModal.badge || 'Accredited Curriculum'}</span>
               </div>
-              <button className="ap-btn-close" onClick={() => setSelectedCourseModal(null)}><X size={24} /></button>
+              <button className="ap-btn-close" onClick={() => setSelectedCourseModal(null)}><X size={20} /></button>
             </div>
             <p className="ap-time-modal-subtitle">{selectedCourseModal.description}</p>
             
-            <div className="ap-modal-section-title">Available Modules & Syllabi:</div>
+            <div className="ap-modal-section-title">Course Modules:</div>
             <div className="ap-subcourses-list">
               {(selectedCourseModal.courses || []).map((course, i) => (
                 <div key={i} className="ap-subcourse-item">
                   <div className="ap-subcourse-item-left">
-                    <BookOpen size={18} className="ap-subcourse-icon" />
+                    <BookOpen size={16} className="ap-subcourse-icon" />
                     <span>{course}</span>
                   </div>
-                  <span className="ap-subcourse-tag">Active Module</span>
+                  <span className="ap-subcourse-tag">Active</span>
                 </div>
               ))}
             </div>
@@ -1153,7 +1182,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>Book a Campus Visit</h2>
-              <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)}><X size={24} /></button>
+              <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)}><X size={20} /></button>
             </div>
             <form className="ap-form" onSubmit={handleSubmit}>
               <div className="ap-form-row">
@@ -1181,6 +1210,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   </select>
                 </div>
               </div>
+
+              {/* DATE AND UNRESTRICTED 3-COLUMN TIME DROPDOWN */}
               <div className="ap-form-row">
                 <div className="ap-form-group">
                   <label>Preferred Date <span className="text-danger">*</span></label>
@@ -1193,70 +1224,170 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     required 
                   />
                 </div>
-                <div className="ap-form-group">
+
+                {/* 3-COLUMN DROPDOWN PICKER */}
+                <div className="ap-form-group" ref={timePickerRef}>
                   <label>Preferred Time <span className="text-danger">*</span></label>
-                  <div className="ap-time-input-wrapper">
-                    <input 
-                      type="text" 
-                      name="time" 
-                      placeholder="Select time slot..." 
-                      value={formData.time ? (availableTimeSlots.find(s => s.value === formData.time)?.label || formData.time) : ''} 
-                      readOnly 
-                      required 
-                    />
-                    <button 
-                      type="button" 
-                      className="btn-ap-choose-time" 
-                      onClick={() => setShowTimeModal(true)}
-                      disabled={!formData.date}
+                  <div className="ap-chrome-time-wrapper">
+                    <div 
+                      className={`ap-chrome-time-input ${showTimeDropdown ? 'focused' : ''} ${!formData.date ? 'disabled' : ''}`}
+                      onClick={() => {
+                        if (!formData.date) {
+                          showToast('Please select a visit date first.', true);
+                          return;
+                        }
+                        setShowTimeDropdown(!showTimeDropdown);
+                      }}
                     >
-                      Choose Time
-                    </button>
+                      <div className="ap-chrome-time-display">
+                        {formData.time ? (
+                          <>
+                            <span className="ap-time-active-chunk">{selectedHour}</span>
+                            <span className="ap-time-sep">:</span>
+                            <span className="ap-time-active-chunk">{selectedMinute}</span>
+                            <span className="ap-time-period-txt">{selectedPeriod}</span>
+                          </>
+                        ) : (
+                          <span className="ap-time-placeholder">-- : --  --</span>
+                        )}
+                      </div>
+                      <Clock size={18} className="ap-chrome-clock-icon" />
+                    </div>
+
+                    {showTimeDropdown && (
+                      <div className="ap-chrome-time-dropdown-popover">
+                        <div className="ap-time-col">
+                          {['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map((h) => (
+                            <button
+                              key={h}
+                              type="button"
+                              className={`ap-time-item ${selectedHour === h ? 'selected' : ''}`}
+                              onClick={() => handleHourClick(h)}
+                            >
+                              {h}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="ap-time-col">
+                          {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              className={`ap-time-item ${selectedMinute === m ? 'selected' : ''}`}
+                              onClick={() => handleMinuteClick(m)}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="ap-time-col period-col">
+                          {['PM', 'AM'].map((p) => (
+                            <button
+                              key={p}
+                              type="button"
+                              className={`ap-time-item ${selectedPeriod === p ? 'selected' : ''}`}
+                              onClick={() => handlePeriodClick(p)}
+                            >
+                              {p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  {!formData.date && <span className="ap-input-hint">Please select a date first.</span>}
+                  <span className="ap-input-hint">Any time can be chosen. Times earlier today are strictly blocked.</span>
                 </div>
               </div>
               
               <div className="ap-checkbox-field">
                 <label>
-                  <input type="checkbox" checked={isMultipleVisitors} onChange={e => setIsMultipleVisitors(e.target.checked)} /> 
+                  <input 
+                    type="checkbox" 
+                    checked={isMultipleVisitors} 
+                    onChange={handleCompanionCheckboxToggle} 
+                  /> 
                   I will be accompanied by other visitors
                 </label>
               </div>
               
+              {/* COMPANIONS BOX: VISIBLE INPUTS, TEMPLATE & UPLOAD BUTTONS */}
               {isMultipleVisitors && (
                 <div className="ap-companions-box">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
-                    <p className="ap-companions-info" style={{ margin: 0, flex: 1, minWidth: '200px' }}>
-                      Please register all accompanying visitors for campus security clearance.
-                    </p>
-                    <div className="ap-csv-actions">
-                      <button type="button" className="btn-ap-outline-sm" onClick={downloadCompanionTemplate} title="Download CSV Template">
+                  <div className="ap-companions-header">
+                    <div>
+                      <h4 className="ap-companions-title">Accompanying Visitors Clearance</h4>
+                      <p className="ap-companions-subtitle">
+                        Register companions manually below. <strong>If more than 5 visitors</strong>, please download our template and upload your companion list.
+                      </p>
+                    </div>
+                    <div className="ap-companions-actions">
+                      <button 
+                        type="button" 
+                        className="btn-ap-companion-action" 
+                        onClick={downloadCompanionTemplate} 
+                        title="Download CSV Template"
+                      >
                         <Download size={14} /> Template
                       </button>
-                      <label className="btn-ap-outline-sm ap-file-upload-label-small" style={{ margin: 0, cursor: 'pointer' }}>
+                      <label 
+                        className="btn-ap-companion-action upload" 
+                        title="Upload Companion CSV"
+                      >
                         <Upload size={14} /> Upload CSV
-                        <input type="file" accept=".csv" onChange={handleCompanionCSVUpload} style={{ display: 'none' }} />
+                        <input 
+                          type="file" 
+                          accept=".csv" 
+                          onChange={handleCompanionCSVUpload} 
+                          style={{ display: 'none' }} 
+                        />
                       </label>
                     </div>
                   </div>
 
-                  {additionalVisitors.map((v, idx) => (
-                    <div key={idx} className="ap-companion-row">
-                      <input type="text" placeholder="Companion Full Name" value={v.name} onChange={e => updateVisitorField(idx, 'name', e.target.value)} required />
-                      <button type="button" onClick={() => removeVisitorRow(idx)} title="Remove Companion"><Trash2 size={18} /></button>
-                    </div>
-                  ))}
-                  
+                  <div className="ap-companions-list">
+                    {additionalVisitors.map((v, idx) => (
+                      <div key={idx} className="ap-companion-row">
+                        <span className="ap-companion-index">#{idx + 1}</span>
+                        <input 
+                          type="text" 
+                          placeholder="Companion Full Name (e.g. Maria Santos)" 
+                          value={v.name} 
+                          onChange={e => updateVisitorField(idx, 'name', e.target.value)} 
+                          required 
+                        />
+                        {additionalVisitors.length > 1 && (
+                          <button 
+                            type="button" 
+                            className="btn-ap-companion-delete" 
+                            onClick={() => removeVisitorRow(idx)} 
+                            title="Remove Companion"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
                   {additionalVisitors.length < 5 && (
-                    <button type="button" className="btn-ap-outline-sm" onClick={addVisitorRow}>
-                      <Plus size={16} /> Add Companion
+                    <button 
+                      type="button" 
+                      className="btn-ap-add-companion" 
+                      onClick={addVisitorRow}
+                    >
+                      <Plus size={15} /> Add Companion ({additionalVisitors.length}/5)
                     </button>
                   )}
+
                   {additionalVisitors.length >= 5 && (
-                    <p className="ap-input-hint text-accent font-semibold" style={{ marginTop: '0.5rem' }}>
-                      For more than 5 companions, please download the CSV template and upload your list.
-                    </p>
+                    <div className="ap-companion-limit-notice">
+                      <AlertCircle size={16} className="limit-icon" />
+                      <span>
+                        Maximum of 5 companions added manually. If your party has more than 5 visitors, please download the template above and upload your CSV list.
+                      </span>
+                    </div>
                   )}
                 </div>
               )}
@@ -1272,52 +1403,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
-      {/* TIME SELECTION MODAL */}
-      {showTimeModal && (
-        <div className="ap-modal-overlay" onClick={() => setShowTimeModal(false)}>
-          <div className="ap-modal-content ap-time-picker-modal" onClick={e => e.stopPropagation()}>
-            <div className="ap-modal-header">
-              <h2>Select Available Time Slot</h2>
-              <button className="ap-btn-close" onClick={() => setShowTimeModal(false)}><X size={24} /></button>
-            </div>
-            <p className="ap-time-modal-subtitle">Date selected: <strong>{formData.date}</strong></p>
-            
-            <div className="ap-time-slots-grid">
-              {availableTimeSlots.map((slot) => {
-                const isBooked = bookedSlots.some(s => {
-                  const sDate = s.visit_date ? s.visit_date.split('T')[0] : '';
-                  const sTime = s.visit_time ? s.visit_time.substring(0, 5) : '';
-                  return sDate === formData.date && sTime === slot.value;
-                });
-
-                const isPast = isPastSlot(slot.value);
-                const isDisabled = isBooked || isPast;
-
-                return (
-                  <button
-                    key={slot.value}
-                    type="button"
-                    className={`ap-time-slot-box ${isDisabled ? 'booked' : ''}`}
-                    disabled={isDisabled}
-                    onClick={() => handleSelectTimeSlot(slot.value)}
-                  >
-                    <Clock size={16} />
-                    <span>{slot.label}</span>
-                    <span className="ap-slot-status">
-                      {isBooked ? 'Unavailable' : isPast ? 'Passed' : 'Available'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="ap-modal-footer" style={{ marginTop: '2rem' }}>
-              <button type="button" className="btn-ap-cancel" onClick={() => setShowTimeModal(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* JOB DETAILS MODAL */}
       {showJobDetailsModal && selectedJobDetails && (
         <div className="ap-modal-overlay" onClick={() => setShowJobDetailsModal(false)}>
@@ -1326,36 +1411,36 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <div className="ap-job-header-text">
                 <h2>{selectedJobDetails.title}</h2>
                 <div className="ap-job-meta-light">
-                  <span><Building2 size={16}/> {selectedJobDetails.department || 'General'}</span>
-                  <span><Clock size={16}/> {selectedJobDetails.employment_type}</span>
+                  <span><Building2 size={15}/> {selectedJobDetails.department || 'General'}</span>
+                  <span><Clock size={15}/> {selectedJobDetails.employment_type}</span>
                 </div>
               </div>
-              <button className="ap-btn-close-light" onClick={() => setShowJobDetailsModal(false)}><X size={28} /></button>
+              <button className="ap-btn-close-light" onClick={() => setShowJobDetailsModal(false)}><X size={22} /></button>
             </div>
 
             <div className="ap-job-modal-body">
               <div className="ap-job-stats-grid">
                 <div className="ap-stat-box">
-                  <span className="ap-stat-label">Location Type</span>
-                  <span className="ap-stat-val"><MapPin size={18} /> {selectedJobDetails.location_type || 'On-site'}</span>
+                  <span className="ap-stat-label">Work Arrangement</span>
+                  <span className="ap-stat-val"><MapPin size={16} /> {selectedJobDetails.location_type || 'On-site'}</span>
                 </div>
                 {selectedJobDetails.location && (
                   <div className="ap-stat-box">
-                    <span className="ap-stat-label">Specific Location</span>
-                    <span className="ap-stat-val"><Building2 size={18} /> {selectedJobDetails.location}</span>
+                    <span className="ap-stat-label">Campus</span>
+                    <span className="ap-stat-val"><Building2 size={16} /> {selectedJobDetails.location}</span>
                   </div>
                 )}
                 <div className="ap-stat-box">
                   <span className="ap-stat-label">Monthly Salary</span>
                   <span className="ap-stat-val">
-                    <DollarSign size={18} /> 
+                    <DollarSign size={16} /> 
                     {(selectedJobDetails.salary_min || selectedJobDetails.salary_max) ? (
                       <>
                         {selectedJobDetails.salary_min ? `₱${Number(selectedJobDetails.salary_min).toLocaleString()}` : ''}
                         {selectedJobDetails.salary_min && selectedJobDetails.salary_max ? ' - ' : ''}
                         {selectedJobDetails.salary_max ? `₱${Number(selectedJobDetails.salary_max).toLocaleString()}` : ''}
                       </>
-                    ) : 'Not specified'}
+                    ) : 'Competitive'}
                   </span>
                 </div>
               </div>
@@ -1376,20 +1461,20 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <div className="ap-job-modal-footer">
               <button type="button" className="btn-ap-cancel" onClick={() => setShowJobDetailsModal(false)}>Close</button>
               <button type="button" className="btn-ap-primary" onClick={() => { setShowJobDetailsModal(false); openApplyModal(selectedJobDetails); }}>
-                <FileText size={18} /> Apply Now
+                <FileText size={16} /> Apply for this Position
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* JOB APPLICATION FORM MODAL */}
+      {/* JOB APPLICATION MODAL */}
       {showApplyModal && selectedJob && (
         <div className="ap-modal-overlay" onClick={() => setShowApplyModal(false)}>
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>Apply: {selectedJob.title}</h2>
-              <button className="ap-btn-close" onClick={() => setShowApplyModal(false)}><X size={24} /></button>
+              <button className="ap-btn-close" onClick={() => setShowApplyModal(false)}><X size={20} /></button>
             </div>
             <form onSubmit={submitApplication} className="ap-form">
               <div className="ap-form-group">
@@ -1410,7 +1495,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
               <div className="ap-form-group">
                 <label>Cover Letter (Optional)</label>
-                <textarea name="cover_letter" rows="5" value={applicationForm.cover_letter} onChange={handleApplicationChange} placeholder="Tell us why you're a great fit for this role..." />
+                <textarea name="cover_letter" rows="4" value={applicationForm.cover_letter} onChange={handleApplicationChange} placeholder="Introduce yourself and your clinical or instructional experience..." />
               </div>
 
               <div className="ap-form-group">
@@ -1419,16 +1504,16 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <input type="file" id="resume-upload" accept=".pdf,.doc,.docx" onChange={handleResumeChange} required className="ap-file-input-hidden" />
                   <label htmlFor="resume-upload" className="ap-file-upload-label">
                     <div className="ap-file-icon">
-                      <Upload size={32} />
+                      <Upload size={28} />
                     </div>
                     <div className="ap-file-text">
                       {applicationForm.resume ? (
-                        <span className="ap-file-name-success"><Check size={18}/> {applicationForm.resume.name}</span>
+                        <span className="ap-file-name-success"><Check size={16}/> {applicationForm.resume.name}</span>
                       ) : (
-                        <span><span className="text-accent font-semibold">Click to upload</span> or drag and drop</span>
+                        <span><span className="text-accent font-semibold">Click to attach file</span> or drag and drop</span>
                       )}
                     </div>
-                    <span className="ap-input-hint">Max size: 5MB. Formats: PDF, DOC, DOCX.</span>
+                    <span className="ap-input-hint">Max size: 5MB (PDF, DOC, DOCX).</span>
                   </label>
                 </div>
               </div>
@@ -1436,7 +1521,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <div className="ap-modal-footer">
                 <button type="button" className="btn-ap-cancel" onClick={() => setShowApplyModal(false)}>Cancel</button>
                 <button type="submit" className="btn-ap-primary" disabled={submittingApplication}>
-                  {submittingApplication ? 'Submitting...' : 'Submit Application'}
+                  {submittingApplication ? 'Submitting Application...' : 'Submit Application'}
                 </button>
               </div>
             </form>
@@ -1444,20 +1529,33 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
-      {/* FACILITY GALLERY MODAL */}
+      {/* SOLID WHITE CARD MODAL FOR ALL FACILITY IMAGES */}
       {selectedFacility && (
         <div className="ap-modal-overlay" onClick={() => setSelectedFacility(null)}>
           <div className="ap-gallery-modal" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>{selectedFacility.name} Gallery</h2>
-              <button className="ap-btn-close" onClick={() => setSelectedFacility(null)}><X size={28} /></button>
+              <button className="ap-btn-close" onClick={() => setSelectedFacility(null)}><X size={20} /></button>
             </div>
             <div className="ap-gallery-grid">
-              {(selectedFacility.images || []).map((img, idx) => (
-                <div key={idx} className="ap-gallery-img-box">
-                  <img src={img} alt={`${selectedFacility.name} ${idx + 1}`} />
+              {(selectedFacility.images && selectedFacility.images.length > 0) ? (
+                selectedFacility.images.map((img, idx) => (
+                  <div key={idx} className="ap-gallery-img-box">
+                    <img 
+                      src={img} 
+                      alt={`${selectedFacility.name} ${idx + 1}`} 
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                ))
+              ) : (
+                <div className="ap-gallery-empty">
+                  <Camera size={44} className="text-gray" />
+                  <p>No photos uploaded yet for {selectedFacility.name}.</p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -1466,7 +1564,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       {/* TOAST NOTIFICATION */}
       {toastMessage && (
         <div className={`ap-toast fade-in-up ${toastMessage.isError ? 'error' : 'success'}`}>
-          {toastMessage.isError ? <AlertCircle size={20} /> : <Check size={20} />}
+          {toastMessage.isError ? <AlertCircle size={18} /> : <Check size={18} />}
           <span>{toastMessage.message}</span>
         </div>
       )}
