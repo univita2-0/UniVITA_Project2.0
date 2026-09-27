@@ -44,6 +44,16 @@ const resolveMediaUrl = (img) => {
   return `${getBackendBaseUrl()}${clean}`;
 };
 
+// Helper to automatically sort course categories and sub-modules alphabetically (A to Z)
+const sortCourseModules = (cats) => {
+  return (cats || []).map(cat => ({
+    ...cat,
+    courses: Array.isArray(cat.courses) 
+      ? [...cat.courses].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'accent', numeric: true })) 
+      : []
+  }));
+};
+
 const checkAdmissionsStatus = () => {
   try {
     const phDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }));
@@ -91,7 +101,7 @@ const checkAdmissionsStatus = () => {
   }
 };
 
-const DEFAULT_COURSES = [
+const DEFAULT_COURSES = sortCourseModules([
   {
     title: "Enhancement Courses (E-Learning)",
     badge: "Flexible Self-Paced",
@@ -137,8 +147,9 @@ const DEFAULT_COURSES = [
       "Advanced Nursing Assessment & Rapid Clinical Decision-Making"
     ]
   }
-];
+]);
 
+// 100% Dynamic CMS state (No hardcoded fallback arrays)
 const DEFAULT_FACILITIES = [
   { name: 'Simulation Lab', images: [] },
   { name: 'Classrooms', images: [] }
@@ -146,10 +157,8 @@ const DEFAULT_FACILITIES = [
 
 const DEFAULT_CONTACT = {
   address: '3F & 5F Westar Building, Shaw Boulevard\nPasig City, Metro Manila',
-  phone_primary: '+63 (2) 1234 5678',
   phone_secondary: '+63 912 345 6789',
   email_admissions: 'admissions@hct.ph',
-  email_general: 'info@hct.ph',
   hours_weekday: 'Mon - Fri: 8:00 AM – 5:00 PM',
   hours_weekend: 'Saturday: 8:00 AM – 12:00 PM',
   hours_sunday: 'Sunday: CLOSED'
@@ -271,13 +280,13 @@ const AppointmentPage = ({ onAdminLogin }) => {
     }
   };
 
-  // Purely dynamic facility images loaded from CMS
+  // Fetch dynamic CMS data
   useEffect(() => {
     axios.get(`${API_BASE}/public/landing-content`)
       .then(res => {
         if (res.data) {
           if (Array.isArray(res.data.courses_catalog) && res.data.courses_catalog.length > 0) {
-            setCourseCategories(res.data.courses_catalog);
+            setCourseCategories(sortCourseModules(res.data.courses_catalog));
           }
           if (Array.isArray(res.data.facilities_gallery) && res.data.facilities_gallery.length > 0) {
             const mapped = res.data.facilities_gallery.map(fac => {
@@ -449,7 +458,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
     reader.readAsText(file);
   };
 
-  // STRICT VALIDATION
   const handleSubmit = async (e) => {
     e.preventDefault();
     const { name, email, phone, date, time, message } = formData;
@@ -703,7 +711,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       {/* HOME PAGE */}
       {activePage === 'home' && (
         <>
-          {/* HERO SECTION - PROMINENT 100vh FULL VIEWPORT */}
+          {/* HERO SECTION */}
           <section id="home" className="ap-hero-section">
             <div className="ap-hero-grid">
               <div className="ap-hero-text">
@@ -814,18 +822,13 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     <p className="ap-clean-card-desc">{activeCourse.description}</p>
 
                     <div className="ap-clean-modules-preview">
-                      <span className="ap-clean-preview-heading">Featured Topics & Syllabi</span>
+                      <span className="ap-clean-preview-heading">Featured Topics & Syllabi (Alphabetical)</span>
                       <div className="ap-clean-chip-row">
-                        {(activeCourse.courses || []).slice(0, 4).map((cName, cIdx) => (
+                        {(activeCourse.courses || []).map((cName, cIdx) => (
                           <span key={cIdx} className="ap-clean-module-chip">
                             <Check size={13} className="chip-check" /> {cName}
                           </span>
                         ))}
-                        {(activeCourse.courses || []).length > 4 && (
-                          <span className="ap-clean-more-chip">
-                            +{(activeCourse.courses.length - 4)} more
-                          </span>
-                        )}
                       </div>
                     </div>
 
@@ -861,7 +864,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
-          {/* FACILITIES - CENTERED, LARGER CARDS (100% DRIVEN BY CMS) */}
+          {/* FACILITIES */}
           <section id="facilities" className="ap-section ap-bg-white">
             <div className="ap-container">
               <div className="ap-section-header">
@@ -923,37 +926,50 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <div className="ap-card-icon-bubble"><MapPin size={20} /></div>
                   <h3 className="ap-card-contact-title">Campus Location</h3>
                   <p className="ap-card-contact-desc">
-                    HCT Academy Pasig City<br />
-                    3F & 5F Westar Building, Shaw Boulevard<br />
-                    Pasig City, Metro Manila
+                    {contactInfo.address || 'Address not configured in CMS.'}
                   </p>
-                  <a href={`https://maps.google.com/?q=${encodeURIComponent('HCT Academy, 3F & 5F Westar Building, Shaw Boulevard, Pasig City')}`} target="_blank" rel="noreferrer" className="ap-card-action-link">
-                    <span>Get directions</span> <ExternalLink size={13} />
-                  </a>
+                  {contactInfo.address && (
+                    <a 
+                      href={`https://maps.google.com/?q=${encodeURIComponent(contactInfo.address)}`} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="ap-card-action-link"
+                    >
+                      <span>Get directions</span> <ExternalLink size={13} />
+                    </a>
+                  )}
                 </div>
 
                 <div className="ap-modern-contact-card">
                   <div className="ap-card-icon-bubble"><Phone size={20} /></div>
-                  <h3 className="ap-card-contact-title">Phone</h3>
+                  <h3 className="ap-card-contact-title">Contact Number</h3>
                   <p className="ap-card-contact-desc">
-                    {contactInfo.phone_primary}<br />
-                    {contactInfo.phone_secondary}
+                    {contactInfo.phone_secondary || 'Contact number not set'}
                   </p>
-                  <a href={`tel:${contactInfo.phone_primary.replace(/[^0-9+]/g, '')}`} className="ap-card-action-link">
-                    <span>Call hotline</span> <ArrowRight size={13} />
-                  </a>
+                  {contactInfo.phone_secondary && (
+                    <a 
+                      href={`tel:${contactInfo.phone_secondary.replace(/[^0-9+]/g, '')}`} 
+                      className="ap-card-action-link"
+                    >
+                      <span>Call mobile</span> <ArrowRight size={13} />
+                    </a>
+                  )}
                 </div>
 
                 <div className="ap-modern-contact-card">
                   <div className="ap-card-icon-bubble"><Mail size={20} /></div>
-                  <h3 className="ap-card-contact-title">Email</h3>
+                  <h3 className="ap-card-contact-title">Admissions Email</h3>
                   <p className="ap-card-contact-desc">
-                    {contactInfo.email_admissions}<br />
-                    {contactInfo.email_general}
+                    {contactInfo.email_admissions || 'Email not set'}
                   </p>
-                  <a href={`mailto:${contactInfo.email_admissions}`} className="ap-card-action-link">
-                    <span>Send message</span> <ArrowRight size={13} />
-                  </a>
+                  {contactInfo.email_admissions && (
+                    <a 
+                      href={`mailto:${contactInfo.email_admissions}`} 
+                      className="ap-card-action-link"
+                    >
+                      <span>Send message</span> <ArrowRight size={13} />
+                    </a>
+                  )}
                 </div>
 
                 <div className="ap-modern-contact-card">
@@ -966,7 +982,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <p className="ap-card-contact-desc">
                     {contactInfo.hours_weekday}<br />
                     {contactInfo.hours_weekend}<br />
-                    Sunday: Closed
+                    {contactInfo.hours_sunday || 'Sunday: Closed'}
                   </p>
                   <span className="ap-hours-subtext">{admissionsStatus.note}</span>
                 </div>
@@ -1132,8 +1148,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </div>
           <div className="ap-footer-contact">
             <h4>Connect With Us</h4>
-            <p><Mail size={15}/> {contactInfo.email_general}</p>
-            <p><Phone size={15}/> {contactInfo.phone_primary}</p>
+            <p><Mail size={15}/> {contactInfo.email_admissions || 'admissions@hct.ph'}</p>
+            <p><Phone size={15}/> {contactInfo.phone_secondary || '+63 912 345 6789'}</p>
           </div>
         </div>
         <div className="ap-footer-bottom">
@@ -1154,7 +1170,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
             <p className="ap-time-modal-subtitle">{selectedCourseModal.description}</p>
             
-            <div className="ap-modal-section-title">Course Modules:</div>
+            <div className="ap-modal-section-title">Course Modules (Alphabetical):</div>
             <div className="ap-subcourses-list">
               {(selectedCourseModal.courses || []).map((course, i) => (
                 <div key={i} className="ap-subcourse-item">
@@ -1225,7 +1241,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   />
                 </div>
 
-                {/* 3-COLUMN DROPDOWN PICKER */}
                 <div className="ap-form-group" ref={timePickerRef}>
                   <label>Preferred Time <span className="text-danger">*</span></label>
                   <div className="ap-chrome-time-wrapper">
@@ -1312,7 +1327,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 </label>
               </div>
               
-              {/* COMPANIONS BOX: VISIBLE INPUTS, TEMPLATE & UPLOAD BUTTONS */}
               {isMultipleVisitors && (
                 <div className="ap-companions-box">
                   <div className="ap-companions-header">
@@ -1468,7 +1482,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
-      {/* JOB APPLICATION MODAL */}
+      {/* JOB APPLICATION FORM MODAL */}
       {showApplyModal && selectedJob && (
         <div className="ap-modal-overlay" onClick={() => setShowApplyModal(false)}>
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>

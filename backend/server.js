@@ -1750,6 +1750,60 @@ app.get('/api/attendance-appeals/history', authenticateToken, (req, res) => {
   });
 });
 
+
+// ============================================
+// ADMIN / HR: LEAVE TYPES CONFIGURATION ENDPOINTS
+// ============================================
+
+// 1. Get all leave types (including active and disabled) for Admin/HR configuration
+app.get('/api/admin/leave-types', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+  db.query("SELECT * FROM leave_types ORDER BY name ASC", (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: err.message });
+    res.json(results || []);
+  });
+});
+
+// 2. Add a new leave type
+app.post('/api/admin/leave-types', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+  const { name, annual_quota } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ success: false, message: 'Leave type name is required.' });
+  }
+  const quota = annual_quota !== undefined ? parseFloat(annual_quota) : 15;
+
+  db.query("INSERT INTO leave_types (name, annual_quota, is_active) VALUES (?, ?, 1)", [name.trim(), quota], (err, result) => {
+    if (err) {
+      if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Leave type already exists.' });
+      return res.status(500).json({ success: false, message: err.message });
+    }
+    logAction(req.user.id, 'CREATE_LEAVE_TYPE', 'leave_type', result.insertId, req);
+    res.json({ success: true, message: 'Leave type created successfully.', id: result.insertId });
+  });
+});
+
+// 3. Toggle Enable / Disable state of a leave type
+app.put('/api/admin/leave-types/:id/toggle', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+  const { id } = req.params;
+  db.query("SELECT is_active FROM leave_types WHERE id = ?", [id], (err, rows) => {
+    if (err || rows.length === 0) return res.status(404).json({ success: false, message: 'Leave type not found.' });
+    const newStatus = rows[0].is_active ? 0 : 1;
+    db.query("UPDATE leave_types SET is_active = ? WHERE id = ?", [newStatus, id], (err2) => {
+      if (err2) return res.status(500).json({ success: false, message: err2.message });
+      logAction(req.user.id, 'TOGGLE_LEAVE_TYPE', 'leave_type', id, req);
+      res.json({ success: true, message: `Leave type successfully ${newStatus ? 'enabled' : 'disabled'}.`, is_active: newStatus });
+    });
+  });
+});
+
 // ============================================
 // LEAVE REQUESTS (Secured, Validated & Timezone-Synchronized)
 // ============================================
@@ -6321,10 +6375,12 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
 
   try {
     for (const reqId of ids) {
-      const [leaveRows] = await connection.query(`SELECT user_id, request_date, type FROM leave_requests WHERE id = ?`, [reqId]);
+      // 1. Select duration to calculate proper half-day (0.5) vs whole-day (1.0) deductions
+      const [leaveRows] = await connection.query(`SELECT user_id, request_date, type, duration FROM leave_requests WHERE id = ?`, [reqId]);
       if (leaveRows.length === 0) continue;
       
-      const { user_id: employee_id, request_date, type } = leaveRows[0];
+      const { user_id: employee_id, request_date, type, duration } = leaveRows[0];
+      const deductionAmount = (duration === '1st Half' || duration === '2nd Half') ? 0.5 : 1.0;
       
       // Get the INT ID for the employee_leave_balances table
       const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
@@ -6334,9 +6390,9 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
       const internalUserId = userRows[0].id;
 
       await connection.query(
-  `UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?`, 
-  [status, admin_remarks || null, phtNow, reqId]
-);
+        `UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?`, 
+        [status, admin_remarks || null, phtNow, reqId]
+      );
 
       if (status === 'Approved') {
         const leaveYear = new Date(request_date).getFullYear();
@@ -6350,14 +6406,15 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
             [internalUserId, leaveTypeId, leaveYear]
           );
           
-          if (balanceRows.length > 0 && balanceRows[0].remaining_days >= 1) {
-            const newBalance = balanceRows[0].remaining_days - 1;
+          // 2. Enforce balance validation using precise deduction amount (0.5 or 1.0)
+          if (balanceRows.length > 0 && balanceRows[0].remaining_days >= deductionAmount) {
+            const newBalance = balanceRows[0].remaining_days - deductionAmount;
             await connection.query(
               `UPDATE employee_leave_balances SET remaining_days = ?, last_updated = CURDATE() WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
               [newBalance, internalUserId, leaveTypeId, leaveYear]
             );
           } else {
-            throw new Error(`Insufficient ${type} balance for ${employee_id} to approve all selected days.`);
+            throw new Error(`Insufficient ${type} balance for ${employee_id} to approve this request (Required: ${deductionAmount} day(s)).`);
           }
         } else {
             throw new Error(`Invalid leave type: ${type}`);

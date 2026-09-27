@@ -95,24 +95,13 @@ const SystemConfig = () => {
             <p className="expert-subtitle">Manage global security policies, authentication timeouts, and geofence parameters.</p>
           </div>
         </div>
-        <div className="sc-active-indicator">
-          <CheckCircle2 size={16} color="#059669" />
-          <span>Core Security Engine: Enforced</span>
-        </div>
+        
       </div>
 
       <div className="expert-card" style={{ padding: '2rem' }}>
-        <div className="set-card-header">
-          <ShieldCheck size={20} className="set-icon-accent" />
-          <h3>Global Security & Geofence Policies</h3>
-        </div>
+        
 
-        <div className="sc-banner">
-          <ShieldCheck size={18} color="#0D9488" />
-          <div>
-            <strong>Active Policy Enforcement:</strong> Changes applied here dynamically dictate OTP expirations, strict lockout thresholds, and geofence boundaries without requiring server restarts.
-          </div>
-        </div>
+        
         
         <div className="sc-form-grid">
           <div className="set-form-group">

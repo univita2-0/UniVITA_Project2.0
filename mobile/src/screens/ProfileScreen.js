@@ -176,6 +176,7 @@ export default function ProfileScreen({ navigation }) {
     }, [])
   );
 
+  // FIXED: Uses axios with transformRequest to bypass expo/fetch FormDataPart bug
   const handlePickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -189,8 +190,9 @@ export default function ProfileScreen({ navigation }) {
       quality: 0.6,
     });
 
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const asset = result.assets[0];
+      const uri = asset.uri;
       setProfileImage(uri);
       setIsUploadingImage(true);
 
@@ -201,9 +203,12 @@ export default function ProfileScreen({ navigation }) {
         formData.append('full_name', String(userData.name || 'User'));
         formData.append('email', String(userData.email || ''));
 
-        const filename = uri.split('/').pop() || 'profile.jpg';
-        let fileType = 'image/jpeg';
-        if (filename.toLowerCase().endsWith('.png')) fileType = 'image/png';
+        const filename = uri.split('/').pop() || `profile_${Date.now()}.jpg`;
+        let fileType = asset.mimeType || 'image/jpeg';
+        if (!asset.mimeType) {
+          if (filename.toLowerCase().endsWith('.png')) fileType = 'image/png';
+          else if (filename.toLowerCase().endsWith('.webp')) fileType = 'image/webp';
+        }
         
         formData.append('profile_picture', {
           uri: uri,
@@ -211,30 +216,37 @@ export default function ProfileScreen({ navigation }) {
           type: fileType
         });
 
-        const response = await fetch(`${API_URL}/users/${userData.id}/profile`, {
-          method: 'PUT',
+        // Use axios with transformRequest to preserve native React Native FormData
+        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, formData, {
           headers: { 
-            'Authorization': `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
           },
-          body: formData,
+          transformRequest: (data) => data,
         });
 
-        const resData = await response.json();
-        if (!response.ok) throw new Error(resData.message || "Failed to upload image");
-
-        if (userData.id) {
+        if (res.data && res.data.profile_picture) {
+          const baseUrl = API_URL.replace('/api', '');
+          const fullImageUrl = `${baseUrl}${res.data.profile_picture}`;
+          setProfileImage(fullImageUrl);
+          await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
+        } else if (userData.id) {
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, uri);
         }
+
+        Alert.alert("Success", "Profile picture updated successfully!");
       } catch (err) {
+        console.error("Upload Error:", err);
         const savedImage = await AsyncStorage.getItem(`@profile_picture_${userData.id}`);
         setProfileImage(savedImage || null);
-        Alert.alert("Upload Error", err.message || "Could not save profile picture to server.");
+        Alert.alert("Upload Error", err.response?.data?.message || err.message || "Could not save profile picture to server.");
       } finally {
         setIsUploadingImage(false);
       }
     }
   };
 
+  // FIXED: Uses axios to reliably update name/email
   const handleUpdateProfile = async () => {
     if (!hasProfileChanges) {
       setShowEditModal(false);
@@ -252,16 +264,15 @@ export default function ProfileScreen({ navigation }) {
       formData.append('full_name', String(editName.trim()));
       formData.append('email', String(editEmail.trim()));
 
-      const response = await fetch(`${API_URL}/users/${userData.id}/profile`, {
-        method: 'PUT',
+      const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, formData, {
         headers: { 
-          'Authorization': `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data',
         },
-        body: formData,
+        transformRequest: (data) => data,
       });
 
-      const resData = await response.json();
-      if (!response.ok) throw new Error(resData.message || "Could not update profile information.");
+      if (!res.data.success) throw new Error(res.data.message || "Could not update profile information.");
       
       await AsyncStorage.setItem('user_name', editName.trim());
       await AsyncStorage.setItem('user_email', editEmail.trim());
@@ -271,7 +282,7 @@ export default function ProfileScreen({ navigation }) {
       Alert.alert("Success", "Profile updated successfully");
       setShowEditModal(false);
     } catch (err) { 
-      Alert.alert("Error", err.message || "Could not update profile information."); 
+      Alert.alert("Error", err.response?.data?.message || err.message || "Could not update profile information."); 
     } finally { 
       setLoading(false); 
     }
@@ -346,7 +357,6 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.menuSection}>
             <Text style={styles.sectionHeader}>ACCOUNT</Text>
             <View style={styles.menuCard}>
-              {/* READ-ONLY EMPLOYMENT & STATUTORY DETAILS BUTTON */}
               <MenuItem 
                 icon={FileText} 
                 title="Personal & Employment Details" 
@@ -383,9 +393,7 @@ export default function ProfileScreen({ navigation }) {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* ========================================================= */}
-        {/* READ-ONLY PERSONAL & STATUTORY DETAILS MODAL              */}
-        {/* ========================================================= */}
+        {/* Read-Only Employment Modal */}
         <Modal 
           visible={showDetailsModal} 
           animationType="slide" 
@@ -402,8 +410,6 @@ export default function ProfileScreen({ navigation }) {
             </View>
 
             <ScrollView contentContainerStyle={styles.detailModalBody} showsVerticalScrollIndicator={false}>
-              
-              {/* Official HR Notice Banner */}
               <View style={styles.verifiedNoticeBanner}>
                 <ShieldCheck size={20} color="#059669" />
                 <View style={{ flex: 1 }}>
@@ -414,7 +420,6 @@ export default function ProfileScreen({ navigation }) {
                 </View>
               </View>
 
-              {/* 1. Employment Information */}
               <View style={styles.detailsGroupCard}>
                 <View style={styles.groupHeaderRow}>
                   <Briefcase size={16} color="#00897B" />
@@ -445,7 +450,6 @@ export default function ProfileScreen({ navigation }) {
                 </View>
               </View>
 
-              {/* 2. Statutory Government Identifiers */}
               <View style={styles.detailsGroupCard}>
                 <View style={styles.groupHeaderRow}>
                   <CreditCard size={16} color="#00897B" />
@@ -476,7 +480,6 @@ export default function ProfileScreen({ navigation }) {
                 </View>
               </View>
 
-              {/* 3. Personal & Emergency Contacts */}
               <View style={styles.detailsGroupCard}>
                 <View style={styles.groupHeaderRow}>
                   <User size={16} color="#00897B" />
@@ -519,7 +522,6 @@ export default function ProfileScreen({ navigation }) {
                 </View>
               </View>
 
-              {/* 4. Registered Address */}
               <View style={styles.detailsGroupCard}>
                 <View style={styles.groupHeaderRow}>
                   <MapPin size={16} color="#00897B" />
@@ -594,7 +596,7 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </Modal>
 
-        {/* Floating Change Password Modal */}
+        {/* Change Password Modal */}
         <Modal visible={showPasswordModal} animationType="fade" transparent={true} onRequestClose={() => setShowPasswordModal(false)}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', alignItems: 'center' }}>
@@ -714,7 +716,6 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   modalBtnTextOutline: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary },
   modalBtnTextFill: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText },
 
-  // Password Modal Specific
   secInputGroup: { marginBottom: 16 },
   secInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, overflow: 'hidden' },
   secInput: { flex: 1, paddingVertical: 14, paddingHorizontal: 12, fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
@@ -723,9 +724,6 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   secCheckText: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
   secCheckPassed: { color: '#059669', fontFamily: 'Inter_18pt-Bold' },
 
-  // =========================================================
-  // READ-ONLY DETAIL INSPECTION MODAL STYLES
-  // =========================================================
   detailModalSafeArea: {
     flex: 1,
     backgroundColor: isLight ? '#F8FAFC' : colors.background

@@ -112,6 +112,21 @@ const LeaveManagement = () => {
     return `${startStr} – ${endStr}`;
   };
 
+  // Helper to format timestamps into 12-hour AM/PM format
+  const formatDateTime12Hour = (dateString) => {
+    if (!dateString) return '—';
+    const date = new Date(dateString.replace(' ', 'T'));
+    if (isNaN(date.getTime())) return dateString;
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
   const filteredHistory = historyGroups.filter(group =>
     !searchTerm ||
     group.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -137,7 +152,7 @@ const LeaveManagement = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            <p className="expert-subtitle">Review historical and resolved employee leave and absence records.</p>
+            <p className="expert-subtitle">Review historical and resolved employee leave and absence logs (Current to Old).</p>
           </div>
         </div>
         <button className="expert-btn-secondary" onClick={() => setShowPendingModal(true)}>
@@ -218,7 +233,7 @@ const LeaveManagement = () => {
         )}
       </div>
 
-      {/* DETAILS MODAL */}
+      {/* DETAILS MODAL (Now includes Date Range, Duration, and Filed On in 12hr AM/PM format) */}
       {showDetailsModal && selectedGroup && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowDetailsModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
@@ -251,8 +266,12 @@ const LeaveManagement = () => {
                     <span className="nowrap">{selectedGroup.request_count || 1} day(s)</span>
                   </div>
                   <div className="lm-custom-prop full-width">
-                    <label>Date Range</label>
+                    <label>Date Range (Log)</label>
                     <span className="nowrap">{formatDateRange(selectedGroup.start_date, selectedGroup.end_date)}</span>
+                  </div>
+                  <div className="lm-custom-prop full-width">
+                    <label>Filed On</label>
+                    <span className="nowrap">{formatDateTime12Hour(selectedGroup.submitted_at || selectedGroup.created_at)}</span>
                   </div>
                   <div className="lm-custom-prop full-width">
                     <label>Reason</label>

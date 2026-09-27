@@ -5,7 +5,7 @@ import {
   RefreshControl, StatusBar, TouchableOpacity
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, CalendarDays, TrendingUp } from 'lucide-react-native';
+import { ArrowLeft, CalendarDays, TrendingUp, Award } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { API_URL } from './api';
@@ -38,14 +38,14 @@ export default function LeaveBalancesScreen({ navigation }) {
         setBalances([
           { leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 },
           { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 },
-          { leave_type: 'Emergency Leave', remaining_days: 5, annual_quota: 5 },
+          { leave_type: 'Compensatory Paid Off (CTO)', remaining_days: 0, annual_quota: 'Accrued' },
         ]);
       }
     } catch (error) {
       setBalances([
         { leave_type: 'Sick Leave', remaining_days: 15, annual_quota: 15 },
         { leave_type: 'Vacation Leave', remaining_days: 15, annual_quota: 15 },
-        { leave_type: 'Emergency Leave', remaining_days: 5, annual_quota: 5 },
+        { leave_type: 'Compensatory Paid Off (CTO)', remaining_days: 0, annual_quota: 'Accrued' },
       ]);
     } finally {
       setLoading(false);
@@ -86,7 +86,6 @@ export default function LeaveBalancesScreen({ navigation }) {
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
         
-        {/* Top Navbar */}
         <View style={styles.topHeader}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} activeOpacity={0.8}>
             <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
@@ -102,8 +101,8 @@ export default function LeaveBalancesScreen({ navigation }) {
             <View style={styles.iconWrapper}>
               <CalendarDays size={32} color={colors.primary} strokeWidth={1.5} />
             </View>
-            <Text style={styles.title}>My Leave Balances</Text>
-            <Text style={styles.subtitle}>Year {currentYear}</Text>
+            <Text style={styles.title}>My Leave Balances & CTO</Text>
+            <Text style={styles.subtitle}>Fiscal Year {currentYear}</Text>
           </View>
 
           {balances.length === 0 ? (
@@ -114,20 +113,24 @@ export default function LeaveBalancesScreen({ navigation }) {
           ) : (
             balances.map((item, idx) => {
               const remaining = item.remaining_days;
-              const quota = item.annual_quota || (item.leave_type === 'Emergency Leave' ? 5 : 15);
+              const quota = item.annual_quota || 15;
+              const isCto = item.leave_type.toLowerCase().includes('compensatory') || item.leave_type.toLowerCase().includes('cto');
+
               return (
-                <View key={idx} style={styles.balanceCard}>
+                <View key={idx} style={[styles.balanceCard, isCto && styles.ctoCardHighlight]}>
                   <View style={styles.cardLeft}>
                     <View style={styles.trendIconWrapper}>
-                      <TrendingUp size={22} color={colors.primary} />
+                      {isCto ? <Award size={22} color="#D97706" /> : <TrendingUp size={22} color={colors.primary} />}
                     </View>
                   </View>
                   <View style={styles.cardRight}>
                     <Text style={styles.leaveType}>{item.leave_type}</Text>
-                    <Text style={styles.remaining}>
-                      {remaining} / {quota} days remaining
+                    <Text style={[styles.remaining, isCto && { color: '#D97706' }]}>
+                      {remaining} {isCto ? 'days earned' : `/${quota} days remaining`}
                     </Text>
-                    <Text style={styles.quota}>Annual quota: {quota} days</Text>
+                    <Text style={styles.quota}>
+                      {isCto ? 'Converted from approved overtime hours (8 hrs = 1 day)' : `Annual quota: ${quota} days`}
+                    </Text>
                   </View>
                 </View>
               );
@@ -136,7 +139,7 @@ export default function LeaveBalancesScreen({ navigation }) {
 
           <View style={styles.noteBox}>
             <Text style={styles.noteText}>
-              📌 Leave requests automatically deduct from your balance upon approval.
+              📌 Approved overtime under Compensatory Time Off (CTO) automatically converts into your leave credits. Leave requests deduct upon admin approval.
             </Text>
           </View>
         </ScrollView>
@@ -154,7 +157,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   
   heroHeader: { alignItems: 'center', marginBottom: 32, marginTop: 10 },
   iconWrapper: { width: 64, height: 64, borderRadius: 24, backgroundColor: isLight ? '#FFFFFF' : colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.15, shadowRadius: 8, elevation: 2, marginBottom: 16 },
-  title: { fontFamily: 'Inter_18pt-Bold', fontSize: 26, color: isLight ? '#0F172A' : colors.textPrimary, letterSpacing: -0.5 },
+  title: { fontFamily: 'Inter_18pt-Bold', fontSize: 24, color: isLight ? '#0F172A' : colors.textPrimary, letterSpacing: -0.5 },
   subtitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 4 },
   
   balanceCard: {
@@ -171,6 +174,10 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
     shadowRadius: 10,
     elevation: 2,
     alignItems: 'center'
+  },
+  ctoCardHighlight: {
+    borderColor: isLight ? '#FDE68A' : 'rgba(217, 119, 6, 0.4)',
+    backgroundColor: isLight ? '#FFFBEB' : 'rgba(217, 119, 6, 0.05)'
   },
   cardLeft: { marginRight: 16, justifyContent: 'center' },
   trendIconWrapper: { width: 44, height: 44, borderRadius: 16, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },

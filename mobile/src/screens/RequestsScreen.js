@@ -1,5 +1,5 @@
 // src/screens/RequestsScreen.js
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar, Platform
@@ -12,8 +12,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { File } from 'expo-file-system';
-import { API_URL, requestAttendanceCorrection } from './api';
-import { Upload, X, Calendar as CalendarIcon, Camera, Clock, ArrowLeft } from 'lucide-react-native';
+import { API_URL } from './api';
+import { Upload, X, Calendar as CalendarIcon, Clock, ArrowLeft } from 'lucide-react-native';
 
 const appendFileToFormData = (formData, fieldName, fileObj) => {
   if (!fileObj) return;
@@ -21,10 +21,8 @@ const appendFileToFormData = (formData, fieldName, fileObj) => {
   if (!fileUri) return;
 
   try {
-    // Standard Expo SDK 54/57 WinterCG File object
     formData.append(fieldName, new File(fileUri));
   } catch (err) {
-    // Fallback for environments where File is not available
     formData.append(fieldName, {
       uri: fileUri,
       name: fileObj.name || fileUri.split('/').pop() || 'attachment.jpg',
@@ -117,6 +115,14 @@ export default function RequestsScreen({ navigation, route }) {
   const [leaveDateTo, setLeaveDateTo] = useState('');
   const [isRange, setIsRange] = useState(false);
   const [leaveType, setLeaveType] = useState('Vacation');
+  const [availableLeaveTypes, setAvailableLeaveTypes] = useState([
+    { id: 1, name: 'Vacation' },
+    { id: 2, name: 'Sick' },
+    { id: 3, name: 'Emergency' },
+    { id: 4, name: 'Birthday' },
+    { id: 5, name: 'PTO' },
+    { id: 6, name: 'Compensatory Paid Off' }
+  ]);
   const [leaveReason, setLeaveReason] = useState('');
   const [leaveImage, setLeaveImage] = useState(null);
   const [submittingLeave, setSubmittingLeave] = useState(false);
@@ -160,6 +166,29 @@ export default function RequestsScreen({ navigation, route }) {
   const [overtimeTiming, setOvertimeTiming] = useState('Normal OT');
 
   const todayStr = getPHNowString();
+
+  // Fetch dynamic active leave types from the server so they sync with HR
+  const fetchDynamicLeaveTypes = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${API_URL}/leave-types`, {
+        headers: { Authorization: `Bearer ${token || ''}` }
+      });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data) && data.length > 0) {
+        setAvailableLeaveTypes(data);
+        if (!data.some(t => t.name === leaveType)) {
+          setLeaveType(data[0].name);
+        }
+      }
+    } catch (err) {
+      console.log('Using fallback static leave types:', err);
+    }
+  }, [leaveType]);
+
+  useEffect(() => {
+    fetchDynamicLeaveTypes();
+  }, [fetchDynamicLeaveTypes]);
 
   const handleTabSwitch = (tab) => {
     setActiveTab(tab);
@@ -229,14 +258,6 @@ export default function RequestsScreen({ navigation, route }) {
     } catch (err) {
       console.error(err);
     }
-  };
-
-  const takeSelfie = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Camera permission needed'); return null; }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-    if (!result.canceled) return result.assets[0].uri;
-    return null;
   };
 
   // --- LEAVE VALIDATION & SUBMISSION ---
@@ -589,7 +610,7 @@ export default function RequestsScreen({ navigation, route }) {
                     <Text style={styles.historyButtonText}>View Leave History</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.balancesButton} onPress={fetchLeaveBalances}>
-                    <Text style={styles.balancesButtonText}>View Leave Balances</Text>
+                    <Text style={styles.balancesButtonText}>View Leave Balances & CTO</Text>
                   </TouchableOpacity>
 
                   <View style={styles.rangeToggle}>
@@ -619,11 +640,11 @@ export default function RequestsScreen({ navigation, route }) {
                     </>
                   )}
 
-                  <Text style={styles.label}>Leave Type</Text>
+                  <Text style={styles.label}>Leave Type (Synchronized with HR)</Text>
                   <View style={styles.typeGroup}>
-                    {['Birthday', 'PTO', 'Compensatory Paid Off', 'Emergency', 'Vacation'].map(t => (
-                      <TouchableOpacity key={t} style={[styles.typeChip, leaveType === t && styles.typeChipActive]} onPress={() => setLeaveType(t)}>
-                        <Text style={[styles.typeChipText, leaveType === t && styles.typeChipTextActive]}>{t}</Text>
+                    {availableLeaveTypes.map(t => (
+                      <TouchableOpacity key={t.id || t.name} style={[styles.typeChip, leaveType === t.name && styles.typeChipActive]} onPress={() => setLeaveType(t.name)}>
+                        <Text style={[styles.typeChipText, leaveType === t.name && styles.typeChipTextActive]}>{t.name}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>

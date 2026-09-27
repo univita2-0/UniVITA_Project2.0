@@ -34,18 +34,17 @@ const resolveImageSrc = (imgUrl) => {
   return `${getBackendBaseUrl()}${clean}`;
 };
 
-const DEFAULT_CONTACT = {
-  address: '3F & 5F Westar Building, Shaw Boulevard\nPasig City, Metro Manila',
-  phone_primary: '+63 (2) 1234 5678',
-  phone_secondary: '+63 912 345 6789',
-  email_admissions: 'admissions@hct.ph',
-  email_general: 'info@hct.ph',
-  hours_weekday: 'Mon - Fri: 8:00 AM – 5:00 PM',
-  hours_weekend: 'Saturday: 8:00 AM – 12:00 PM',
-  hours_sunday: 'Sunday: CLOSED'
+// Helper to sort course categories and sub-modules alphabetically
+const sortCourseModules = (cats) => {
+  return (cats || []).map(cat => ({
+    ...cat,
+    courses: Array.isArray(cat.courses) 
+      ? [...cat.courses].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'accent', numeric: true })) 
+      : []
+  }));
 };
 
-const DEFAULT_COURSES = [
+const DEFAULT_COURSES = sortCourseModules([
   {
     title: "Enhancement Courses (E-Learning)",
     badge: "Flexible Self-Paced",
@@ -91,12 +90,21 @@ const DEFAULT_COURSES = [
       "Advanced Nursing Assessment & Rapid Clinical Decision-Making"
     ]
   }
-];
+]);
 
 const DEFAULT_FACILITIES = [
   { name: 'Simulation Lab', images: [] },
   { name: 'Classrooms', images: [] }
 ];
+
+const DEFAULT_CONTACT = {
+  address: '3F & 5F Westar Building, Shaw Boulevard\nPasig City, Metro Manila',
+  phone_secondary: '+63 912 345 6789',
+  email_admissions: 'admissions@hct.ph',
+  hours_weekday: 'Mon - Fri: 8:00 AM – 5:00 PM',
+  hours_weekend: 'Saturday: 8:00 AM – 12:00 PM',
+  hours_sunday: 'Sunday: CLOSED'
+};
 
 const LandingPageManagement = () => {
   const [activeTab, setActiveTab] = useState('contact');
@@ -120,7 +128,7 @@ const LandingPageManagement = () => {
           setContact(prev => ({ ...prev, ...res.data.contact_details }));
         }
         if (Array.isArray(res.data.courses_catalog) && res.data.courses_catalog.length > 0) {
-          setCourses(res.data.courses_catalog);
+          setCourses(sortCourseModules(res.data.courses_catalog));
         }
         if (Array.isArray(res.data.facilities_gallery) && res.data.facilities_gallery.length > 0) {
           setFacilities(res.data.facilities_gallery);
@@ -133,7 +141,6 @@ const LandingPageManagement = () => {
     }
   };
 
-  // Silent parameter suppresses the redundant "Saved successfully!" toast when auto-saving
   const saveSection = async (key, data, silent = false) => {
     setSaving(true);
     try {
@@ -148,7 +155,6 @@ const LandingPageManagement = () => {
     }
   };
 
-  // BULK UPLOAD HANDLER: Uploads multiple files at once without duplicate toasts
   const handleUploadFacilityImages = async (facilityIndex, fileList) => {
     if (!fileList || fileList.length === 0) return;
 
@@ -222,11 +228,16 @@ const LandingPageManagement = () => {
     ]);
   };
 
+  // Automatically sorts sub-modules alphabetically when adding a new one
   const addSubCourse = (catIndex, name) => {
     if (!name.trim()) return;
     const updated = [...courses];
+    if (!updated[catIndex].courses) {
+      updated[catIndex].courses = [];
+    }
     updated[catIndex].courses.push(name.trim());
-    setCourses(updated);
+    updated[catIndex].courses.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'accent', numeric: true }));
+    setCourses(sortCourseModules(updated));
   };
 
   const removeSubCourse = (catIndex, subIndex) => {
@@ -258,7 +269,7 @@ const LandingPageManagement = () => {
 
       <div className="lpm-tabs-bar">
         <button className={`lpm-tab-btn ${activeTab === 'contact' ? 'active' : ''}`} onClick={() => setActiveTab('contact')}>
-           Contact Details & Hours
+          Contact Details & Hours
         </button>
         <button className={`lpm-tab-btn ${activeTab === 'courses' ? 'active' : ''}`} onClick={() => setActiveTab('courses')}>
            Course Management ({courses.length})
@@ -281,7 +292,7 @@ const LandingPageManagement = () => {
               <label>Campus Physical Address</label>
               <textarea 
                 rows="2" 
-                value={contact.address} 
+                value={contact.address || ''} 
                 onChange={e => setContact({ ...contact, address: e.target.value })} 
                 placeholder="Building, street, and city..."
               />
@@ -291,34 +302,16 @@ const LandingPageManagement = () => {
             <div className="lpm-form-group">
               <label>Admissions Email</label>
               <input 
-                value={contact.email_admissions} 
+                value={contact.email_admissions || ''} 
                 onChange={e => setContact({ ...contact, email_admissions: e.target.value })} 
                 placeholder="admissions@hct.ph"
               />
             </div>
 
             <div className="lpm-form-group">
-              <label>General Inquiry Email</label>
-              <input 
-                value={contact.email_general} 
-                onChange={e => setContact({ ...contact, email_general: e.target.value })} 
-                placeholder="info@hct.ph"
-              />
-            </div>
-
-            <div className="lpm-form-group">
-              <label>Primary Landline Hotline</label>
-              <input 
-                value={contact.phone_primary} 
-                onChange={e => setContact({ ...contact, phone_primary: e.target.value })} 
-                placeholder="+63 (2) 1234 5678"
-              />
-            </div>
-
-            <div className="lpm-form-group">
               <label>Mobile Contact Number</label>
               <input 
-                value={contact.phone_secondary} 
+                value={contact.phone_secondary || ''} 
                 onChange={e => setContact({ ...contact, phone_secondary: e.target.value })} 
                 placeholder="+63 912 345 6789"
               />
@@ -327,7 +320,7 @@ const LandingPageManagement = () => {
             <div className="lpm-form-group">
               <label>Weekday Hours (Mon – Fri)</label>
               <input 
-                value={contact.hours_weekday} 
+                value={contact.hours_weekday || ''} 
                 onChange={e => setContact({ ...contact, hours_weekday: e.target.value })} 
                 placeholder="Mon - Fri: 8:00 AM – 5:00 PM"
               />
@@ -336,7 +329,7 @@ const LandingPageManagement = () => {
             <div className="lpm-form-group">
               <label>Saturday Hours</label>
               <input 
-                value={contact.hours_weekend} 
+                value={contact.hours_weekend || ''} 
                 onChange={e => setContact({ ...contact, hours_weekend: e.target.value })} 
                 placeholder="Saturday: 8:00 AM – 12:00 PM"
               />
@@ -345,7 +338,7 @@ const LandingPageManagement = () => {
             <div className="lpm-form-group full-width">
               <label>Sunday Schedule</label>
               <input 
-                value={contact.hours_sunday} 
+                value={contact.hours_sunday || ''} 
                 onChange={e => setContact({ ...contact, hours_sunday: e.target.value })} 
                 placeholder="Sunday: CLOSED"
               />
@@ -360,7 +353,7 @@ const LandingPageManagement = () => {
         </div>
       )}
 
-      {/* TAB 2: COURSE MANAGEMENT */}
+      {/* TAB 2: COURSE MANAGEMENT (ALPHABETICAL ORDER GUARANTEED) */}
       {activeTab === 'courses' && (
         <div className="lpm-courses-stack">
           {courses.map((cat, idx) => (
@@ -371,7 +364,7 @@ const LandingPageManagement = () => {
                     Track #{idx + 1}: {cat.title}
                   </h4>
                   <span style={{ fontSize: '0.8rem', color: '#64748B' }}>
-                    {(cat.courses || []).length} modules configured
+                    {(cat.courses || []).length} modules configured (Alphabetically Sorted)
                   </span>
                 </div>
                 <button 
@@ -436,7 +429,7 @@ const LandingPageManagement = () => {
               </div>
 
               <div className="lpm-subcourses-box">
-                <label className="lpm-subcourses-title">Included Modules / Syllabi:</label>
+                <label className="lpm-subcourses-title">Included Modules / Syllabi (Sorted A–Z):</label>
                 <div className="lpm-chips-list">
                   {(cat.courses || []).map((cName, cIdx) => (
                     <span key={cIdx} className="lpm-course-chip">
@@ -455,7 +448,7 @@ const LandingPageManagement = () => {
                 <div className="lpm-add-chip-row">
                   <input 
                     id={`new-sub-${idx}`} 
-                    placeholder="Add module (e.g. Advanced Nursing Assessment)..."
+                    placeholder="Add module (automatically placed alphabetically)..."
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -491,7 +484,7 @@ const LandingPageManagement = () => {
         </div>
       )}
 
-      {/* TAB 3: FACILITY GALLERIES (BULK UPLOAD & NO FORCED HARDCODED IMAGES) */}
+      {/* TAB 3: FACILITY GALLERIES */}
       {activeTab === 'facilities' && (
         <div className="lpm-facilities-stack">
           {facilities.map((fac, idx) => (
@@ -520,7 +513,6 @@ const LandingPageManagement = () => {
                 </label>
               </div>
 
-              {/* Photos Grid */}
               <div className="lpm-facility-photos-grid">
                 {(fac.images || []).length === 0 ? (
                   <div className="lpm-no-photos">
