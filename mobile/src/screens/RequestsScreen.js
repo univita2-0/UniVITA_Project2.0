@@ -143,7 +143,7 @@ export default function RequestsScreen({ navigation, route }) {
   const [correctionTime, setCorrectionTime] = useState(prefill.prefillTime || '');
   const [correctionReason, setCorrectionReason] = useState(prefill.prefillReason || '');
   const [correctionScheduleId, setCorrectionScheduleId] = useState(prefill.prefillScheduleId || null);
-  const [correctionSelfie, setCorrectionSelfie] = useState(null);
+  const [correctionAttachment, setCorrectionAttachment] = useState(null);
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
   const [showCorrectionCalendar, setShowCorrectionCalendar] = useState(false);
 
@@ -385,24 +385,18 @@ export default function RequestsScreen({ navigation, route }) {
   };
 
   // --- CORRECTION VALIDATION & SUBMISSION ---
-  const handleNextCorrection = async () => {
+  const handleNextCorrection = () => {
     if (!correctionDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
     if (!correctionTime) { Alert.alert('Validation Error', 'Please select a correction time.'); return; }
     if (!correctionReason.trim() || correctionReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a valid reason (minimum 5 characters).'); return; }
-    
-    let selfieUri = correctionSelfie;
-    if (!selfieUri) {
-      const taken = await takeSelfie();
-      if (!taken) { Alert.alert('Selfie Required', 'A verification selfie is mandatory.'); return; }
-      selfieUri = taken;
-      setCorrectionSelfie(taken);
-    }
+    if (!correctionAttachment) { Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.'); return; }
     setCorrectionStep(2);
   };
 
   const handleSubmitCorrection = async () => {
     setSubmittingCorrection(true);
     try {
+      const token = await AsyncStorage.getItem('auth_token');
       let employeeId = await AsyncStorage.getItem('employee_id');
       if (!employeeId) {
         const userStr = await AsyncStorage.getItem('user');
@@ -415,23 +409,34 @@ export default function RequestsScreen({ navigation, route }) {
       const dbType = correctionType === 'early_out' ? 'clock_out' : correctionType;
       const finalReason = correctionType === 'early_out' ? `[Early Departure] ${correctionReason.trim()}` : correctionReason.trim();
       const formattedTime = formatTimeForDB(correctionTime);
-      const finalSelfieUri = Platform.OS === 'android' ? correctionSelfie : correctionSelfie.replace('file://', '');
 
-      const payload = {
-        employee_id: String(employeeId),
-        date: correctionDate,
-        type: dbType,
-        time: formattedTime,
-        reason: finalReason,
-        schedule_id: correctionScheduleId || null,
-        selfie: { uri: finalSelfieUri, name: 'correction.jpg', type: 'image/jpeg' }
-      };
+      const formData = new FormData();
+      formData.append('employee_id', String(employeeId));
+      formData.append('date', String(correctionDate));
+      formData.append('type', String(dbType));
+      formData.append('time', String(formattedTime));
+      formData.append('reason', String(finalReason));
+      if (correctionScheduleId) {
+        formData.append('schedule_id', String(correctionScheduleId));
+      }
+
+      if (correctionAttachment) {
+        appendFileToFormData(formData, 'attachment', correctionAttachment);
+      }
+
+      const response = await fetch(`${API_URL}/attendance/correction-request`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const res = await parseServerResponse(response);
       
-      const res = await requestAttendanceCorrection(payload);
-      
-      if (res && res.success) {
+      if (response && response.ok && (res.success || res.success === undefined)) {
         Alert.alert('Success', res.message || 'Correction request submitted.');
-        setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionSelfie(null); 
+        setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionAttachment(null); 
         setCorrectionType('clock_in'); setCorrectionScheduleId(null); setCorrectionStep(1);
         if (navigation.setParams) {
           navigation.setParams({ prefillTab: undefined, prefillDate: undefined, prefillType: undefined, prefillTime: undefined, prefillReason: undefined, prefillScheduleId: undefined });
@@ -441,7 +446,7 @@ export default function RequestsScreen({ navigation, route }) {
         Alert.alert('Submission Error', res?.message || res?.error || 'Failed to submit correction.');
       }
     } catch (err) {
-      Alert.alert('Submission Error', err?.response?.data?.message || err?.message || 'Connection failed.');
+      Alert.alert('Submission Error', err?.message || 'Connection failed.');
     } finally { 
       setSubmittingCorrection(false); 
     }
@@ -476,7 +481,7 @@ export default function RequestsScreen({ navigation, route }) {
           formData.append('schedule_id', String(scheduleId));
         }
 
-        appendFileToFormData(formData, 'image', overtimeImage);
+        appendFileToFormData(formData, 'attachment', overtimeImage);
 
         response = await fetch(`${API_URL}/overtime-requests`, {
           method: 'POST',
@@ -855,12 +860,11 @@ export default function RequestsScreen({ navigation, route }) {
                   <Text style={styles.label}>Reason</Text>
                   <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why did you forget to clock or need to leave early?" placeholderTextColor={colors.textSecondary} value={correctionReason} onChangeText={setCorrectionReason} />
 
-                  <Text style={styles.label}>Selfie (Required Proof)</Text>
-                  <TouchableOpacity style={styles.uploadBtn} onPress={async () => { const uri = await takeSelfie(); if (uri) setCorrectionSelfie(uri); }}>
-                    <Camera size={18} color="#00897B" />
-                    <Text style={styles.uploadText}>{correctionSelfie ? 'Retake Selfie' : 'Take Selfie'}</Text>
+                  <Text style={styles.label}>Attachment (Required - PDF, DOC, JPG up to 5MB)</Text>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setCorrectionAttachment)}>
+                    <Upload size={18} color="#00897B" />
+                    <Text style={styles.uploadText}>{correctionAttachment ? (correctionAttachment.name || 'File Attached') : 'Upload Proof'}</Text>
                   </TouchableOpacity>
-                  {correctionSelfie && <Image source={{ uri: correctionSelfie }} style={styles.previewImage} />}
 
                   <TouchableOpacity style={styles.submitBtn} onPress={handleNextCorrection}>
                     <Text style={styles.submitBtnText}>Next: Review Application</Text>
@@ -899,8 +903,8 @@ export default function RequestsScreen({ navigation, route }) {
                     <View style={styles.reviewDivider} />
 
                     <View style={styles.reviewRow}>
-                      <Text style={styles.reviewLabel}>Selfie Attached</Text>
-                      <Text style={styles.reviewValue}>{correctionSelfie ? 'Yes (Attached)' : 'No'}</Text>
+                      <Text style={styles.reviewLabel}>Attachment</Text>
+                      <Text style={styles.reviewValue}>{correctionAttachment ? (correctionAttachment.name || 'File Attached') : 'No'}</Text>
                     </View>
                   </View>
 

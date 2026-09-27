@@ -442,17 +442,32 @@ const selfieStorage = multer.diskStorage({
 });
 const multerSelfie = multer({ storage: selfieStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
 
-// 4. CORRECTIONS
 const correctionDir = path.join(uploadsPath, 'corrections');
 if (!fs.existsSync(correctionDir)) fs.mkdirSync(correctionDir, { recursive: true });
 const correctionStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, correctionDir),
   filename: (req, file, cb) => {
     const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, unique + '.jpg');
+    cb(null, `correction_${unique}${path.extname(file.originalname || '.jpg')}`);
   }
 });
-const multerCorrection = multer({ storage: correctionStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
+
+const uploadCorrection = multer({ 
+  storage: correctionStorage, 
+  limits: { fileSize: 5 * 1024 * 1024 }, 
+  fileFilter: documentFilter 
+});
+
+const uploadCorrectionFiles = uploadCorrection.fields([
+  { name: 'attachment', maxCount: 1 },
+  { name: 'image', maxCount: 1 },
+  { name: 'selfie', maxCount: 1 }
+]);
+
+const uploadOvertimeFiles = upload.fields([
+  { name: 'attachment', maxCount: 1 },
+  { name: 'image', maxCount: 1 }
+]);
 
 // 5. APPEALS
 const appealUploadDir = path.join(uploadsPath, 'attendance_appeals');
@@ -1169,10 +1184,13 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
 // ATTENDANCE CORRECTIONS (Secured, Validated & Timezone-Synchronized)
 // ============================================
 
-app.post('/api/attendance/correction-request', authenticateToken, multerCorrection.single('selfie'), async (req, res) => {
+app.post('/api/attendance/correction-request', authenticateToken, uploadCorrectionFiles, async (req, res) => {
   let { employee_id, date, type, time, reason, schedule_id } = req.body;
   const userId = req.user.id;
-  const selfiePath = req.file ? `/uploads/corrections/${req.file.filename}` : null;
+  
+  // Safely extract uploaded document/image from any accepted field name
+  const uploadedFile = req.file || (req.files && (req.files['attachment']?.[0] || req.files['image']?.[0] || req.files['selfie']?.[0]));
+  const attachmentPath = uploadedFile ? `/uploads/corrections/${uploadedFile.filename}` : null;
   const phNow = getPHDateTime();
 
   if (!employee_id || !date || !type || !time || !reason) {
@@ -1227,12 +1245,12 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
       });
     }
 
-    // 3. Insert correction record explicitly stamped with Philippine Standard Time
+    // 3. Insert correction record explicitly stamped with Philippine Standard Time and document path
     await db.promise().query(
       `INSERT INTO attendance_corrections 
         (user_id, attendance_date, schedule_id, requested_clock_in, requested_clock_out, reason, selfie_url, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [userId, date, schedule_id, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason.trim(), selfiePath, phNow]
+      [userId, date, schedule_id, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason.trim(), attachmentPath, phNow]
     );
 
     // 4. Mark attendance record as PENDING without prematurely setting time_out or 'early clock-out'
@@ -5609,10 +5627,13 @@ app.get('/api/visitor-requests/history', authenticateToken, (req, res) => {
 // OVERTIME REQUESTS (Secured, Validated & Timezone-Synchronized)
 // ============================================
 
-app.post('/api/overtime-requests', authenticateToken, upload.single('attachment'), async (req, res) => {
+app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async (req, res) => {
   const { date, start_time, end_time, reason, scenario_type, overtime_type, schedule_id } = req.body;
   const userId = req.user.id;
-  const attachment = req.file ? `/uploads/${req.file.filename}` : null;
+  
+  // Safely extract attachment from either 'attachment' or 'image' field
+  const uploadedFile = req.file || (req.files && (req.files['attachment']?.[0] || req.files['image']?.[0]));
+  const attachment = uploadedFile ? `/uploads/leave_images/${uploadedFile.filename}` : null;
   const phNow = getPHDateTime();
 
   // 1. Strict Input Validation
