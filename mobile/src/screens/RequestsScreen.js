@@ -81,20 +81,20 @@ const getPHNowString = () => {
 };
 
 const parseServerResponse = async (response) => {
-  if (!response) {
-    return { success: false, message: 'No response received from server.' };
-  }
-  try {
-    const text = await response.text();
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { success: response.ok, message: text || response.statusText || 'Server error' };
+    if (!response) {
+      return { success: false, message: 'No response received from server.' };
     }
-  } catch (err) {
-    return { success: false, message: err.message || 'Failed to parse response.' };
-  }
-};
+    try {
+      const text = await response.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { success: response.ok, message: text || response.statusText || 'Server error' };
+      }
+    } catch (err) {
+      return { success: false, message: err.message || 'Failed to parse response.' };
+    }
+  };
 
 export default function RequestsScreen({ navigation, route }) {
   const prefill = route.params || {};
@@ -345,9 +345,6 @@ export default function RequestsScreen({ navigation, route }) {
     setSubmittingAppeal(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      const imageUri = typeof appealImage === 'string' ? appealImage : appealImage.uri;
-      const filename = appealImage.name || imageUri.split('/').pop() || 'appeal_proof.jpg';
-      const mimeType = appealImage.mimeType || (filename.endsWith('.png') ? 'image/png' : 'image/jpeg');
 
       const formData = new FormData();
       formData.append('date', String(appealDate));
@@ -357,21 +354,26 @@ export default function RequestsScreen({ navigation, route }) {
       if (appealTimeOut) formData.append('time_out', String(formatTimeForDB(appealTimeOut)));
       
       if (appealImage) { 
-          appendFileToFormData(formData, 'image', appealImage);
+        appendFileToFormData(formData, 'image', appealImage);
       }
 
       const response = await fetch(`${API_URL}/attendance-appeals`, {
-  method: 'POST',
-  headers: {
-    Authorization: `Bearer ${token}`,
-  },
-  body: formData,
-});
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
 
       const result = await parseServerResponse(response);
-      if (response.ok && result.success) {
+      if (response.ok && (result.success || result.success === undefined)) {
         Alert.alert('Success', 'Attendance appeal submitted successfully.');
-        setAppealDate(''); setAppealTimeIn(''); setAppealTimeOut(''); setAppealReason(''); setAppealImage(null); setAppealStep(1);
+        setAppealDate(''); 
+        setAppealTimeIn(''); 
+        setAppealTimeOut(''); 
+        setAppealReason(''); 
+        setAppealImage(null); 
+        setAppealStep(1);
       } else {
         Alert.alert('Submission Error', result.message || result.error || 'Failed to submit appeal.');
       }
@@ -476,7 +478,6 @@ export default function RequestsScreen({ navigation, route }) {
 
         appendFileToFormData(formData, 'image', overtimeImage);
 
-        // ✅ Assign to the outer 'response' variable (no 'const')
         response = await fetch(`${API_URL}/overtime-requests`, {
           method: 'POST',
           headers: {
@@ -504,7 +505,7 @@ export default function RequestsScreen({ navigation, route }) {
       }
 
       const result = await parseServerResponse(response);
-      if (response && response.ok && result.success) {
+      if (response && response.ok && (result.success || result.success === undefined)) {
         Alert.alert('Success', result.message || 'Overtime request submitted successfully.');
         setOvertimeDate('');
         setOvertimeStart('');

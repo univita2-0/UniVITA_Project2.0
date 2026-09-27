@@ -1169,7 +1169,6 @@ app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
 // ATTENDANCE CORRECTIONS (Secured, Validated & Timezone-Synchronized)
 // ============================================
 
-// 1. Submit Correction Request (Explicit Philippine Submission Timestamp)
 app.post('/api/attendance/correction-request', authenticateToken, multerCorrection.single('selfie'), async (req, res) => {
   let { employee_id, date, type, time, reason, schedule_id } = req.body;
   const userId = req.user.id;
@@ -1236,12 +1235,17 @@ app.post('/api/attendance/correction-request', authenticateToken, multerCorrecti
       [userId, date, schedule_id, type === 'clock_in' ? time : null, type === 'clock_out' ? time : null, reason.trim(), selfiePath, phNow]
     );
 
-    // 4. Update attendance specifically for this schedule_id if clock_out / early_out
+    // 4. Mark attendance record as PENDING without prematurely setting time_out or 'early clock-out'
+    await db.promise().query(
+      `UPDATE attendance 
+       SET correction_requested = 1, 
+           correction_status = 'pending',
+           status = 'pending'
+       WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
+      [resolvedEmployeeId, userId, schedule_id]
+    );
+
     if (type === 'clock_out' || type === 'early_out') {
-      await db.promise().query(
-        "UPDATE attendance SET time_out = ?, status = 'early clock-out' WHERE (user_id = ? OR user_id = ?) AND schedule_id = ? AND time_out IS NULL",
-        [time, resolvedEmployeeId, userId, schedule_id]
-      );
       await db.promise().query(
         "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
         [resolvedEmployeeId]
@@ -1309,6 +1313,18 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
     );
     if (corr.length === 0) return res.status(404).json({ error: 'Request not found' });
 
+    const record = corr[0];
+    const empIdString = record.employee_id; 
+    let targetScheduleId = record.schedule_id;
+
+    if (!targetScheduleId) {
+      const [schedRows] = await db.promise().query(
+        "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
+        [empIdString, record.internal_user_id, record.attendance_date]
+      );
+      if (schedRows.length > 0) targetScheduleId = schedRows[0].id;
+    }
+
     // Stamped with exact Philippine Time on review
     await db.promise().query(
       "UPDATE attendance_corrections SET status = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
@@ -1316,38 +1332,49 @@ app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req,
     );
 
     if (status === 'approved') {
-      const record = corr[0];
-      const empIdString = record.employee_id; 
-      let targetScheduleId = record.schedule_id;
-
-      if (!targetScheduleId) {
-        const [schedRows] = await db.promise().query(
-          "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
-          [empIdString, record.internal_user_id, record.attendance_date]
-        );
-        if (schedRows.length > 0) targetScheduleId = schedRows[0].id;
-      }
-
       const [existing] = await db.promise().query(
-        "SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?",
+        "SELECT id, time_in, time_out FROM attendance WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?",
         [empIdString, record.internal_user_id, targetScheduleId]
       );
 
+      const finalIn = record.requested_clock_in || (existing.length > 0 ? existing[0].time_in : null);
+      const finalOut = record.requested_clock_out || (existing.length > 0 ? existing[0].time_out : null);
+      let totalHours = 0;
+      if (finalIn && finalOut && finalOut !== '--:--') {
+        totalHours = Math.max(0, (new Date(`1970-01-01T${finalOut}`) - new Date(`1970-01-01T${finalIn}`)) / 3600000);
+      }
+
       if (existing.length === 0) {
         await db.promise().query(
-          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out, status, correction_requested, correction_status)
-           VALUES (?, ?, ?, ?, ?, 'present', 1, 'approved')`,
-          [empIdString, targetScheduleId, record.attendance_date, record.requested_clock_in, record.requested_clock_out]
+          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out, status, total_hours, correction_requested, correction_status)
+           VALUES (?, ?, ?, ?, ?, 'completed', ?, 0, 'approved')`,
+          [empIdString, targetScheduleId, record.attendance_date, finalIn, finalOut, totalHours.toFixed(2)]
         );
       } else {
         const updates = [];
         const values = [];
         if (record.requested_clock_in) { updates.push('time_in = ?'); values.push(record.requested_clock_in); }
         if (record.requested_clock_out) { updates.push('time_out = ?'); values.push(record.requested_clock_out); }
-        updates.push('correction_requested = 1, correction_status = "approved"');
+        updates.push("status = 'completed', total_hours = ?, correction_requested = 0, correction_status = 'approved'");
+        values.push(totalHours.toFixed(2));
         values.push(existing[0].id);
         await db.promise().query(`UPDATE attendance SET ${updates.join(', ')} WHERE id = ?`, values);
       }
+    } else if (status === 'rejected') {
+      // Revert attendance status to missing clock-out if clock-out correction is denied
+      await db.promise().query(
+        `UPDATE attendance 
+         SET correction_requested = 0, 
+             correction_status = 'rejected',
+             time_out = NULL,
+             total_hours = 0,
+             status = CASE 
+               WHEN time_in IS NOT NULL THEN 'missing clock-out'
+               ELSE 'missed schedule'
+             END
+         WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
+        [empIdString, record.internal_user_id, targetScheduleId]
+      );
     }
     
     const actionName = status === 'approved' ? 'APPROVE_CORRECTION' : 'REJECT_CORRECTION';
@@ -1497,7 +1524,6 @@ app.get('/api/attendance-appeals/pending', authenticateToken, (req, res) => {
   });
 });
 
-// 4. Update Appeal Status (Approved / Rejected) Synchronized to Real Philippine Time
 app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
@@ -1535,7 +1561,7 @@ app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res
     let end_time = requested_time_out || (schedRecord.length > 0 ? schedRecord[0].end_time : null);
     let total_hours = 0;
     if (start_time && end_time) {
-      total_hours = (new Date(`1970-01-01T${end_time}`) - new Date(`1970-01-01T${start_time}`)) / 3600000;
+      total_hours = Math.max(0, (new Date(`1970-01-01T${end_time}`) - new Date(`1970-01-01T${start_time}`)) / 3600000);
     }
 
     // Stamped with exact Philippine Time on review
@@ -1555,17 +1581,22 @@ app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res
 
       if (existingAtt.length > 0) {
         await db.promise().query(
-          `UPDATE attendance SET time_in = ?, time_out = ?, status = 'Present', total_hours = ?, location = 'Appeal Approved'
+          `UPDATE attendance SET time_in = ?, time_out = ?, status = 'completed', total_hours = ?, location = 'Appeal Approved'
            WHERE id = ?`,
-          [start_time, end_time, total_hours, existingAtt[0].id]
+          [start_time, end_time, total_hours.toFixed(2), existingAtt[0].id]
         );
       } else {
         await db.promise().query(
           `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out, status, location, total_hours)
-           VALUES (?, ?, ?, ?, ?, 'Present', 'Appeal Approved', ?)`,
-          [user_id, targetScheduleId, date, start_time, end_time, total_hours]
+           VALUES (?, ?, ?, ?, ?, 'completed', 'Appeal Approved', ?)`,
+          [user_id, targetScheduleId, date, start_time, end_time, total_hours.toFixed(2)]
         );
       }
+    } else if (status === 'rejected' && targetScheduleId) {
+      await db.promise().query(
+        `UPDATE attendance SET status = 'absent', location = 'Appeal Rejected' WHERE user_id = ? AND schedule_id = ?`,
+        [user_id, targetScheduleId]
+      );
     }
 
     res.json({ success: true, message: `Appeal successfully ${status}.` });
@@ -2098,15 +2129,47 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
       s.*, 
       a.time_in,
       a.time_out,
-      a.status AS attendance_record_status,
       DATE_FORMAT(s.date, '%Y-%m-%d') as date,
+      
+      -- Mobile Badge Status
       CASE 
-        WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'COMPLETED'
-        WHEN a.time_in IS NOT NULL THEN 'IN PROGRESS'
+        WHEN (ac.id IS NOT NULL AND ac.status = 'pending') OR (a.correction_status = 'pending') THEN 'Pending'
+        WHEN (ap.id IS NOT NULL AND ap.status = 'pending') THEN 'Pending'
+        WHEN (lr_pending.id IS NOT NULL) THEN 'Pending'
+        WHEN (lr_approved.id IS NOT NULL) OR a.status = 'on leave' THEN 'On Leave'
+        WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Completed'
+        WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN
+          CASE 
+            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
+            ELSE 'In Progress'
+          END
+        WHEN a.time_in IS NULL THEN
+          CASE 
+            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missed Schedule'
+            ELSE 'Scheduled'
+          END
+        ELSE COALESCE(a.status, 'Scheduled')
+      END AS attendance_record_status,
+
+      -- Web UI Schedule Status
+      CASE 
+        WHEN (ac.id IS NOT NULL AND ac.status = 'pending') OR (a.correction_status = 'pending') OR (ap.id IS NOT NULL AND ap.status = 'pending') THEN 'PENDING'
+        WHEN (lr_approved.id IS NOT NULL) OR a.status = 'on leave' THEN 'ON LEAVE'
+        WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'COMPLETED'
+        WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) >= NOW() THEN 'IN PROGRESS'
+        WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'MISSING CLOCK-OUT'
+        WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'MISSED SCHEDULE'
         ELSE 'Scheduled'
       END AS attendance_status
+
     FROM schedules s
     LEFT JOIN attendance a ON s.id = a.schedule_id
+    LEFT JOIN attendance_corrections ac ON s.id = ac.schedule_id AND ac.status = 'pending'
+    LEFT JOIN attendance_appeals ap ON s.id = ap.schedule_id AND ap.status = 'pending'
+    LEFT JOIN leave_requests lr_pending ON (lr_pending.user_id = s.user_id OR lr_pending.user_id = (SELECT id FROM users WHERE employee_id = s.user_id)) 
+      AND lr_pending.request_date = s.date AND lr_pending.status = 'Pending'
+    LEFT JOIN leave_requests lr_approved ON (lr_approved.user_id = s.user_id OR lr_approved.user_id = (SELECT id FROM users WHERE employee_id = s.user_id)) 
+      AND lr_approved.request_date = s.date AND lr_approved.status = 'Approved'
     WHERE s.user_id = ? 
     ORDER BY s.date ASC, s.start_time ASC
   `;
@@ -2673,27 +2736,43 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
   let queryParam = date;
 
   if (month) {
-      dateCondition = "DATE_FORMAT(s.date, '%Y-%m') = ?";
-      queryParam = month;
+    dateCondition = "DATE_FORMAT(s.date, '%Y-%m') = ?";
+    queryParam = month;
   } else if (!date) {
-      return res.status(400).json({ success: false, message: "A valid date or month parameter is required." });
+    return res.status(400).json({ success: false, message: "A valid date or month parameter is required." });
   }
 
   const sql = `
       SELECT 
           u.id AS user_db_id, u.full_name, u.employee_id, 
-          COALESCE(a.status, 'Pending') AS status, 
+          CASE 
+              WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 'Pending'
+              WHEN ap.id IS NOT NULL AND ap.status = 'pending' THEN 'Pending'
+              WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
+              WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
+              WHEN a.time_in IS NOT NULL THEN 'In Progress'
+              WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Absent'
+              ELSE COALESCE(a.status, 'Scheduled')
+          END AS status,
           COALESCE(a.time_in, '--:--') AS time_in, 
-          COALESCE(a.time_out, '--:--') AS time_out, 
+          CASE 
+              WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN '--:--'
+              ELSE COALESCE(a.time_out, '--:--')
+          END AS time_out, 
           a.location, a.clock_in_latitude, a.clock_in_longitude,
           a.clock_out_latitude, a.clock_out_longitude,
           a.clock_in_selfie, a.clock_out_selfie,
           s.id AS schedule_id, s.start_time AS scheduled_start, s.end_time AS scheduled_end, s.course,
           DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
-          COALESCE(ROUND(TIME_TO_SEC(TIMEDIFF(a.time_out, a.time_in)) / 3600, 2), 0) AS total_hours
+          CASE 
+              WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
+              ELSE COALESCE(ROUND(TIME_TO_SEC(TIMEDIFF(a.time_out, a.time_in)) / 3600, 2), 0)
+          END AS total_hours
       FROM users u
       INNER JOIN schedules s ON u.employee_id = s.user_id 
       LEFT JOIN attendance a ON s.id = a.schedule_id
+      LEFT JOIN attendance_corrections ac ON s.id = ac.schedule_id AND ac.status = 'pending'
+      LEFT JOIN attendance_appeals ap ON s.id = ap.schedule_id AND ap.status = 'pending'
       WHERE LOWER(u.role) = 'instructor' 
         AND u.status = 'active'
         AND ${dateCondition}
@@ -2701,8 +2780,8 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
   `;
 
   db.query(sql, [queryParam], (err, result) => {
-      if (err) return res.status(500).json({ success: false, message: "Database query failed." });
-      res.json(result || []);
+    if (err) return res.status(500).json({ success: false, message: "Database query failed." });
+    res.json(result || []);
   });
 });
 
