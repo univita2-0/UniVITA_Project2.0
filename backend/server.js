@@ -1621,9 +1621,10 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
     return res.status(400).json({ success: false, message: "Please provide a more detailed reason (minimum 10 characters)." });
   }
 
-  // 2. Prevent Retroactive Non-Emergency Leaves
+  // 2. Prevent Retroactive Non-Emergency Leaves (Supports both "Emergency" & "Emergency Leave")
   const { date: today } = getPHTime(); 
-  if (request_date < today && type !== 'Emergency Leave' && type !== 'Sick Leave') {
+  const isRetroactiveAllowed = /emergency|sick/i.test(type);
+  if (request_date < today && !isRetroactiveAllowed) {
     return res.status(400).json({ success: false, message: `${type} cannot be filed retroactively.` });
   }
 
@@ -1647,40 +1648,84 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       return res.status(409).json({ success: false, message: "A request already exists for this date." });
     }
 
-    const [typeRows] = await db.promise().query(
-      "SELECT id, annual_quota FROM leave_types WHERE name = ?",
-      [type]
-    );
-    if (typeRows.length === 0) {
-      return res.status(400).json({ success: false, message: "Invalid leave type selected." });
-    }
-    
-    const leaveTypeId = typeRows[0].id;
-    const annualQuota = typeRows[0].annual_quota || 15;
+    // 3. Flexible Leave Type Resolution (Matches 'PTO', 'Vacation', 'Sick', etc.)
+    const cleanType = String(type || '').trim();
+    const lowerType = cleanType.toLowerCase();
 
-    // Ensure leave balance entry exists
-    await db.promise().query(
-      `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated) 
-       VALUES (?, ?, ?, ?, CURDATE())`,
-      [userId, leaveTypeId, annualQuota, leaveYear]
-    );
-
-    const [balanceRows] = await db.promise().query(
-      `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-      [userId, leaveTypeId, leaveYear]
-    );
-    
-    // Validate balance ONLY if the request is marked as 'Paid'
-    if (isPaid === 1 && (!balanceRows.length || balanceRows[0].remaining_days < 1)) {
-      return res.status(400).json({ success: false, message: `Insufficient ${type} balance for a paid leave. You have 0 days remaining.` });
+    const candidateNames = [cleanType];
+    if (lowerType === 'pto' || lowerType === 'paid time off') {
+      candidateNames.push('PTO', 'Paid Time Off', 'Vacation', 'Vacation Leave');
+    } else if (lowerType.includes('vacation')) {
+      candidateNames.push('Vacation', 'Vacation Leave', 'PTO', 'Paid Time Off');
+    } else if (lowerType.includes('sick')) {
+      candidateNames.push('Sick', 'Sick Leave');
+    } else if (lowerType.includes('emergency')) {
+      candidateNames.push('Emergency', 'Emergency Leave');
+    } else if (lowerType.includes('birthday')) {
+      candidateNames.push('Birthday', 'Birthday Leave');
+    } else if (lowerType.includes('compensatory') || lowerType === 'cpo' || lowerType === 'cto') {
+      candidateNames.push('Compensatory Paid Off', 'Compensatory Time Off', 'Compensatory Leave', 'CTO', 'CPO');
     }
 
+    let [typeRows] = await db.promise().query(
+      `SELECT id, name, annual_quota FROM leave_types 
+       WHERE LOWER(name) IN (${candidateNames.map(() => '?').join(',')}) 
+          OR LOWER(name) LIKE ? 
+       ORDER BY id ASC LIMIT 1`,
+      [...candidateNames.map(n => n.toLowerCase()), `%${lowerType}%`]
+    );
+
+    let leaveTypeId = null;
+    let annualQuota = 15;
+
+    if (typeRows.length > 0) {
+      leaveTypeId = typeRows[0].id;
+      annualQuota = typeRows[0].annual_quota || 15;
+    } else {
+      // Auto-insert missing leave type into leave_types so it never blocks valid submissions
+      try {
+        const [insertResult] = await db.promise().query(
+          "INSERT INTO leave_types (name, annual_quota) VALUES (?, 15)",
+          [cleanType]
+        );
+        leaveTypeId = insertResult.insertId;
+      } catch (insertErr) {
+        const [fallbackRows] = await db.promise().query("SELECT id, annual_quota FROM leave_types LIMIT 1");
+        if (fallbackRows.length > 0) {
+          leaveTypeId = fallbackRows[0].id;
+          annualQuota = fallbackRows[0].annual_quota || 15;
+        }
+      }
+    }
+
+    // 4. Leave Balance Check (Only enforced if leaveTypeId exists AND leave is marked 'Paid')
+    if (leaveTypeId) {
+      await db.promise().query(
+        `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated) 
+         VALUES (?, ?, ?, ?, CURDATE())`,
+        [userId, leaveTypeId, annualQuota, leaveYear]
+      );
+
+      const [balanceRows] = await db.promise().query(
+        `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
+        [userId, leaveTypeId, leaveYear]
+      );
+
+      if (isPaid === 1 && (!balanceRows.length || balanceRows[0].remaining_days < 1)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: `Insufficient ${type} balance for a paid leave. You have 0 days remaining.` 
+        });
+      }
+    }
+
+    // 5. Insert Leave Request
     const [result] = await db.promise().query(
       `INSERT INTO leave_requests (user_id, request_date, duration, is_paid, reason, type, image_url, status, submitted_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?)`,
-      [employee_id, request_date, duration, isPaid, reason.trim(), type, image_url, phNow]
+      [employee_id, request_date, duration, isPaid, reason.trim(), cleanType, image_url, phNow]
     );
-    
+
     logAction(req.user.id, 'SUBMIT_LEAVE', 'leave_request', result.insertId, req);
     res.json({ success: true, message: "Leave request submitted successfully." });
   } catch (err) {

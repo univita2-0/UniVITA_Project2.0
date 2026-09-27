@@ -81,11 +81,18 @@ const getPHNowString = () => {
 };
 
 const parseServerResponse = async (response) => {
-  const text = await response.text();
+  if (!response) {
+    return { success: false, message: 'No response received from server.' };
+  }
   try {
-    return JSON.parse(text);
-  } catch (e) {
-    return { success: false, message: text || `Server error (${response.status})` };
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { success: response.ok, message: text || response.statusText || 'Server error' };
+    }
+  } catch (err) {
+    return { success: false, message: err.message || 'Failed to parse response.' };
   }
 };
 
@@ -279,33 +286,28 @@ export default function RequestsScreen({ navigation, route }) {
       let successCount = 0;
       let lastMessage = '';
 
-      const rawUri = typeof leaveImage === 'string' ? leaveImage : leaveImage.uri;
-      const cleanUri = Platform.OS === 'android' ? rawUri : rawUri.replace('file://', '');
-      const filename = leaveImage.name || rawUri.split('/').pop() || 'leave_proof.jpg';
-      const mimeType = leaveImage.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-
       for (const item of leaveBreakdown) {
         const formData = new FormData();
         formData.append('type', String(leaveType));
-        formData.append('reason', String(leaveReason.trim()));
+        formData.append('reason', String(leaveReason ? leaveReason.trim() : ''));
         formData.append('request_date', String(item.date));
         formData.append('duration', String(item.duration));
         formData.append('is_paid', String(item.isPaid ? '1' : '0'));
-        
+
         if (leaveImage) {
-  appendFileToFormData(formData, 'image', leaveImage);
-}
+          appendFileToFormData(formData, 'image', leaveImage);
+        }
 
         const response = await fetch(`${API_URL}/leave-requests`, {
-  method: 'POST',
-  headers: {
-    Authorization: `Bearer ${token}`,
-  },
-  body: formData,
-});
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
 
         const result = await parseServerResponse(response);
-        if (response.ok && result.success) {
+        if (response && response.ok && result.success) {
           successCount++;
         } else {
           lastMessage = result.message || 'Failed to submit date.';
@@ -458,59 +460,63 @@ export default function RequestsScreen({ navigation, route }) {
       const token = await AsyncStorage.getItem('auth_token');
       let response;
       const dbScenarioType = overtimeTiming === 'Early OT' ? 'early_ot' : 'normal_ot';
+      const scheduleId = prefill?.prefillScheduleId || null;
 
       if (overtimeImage) {
-        const imageUri = typeof overtimeImage === 'string' ? overtimeImage : overtimeImage.uri;
-        const filename = overtimeImage.name || imageUri.split('/').pop() || 'overtime_proof.pdf';
-        const mimeType = overtimeImage.mimeType || (filename.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-
         const formData = new FormData();
         formData.append('date', String(overtimeDate));
         formData.append('start_time', String(formatTimeForDB(overtimeStart)));
         formData.append('end_time', String(formatTimeForDB(overtimeEnd)));
-        formData.append('reason', String(overtimeReason.trim()));
+        formData.append('reason', String(overtimeReason ? overtimeReason.trim() : ''));
         formData.append('scenario_type', String(dbScenarioType));
         formData.append('overtime_type', String(overtimeType));
-        if (prefill.prefillScheduleId) formData.append('schedule_id', String(prefill.prefillScheduleId));
+        if (scheduleId) {
+          formData.append('schedule_id', String(scheduleId));
+        }
 
-       if (overtimeImage) { 
-       appendFileToFormData(formData, 'image', overtimeImage);
-       }
+        appendFileToFormData(formData, 'image', overtimeImage);
 
-       const response = await fetch(`${API_URL}/overtime-requests`, {
-       method: 'POST',
-       headers: {
-       Authorization: `Bearer ${token}`,
-      },
-       body: formData,
-      });
+        // ✅ Assign to the outer 'response' variable (no 'const')
+        response = await fetch(`${API_URL}/overtime-requests`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
       } else {
         response = await fetch(`${API_URL}/overtime-requests`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             date: overtimeDate,
             start_time: formatTimeForDB(overtimeStart),
             end_time: formatTimeForDB(overtimeEnd),
-            reason: overtimeReason.trim(),
+            reason: overtimeReason ? overtimeReason.trim() : '',
             scenario_type: dbScenarioType,
             overtime_type: overtimeType,
-            schedule_id: prefill.prefillScheduleId || null
-          })
+            schedule_id: scheduleId,
+          }),
         });
       }
 
       const result = await parseServerResponse(response);
-      if (response.ok && result.success) {
+      if (response && response.ok && result.success) {
         Alert.alert('Success', result.message || 'Overtime request submitted successfully.');
-        setOvertimeDate(''); setOvertimeStart(''); setOvertimeEnd(''); setOvertimeReason(''); setOvertimeImage(null); setOvertimeStep(1);
+        setOvertimeDate('');
+        setOvertimeStart('');
+        setOvertimeEnd('');
+        setOvertimeReason('');
+        setOvertimeImage(null);
+        setOvertimeStep(1);
       } else {
         Alert.alert('Submission Error', result.message || result.error || 'Failed to submit overtime request.');
       }
     } catch (err) {
+      console.error('Submit Overtime Error:', err);
       Alert.alert('Submission Error', err.message || 'Server connection failed.');
     } finally {
       setSubmittingOvertime(false);
