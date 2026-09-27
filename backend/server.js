@@ -5630,28 +5630,33 @@ app.get('/api/visitor-requests/history', authenticateToken, (req, res) => {
 app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async (req, res) => {
   const { date, start_time, end_time, reason, scenario_type, overtime_type, schedule_id } = req.body;
   const userId = req.user.id;
-  
-  // Safely extract attachment from either 'attachment' or 'image' field
-  const uploadedFile = req.file || (req.files && (req.files['attachment']?.[0] || req.files['image']?.[0]));
-  const attachment = uploadedFile ? `/uploads/leave_images/${uploadedFile.filename}` : null;
   const phNow = getPHDateTime();
 
-  // 1. Strict Input Validation
+  // 1. Strict Input Validation (Guards against undefined before any string operations)
   if (!date || !start_time || !end_time || !reason || !scenario_type) {
     return res.status(400).json({ success: false, message: 'All overtime fields are required.' });
   }
-  if (reason.trim().length < 5) {
+  if (String(reason).trim().length < 5) {
     return res.status(400).json({ success: false, message: 'Please provide a more detailed reason for overtime (minimum 5 characters).' });
   }
   if (start_time >= end_time) {
     return res.status(400).json({ success: false, message: 'Overtime end time must be strictly after the start time.' });
   }
 
-  // 2. Prevent logical date errors
+  // 2. Prevent logical date errors (Only 'ongoing' active clock-ins cannot be filed in the future)
   const { date: today } = getPHTime();
-  if ((scenario_type === 'ongoing' || scenario_type === 'after_shift') && date > today) {
-    return res.status(400).json({ success: false, message: 'Ongoing or after-shift overtime cannot be filed for future dates.' });
+  if (scenario_type === 'ongoing' && date > today) {
+    return res.status(400).json({ success: false, message: 'Ongoing overtime cannot be filed for future dates.' });
   }
+
+  // 3. Normalize scenario_type for database compatibility
+  let resolvedScenario = scenario_type;
+  if (scenario_type === 'normal_ot') resolvedScenario = 'normal_ot';
+  if (scenario_type === 'early_ot') resolvedScenario = 'early_ot';
+
+  // 4. Safely extract attachment from either 'attachment' or 'image' field
+  const uploadedFile = req.file || (req.files && (req.files['attachment']?.[0] || req.files['image']?.[0]));
+  const attachment = uploadedFile ? `/uploads/leave_images/${uploadedFile.filename}` : null;
 
   try {
     let attendanceId = null;
@@ -5696,12 +5701,11 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
       attendanceId = attRecords[0].id;
     }
 
-    // Explicitly stamp created_at with Philippine Standard Time and save overtime_type
     const [result] = await db.promise().query(
       `INSERT INTO overtime_requests 
         (user_id, date, schedule_id, start_time, end_time, reason, attachment, scenario_type, overtime_type, attendance_id, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [userId, date, targetScheduleId || null, start_time, end_time, reason.trim(), attachment, scenario_type, overtime_type || 'Regular Overtime', attendanceId, phNow]
+      [userId, date, targetScheduleId || null, start_time, end_time, reason.trim(), attachment, resolvedScenario, overtime_type || 'Regular Overtime', attendanceId, phNow]
     );
 
     logAction(userId, 'SUBMIT_OVERTIME', 'overtime_request', result.insertId, req);
