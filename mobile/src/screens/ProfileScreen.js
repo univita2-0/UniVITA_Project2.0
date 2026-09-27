@@ -14,7 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
-import { API_URL } from './api';
+import { API_URL, updateProfile } from './api';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -106,7 +106,6 @@ export default function ProfileScreen({ navigation }) {
             role: freshUser.role 
           });
 
-          // Parse additional_info for statutory records
           let parsedAdditional = {};
           if (freshUser.additional_info) {
             try {
@@ -176,7 +175,6 @@ export default function ProfileScreen({ navigation }) {
     }, [])
   );
 
-  // FIXED: Uses axios with transformRequest to bypass expo/fetch FormDataPart bug
   const handlePickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -192,46 +190,23 @@ export default function ProfileScreen({ navigation }) {
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const asset = result.assets[0];
-      const uri = asset.uri;
-      setProfileImage(uri);
+      setProfileImage(asset.uri);
       setIsUploadingImage(true);
 
       try {
-        const token = await AsyncStorage.getItem('auth_token');
-        const formData = new FormData();
-        
-        formData.append('full_name', String(userData.name || 'User'));
-        formData.append('email', String(userData.email || ''));
-
-        const filename = uri.split('/').pop() || `profile_${Date.now()}.jpg`;
-        let fileType = asset.mimeType || 'image/jpeg';
-        if (!asset.mimeType) {
-          if (filename.toLowerCase().endsWith('.png')) fileType = 'image/png';
-          else if (filename.toLowerCase().endsWith('.webp')) fileType = 'image/webp';
-        }
-        
-        formData.append('profile_picture', {
-          uri: uri,
-          name: filename,
-          type: fileType
+        const res = await updateProfile(userData.id, {
+          full_name: userData.name,
+          email: userData.email,
+          profile_picture: asset
         });
 
-        // Use axios with transformRequest to preserve native React Native FormData
-        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, formData, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          },
-          transformRequest: (data) => data,
-        });
-
-        if (res.data && res.data.profile_picture) {
+        if (res.success && res.profile_picture) {
           const baseUrl = API_URL.replace('/api', '');
-          const fullImageUrl = `${baseUrl}${res.data.profile_picture}`;
+          const fullImageUrl = `${baseUrl}${res.profile_picture}`;
           setProfileImage(fullImageUrl);
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
-        } else if (userData.id) {
-          await AsyncStorage.setItem(`@profile_picture_${userData.id}`, uri);
+        } else {
+          await AsyncStorage.setItem(`@profile_picture_${userData.id}`, asset.uri);
         }
 
         Alert.alert("Success", "Profile picture updated successfully!");
@@ -239,14 +214,13 @@ export default function ProfileScreen({ navigation }) {
         console.error("Upload Error:", err);
         const savedImage = await AsyncStorage.getItem(`@profile_picture_${userData.id}`);
         setProfileImage(savedImage || null);
-        Alert.alert("Upload Error", err.response?.data?.message || err.message || "Could not save profile picture to server.");
+        Alert.alert("Upload Error", err.message || "Could not save profile picture to server.");
       } finally {
         setIsUploadingImage(false);
       }
     }
   };
 
-  // FIXED: Uses axios to reliably update name/email
   const handleUpdateProfile = async () => {
     if (!hasProfileChanges) {
       setShowEditModal(false);
@@ -258,21 +232,12 @@ export default function ProfileScreen({ navigation }) {
 
     setLoading(true);
     try {
-      const token = await AsyncStorage.getItem('auth_token');
-      
-      const formData = new FormData();
-      formData.append('full_name', String(editName.trim()));
-      formData.append('email', String(editEmail.trim()));
-
-      const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, formData, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-        transformRequest: (data) => data,
+      const res = await updateProfile(userData.id, {
+        full_name: editName.trim(),
+        email: editEmail.trim()
       });
 
-      if (!res.data.success) throw new Error(res.data.message || "Could not update profile information.");
+      if (!res.success) throw new Error(res.message || "Could not update profile information.");
       
       await AsyncStorage.setItem('user_name', editName.trim());
       await AsyncStorage.setItem('user_email', editEmail.trim());

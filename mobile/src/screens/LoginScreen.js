@@ -1,5 +1,5 @@
 // src/screens/LoginScreen.js
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Alert,
   ActivityIndicator, Modal, Keyboard, KeyboardAvoidingView, Platform, StatusBar, Animated
@@ -10,12 +10,13 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import axios from 'axios';
 import { loginUser, sendOtp, verifyOtp, verifyResetOtp, forgotPassword, resetPassword, API_URL } from './api';
-import { AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react-native';
+import { AlertCircle, CheckCircle2, Eye, EyeOff, CheckSquare, Square } from 'lucide-react-native';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [stayLoggedIn, setStayLoggedIn] = useState(true);
   const [loading, setLoading] = useState(false);
 
   // --- Custom Animated Toast State ---
@@ -30,17 +31,30 @@ export default function LoginScreen({ navigation }) {
   const [sendingOtpResend, setSendingOtpResend] = useState(false);
   const timerRef = useRef(null);
 
-  // --- Password Recovery Flow States (3-Step Sequential Flow) ---
+  // --- Password Recovery Flow States ---
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
-  const [resetStep, setResetStep] = useState('email'); // 'email' -> 'otp' -> 'new-password'
+  const [resetStep, setResetStep] = useState('email'); 
   const [resetOtp, setResetOtp] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [resetTimer, setResetTimer] = useState(0);
 
-  // --- Toast Trigger Function ---
+  // Check remembered email on mount
+  useEffect(() => {
+    const loadRemembered = async () => {
+      try {
+        const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
+        if (rememberedEmail) {
+          setEmail(rememberedEmail);
+          setStayLoggedIn(true);
+        }
+      } catch (e) {}
+    };
+    loadRemembered();
+  }, []);
+
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
     setToastType(type);
@@ -114,24 +128,36 @@ export default function LoginScreen({ navigation }) {
     await AsyncStorage.setItem('user_email', user.email);
     if (user.employee_id) await AsyncStorage.setItem('employee_id', user.employee_id);
     if (user.full_name) await AsyncStorage.setItem('user_name', user.full_name);
+
+    if (stayLoggedIn) {
+      await AsyncStorage.setItem('@remembered_email', user.email);
+    } else {
+      await AsyncStorage.removeItem('@remembered_email');
+    }
   };
 
   const handleLogin = async () => {
     Keyboard.dismiss();
     
-    if (!email || !password) {
+    // Enhanced Validation
+    if (!email.trim() || !password) {
       showToast('Please enter both email and password', 'error');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      showToast('Email invalid', 'error');
+    if (!emailRegex.test(email.trim())) {
+      showToast('Please enter a valid email address format', 'error');
+      return;
+    }
+
+    if (password.length < 6) {
+      showToast('Password must be at least 6 characters long', 'error');
       return;
     }
 
     setLoading(true);
-    const result = await loginUser(email, password);
+    const result = await loginUser(email.trim(), password);
     setLoading(false);
 
     if (result.success) {
@@ -166,7 +192,7 @@ export default function LoginScreen({ navigation }) {
         showToast(otpRes.message || 'Failed to send OTP', 'error');
       }
     } else {
-      showToast(result.message || 'Invalid input', 'error');
+      showToast(result.message || 'Invalid credentials', 'error');
     }
   };
 
@@ -180,9 +206,8 @@ export default function LoginScreen({ navigation }) {
     try {
       const result = await verifyOtp(email, otp);
       if (result.success && result.user) {
-        // STRICT MOBILE ROLE VALIDATION: Only instructors allowed on mobile
         if (result.user.role !== 'instructor') {
-          showToast('Mobile access is restricted to instructors only. Admin, HR, and Security accounts are for web access only.', 'error');
+          showToast('Mobile access is restricted to instructors only. Admin accounts are for web access only.', 'error');
           setVerifyingOtp(false);
           return;
         }
@@ -212,7 +237,6 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // --- PASSWORD RECOVERY STEP 1: Submit Recovery Email ---
   const handleForgotPassword = async () => {
     if (!resetEmail.trim()) {
       showToast('Email is required', 'error');
@@ -227,7 +251,7 @@ export default function LoginScreen({ navigation }) {
     try {
       const result = await forgotPassword(resetEmail.trim().toLowerCase());
       if (result.success) {
-        setResetStep('otp'); // Move to OTP Modal input
+        setResetStep('otp');
         startResendTimer(setResetTimer);
         showToast('Verification code sent to your email', 'success');
       } else {
@@ -250,7 +274,7 @@ export default function LoginScreen({ navigation }) {
     try {
       const result = await verifyResetOtp(resetEmail, resetOtp);
       if (result.success) {
-        setResetStep('new-password'); // Proceed to New Password modal input
+        setResetStep('new-password');
         showToast('OTP verified successfully', 'success');
       } else {
         showToast(result.message || 'Invalid OTP', 'error');
@@ -263,7 +287,6 @@ export default function LoginScreen({ navigation }) {
   };
   
   const handleResetPassword = async () => {
-    
     if (
       !resetNewPassword || 
       resetNewPassword.length < 8 || 
@@ -351,7 +374,7 @@ export default function LoginScreen({ navigation }) {
                   placeholder="employee@example.com"
                   placeholderTextColor="#475569"
                   value={email}
-                  onChangeText={(text) => setEmail(text.trim())}
+                  onChangeText={(text) => setEmail(text)}
                   autoCapitalize="none"
                   keyboardType="email-address"
                 />
@@ -375,9 +398,17 @@ export default function LoginScreen({ navigation }) {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.forgotLink} onPress={() => setShowForgotModal(true)} activeOpacity={0.8}>
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </TouchableOpacity>
+            {/* Stay Logged In Checkbox & Forgot Password Row */}
+            <View style={styles.rowBetween}>
+              <TouchableOpacity style={styles.checkboxRow} onPress={() => setStayLoggedIn(!stayLoggedIn)} activeOpacity={0.8}>
+                {stayLoggedIn ? <CheckSquare size={18} color="#0EA5E9" /> : <Square size={18} color="#64748B" />}
+                <Text style={styles.checkboxLabel}>Stay logged in</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={() => setShowForgotModal(true)} activeOpacity={0.8}>
+                <Text style={styles.forgotText}>Forgot Password?</Text>
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
               style={[styles.signInButton, loading && styles.buttonDisabled]}
@@ -435,14 +466,12 @@ export default function LoginScreen({ navigation }) {
         </View>
       </Modal>
 
-      {/* Password Recovery Modal: Sequential 3-Step Flow */}
+      {/* Password Recovery Modal */}
       <Modal visible={showForgotModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           {renderToast()}
 
           <View style={styles.modalCard}>
-            
-            {/* STEP 1: Recovery Email Input */}
             {resetStep === 'email' && (
               <>
                 <Text style={styles.modalTitle}>Password Recovery</Text>
@@ -450,7 +479,7 @@ export default function LoginScreen({ navigation }) {
                 <TextInput
                   style={styles.resetInput}
                   placeholder="Enter your Email"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor="#475569"
                   value={resetEmail}
                   onChangeText={(text) => setResetEmail(text.trim())}
                   autoCapitalize="none"
@@ -463,7 +492,6 @@ export default function LoginScreen({ navigation }) {
               </>
             )}
 
-            {/* STEP 2: OTP Modal Input */}
             {resetStep === 'otp' && (
               <>
                 <Text style={styles.modalTitle}>Enter OTP Code</Text>
@@ -497,7 +525,6 @@ export default function LoginScreen({ navigation }) {
               </>
             )}
 
-            {/* STEP 3: New Password Modal Input */}
             {resetStep === 'new-password' && (
               <>
                 <Text style={styles.modalTitle}>Create New Password</Text>
@@ -506,7 +533,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="New password (8+ chars, 1 upper, 1 special)"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor="#475569"
                   value={resetNewPassword}
                   onChangeText={setResetNewPassword}
                   autoFocus
@@ -515,7 +542,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="Confirm new password"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor="#475569"
                   value={resetConfirmPassword}
                   onChangeText={setResetConfirmPassword}
                 />
@@ -578,7 +605,10 @@ const styles = StyleSheet.create({
   inputWrapper: { borderWidth: 1, borderColor: '#1E293B', borderRadius: 10, backgroundColor: '#0B132B' },
   input: { fontFamily: 'Inter_18pt-Regular', height: 52, paddingHorizontal: 16, fontSize: 15, color: '#FFFFFF' },
   
-  forgotLink: { alignSelf: 'flex-start', marginTop: 2, marginBottom: 28 },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28, marginTop: 2 },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  checkboxLabel: { fontFamily: 'Inter_18pt-Medium', color: '#94A3B8', fontSize: 13 },
+  
   forgotText: { fontFamily: 'Inter_18pt-Medium', color: '#FFFFFF', fontSize: 13 },
   
   signInButton: { backgroundColor: '#FFFFFF', height: 52, borderRadius: 12, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5 },

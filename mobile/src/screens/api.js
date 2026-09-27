@@ -175,6 +175,46 @@ export const setTrackingEnabled = async (enabled) => {
   }
 };
 
+
+export const updateProfile = async (userId, data) => {
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    const formData = new FormData();
+    
+    if (data.full_name) formData.append('full_name', String(data.full_name));
+    if (data.email) formData.append('email', String(data.email));
+    if (data.phone_number) formData.append('phone_number', String(data.phone_number));
+
+    if (data.profile_picture) {
+      const pic = data.profile_picture;
+      const uri = typeof pic === 'string' ? pic : pic.uri;
+      if (uri) {
+        const filename = pic.name || uri.split('/').pop() || `profile_${Date.now()}.jpg`;
+        let type = pic.mimeType || 'image/jpeg';
+        if (!pic.mimeType) {
+          if (filename.toLowerCase().endsWith('.png')) type = 'image/png';
+          else if (filename.toLowerCase().endsWith('.webp')) type = 'image/webp';
+        }
+        formData.append('profile_picture', {
+          uri: Platform.OS === 'ios' ? uri.replace('file://', '') : uri,
+          name: filename,
+          type: type,
+        });
+      }
+    }
+
+    const response = await axios.put(`${API_URL}/users/${userId}/profile`, formData, {
+      headers: { 
+        Authorization: `Bearer ${token}` 
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Update Profile Error:", error.response?.data || error.message);
+    return { success: false, message: error.response?.data?.message || error.message || 'Failed to update profile.' };
+  }
+};
+
 // ==========================================
 // AUTHENTICATION
 // ==========================================
