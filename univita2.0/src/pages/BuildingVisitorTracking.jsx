@@ -386,7 +386,15 @@ const BuildingVisitorTracking = () => {
                       <div className="detail-row"><span>BLE: {visitor.bleId}</span></div>
                       <div className="detail-row"><span>Current: <strong>{visitor.currentRoom}</strong></span></div>
                       <div className="detail-row"><span>Destination: <strong>{visitor.destination}</strong></span></div>
-                      <div className="detail-row last-seen"><span>{visitor.lastSeen || 'Just now'}</span></div>
+                      <div className="detail-row last-seen">
+  <span>
+    {visitor.isPendingDetection 
+      ? 'Awaiting scanner...' 
+      : typeof visitor.lastSeen === 'number' 
+        ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
+        : (visitor.lastSeen || 'Just now')}
+  </span>
+</div>
                     </div>
                     <div className="edit-destination-hint">Click to edit destination</div>
                   </div>
