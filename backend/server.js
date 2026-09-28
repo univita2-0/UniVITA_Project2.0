@@ -3690,8 +3690,7 @@ app.post('/api/scan', async (req, res) => {
     const detectedFloor = String(scannerRows[0].assigned_floor);
     const detectedCurrentRoom = scannerRows[0].assigned_room;
 
-    // 2. FOOLPROOF DB QUERY: Matches tag by MAC and checks active check-in state
-    const sql = `
+   const sql = `
       SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
       FROM visitor_requests vr
       JOIN ble_tags bt ON (
