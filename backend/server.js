@@ -850,19 +850,23 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   });
 });
 
-app.put('/api/users/:id/profile', authenticateToken, uploadProfilePic.single('profile_picture'), async (req, res) => {
+app.put('/api/users/:id/profile', authenticateToken, async (req, res) => {
   const userId = req.params.id;
   if (req.user.id.toString() !== userId.toString() && req.user.role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
 
-  const body = req.body || {};
-  const full_name = body.full_name;
-  const email = body.email;
-  const phone_number = body.phone_number;
+  const { full_name, email, phone_number, base64_image } = req.body;
 
   try {
-    const profile_picture = req.file ? `/uploads/profile_pictures/${req.file.filename}` : null;
+    let profile_picture = null;
+    if (base64_image) {
+      const buffer = Buffer.from(base64_image, 'base64');
+      const filename = `profile_${Date.now()}.jpg`;
+      const filePath = path.join(profilePicDir, filename);
+      fs.writeFileSync(filePath, buffer);
+      profile_picture = `/uploads/profile_pictures/${filename}`;
+    }
 
     if (profile_picture && (!full_name || !email)) {
       await db.promise().query("UPDATE users SET profile_picture = ? WHERE id = ?", [profile_picture, userId]);

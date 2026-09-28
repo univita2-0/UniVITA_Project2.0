@@ -180,49 +180,33 @@ export const setTrackingEnabled = async (enabled) => {
 export const updateProfile = async (userId, data) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
+    let base64Image = null;
 
-    // If an image is being uploaded, use native FileSystem.uploadAsync
     if (data.profile_picture) {
       const pic = data.profile_picture;
       const fileUri = typeof pic === 'string' ? pic : pic.uri;
-
-      const uploadResult = await FileSystem.uploadAsync(
-        `${API_URL}/users/${userId}/profile`,
-        fileUri,
-        {
-          httpMethod: 'PUT',
-          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-          fieldName: 'profile_picture',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-          parameters: {
-            full_name: String(data.full_name || ''),
-            email: String(data.email || ''),
-            phone_number: String(data.phone_number || '')
-          }
-        }
-      );
-
-      const parsed = JSON.parse(uploadResult.body);
-      return parsed;
-    } else {
-      // Standard JSON update if no image was selected
-      const response = await fetch(`${API_URL}/users/${userId}/profile`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          full_name: data.full_name,
-          email: data.email,
-          phone_number: data.phone_number
-        })
-      });
-      return await response.json();
+      if (fileUri) {
+        // Read file as Base64 string directly via Expo FileSystem
+        base64Image = await FileSystem.readAsStringAsync(fileUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
     }
+
+    const response = await fetch(`${API_URL}/users/${userId}/profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        full_name: data.full_name,
+        email: data.email,
+        phone_number: data.phone_number,
+        base64_image: base64Image
+      })
+    });
+    return await handleResponse(response);
   } catch (error) {
     console.error("Update Profile Error:", error);
     return { success: false, message: error.message || 'Failed to update profile.' };
