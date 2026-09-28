@@ -50,18 +50,6 @@ const fifthFloorRooms = [
   { name: 'Toilet', xMin: 329.0, xMax: 374.3, yMin: 7.4, yMax: 30.0 },
 ];
 
-const getRoomByName = (name, floor) => {
-  if (!name) return null;
-  const clean = String(name).trim().toLowerCase();
-  const rooms = String(floor) === '3' ? thirdFloorRooms : fifthFloorRooms;
-  return rooms.find(r => r.name.toLowerCase() === clean || r.name.toLowerCase().includes(clean));
-};
-
-const getRoomCenter = (room) => {
-  if (!room) return { x: 200, y: 125 };
-  return { x: (room.xMin + room.xMax) / 2, y: (room.yMin + room.yMax) / 2 };
-};
-
 export default function useBLEPositions() {
   const [positions, setPositions] = useState({});
   const [visitorMeta, setVisitorMeta] = useState({});
@@ -69,7 +57,7 @@ export default function useBLEPositions() {
 
   const fetchPositions = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/positions`);
+      const res = await fetch(`${API_BASE}/positions`, getAuthHeaders());
       const data = await res.json();
       
       if (!Array.isArray(data) || data.length === 0) {
@@ -83,21 +71,31 @@ export default function useBLEPositions() {
 
       data.forEach(v => {
         const id = String(v.id || v.bleId);
-        const roomObj = getRoomByName(v.currentRoom, v.floor);
-        const center = getRoomCenter(roomObj);
         
-        const posX = typeof v.x === 'number' && v.x > 0 ? v.x : center.x;
-        const posY = typeof v.y === 'number' && v.y > 0 ? v.y : center.y;
+        // Strict real-time rule: If x or y is missing/null, do not plot a pin on the map
+        const posX = typeof v.x === 'number' && v.x > 0 ? v.x : null;
+        const posY = typeof v.y === 'number' && v.y > 0 ? v.y : null;
 
-        nextPositions[id] = { x: posX, y: posY };
+        if (posX !== null && posY !== null) {
+          nextPositions[id] = { x: posX, y: posY };
+        }
+
+        // Format lastSeen timestamp safely
+        let formattedTime = 'Just now';
+        if (typeof v.lastSeen === 'number') {
+          formattedTime = new Date(v.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } else if (typeof v.lastSeen === 'string') {
+          formattedTime = v.lastSeen;
+        }
+
         nextMeta[id] = {
           id,
           name: v.name || 'Visitor',
-          floor: String(v.floor || '3'),
+          floor: String(v.floor || '5'),
           bleId: v.bleId || id,
-          currentRoom: v.currentRoom || 'Unknown',
-          destination: v.destination || v.currentRoom || 'Unknown',
-          lastSeen: v.lastSeen ? new Date(v.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Just now'
+          currentRoom: v.currentRoom || 'Waiting for Scanner...',
+          destination: v.destination || 'Unknown',
+          lastSeen: formattedTime
         };
       });
 
@@ -136,8 +134,8 @@ export default function useBLEPositions() {
   const visitors = useMemo(() => {
     return Object.keys(visitorMeta).map(id => ({
       ...visitorMeta[id],
-      x: positions[id]?.x || 0,
-      y: positions[id]?.y || 0,
+      x: positions[id]?.x || null,
+      y: positions[id]?.y || null,
     }));
   }, [visitorMeta, positions]);
 

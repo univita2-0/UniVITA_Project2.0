@@ -3676,67 +3676,77 @@ app.post('/api/scan', async (req, res) => {
   }
 
   try {
-    // 1. DYNAMIC SCANNER LOOKUP: Query which room this physical scanner is assigned to
+    // 1. Get scanner room assignment
     const [scannerRows] = await db.promise().query(
       "SELECT assigned_floor, assigned_room FROM scanners WHERE scanner_id = ?",
       [scannerId.trim()]
     );
 
     if (scannerRows.length === 0) {
-      console.warn(`[SCAN REJECTED] Unknown Scanner ID: ${scannerId}`);
+      console.warn(`[SCAN] Unregistered scanner ID: ${scannerId}`);
       return res.status(404).json({ success: false, message: `Scanner '${scannerId}' is not registered.` });
     }
 
     const detectedFloor = String(scannerRows[0].assigned_floor);
-    const detectedCurrentRoom = scannerRows[0].assigned_room; // Physical room where scanner is located (e.g. Classroom 1)
+    const detectedCurrentRoom = scannerRows[0].assigned_room;
 
-    // 2. DYNAMIC VISITOR & BLE TAG LOOKUP: Match MAC to an active visitor
+    // 2. FOOLPROOF DB QUERY: Matches tag by MAC and checks active check-in state
     const sql = `
       SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
       FROM visitor_requests vr
-      JOIN ble_tags bt ON vr.ble_id = bt.ble_id
+      JOIN ble_tags bt ON (
+        UPPER(vr.ble_id) = UPPER(bt.ble_id) 
+        OR UPPER(vr.used_ble_id) = UPPER(bt.ble_id)
+        OR UPPER(vr.ble_id) = UPPER(bt.mac_address)
+      )
       WHERE UPPER(bt.mac_address) = UPPER(?) 
         AND vr.arrived = 1 
-        AND vr.no_show = 0 
-        AND vr.returned = 0
+        AND vr.returned = 0 
+        AND vr.no_show = 0
+      ORDER BY vr.id DESC
       LIMIT 1
     `;
 
     const [visitorRows] = await db.promise().query(sql, [tagMac.trim()]);
+    
     if (visitorRows.length === 0) {
-      return res.json({ success: false, message: "Tag not assigned to any active checked-in visitor." });
+      // Debug helper: log if tag exists in inventory at all
+      const [tagCheck] = await db.promise().query("SELECT * FROM ble_tags WHERE UPPER(mac_address) = UPPER(?)", [tagMac.trim()]);
+      if (tagCheck.length === 0) {
+        console.warn(`[SCAN REJECTED] MAC ${tagMac} is NOT registered in ble_tags table!`);
+      } else {
+        console.warn(`[SCAN REJECTED] Tag found for MAC ${tagMac}, but visitor is not checked-in (arrived=1, returned=0).`);
+      }
+      return res.json({ success: false, message: "Tag not checked-in or inactive." });
     }
 
     const row = visitorRows[0];
     const bleId = row.ble_id;
     const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-    const plannedDestination = row.destination; // Assigned target from check-in (e.g. Classroom 2)
+    const plannedDestination = row.destination || 'Classroom 2';
 
-    // 3. Resolve exact blueprint coordinates for the SCANNER'S ROOM
     const coords = getRoomCoords(detectedFloor, detectedCurrentRoom);
 
-    // Track movement history if room changed
     if (liveVisitors[bleId] && liveVisitors[bleId].currentRoom !== detectedCurrentRoom) {
       logVisitorHistory(bleId, visitorName, bleId, detectedFloor, detectedCurrentRoom, 'move', coords.x, coords.y);
     }
 
-    // 4. Update memory state with REAL scanner data
     liveVisitors[bleId] = {
       id: bleId,
       name: visitorName,
       bleId: bleId,
-      floor: detectedFloor,              // Floor where scanner heard it
-      currentRoom: detectedCurrentRoom,  // Physical room from Scanner (Classroom 1)
-      destination: plannedDestination,   // Expected destination (Classroom 2)
+      floor: detectedFloor,
+      currentRoom: detectedCurrentRoom, // Physical room from scanner (Classroom 1)
+      destination: plannedDestination,   // Target destination
       x: coords.x,
       y: coords.y,
       lastSeen: Date.now(),
-      isDetected: true,                  // Beacon has been physically detected
+      isDetected: true,
       isDisconnected: false,
       rssi: rssi || -50
     };
 
-    console.log(`[LIVE PING] ${visitorName} (${bleId}) detected by ${scannerId} in ${detectedCurrentRoom}`);
+    console.log(`[SUCCESS] Tracked ${visitorName} in ${detectedCurrentRoom} via ${scannerId}`);
 
     res.status(200).json({ 
       success: true, 
