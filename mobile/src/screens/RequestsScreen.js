@@ -1,35 +1,50 @@
-// src/screens/RequestsScreen.js
 import React, { useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar
+  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar, Platform
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { API_URL } from './api';
 import { Upload, X, Calendar as CalendarIcon, Clock, ArrowLeft } from 'lucide-react-native';
 
-const uploadRequestWithFile = async (url, token, fieldName, fileObj, parameters) => {
-  if (!fileObj) throw new Error('Please attach a file before submitting this request.');
-  const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
-  if (!fileUri) throw new Error('The selected file is no longer available. Please attach it again.');
+let FileSystem;
+try {
+  FileSystem = require('expo-file-system/legacy');
+} catch (e) {
+  FileSystem = require('expo-file-system');
+}
 
-  const filename = (typeof fileObj === 'object' && fileObj.name) || fileUri.split('/').pop() || 'attachment';
-  const extension = filename.split('.').pop().toLowerCase();
-  const mimeType = (typeof fileObj === 'object' && fileObj.mimeType) || ({
+const uploadRequestWithFile = async (url, token, fieldName, fileObj, parameters = {}) => {
+  if (!fileObj) throw new Error('Please attach a file before submitting this request.');
+
+  const resolvedFile = typeof fileObj === 'string' ? { uri: fileObj, name: 'attachment.jpg' } : fileObj;
+  const fileUri = resolvedFile?.uri;
+  if (!fileUri) {
+    throw new Error('The selected file is no longer available. Please attach it again.');
+  }
+
+  const filename = resolvedFile?.name || fileUri.split('/').pop() || 'attachment.jpg';
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  const mimeType = resolvedFile?.mimeType || {
     jpg: 'image/jpeg',
     jpeg: 'image/jpeg',
     png: 'image/png',
     pdf: 'application/pdf',
     doc: 'application/msword',
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  })[extension] || 'application/octet-stream';
+  }[ext] || 'application/octet-stream';
+
+  const normalizedParams = Object.entries(parameters || {})
+    .filter(([, value]) => value !== '' && value !== null && value !== undefined)
+    .reduce((acc, [key, value]) => {
+      acc[key] = String(value);
+      return acc;
+    }, {});
 
   const uploadResult = await FileSystem.uploadAsync(url, fileUri, {
     httpMethod: 'POST',
@@ -40,20 +55,20 @@ const uploadRequestWithFile = async (url, token, fieldName, fileObj, parameters)
       Authorization: `Bearer ${token || ''}`,
       Accept: 'application/json',
     },
-    parameters: Object.fromEntries(
-      Object.entries(parameters)
-        .filter(([, value]) => value !== '' && value !== null && value !== undefined)
-        .map(([key, value]) => [key, String(value)])
-    ),
+    parameters: normalizedParams,
   });
 
   let result;
   try {
-    result = JSON.parse(uploadResult.body);
+    result = JSON.parse(uploadResult?.body || '{}');
   } catch {
-    result = { success: false, message: uploadResult.body || 'Server upload error.' };
+    result = { success: false, message: uploadResult?.body || 'Server upload error.' };
   }
-  return { ...result, ok: uploadResult.status >= 200 && uploadResult.status < 300 };
+
+  return {
+    ...result,
+    ok: uploadResult && uploadResult.status >= 200 && uploadResult.status < 300,
+  };
 };
 
 const formatTo12Hour = (timeStr) => {

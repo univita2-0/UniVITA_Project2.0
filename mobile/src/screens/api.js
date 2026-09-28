@@ -1,10 +1,17 @@
+// src/screens/api.js
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, Alert } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
+
+// Safe legacy import for Expo SDK 54+ compatibility
+let FileSystem;
+try {
+  FileSystem = require('expo-file-system/legacy');
+} catch (e) {
+  FileSystem = require('expo-file-system');
+}
 
 const LOCAL_IP = "192.168.86.5"; 
-
 const USE_REMOTE = true;
 const REMOTE_URL = "https://api.univitahct.tech"; 
 
@@ -20,7 +27,7 @@ const getAuthHeaders = async () => {
   return headers;
 };
 
-// Helper: handle API response (works for both JSON and text)
+// Helper: handle API response
 const handleResponse = async (response) => {
   const contentType = response.headers.get("content-type");
   if (contentType && contentType.includes("application/json")) {
@@ -32,7 +39,7 @@ const handleResponse = async (response) => {
   }
 };
 
-// Helper: parse FileSystem.uploadAsync response string
+// Helper: parse FileSystem.uploadAsync response safely
 const parseUploadResult = (uploadResult) => {
   try {
     const data = JSON.parse(uploadResult.body);
@@ -42,6 +49,22 @@ const parseUploadResult = (uploadResult) => {
       success: uploadResult.status >= 200 && uploadResult.status < 300, 
       message: uploadResult.body || 'Server upload error' 
     };
+  }
+};
+
+// Helper: resolve clean MIME type from filename
+const getMimeTypeFromUri = (uri, customName = null) => {
+  const filename = customName || uri?.split('/')?.pop() || '';
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'pdf': return 'application/pdf';
+    case 'png': return 'image/png';
+    case 'doc': return 'application/msword';
+    case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'jpeg':
+    case 'jpg':
+    default:
+      return 'image/jpeg';
   }
 };
 
@@ -84,7 +107,6 @@ const queueOfflineAction = async (action, payload) => {
     const queue = existing ? JSON.parse(existing) : [];
     queue.push({ action, payload, timestamp: Date.now() });
     await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-    console.log(`[Offline] Action '${action}' queued for sync.`);
   } catch (e) {
     console.error("Failed to queue offline action", e);
   }
@@ -112,6 +134,7 @@ export const syncOfflineQueue = async () => {
             httpMethod: 'POST',
             uploadType: FileSystem.FileSystemUploadType.MULTIPART,
             fieldName: 'selfie',
+            mimeType: 'image/jpeg',
             headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
             parameters: {
               employee_id: String(data.employee_id || ''),
@@ -140,19 +163,16 @@ export const syncOfflineQueue = async () => {
   }
 };
 
-// Fetch correction history for the logged-in user
 export const fetchCorrectionHistory = async () => {
   try {
     const headers = await getAuthHeaders();
     const employeeId = await AsyncStorage.getItem('employee_id');
-    
     if (!employeeId) return [];
 
     const response = await fetch(`${API_URL}/attendance/corrections/user/${employeeId}`, { 
       method: 'GET',
       headers 
     });
-    
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -180,7 +200,7 @@ export const setTrackingEnabled = async (enabled) => {
 };
 
 // ==========================================
-// PROFILE PICTURE UPLOAD (File-System Multipart)
+// PROFILE PICTURE UPLOAD
 // ==========================================
 export const updateProfile = async (userId, data) => {
   try {
@@ -189,9 +209,7 @@ export const updateProfile = async (userId, data) => {
     const fileUri = pic ? (typeof pic === 'string' ? pic : pic.uri) : null;
 
     if (fileUri) {
-      const mimeType = typeof pic === 'object' && pic.mimeType
-        ? pic.mimeType
-        : fileUri.toLowerCase().split('?')[0].endsWith('.png') ? 'image/png' : 'image/jpeg';
+      const mimeType = getMimeTypeFromUri(fileUri, typeof pic === 'object' ? pic.name : null);
       const uploadResult = await FileSystem.uploadAsync(`${API_URL}/users/${userId}/profile`, fileUri, {
         httpMethod: 'PUT',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
@@ -239,7 +257,6 @@ export const loginUser = async (email, password) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Login Error:", error.message);
     return { success: false, message: `Network Error: Cannot reach ${API_URL}` };
   }
 };
@@ -253,7 +270,6 @@ export const sendOtp = async (email) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Send OTP Error:", error.message);
     return { success: false, message: 'Network error' };
   }
 };
@@ -267,7 +283,6 @@ export const verifyOtp = async (email, otp) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Verify OTP Error:", error.message);
     return { success: false, message: 'Network error' };
   }
 };
@@ -281,7 +296,6 @@ export const forgotPassword = async (email) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Forgot Password Error:", error.message);
     return { success: false, message: 'Network error' };
   }
 };
@@ -295,7 +309,6 @@ export const verifyResetOtp = async (email, otp) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Verify Reset OTP Error:", error.message);
     return { success: false, message: 'Network error' };
   }
 };
@@ -309,13 +322,12 @@ export const resetPassword = async (email, otp, newPassword) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Reset Password Error:", error.message);
     return { success: false, message: 'Network error' };
   }
 };
 
 // ==========================================
-// OVERTIME REQUESTS (Mobile)
+// OVERTIME REQUESTS
 // ==========================================
 export const submitOvertimeRequest = async (data) => {
   try {
@@ -324,10 +336,12 @@ export const submitOvertimeRequest = async (data) => {
     const attUri = att ? (typeof att === 'string' ? att : att.uri) : null;
 
     if (attUri) {
+      const mimeType = getMimeTypeFromUri(attUri, typeof att === 'object' ? att.name : null);
       const uploadResult = await FileSystem.uploadAsync(`${API_URL}/overtime-requests`, attUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'attachment',
+        mimeType,
         headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
         parameters: {
           date: String(data.date || ''),
@@ -350,7 +364,6 @@ export const submitOvertimeRequest = async (data) => {
       return await handleResponse(response);
     }
   } catch (error) {
-    console.error("Submit Overtime Error:", error.message);
     return { success: false, message: "Network error" };
   }
 };
@@ -362,7 +375,6 @@ export const fetchOvertimeHistory = async () => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch Overtime History Error:", error.message);
     return [];
   }
 };
@@ -374,10 +386,12 @@ export const requestAttendanceCorrection = async (data) => {
     const selfieUri = selfie ? (typeof selfie === 'string' ? selfie : selfie.uri) : null;
 
     if (selfieUri) {
+      const mimeType = getMimeTypeFromUri(selfieUri, typeof selfie === 'object' ? selfie.name : null);
       const uploadResult = await FileSystem.uploadAsync(`${API_URL}/attendance/correction-request`, selfieUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'selfie',
+        fieldName: 'attachment',
+        mimeType,
         headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
         parameters: {
           employee_id: String(data.employee_id || ''),
@@ -399,7 +413,6 @@ export const requestAttendanceCorrection = async (data) => {
       return await handleResponse(response);
     }
   } catch (error) {
-    console.error("Correction Request Error:", error.message);
     return { success: false, message: 'Network error' };
   }
 };
@@ -417,7 +430,6 @@ export const sendLocationPing = async (latitude, longitude, location_enabled, lo
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Location Ping Error:", error.message);
     return { success: false };
   }
 };
@@ -433,6 +445,7 @@ export const clockIn = async (data) => {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'selfie',
+        mimeType: 'image/jpeg',
         headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
         parameters: {
           employee_id: String(data.employee_id || ''),
@@ -452,7 +465,6 @@ export const clockIn = async (data) => {
       return await handleResponse(response);
     }
   } catch (error) {
-    console.error("Clock In API Error:", error.message);
     await queueOfflineAction('clock-in', data);
     return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
   }
@@ -469,6 +481,7 @@ export const clockOut = async (data) => {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'selfie',
+        mimeType: 'image/jpeg',
         headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
         parameters: {
           employee_id: String(data.employee_id || ''),
@@ -488,7 +501,6 @@ export const clockOut = async (data) => {
       return await handleResponse(response);
     }
   } catch (error) {
-    console.error("Clock Out API Error:", error.message);
     await queueOfflineAction('clock-out', data);
     return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
   }
@@ -501,7 +513,6 @@ export const fetchAttendanceHistory = async (employeeId) => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Attendance History Error:", error.message);
     return [];
   }
 };
@@ -514,15 +525,16 @@ export const fetchAttendanceReport = fetchAttendanceHistory;
 export const submitLeaveRequest = async (payload) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    
     const imageObj = payload.image || payload.attachment;
     const imageUri = imageObj ? (typeof imageObj === 'string' ? imageObj : imageObj.uri) : null;
 
     if (imageUri) {
+      const mimeType = getMimeTypeFromUri(imageUri, typeof imageObj === 'object' ? imageObj.name : null);
       const uploadResult = await FileSystem.uploadAsync(`${API_URL}/leave-requests`, imageUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'image',
+        mimeType,
         headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
         parameters: {
           type: String(payload.type || ''),
@@ -543,7 +555,6 @@ export const submitLeaveRequest = async (payload) => {
       return await handleResponse(response);
     }
   } catch (error) {
-    console.error("Submit Leave Error:", error.message);
     return { success: false, message: "Server unreachable" };
   }
 };
@@ -555,7 +566,6 @@ export const fetchMyLeaveRequests = async (employeeId) => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch Leave Error:", error.message);
     return [];
   }
 };
@@ -570,7 +580,6 @@ export const updateLeaveStatus = async (id, status) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Status Update Error:", error.message);
     return { success: false };
   }
 };
@@ -584,7 +593,6 @@ export const dismissLeaveRequest = async (id) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Dismiss Request Error:", error.message);
     return { success: false };
   }
 };
@@ -599,7 +607,6 @@ export const fetchUserSchedule = async (employeeId) => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch User Schedule Error:", error.message);
     return [];
   }
 };
@@ -610,7 +617,6 @@ export const fetchEvents = async () => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch Events Error:", error.message);
     return [];
   }
 };
@@ -625,7 +631,6 @@ export const fetchEmployeePayrollHistory = async (employeeId) => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch Employee Payroll Error:", error.message);
     return [];
   }
 };
@@ -637,7 +642,6 @@ export const fetchLeaveBalances = async (userId, year = new Date().getFullYear()
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch Leave Balances Error:", error.message);
     return [];
   }
 };
@@ -649,7 +653,6 @@ export const fetchLeaveTypes = async () => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch Leave Types Error:", error.message);
     return [];
   }
 };
@@ -664,7 +667,6 @@ export const fetchEmergencyAlerts = async (userId) => {
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Fetch Emergency Alerts Error:", error.message);
     return [];
   }
 };
@@ -679,7 +681,6 @@ export const markAlertAsRead = async (alertId, userId) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Mark Alert Read Error:", error.message);
     return { success: false, message: "Network error" };
   }
 };
@@ -697,7 +698,6 @@ export const updatePassword = async (identifier, data) => {
     });
     return await handleResponse(response);
   } catch (error) {
-    console.error("Update Password Error:", error.message);
     return { success: false, message: "Network error" };
   }
 };

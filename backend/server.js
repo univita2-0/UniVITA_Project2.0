@@ -451,13 +451,20 @@ const storage = multer.diskStorage({
 });
 
 const documentFilter = (req, file, cb) => {
-  const allowed = [
+  const allowedMimes = [
     'image/jpeg', 'image/png', 'image/jpg', 
     'application/pdf', 'application/msword', 
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/octet-stream'
   ];
-  if (allowed.includes(file.mimetype)) cb(null, true);
-  else cb(new Error('Invalid file type. Only JPG, PNG, PDF, DOC, DOCX allowed.'));
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  const allowedExts = ['.jpg', '.jpeg', '.png', '.pdf', '.doc', '.docx'];
+
+  if (allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only JPG, PNG, PDF, DOC, DOCX allowed.'));
+  }
 };
 
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: documentFilter });

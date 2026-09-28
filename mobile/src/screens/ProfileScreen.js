@@ -185,7 +185,7 @@ export default function ProfileScreen({ navigation }) {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
+      quality: 0.6,
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -207,7 +207,7 @@ export default function ProfileScreen({ navigation }) {
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
           Alert.alert("Success", "Profile picture updated successfully!");
         } else {
-          throw new Error(res.message || "Failed to save profile picture.");
+          throw new Error(res.message || "Failed to update profile picture on server.");
         }
       } catch (err) {
         console.error("Upload Error:", err);
