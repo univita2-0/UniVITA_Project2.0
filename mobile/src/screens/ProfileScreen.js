@@ -185,12 +185,12 @@ export default function ProfileScreen({ navigation }) {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.6,
+      quality: 0.7,
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const asset = result.assets[0];
-      setProfileImage(asset.uri);
+      setProfileImage(asset.uri); // Show local photo immediately
       setIsUploadingImage(true);
 
       try {
@@ -202,7 +202,9 @@ export default function ProfileScreen({ navigation }) {
 
         if (res.success && res.profile_picture) {
           const baseUrl = API_URL.replace('/api', '');
-          const fullImageUrl = `${baseUrl}${res.profile_picture}`;
+          const cleanPath = res.profile_picture.startsWith('/') ? res.profile_picture : `/${res.profile_picture}`;
+          // Cache-busting query parameter forces device to reload the image immediately
+          const fullImageUrl = `${baseUrl}${cleanPath}?t=${Date.now()}`;
           setProfileImage(fullImageUrl);
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
           Alert.alert("Success", "Profile picture updated successfully!");
@@ -297,7 +299,12 @@ export default function ProfileScreen({ navigation }) {
             <View style={styles.avatarContainer}>
               <View style={styles.avatar}>
                 {profileImage ? (
-                  <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+                  <Image 
+                    key={profileImage}
+                    source={{ uri: profileImage }} 
+                    style={styles.avatarImage} 
+                    resizeMode="cover"
+                  />
                 ) : (
                   <User size={44} color={isLight ? "#FFFFFF" : colors.primary} />
                 )}

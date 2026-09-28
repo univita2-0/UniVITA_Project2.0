@@ -180,7 +180,12 @@ if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true });
 }
 
-app.use('/uploads', express.static(uploadsPath));
+app.use('/uploads', express.static(uploadsPath, {
+  setHeaders: (res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
 
 const ROOM_COORDINATES = {
   '3': {
@@ -430,12 +435,20 @@ if (!fs.existsSync(profilePicDir)) fs.mkdirSync(profilePicDir, { recursive: true
 const uploadProfilePic = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, profilePicDir),
-    filename: (req, file, cb) => cb(null, `profile_${Date.now()}${path.extname(file.originalname)}`)
+    filename: (req, file, cb) => {
+      
+      let ext = path.extname(file.originalname || '').toLowerCase();
+      if (!ext || ext.length < 2) {
+        if (file.mimetype === 'image/png') ext = '.png';
+        else if (file.mimetype === 'image/webp') ext = '.webp';
+        else ext = '.jpg';
+      }
+      cb(null, `profile_${Date.now()}${ext}`);
+    }
   }),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) cb(null, true);
-    else cb(new Error('Invalid file type. Only images are allowed.'));
+    cb(null, true);
   }
 });
 
