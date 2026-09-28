@@ -192,6 +192,7 @@ const ROOM_COORDINATES = {
     'Classroom': { x: 37.15, y: 168.5 },
     'AHA Room': { x: 164.9, y: 291.9 },
     'Private Room': { x: 188.2, y: 157.5 },
+    'Operating Room': { x: 233.5, y: 197.1 },
     'Delivery Room': { x: 254.7, y: 197.1 },
     'NICU': { x: 320.85, y: 158.25 },
     'ICU': { x: 365.8, y: 156.1 },
@@ -199,8 +200,8 @@ const ROOM_COORDINATES = {
     'Breakout Room 1': { x: 190.3, y: 40.9 },
     'Breakout Room 2': { x: 210.85, y: 84.75 },
     'Breakout Room 3': { x: 255.8, y: 85.8 },
-    'Faculty Office': { x: 321.2, y: 6.9 },
     'Faculty Room': { x: 321.2, y: 6.9 },
+    'Faculty Office': { x: 321.2, y: 6.9 },
     'Main Entrance': { x: 360.45, y: 50.75 }
   },
   '5': {
@@ -208,20 +209,22 @@ const ROOM_COORDINATES = {
     'Operating Room': { x: 112.1, y: 198.6 },
     'Delivery Room': { x: 161.0, y: 199.6 },
     'ICU': { x: 208.75, y: 196.85 },
-    'Educ. Head': { x: 249.75, y: 214.55 },
     'Educ Head': { x: 249.75, y: 214.55 },
-    'Executive 1': { x: 286.2, y: 197.2 },
+    'Educ. Head': { x: 249.75, y: 214.55 },
     'Executive': { x: 286.2, y: 197.2 },
+    'Executive 1': { x: 286.2, y: 197.2 },
     'Executive 2': { x: 322.95, y: 198.6 },
     'Conference': { x: 322.95, y: 198.6 },
     'Creatives': { x: 260.0, y: 141.35 },
     'Debrief Room': { x: 163.75, y: 123.35 },
+    'Lobby': { x: 52.75, y: 132.15 },
     'Main El': { x: 52.75, y: 132.15 },
     'Entrance': { x: 52.75, y: 132.15 },
-    'ArriA Room': { x: 108.25, y: 40.9 },
     'AHA Room': { x: 108.25, y: 40.9 },
+    'ArriA Room': { x: 108.25, y: 40.9 },
     'Classroom 1': { x: 173.7, y: 43.1 },
     'Classroom 2': { x: 246.9, y: 40.2 },
+    'HR / Admin': { x: 307.4, y: 41.25 },
     'HR / Admin Finance': { x: 307.4, y: 41.25 },
     'Pantry': { x: 348.8, y: 52.6 },
     'Toilet': { x: 351.65, y: 18.7 }
@@ -234,7 +237,8 @@ const getRoomCoords = (floor, room) => {
   if (ROOM_COORDINATES[f] && ROOM_COORDINATES[f][r]) {
     return ROOM_COORDINATES[f][r];
   }
-  return { x: 100, y: 100 }; 
+  // Default to entrance coordinates if room name not matched
+  return f === '5' ? { x: 52.75, y: 132.15 } : { x: 360.45, y: 50.75 };
 };
 
 
@@ -3496,39 +3500,25 @@ app.get('/api/dashboard/summary', async (req, res) => {
   } catch (err) { res.status(500).send(err); }
 });
 
-
 // ============================================
-// 9. LIVE TRACKING & SYSTEM MAINTENANCE SWEEPS
+// UNIFIED VISITOR TRACKING WATCHDOG (Single Timer)
 // ============================================
-
 let liveVisitors = {}; 
 let lastKnownVisitorsData = {};
 
-
-
 setInterval(async () => {
   const now = Date.now();
-  const currentVisitorIds = Object.keys(liveVisitors);
+  const INACTIVITY_THRESHOLD_MS = 45000; // 45 seconds before flagging signal loss
 
-  for (const bleId in lastKnownVisitorsData) {
-    if (!currentVisitorIds.includes(bleId)) {
-      console.log(`⚠️ Visitor ${bleId} disconnected.`);
-      const visitor = lastKnownVisitorsData[bleId];
-      
-      logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'disconnect', null, null);
-      delete lastKnownVisitorsData[bleId];
-    }
-  }
-
+  // 1. Fetch only actively checked-in BLE IDs currently holding a badge in the facility
   let validBleIds = new Set();
   try {
     const [activeRows] = await db.promise().query(`
       SELECT ble_id FROM visitor_requests 
-      WHERE arrived = 1 AND returned = 0 AND ble_id IS NOT NULL
+      WHERE arrived = 1 AND returned = 0 AND no_show = 0 AND ble_id IS NOT NULL
     `);
     validBleIds = new Set(activeRows.map(row => String(row.ble_id).trim()));
   } catch (err) {
-    // Suppress transient remote cloud proxy drops and connection losses from spamming the console
     if (
       err.code !== 'ECONNRESET' && 
       err.code !== 'ETIMEDOUT' && 
@@ -3539,22 +3529,40 @@ setInterval(async () => {
     }
   }
 
+  // 2. Evaluate all live visitors currently tracked in memory
   for (const bleId in liveVisitors) {
+    // If the visitor returned their tag or was marked No Show, purge them from memory
+    if (!validBleIds.has(String(bleId).trim())) {
+      console.log(`🧹 Purging returned tag from memory: ${bleId}`);
+      delete liveVisitors[bleId];
+      delete lastKnownVisitorsData[bleId];
+      continue;
+    }
+
     const visitor = liveVisitors[bleId];
 
-    if (!lastKnownVisitorsData[bleId]) {
+    // Log connection / reconnection history if this is a newly detected beacon or recovered signal
+    if (!lastKnownVisitorsData[bleId] || lastKnownVisitorsData[bleId].isDisconnected) {
       console.log(`✅ Visitor ${bleId} connected.`);
-      logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'connect', null, null);
+      logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'connect', visitor.x, visitor.y);
     }
-    
-    lastKnownVisitorsData[bleId] = { ...visitor };
 
-    if (!validBleIds.has(String(bleId).trim()) || (now - visitor.lastSeen > 15000)) {
-      console.log(`🧹 Purging: ${bleId}`);
-      delete liveVisitors[bleId];
+    // Flag signal loss if scanner hasn't heard the beacon in over 45 seconds
+    if (now - visitor.lastSeen > INACTIVITY_THRESHOLD_MS) {
+      if (!visitor.isDisconnected) {
+        console.log(`⚠️ Visitor ${bleId} signal lost in ${visitor.currentRoom}.`);
+        visitor.isDisconnected = true;
+        visitor.disconnectedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'disconnect', null, null);
+      }
+    } else {
+      visitor.isDisconnected = false;
     }
+
+    // Update state tracking snapshot
+    lastKnownVisitorsData[bleId] = { ...visitor };
   }
-}, 15000);
+}, 10000);
 
 app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
   if (req.user.role !== 'instructor') {
@@ -3668,6 +3676,20 @@ app.post('/api/scan', async (req, res) => {
   }
 
   try {
+    // 1. Query the physical scanner from the database to identify where this scanner is installed
+    const [scannerRows] = await db.promise().query(
+      "SELECT assigned_floor, assigned_room FROM scanners WHERE scanner_id = ?",
+      [scannerId.trim()]
+    );
+
+    if (scannerRows.length === 0) {
+      return res.status(404).json({ success: false, message: `Scanner '${scannerId}' is not registered in the system.` });
+    }
+
+    const detectedFloor = String(scannerRows[0].assigned_floor);
+    const detectedCurrentRoom = scannerRows[0].assigned_room; // ACTUAL physical location of the visitor
+
+    // 2. Identify which active visitor is currently carrying this beacon
     const sql = `
       SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
       FROM visitor_requests vr
@@ -3679,50 +3701,47 @@ app.post('/api/scan', async (req, res) => {
       LIMIT 1
     `;
 
-    const [results] = await db.promise().query(sql, [tagMac.trim()]);
-    if (results.length === 0) {
-      return res.json({ success: false, message: "Visitor not found or tag is inactive." });
+    const [visitorRows] = await db.promise().query(sql, [tagMac.trim()]);
+    if (visitorRows.length === 0) {
+      return res.json({ success: false, message: "Tag detected, but not currently assigned to any active checked-in visitor." });
     }
 
-    const row = results[0];
+    const row = visitorRows[0];
     const bleId = row.ble_id;
     const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-    const destination = row.destination || 'Classroom';
+    const plannedDestination = row.destination; // INTENDED room assigned at check-in
 
-    let detectedFloor = "3";
-    let detectedRoom = destination;
+    // 3. Resolve map coordinates for the scanner's physical room
+    const coords = getRoomCoords(detectedFloor, detectedCurrentRoom);
 
-    const [scannerRows] = await db.promise().query(
-      "SELECT assigned_floor, assigned_room FROM scanners WHERE scanner_id = ?",
-      [scannerId]
-    );
-    if (scannerRows.length > 0) {
-      if (scannerRows[0].assigned_floor) detectedFloor = String(scannerRows[0].assigned_floor);
-      if (scannerRows[0].assigned_room) detectedRoom = scannerRows[0].assigned_room;
+    // Track movement event if visitor shifted into a new room
+    if (liveVisitors[bleId] && liveVisitors[bleId].currentRoom !== detectedCurrentRoom) {
+      logVisitorHistory(bleId, visitorName, bleId, detectedFloor, detectedCurrentRoom, 'move', coords.x, coords.y);
     }
 
-    const coords = getRoomCoords(detectedFloor, detectedRoom);
-
-    // Track movement event
-    if (liveVisitors[bleId] && liveVisitors[bleId].currentRoom !== detectedRoom) {
-      logVisitorHistory(bleId, visitorName, bleId, detectedFloor, detectedRoom, 'move', coords.x, coords.y);
-    }
-
+    // 4. Update live state: currentRoom reflects the scanner, destination reflects the assigned target
     liveVisitors[bleId] = {
       id: bleId,
       name: visitorName,
       bleId: bleId,
-      floor: detectedFloor,
-      currentRoom: detectedRoom,
-      destination: destination,
+      floor: detectedFloor,               // Scanner's floor
+      currentRoom: detectedCurrentRoom,   // Where visitor physically is (e.g. Classroom 1)
+      destination: plannedDestination,    // Where visitor is supposed to be (e.g. Classroom 2)
       x: coords.x,
       y: coords.y,
       lastSeen: Date.now(),
+      isDisconnected: false,
       rssi: rssi || -50
     };
 
-    res.status(200).json({ success: true, message: "Visitor location updated." });
+    res.status(200).json({ 
+      success: true, 
+      message: "Visitor location updated.",
+      currentRoom: detectedCurrentRoom,
+      destination: plannedDestination
+    });
   } catch (err) {
+    console.error("Scan processing error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -3731,8 +3750,77 @@ app.post('/api/scan', async (req, res) => {
 // LIVE POSITIONS & VISIT REASONS (Secured & Validated)
 // ============================================
 
-app.get('/api/positions', (req, res) => {
-  res.json(Object.values(liveVisitors) || []);
+app.get('/api/positions', async (req, res) => {
+  try {
+    // Query ONLY real visitors who are officially checked in and haven't returned their tag
+    const [activeVisitors] = await db.promise().query(`
+      SELECT vr.id, vr.first_name, vr.last_name, vr.ble_id, vr.destination
+      FROM visitor_requests vr
+      WHERE vr.arrived = 1 AND vr.returned = 0 AND vr.no_show = 0 AND vr.ble_id IS NOT NULL
+    `);
+
+    const now = Date.now();
+    const result = [];
+
+    for (const v of activeVisitors) {
+      const bleId = v.ble_id;
+      const live = liveVisitors[bleId];
+      const fullName = `${v.first_name} ${v.last_name || ''}`.trim();
+
+      // Case A: Beacon is actively sending pings via an ESP32 scanner
+      if (live && !live.isDisconnected && (now - live.lastSeen <= 45000)) {
+        result.push({
+          id: bleId,
+          name: fullName,
+          bleId: bleId,
+          floor: live.floor,
+          currentRoom: live.currentRoom, // Room from the scanner currently picking up the tag
+          destination: v.destination,    // Assigned target room
+          x: live.x,
+          y: live.y,
+          lastSeen: 'Just now',
+          isDisconnected: false
+        });
+      } 
+      // Case B: Beacon has temporarily stopped advertising / out of scanner range
+      else if (live) {
+        result.push({
+          id: bleId,
+          name: fullName,
+          bleId: bleId,
+          floor: live.floor,
+          currentRoom: live.currentRoom,
+          destination: v.destination,
+          x: live.x,
+          y: live.y,
+          lastSeen: 'Disconnected',
+          isDisconnected: true,
+          disconnectedAt: live.disconnectedAt || 'Recent'
+        });
+      } 
+      // Case C: Checked in at the desk, waiting for the first scanner detection
+      else {
+        const defaultCoords = getRoomCoords("5", v.destination);
+        result.push({
+          id: bleId,
+          name: fullName,
+          bleId: bleId,
+          floor: "5",
+          currentRoom: v.destination,
+          destination: v.destination,
+          x: defaultCoords.x,
+          y: defaultCoords.y,
+          lastSeen: 'Checked In',
+          isDisconnected: false
+        });
+      }
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error("Fetch positions error:", err);
+    res.json(Object.values(liveVisitors) || []);
+  }
 });
 
 app.get('/api/visit-reasons', (req, res) => {
@@ -5573,7 +5661,7 @@ app.put('/api/visitor-requests/:id/arrive', authenticateToken, async (req, res) 
   const cleanBleId = ble_id.trim();
 
   try {
-    // Check request state
+    // 1. Verify appointment state
     const [reqRows] = await db.promise().query(
       "SELECT id, first_name, last_name, status, arrived, returned, no_show FROM visitor_requests WHERE id = ?",
       [id]
@@ -5591,13 +5679,13 @@ app.put('/api/visitor-requests/:id/arrive', authenticateToken, async (req, res) 
       return res.status(400).json({ success: false, message: "Cannot check in a visitor who was marked as No Show." });
     }
 
-    // Verify tag exists
+    // 2. Verify BLE Tag exists in inventory
     const [tagRows] = await db.promise().query("SELECT id FROM ble_tags WHERE ble_id = ?", [cleanBleId]);
     if (tagRows.length === 0) {
       return res.status(404).json({ success: false, message: `BLE Tag '${cleanBleId}' is not registered in the inventory.` });
     }
 
-    // Verify tag is not in use
+    // 3. Verify tag is not in use by another active visitor
     const [activeWithTag] = await db.promise().query(
       "SELECT id, first_name, last_name FROM visitor_requests WHERE ble_id = ? AND arrived = 1 AND returned = 0 AND id != ?",
       [cleanBleId, id]
@@ -5612,6 +5700,7 @@ app.put('/api/visitor-requests/:id/arrive', authenticateToken, async (req, res) 
     const visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
     const coords = getRoomCoords(cleanFloor, cleanRoom);
 
+    // 4. Update database record: link the visitor to the tag and target destination
     await db.promise().query(
       `UPDATE visitor_requests 
        SET arrived = 1, arrived_at = NOW(), destination = ?, ble_id = ?, returned = 0, no_show = 0 
@@ -5620,24 +5709,26 @@ app.put('/api/visitor-requests/:id/arrive', authenticateToken, async (req, res) 
     );
 
     logAction(req.user.id, 'VISITOR_ARRIVE', 'visitor_request', id, req);
-    visitorDestinations[cleanBleId] = cleanRoom;
 
+    // 5. Seed initial live tracking state (Scanner pings will update currentRoom as they move)
     liveVisitors[cleanBleId] = {
       id: cleanBleId,
       name: visitorName,
       bleId: cleanBleId,
       floor: cleanFloor,
-      currentRoom: cleanRoom,
-      destination: cleanRoom,
+      currentRoom: cleanRoom,      // Starts at check-in room until detected by a scanner
+      destination: cleanRoom,      // Intended destination
       x: coords.x,
       y: coords.y,
-      lastSeen: Date.now() + 60000 
+      lastSeen: Date.now(),
+      isDisconnected: false
     };
 
     logVisitorHistory(cleanBleId, visitorName, cleanBleId, cleanFloor, cleanRoom, 'connect', coords.x, coords.y);
     res.json({ success: true, message: "Visitor checked in successfully and BLE tag activated." });
 
   } catch (err) {
+    console.error("Check-in error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
