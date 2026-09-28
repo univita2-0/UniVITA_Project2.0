@@ -601,9 +601,13 @@ export default function HomeScreen({ navigation }) {
                     statusBadgeStyle = styles.statusInProgress;
                     statusBadgeTextColor = isLight ? '#059669' : '#34D399';
                   } else if (shiftStatus.includes('COMPLETED') || shiftStatus.includes('PRESENT') || shiftStatus.includes('EARLY') || shiftStatus.includes('CLOCK OUT')) {
-                    statusBadgeStyle = styles.statusMissed;
-                    statusBadgeTextColor = isLight ? '#64748B' : '#94A3B8';
-                  } else { shiftStatus = 'SCHEDULED'; }
+                    // FORCE TEXT TO READ 'COMPLETED' WITH A GREEN THEME
+                    shiftStatus = 'COMPLETED';
+                    statusBadgeStyle = { backgroundColor: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)' };
+                    statusBadgeTextColor = isLight ? '#059669' : '#34D399';
+                  } else { 
+                    shiftStatus = 'SCHEDULED'; 
+                  }
 
                   return (
                     <>

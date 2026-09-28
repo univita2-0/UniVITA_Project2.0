@@ -32,26 +32,17 @@ const handleResponse = async (response) => {
   }
 };
 
-// Helper: Safely append files to FormData for React Native (iOS & Android)
-const appendFileToFormData = (formData, fieldName, fileObj) => {
-  if (!fileObj) return;
-  const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
-  if (!fileUri) return;
-
-  const filename = fileObj.name || fileUri.split('/').pop() || 'attachment.jpg';
-  let mimeType = fileObj.mimeType || 'image/jpeg';
-  if (!fileObj.mimeType) {
-    if (filename.toLowerCase().endsWith('.pdf')) mimeType = 'application/pdf';
-    else if (filename.toLowerCase().endsWith('.png')) mimeType = 'image/png';
-    else if (filename.toLowerCase().endsWith('.doc')) mimeType = 'application/msword';
-    else if (filename.toLowerCase().endsWith('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+// Helper: parse FileSystem.uploadAsync response string
+const parseUploadResult = (uploadResult) => {
+  try {
+    const data = JSON.parse(uploadResult.body);
+    return data;
+  } catch (e) {
+    return { 
+      success: uploadResult.status >= 200 && uploadResult.status < 300, 
+      message: uploadResult.body || 'Server upload error' 
+    };
   }
-
-  formData.append(fieldName, {
-    uri: Platform.OS === 'ios' ? fileUri.replace('file://', '') : fileUri,
-    name: filename,
-    type: mimeType,
-  });
 };
 
 // Enforce GPS / Location Services Enabled Check
@@ -107,38 +98,33 @@ export const syncOfflineQueue = async () => {
     if (queue.length === 0) return 0;
 
     const token = await AsyncStorage.getItem('auth_token');
-    const headers = {}; 
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
     let synced = 0;
     const remaining = [];
     
     for (const item of queue) {
-      let response;
       try {
-        const formData = new FormData();
         const data = item.payload;
-        
-        if (data.employee_id) formData.append('employee_id', String(data.employee_id));
-        if (data.latitude) formData.append('latitude', String(data.latitude));
-        if (data.longitude) formData.append('longitude', String(data.longitude));
-        if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
-
-        if (data.selfie) {
-          appendFileToFormData(formData, 'selfie', data.selfie);
-        }
-
         const endpoint = item.action === 'clock-in' ? '/attendance/clock-in' : '/attendance/clock-out';
+        const selfieUri = data.selfie ? (typeof data.selfie === 'string' ? data.selfie : data.selfie.uri) : null;
 
-        response = await fetch(`${API_URL}${endpoint}`, {
-          method: 'POST',
-          headers,
-          body: formData
-        });
-
-        if (response && response.ok) {
-          synced++;
-          continue; 
+        if (selfieUri) {
+          const uploadResult = await FileSystem.uploadAsync(`${API_URL}${endpoint}`, selfieUri, {
+            httpMethod: 'POST',
+            uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+            fieldName: 'selfie',
+            headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
+            parameters: {
+              employee_id: String(data.employee_id || ''),
+              latitude: String(data.latitude || ''),
+              longitude: String(data.longitude || ''),
+              schedule_id: String(data.schedule_id || '')
+            }
+          });
+          const res = parseUploadResult(uploadResult);
+          if (res.success) {
+            synced++;
+            continue;
+          }
         }
       } catch (err) {
         console.error(`Sync failed for ${item.action}:`, err);
@@ -193,36 +179,44 @@ export const setTrackingEnabled = async (enabled) => {
   }
 };
 
-// Profile Picture Base64 Upload
+// ==========================================
+// PROFILE PICTURE UPLOAD (File-System Multipart)
+// ==========================================
 export const updateProfile = async (userId, data) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    let base64Image = null;
+    const pic = data.profile_picture;
+    const fileUri = pic ? (typeof pic === 'string' ? pic : pic.uri) : null;
 
-    if (data.profile_picture) {
-      const pic = data.profile_picture;
-      const fileUri = typeof pic === 'string' ? pic : pic.uri;
-      if (fileUri) {
-        base64Image = await FileSystem.readAsStringAsync(fileUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-      }
+    if (fileUri) {
+      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/users/${userId}/profile`, fileUri, {
+        httpMethod: 'PUT',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'profile_picture',
+        headers: {
+          Authorization: `Bearer ${token || ''}`,
+          Accept: 'application/json',
+        },
+        parameters: {
+          full_name: String(data.full_name || ''),
+          email: String(data.email || ''),
+          phone_number: String(data.phone_number || '')
+        }
+      });
+      return parseUploadResult(uploadResult);
+    } else {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_URL}/users/${userId}/profile`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          full_name: data.full_name,
+          email: data.email,
+          phone_number: data.phone_number
+        })
+      });
+      return await handleResponse(response);
     }
-
-    const response = await fetch(`${API_URL}/users/${userId}/profile`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        full_name: data.full_name,
-        email: data.email,
-        phone_number: data.phone_number,
-        base64_image: base64Image
-      })
-    });
-    return await handleResponse(response);
   } catch (error) {
     console.error("Update Profile Error:", error);
     return { success: false, message: error.message || 'Failed to update profile.' };
@@ -322,28 +316,35 @@ export const resetPassword = async (email, otp, newPassword) => {
 export const submitOvertimeRequest = async (data) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const att = data.attachment;
+    const attUri = att ? (typeof att === 'string' ? att : att.uri) : null;
 
-    const formData = new FormData();
-    if (data.date) formData.append('date', String(data.date));
-    if (data.start_time) formData.append('start_time', String(data.start_time));
-    if (data.end_time) formData.append('end_time', String(data.end_time));
-    if (data.reason) formData.append('reason', String(data.reason));
-    if (data.scenario_type) formData.append('scenario_type', String(data.scenario_type));
-    if (data.overtime_type) formData.append('overtime_type', String(data.overtime_type));
-    if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
-
-    if (data.attachment) {
-      appendFileToFormData(formData, 'attachment', data.attachment);
+    if (attUri) {
+      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/overtime-requests`, attUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'attachment',
+        headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
+        parameters: {
+          date: String(data.date || ''),
+          start_time: String(data.start_time || ''),
+          end_time: String(data.end_time || ''),
+          reason: String(data.reason || ''),
+          scenario_type: String(data.scenario_type || 'normal_ot'),
+          overtime_type: String(data.overtime_type || 'Regular Overtime'),
+          schedule_id: String(data.schedule_id || '')
+        }
+      });
+      return parseUploadResult(uploadResult);
+    } else {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_URL}/overtime-requests`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+      });
+      return await handleResponse(response);
     }
-
-    const response = await fetch(`${API_URL}/overtime-requests`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    return await handleResponse(response);
   } catch (error) {
     console.error("Submit Overtime Error:", error.message);
     return { success: false, message: "Network error" };
@@ -365,24 +366,34 @@ export const fetchOvertimeHistory = async () => {
 export const requestAttendanceCorrection = async (data) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    const formData = new FormData();
-    if (data.employee_id) formData.append('employee_id', String(data.employee_id));
-    if (data.date) formData.append('date', String(data.date));
-    if (data.type) formData.append('type', String(data.type));
-    if (data.time) formData.append('time', String(data.time));
-    if (data.reason) formData.append('reason', String(data.reason));
+    const selfie = data.selfie;
+    const selfieUri = selfie ? (typeof selfie === 'string' ? selfie : selfie.uri) : null;
 
-    if (data.selfie) {
-      appendFileToFormData(formData, 'selfie', data.selfie);
+    if (selfieUri) {
+      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/attendance/correction-request`, selfieUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'selfie',
+        headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
+        parameters: {
+          employee_id: String(data.employee_id || ''),
+          date: String(data.date || ''),
+          type: String(data.type || ''),
+          time: String(data.time || ''),
+          reason: String(data.reason || ''),
+          schedule_id: String(data.schedule_id || '')
+        }
+      });
+      return parseUploadResult(uploadResult);
+    } else {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_URL}/attendance/correction-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+      });
+      return await handleResponse(response);
     }
-
-    const response = await fetch(`${API_URL}/attendance/correction-request`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-    const result = await response.json();
-    return result;
   } catch (error) {
     console.error("Correction Request Error:", error.message);
     return { success: false, message: 'Network error' };
@@ -410,26 +421,32 @@ export const sendLocationPing = async (latitude, longitude, location_enabled, lo
 export const clockIn = async (data) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const selfie = data.selfie;
+    const selfieUri = selfie ? (typeof selfie === 'string' ? selfie : selfie.uri) : null;
 
-    const formData = new FormData();
-    if (data.employee_id) formData.append('employee_id', String(data.employee_id));
-    if (data.latitude) formData.append('latitude', String(data.latitude));
-    if (data.longitude) formData.append('longitude', String(data.longitude));
-    if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
-
-    if (data.selfie) {
-      appendFileToFormData(formData, 'selfie', data.selfie);
+    if (selfieUri) {
+      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/attendance/clock-in`, selfieUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'selfie',
+        headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
+        parameters: {
+          employee_id: String(data.employee_id || ''),
+          latitude: String(data.latitude || ''),
+          longitude: String(data.longitude || ''),
+          schedule_id: String(data.schedule_id || '')
+        }
+      });
+      return parseUploadResult(uploadResult);
+    } else {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_URL}/attendance/clock-in`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data)
+      });
+      return await handleResponse(response);
     }
-
-    const response = await fetch(`${API_URL}/attendance/clock-in`, {
-      method: 'POST',
-      headers,
-      body: formData
-    });
-    
-    return await handleResponse(response);
   } catch (error) {
     console.error("Clock In API Error:", error.message);
     await queueOfflineAction('clock-in', data);
@@ -440,26 +457,32 @@ export const clockIn = async (data) => {
 export const clockOut = async (data) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    const headers = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const selfie = data.selfie;
+    const selfieUri = selfie ? (typeof selfie === 'string' ? selfie : selfie.uri) : null;
 
-    const formData = new FormData();
-    if (data.employee_id) formData.append('employee_id', String(data.employee_id));
-    if (data.latitude) formData.append('latitude', String(data.latitude));
-    if (data.longitude) formData.append('longitude', String(data.longitude));
-    if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
-
-    if (data.selfie) {
-      appendFileToFormData(formData, 'selfie', data.selfie);
+    if (selfieUri) {
+      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/attendance/clock-out`, selfieUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'selfie',
+        headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
+        parameters: {
+          employee_id: String(data.employee_id || ''),
+          latitude: String(data.latitude || ''),
+          longitude: String(data.longitude || ''),
+          schedule_id: String(data.schedule_id || '')
+        }
+      });
+      return parseUploadResult(uploadResult);
+    } else {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${API_URL}/attendance/clock-out`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data)
+      });
+      return await handleResponse(response);
     }
-
-    const response = await fetch(`${API_URL}/attendance/clock-out`, {
-      method: 'POST',
-      headers,
-      body: formData
-    });
-    
-    return await handleResponse(response);
   } catch (error) {
     console.error("Clock Out API Error:", error.message);
     await queueOfflineAction('clock-out', data);
@@ -486,35 +509,37 @@ export const fetchAttendanceReport = fetchAttendanceHistory;
 // ==========================================
 export const submitLeaveRequest = async (payload) => {
   try {
-    let headers = await getAuthHeaders();
-    delete headers['Content-Type'];
+    const token = await AsyncStorage.getItem('auth_token');
+    
+    // If payload is already FormData (unlikely here since RequestsScreen loops and fetches directly), 
+    // but if passed as object:
+    const imageObj = payload.image || payload.attachment;
+    const imageUri = imageObj ? (typeof imageObj === 'string' ? imageObj : imageObj.uri) : null;
 
-    const formData = new FormData();
-    if (payload instanceof FormData) {
+    if (imageUri) {
+      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/leave-requests`, imageUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'image',
+        headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
+        parameters: {
+          type: String(payload.type || ''),
+          reason: String(payload.reason || ''),
+          request_date: String(payload.request_date || ''),
+          duration: String(payload.duration || 'Whole Day'),
+          is_paid: String(payload.is_paid || '1')
+        }
+      });
+      return parseUploadResult(uploadResult);
+    } else {
+      let headers = await getAuthHeaders();
       const response = await fetch(`${API_URL}/leave-requests`, {
         method: 'POST',
         headers,
-        body: payload,
+        body: JSON.stringify(payload),
       });
       return await handleResponse(response);
     }
-
-    for (const key in payload) {
-      if (payload[key] !== null && payload[key] !== undefined) {
-        if (key === 'image' || key === 'attachment') {
-          appendFileToFormData(formData, key, payload[key]);
-        } else {
-          formData.append(key, String(payload[key]));
-        }
-      }
-    }
-
-    const response = await fetch(`${API_URL}/leave-requests`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    return await handleResponse(response);
   } catch (error) {
     console.error("Submit Leave Error:", error.message);
     return { success: false, message: "Server unreachable" };
@@ -576,8 +601,6 @@ export const fetchUserSchedule = async (employeeId) => {
     return [];
   }
 };
-
-
 
 export const fetchEvents = async () => {
   try {
