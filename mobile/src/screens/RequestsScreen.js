@@ -1,5 +1,5 @@
 // src/screens/RequestsScreen.js
-import React, { useState, useContext, useEffect, useCallback } from 'react';
+import React, { useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
   TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar, Platform
@@ -11,7 +11,6 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
-import { File } from 'expo-file-system';
 import { API_URL } from './api';
 import { Upload, X, Calendar as CalendarIcon, Clock, ArrowLeft } from 'lucide-react-native';
 
@@ -20,15 +19,20 @@ const appendFileToFormData = (formData, fieldName, fileObj) => {
   const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
   if (!fileUri) return;
 
-  try {
-    formData.append(fieldName, new File(fileUri));
-  } catch (err) {
-    formData.append(fieldName, {
-      uri: fileUri,
-      name: fileObj.name || fileUri.split('/').pop() || 'attachment.jpg',
-      type: fileObj.mimeType || 'image/jpeg',
-    });
+  const filename = fileObj.name || fileUri.split('/').pop() || 'attachment.jpg';
+  let mimeType = fileObj.mimeType || 'image/jpeg';
+  if (!fileObj.mimeType) {
+    if (filename.toLowerCase().endsWith('.pdf')) mimeType = 'application/pdf';
+    else if (filename.toLowerCase().endsWith('.png')) mimeType = 'image/png';
+    else if (filename.toLowerCase().endsWith('.doc')) mimeType = 'application/msword';
+    else if (filename.toLowerCase().endsWith('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   }
+
+  formData.append(fieldName, {
+    uri: Platform.OS === 'ios' ? fileUri.replace('file://', '') : fileUri,
+    name: filename,
+    type: mimeType,
+  });
 };
 
 const formatTo12Hour = (timeStr) => {
@@ -79,20 +83,20 @@ const getPHNowString = () => {
 };
 
 const parseServerResponse = async (response) => {
-    if (!response) {
-      return { success: false, message: 'No response received from server.' };
-    }
+  if (!response) {
+    return { success: false, message: 'No response received from server.' };
+  }
+  try {
+    const text = await response.text();
     try {
-      const text = await response.text();
-      try {
-        return JSON.parse(text);
-      } catch {
-        return { success: response.ok, message: text || response.statusText || 'Server error' };
-      }
-    } catch (err) {
-      return { success: false, message: err.message || 'Failed to parse response.' };
+      return JSON.parse(text);
+    } catch {
+      return { success: response.ok, message: text || response.statusText || 'Server error' };
     }
-  };
+  } catch (err) {
+    return { success: false, message: err.message || 'Failed to parse response.' };
+  }
+};
 
 export default function RequestsScreen({ navigation, route }) {
   const prefill = route.params || {};
@@ -100,7 +104,7 @@ export default function RequestsScreen({ navigation, route }) {
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
-  const styles = React.useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
+  const styles = useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
 
   const [activeTab, setActiveTab] = useState(prefill.prefillTab || 'leave');
 
@@ -167,28 +171,51 @@ export default function RequestsScreen({ navigation, route }) {
 
   const todayStr = getPHNowString();
 
-  // Fetch dynamic active leave types from the server so they sync with HR
-  const fetchDynamicLeaveTypes = useCallback(async () => {
+  // AUTOMATIC INITIAL LOAD: Fetch active leave types AND live employee balances on mount
+  const loadInitialLeaveData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      const res = await fetch(`${API_URL}/leave-types`, {
+      const userId = await AsyncStorage.getItem('user_id');
+      const year = new Date().getFullYear();
+
+      // 1. Fetch active leave types from DB
+      const resTypes = await fetch(`${API_URL}/leave-types`, {
         headers: { Authorization: `Bearer ${token || ''}` }
       });
-      const data = await res.json();
-      if (res.ok && Array.isArray(data) && data.length > 0) {
-        setAvailableLeaveTypes(data);
-        if (!data.some(t => t.name === leaveType)) {
-          setLeaveType(data[0].name);
+      const dataTypes = await resTypes.json();
+      if (resTypes.ok && Array.isArray(dataTypes) && dataTypes.length > 0) {
+        setAvailableLeaveTypes(dataTypes);
+        if (!dataTypes.some(t => t.name === leaveType)) {
+          setLeaveType(dataTypes[0].name);
+        }
+      }
+
+      // 2. Fetch live employee balances so validations have immediate access to quota numbers
+      if (userId) {
+        const resBal = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`, {
+          headers: { Authorization: `Bearer ${token || ''}` }
+        });
+        const dataBal = await resBal.json();
+        if (resBal.ok && Array.isArray(dataBal)) {
+          setLeaveBalances(dataBal);
         }
       }
     } catch (err) {
-      console.log('Using fallback static leave types:', err);
+      console.log('Error loading initial leave data:', err);
     }
   }, [leaveType]);
 
   useEffect(() => {
-    fetchDynamicLeaveTypes();
-  }, [fetchDynamicLeaveTypes]);
+    loadInitialLeaveData();
+  }, [loadInitialLeaveData]);
+
+  // Compute remaining days for currently selected leave type
+  const currentSelectedBalance = useMemo(() => {
+    const record = leaveBalances.find(b => 
+      b.leave_type?.trim().toLowerCase() === leaveType?.trim().toLowerCase()
+    );
+    return record ? parseFloat(record.remaining_days) : 0;
+  }, [leaveBalances, leaveType]);
 
   const handleTabSwitch = (tab) => {
     setActiveTab(tab);
@@ -196,6 +223,7 @@ export default function RequestsScreen({ navigation, route }) {
     setAppealStep(1);
     setCorrectionStep(1);
     setOvertimeStep(1);
+    if (tab === 'leave') loadInitialLeaveData();
   };
 
   const handleBackPress = () => {
@@ -260,7 +288,7 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- LEAVE VALIDATION & SUBMISSION ---
+  // --- STRICT LEAVE VALIDATION (BLOCKS 0 BALANCE & INSUFFICIENT QUOTAS) ---
   const handleNextLeave = () => {
     if (!leaveDateFrom) { Alert.alert('Validation Error', 'Please select a start date.'); return; }
     if (isRange && !leaveDateTo) { Alert.alert('Validation Error', 'Please select an end date.'); return; }
@@ -268,11 +296,19 @@ export default function RequestsScreen({ navigation, route }) {
     if (!leaveImage) { Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.'); return; }
     if (isRange && leaveDateTo < leaveDateFrom) { Alert.alert('Invalid Date Range', 'End date cannot be earlier than start date.'); return; }
 
+    // 1. STRICT 0-BALANCE CHECK
+    if (currentSelectedBalance <= 0) {
+      Alert.alert(
+        'Insufficient Balance', 
+        `You currently have 0.00 days remaining for "${leaveType}". You cannot submit a leave application without available balance.`
+      );
+      return;
+    }
+
     const start = new Date(leaveDateFrom);
     const end = isRange ? new Date(leaveDateTo) : start;
     const dates = [];
-    
-    let currentBalance = leaveBalances.find(b => b.leave_type === leaveType)?.remaining_days || 0;
+    let currentBalance = currentSelectedBalance;
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       dates.push({
@@ -282,6 +318,16 @@ export default function RequestsScreen({ navigation, route }) {
       });
       currentBalance -= 1;
     }
+
+    // 2. STRICT QUOTA EXCEEDED CHECK
+    if (dates.length > currentSelectedBalance) {
+      Alert.alert(
+        'Insufficient Balance',
+        `You are requesting ${dates.length} day(s), but only have ${currentSelectedBalance.toFixed(2)} day(s) remaining for "${leaveType}".`
+      );
+      return;
+    }
+
     setLeaveBreakdown(dates);
     setLeaveStep(2);
   };
@@ -290,17 +336,41 @@ export default function RequestsScreen({ navigation, route }) {
     const newBreakdown = [...leaveBreakdown];
     newBreakdown[index].duration = value;
     
-    let currentBalance = leaveBalances.find(b => b.leave_type === leaveType)?.remaining_days || 0;
+    let totalCost = 0;
     newBreakdown.forEach(item => {
-      const cost = item.duration === 'Whole Day' ? 1 : 0.5;
-      item.isPaid = currentBalance >= cost;
-      currentBalance -= cost;
+      totalCost += item.duration === 'Whole Day' ? 1.0 : 0.5;
+    });
+
+    if (totalCost > currentSelectedBalance) {
+      Alert.alert(
+        'Quota Exceeded', 
+        `The selected durations require ${totalCost} day(s), which exceeds your remaining balance of ${currentSelectedBalance} day(s) for "${leaveType}".`
+      );
+      return;
+    }
+
+    let runningBalance = currentSelectedBalance;
+    newBreakdown.forEach(item => {
+      const cost = item.duration === 'Whole Day' ? 1.0 : 0.5;
+      item.isPaid = runningBalance >= cost;
+      runningBalance -= cost;
     });
     
     setLeaveBreakdown(newBreakdown);
   };
 
   const handleSubmitLeave = async () => {
+    // Final balance safeguard before network request
+    let totalRequired = 0;
+    leaveBreakdown.forEach(item => {
+      totalRequired += item.duration === 'Whole Day' ? 1.0 : 0.5;
+    });
+
+    if (totalRequired > currentSelectedBalance) {
+      Alert.alert('Submission Error', `You do not have sufficient "${leaveType}" balance to complete this request.`);
+      return;
+    }
+
     setSubmittingLeave(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -313,7 +383,7 @@ export default function RequestsScreen({ navigation, route }) {
         formData.append('reason', String(leaveReason ? leaveReason.trim() : ''));
         formData.append('request_date', String(item.date));
         formData.append('duration', String(item.duration));
-        formData.append('is_paid', String(item.isPaid ? '1' : '0'));
+        formData.append('is_paid', '1');
 
         if (leaveImage) {
           appendFileToFormData(formData, 'image', leaveImage);
@@ -331,7 +401,7 @@ export default function RequestsScreen({ navigation, route }) {
         if (response && response.ok && result.success) {
           successCount++;
         } else {
-          lastMessage = result.message || 'Failed to submit date.';
+          lastMessage = result.message || 'Failed to submit request.';
         }
       }
 
@@ -343,6 +413,7 @@ export default function RequestsScreen({ navigation, route }) {
         setLeaveImage(null);
         setIsRange(false);
         setLeaveStep(1);
+        loadInitialLeaveData(); // Refresh remaining balances immediately
       } else {
         Alert.alert('Submission Notice', `${successCount}/${leaveBreakdown.length} submitted. ${lastMessage}`);
       }
@@ -640,10 +711,24 @@ export default function RequestsScreen({ navigation, route }) {
                     </>
                   )}
 
-                  <Text style={styles.label}>Leave Type (Synchronized with HR)</Text>
+                  {/* Header showing Selected Leave Type and Real-Time Remaining Quota */}
+                  <View style={styles.leaveTypeHeaderRow}>
+                    <Text style={[styles.label, { marginVertical: 0 }]}>Leave Type</Text>
+                    <Text style={[
+                      styles.balanceIndicatorText, 
+                      { color: currentSelectedBalance > 0 ? '#00897B' : '#EF4444' }
+                    ]}>
+                      Available: {currentSelectedBalance.toFixed(2)} day(s) left
+                    </Text>
+                  </View>
+
                   <View style={styles.typeGroup}>
                     {availableLeaveTypes.map(t => (
-                      <TouchableOpacity key={t.id || t.name} style={[styles.typeChip, leaveType === t.name && styles.typeChipActive]} onPress={() => setLeaveType(t.name)}>
+                      <TouchableOpacity 
+                        key={t.id || t.name} 
+                        style={[styles.typeChip, leaveType === t.name && styles.typeChipActive]} 
+                        onPress={() => setLeaveType(t.name)}
+                      >
                         <Text style={[styles.typeChipText, leaveType === t.name && styles.typeChipTextActive]}>{t.name}</Text>
                       </TouchableOpacity>
                     ))}
@@ -666,15 +751,17 @@ export default function RequestsScreen({ navigation, route }) {
 
               {leaveStep === 2 && (
                 <View>
-                  <Text style={[styles.headerTitle, { marginBottom: 16 }]}>Date Breakdown</Text>
-                  <Text style={[styles.subLabel, { marginBottom: 16 }]}>Specify duration for each day. Pay status is calculated based on your remaining '{leaveType}' balance.</Text>
+                  <Text style={[styles.headerTitle, { marginBottom: 8 }]}>Date Breakdown</Text>
+                  <Text style={[styles.subLabel, { marginBottom: 16 }]}>
+                    Specify duration for each day. Available '{leaveType}' balance: {currentSelectedBalance.toFixed(2)} day(s).
+                  </Text>
                   
                   {leaveBreakdown.map((item, index) => (
                     <View key={item.date} style={styles.reviewBox}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
                         <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary }}>{item.date}</Text>
-                        <Text style={{ fontFamily: 'Inter_18pt-Bold', color: item.isPaid ? '#059669' : '#DC2626' }}>
-                          {item.isPaid ? 'With Pay' : 'Without Pay'}
+                        <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#059669' }}>
+                          Approved Balance Deductible
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -713,6 +800,12 @@ export default function RequestsScreen({ navigation, route }) {
                     </View>
                     <View style={styles.reviewDivider} />
 
+                    <View style={styles.reviewRow}>
+                      <Text style={styles.reviewLabel}>Available Quota</Text>
+                      <Text style={[styles.reviewValue, { color: '#00897B' }]}>{currentSelectedBalance.toFixed(2)} days</Text>
+                    </View>
+                    <View style={styles.reviewDivider} />
+
                     <View style={styles.reviewRowColumn}>
                       <Text style={styles.reviewLabel}>Reason</Text>
                       <Text style={styles.reviewValueMultiline}>{leaveReason || '—'}</Text>
@@ -730,7 +823,7 @@ export default function RequestsScreen({ navigation, route }) {
                       {leaveBreakdown.map((item) => (
                         <View key={item.date} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 }}>
                           <Text style={{ fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#334155' : colors.textPrimary }}>• {item.date} ({item.duration})</Text>
-                          <Text style={{ fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: item.isPaid ? '#059669' : '#DC2626' }}>{item.isPaid ? 'With Pay' : 'Without Pay'}</Text>
+                          <Text style={{ fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: '#059669' }}>Quota Deductible</Text>
                         </View>
                       ))}
                     </View>
@@ -1095,7 +1188,7 @@ export default function RequestsScreen({ navigation, route }) {
                 leaveBalances.map((item, idx) => (
                   <View key={idx} style={styles.balanceRow}>
                     <Text style={styles.balanceType}>{item.leave_type}</Text>
-                    <Text style={styles.balanceDays}>{item.remaining_days} / {item.annual_quota || 15} left</Text>
+                    <Text style={styles.balanceDays}>{parseFloat(item.remaining_days).toFixed(2)} / {item.annual_quota || 15} left</Text>
                   </View>
                 ))
               )}
@@ -1126,6 +1219,18 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   label: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#334155' : colors.textPrimary, marginBottom: 8, marginTop: 16 },
   subLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
   
+  leaveTypeHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  balanceIndicatorText: {
+    fontFamily: 'Inter_18pt-Bold',
+    fontSize: 12,
+  },
+
   input: { fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, padding: 16, fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, marginBottom: 16 },
   textArea: { height: 110, textAlignVertical: 'top' },
   

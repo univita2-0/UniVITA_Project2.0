@@ -1813,7 +1813,6 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
   const userId = req.user.id;
   const image_url = req.file ? `/uploads/leave_images/${req.file.filename}` : null;
   const duration = req.body.duration || 'Whole Day';
-  const isPaid = (req.body.is_paid === 'true' || req.body.is_paid === true || req.body.is_paid === 1 || req.body.is_paid === '1') ? 1 : 0;
   const phNow = getPHDateTime();
 
   // 1. Strict Input Validation
@@ -1883,12 +1882,15 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
 
     if (typeRows.length > 0) {
       leaveTypeId = typeRows[0].id;
-      annualQuota = typeRows[0].annual_quota || 15;
+      // Fixed: Prevent 0 quota (such as CPO) from evaluating to 15
+      annualQuota = typeRows[0].annual_quota !== undefined && typeRows[0].annual_quota !== null 
+        ? parseFloat(typeRows[0].annual_quota) 
+        : 15;
     } else {
       // Auto-insert missing leave type into leave_types so it never blocks valid submissions
       try {
         const [insertResult] = await db.promise().query(
-          "INSERT INTO leave_types (name, annual_quota) VALUES (?, 15)",
+          "INSERT INTO leave_types (name, annual_quota, is_active) VALUES (?, 15, 1)",
           [cleanType]
         );
         leaveTypeId = insertResult.insertId;
@@ -1896,12 +1898,12 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
         const [fallbackRows] = await db.promise().query("SELECT id, annual_quota FROM leave_types LIMIT 1");
         if (fallbackRows.length > 0) {
           leaveTypeId = fallbackRows[0].id;
-          annualQuota = fallbackRows[0].annual_quota || 15;
+          annualQuota = parseFloat(fallbackRows[0].annual_quota) || 15;
         }
       }
     }
 
-    // 4. Leave Balance Check (Only enforced if leaveTypeId exists AND leave is marked 'Paid')
+    // 4. Strict Balance Validation (Blocks 0-Balance and Insufficient Balance Requests)
     if (leaveTypeId) {
       await db.promise().query(
         `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated) 
@@ -1914,10 +1916,14 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
         [userId, leaveTypeId, leaveYear]
       );
 
-      if (isPaid === 1 && (!balanceRows.length || balanceRows[0].remaining_days < 1)) {
+      const currentRemaining = balanceRows.length > 0 ? parseFloat(balanceRows[0].remaining_days) : 0;
+      const requiredCost = (duration === '1st Half' || duration === '2nd Half') ? 0.5 : 1.0;
+
+      // Strictly block submission if employee has 0 or insufficient days
+      if (currentRemaining < requiredCost) {
         return res.status(400).json({ 
           success: false, 
-          message: `Insufficient ${type} balance for a paid leave. You have 0 days remaining.` 
+          message: `Insufficient ${cleanType} balance. You currently have ${currentRemaining.toFixed(2)} day(s) remaining (Required: ${requiredCost} day(s)).` 
         });
       }
     }
@@ -1925,8 +1931,8 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
     // 5. Insert Leave Request
     const [result] = await db.promise().query(
       `INSERT INTO leave_requests (user_id, request_date, duration, is_paid, reason, type, image_url, status, submitted_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?)`,
-      [employee_id, request_date, duration, isPaid, reason.trim(), cleanType, image_url, phNow]
+       VALUES (?, ?, ?, 1, ?, ?, ?, 'Pending', ?)`,
+      [employee_id, request_date, duration, reason.trim(), cleanType, image_url, phNow]
     );
 
     logAction(req.user.id, 'SUBMIT_LEAVE', 'leave_request', result.insertId, req);

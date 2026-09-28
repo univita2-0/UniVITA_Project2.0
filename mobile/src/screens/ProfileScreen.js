@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import { API_URL, updateProfile } from './api';
+import * as FileSystem from 'expo-file-system';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -194,22 +195,38 @@ export default function ProfileScreen({ navigation }) {
       setIsUploadingImage(true);
 
       try {
-        const res = await updateProfile(userData.id, {
-          full_name: userData.name,
-          email: userData.email,
-          profile_picture: asset
-        });
+        const token = await AsyncStorage.getItem('auth_token');
+
+        // Native multipart upload to bypass React Native's FormDataPart bug
+        const uploadResult = await FileSystem.uploadAsync(
+          `${API_URL}/users/${userData.id}/profile`,
+          asset.uri,
+          {
+            httpMethod: 'PUT',
+            uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+            fieldName: 'profile_picture',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/json',
+            },
+            parameters: {
+              full_name: String(userData.name || ''),
+              email: String(userData.email || '')
+            }
+          }
+        );
+
+        const res = JSON.parse(uploadResult.body);
 
         if (res.success && res.profile_picture) {
           const baseUrl = API_URL.replace('/api', '');
           const fullImageUrl = `${baseUrl}${res.profile_picture}`;
           setProfileImage(fullImageUrl);
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
+          Alert.alert("Success", "Profile picture updated successfully!");
         } else {
-          await AsyncStorage.setItem(`@profile_picture_${userData.id}`, asset.uri);
+          throw new Error(res.message || "Failed to update profile picture on server.");
         }
-
-        Alert.alert("Success", "Profile picture updated successfully!");
       } catch (err) {
         console.error("Upload Error:", err);
         const savedImage = await AsyncStorage.getItem(`@profile_picture_${userData.id}`);
