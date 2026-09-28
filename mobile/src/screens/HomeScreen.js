@@ -419,6 +419,7 @@ export default function HomeScreen({ navigation }) {
               isClockedOut: hasClockOut,
               computedStatus,
               record,
+              isPassed,
             };
           })
           .sort((a, b) => a.startMins - b.startMins);
@@ -430,21 +431,36 @@ export default function HomeScreen({ navigation }) {
         if (!activeSchedule && todaySchedules.length > 0) activeSchedule = todaySchedules[todaySchedules.length - 1];
         
         setTodaySchedule(activeSchedule || null);
-        checkTodayStatus(history || [], activeSchedule);
+        checkTodayStatus(history || [], activeSchedule, currentMinutes);
       }
     } catch (error) { console.error("LoadData error:", error); }
   }, [selectedMonth, computeMonthlyStats]);
 
   useEffect(() => { computeMonthlyStats(rawHistory, rawSchedule, selectedMonth); }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
 
-  const checkTodayStatus = (history, activeSchedule) => {
-    if (!activeSchedule) { setAttendanceStatus({ canClockIn: false, canClockOut: false, todayRecord: null }); return; }
+  const checkTodayStatus = (history, activeSchedule, currentMinutes) => {
+    if (!activeSchedule) { 
+      setAttendanceStatus({ canClockIn: false, canClockOut: false, todayRecord: null }); 
+      return; 
+    }
+    
+    const endMins = parseMins(activeSchedule.end_time);
+    const isPassed = currentMinutes > endMins;
+
     const todayRecord = history.find(record => record.schedule_id === activeSchedule.id);
     if (todayRecord) {
-      const isClockedIn = !!todayRecord.time_in;
+      const isClockedIn = !!todayRecord.time_in && todayRecord.time_in !== '--:--';
       const isClockedOut = todayRecord.time_out && todayRecord.time_out !== '--:--';
-      setAttendanceStatus({ canClockIn: false, canClockOut: isClockedIn && !isClockedOut, todayRecord: { ...todayRecord, time_in: todayRecord.time_in || '--:--', time_out: todayRecord.time_out || '--:--' } });
-    } else setAttendanceStatus({ canClockIn: true, canClockOut: false, todayRecord: null });
+      
+      setAttendanceStatus({ 
+        canClockIn: false, 
+        // Disables check-out button if shift end time has already passed
+        canClockOut: isClockedIn && !isClockedOut && !isPassed, 
+        todayRecord: { ...todayRecord, time_in: todayRecord.time_in || '--:--', time_out: todayRecord.time_out || '--:--' } 
+      });
+    } else { 
+      setAttendanceStatus({ canClockIn: !isPassed, canClockOut: false, todayRecord: null }); 
+    }
   };
 
   // MANDATORY GPS CHECK BEFORE CLOCK IN

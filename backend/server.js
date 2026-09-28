@@ -2602,9 +2602,32 @@ app.get('/api/attendance/all-recent', authenticateToken, (req, res) => {
 
 app.get('/api/attendance/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   const employeeId = req.params.employeeId;
-  const sql = "SELECT *, DATE_FORMAT(date, '%Y-%m-%d') as date, ROUND(TIMESTAMPDIFF(MINUTE, time_in, time_out) / 60, 2) as total_hours FROM attendance WHERE user_id = ? ORDER BY date DESC";
-  db.query(sql, [employeeId], (err, result) => {
-    if (err) return res.status(500).json({ success: false, message: 'Failed to load user attendance.' });
+  const phNow = getPHDateTime(); // Explicit Philippine Standard Time
+
+  const sql = `
+    SELECT 
+      a.*, 
+      DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
+      ROUND(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60, 2) as total_hours,
+      CASE 
+        WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN
+          CASE 
+            WHEN CONCAT(a.date, ' ', COALESCE(s.end_time, '23:59:59')) < ? THEN 'Missing Clock-Out'
+            ELSE 'In Progress'
+          END
+        ELSE a.status
+      END AS status
+    FROM attendance a
+    LEFT JOIN schedules s ON a.schedule_id = s.id
+    WHERE a.user_id = ? 
+    ORDER BY a.date DESC
+  `;
+
+  db.query(sql, [phNow, employeeId], (err, result) => {
+    if (err) {
+      console.error('Failed to load user attendance:', err);
+      return res.status(500).json({ success: false, message: 'Failed to load user attendance.' });
+    }
     res.json(result || []);
   });
 });
