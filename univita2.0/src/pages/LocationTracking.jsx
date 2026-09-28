@@ -272,7 +272,7 @@ const LocationTracking = () => {
               <div className="stat-info">
                 <span className="stat-label">On-Campus Now</span>
                 <span className="stat-value">
-                 {instructors.filter(i => i.last_is_inside === 1 && i.gps_status === 'GPS ON').length}
+                  {instructors.filter(i => i.last_is_inside === 1 && i.gps_status === 'GPS ON').length}
                </span>
               </div>
             </div>
@@ -354,9 +354,9 @@ const LocationTracking = () => {
                           </td>
                           
                           <td className="text-center">
-                            {!displayGpsOn ? (
-                              <span className="lt-status-badge outside">
-                                OUTSIDE
+                            {!displayGpsOn || displayLocation === null ? (
+                              <span className="lt-status-badge" style={{ backgroundColor: '#F3F4F6', color: '#4B5563', border: '1px solid #D1D5DB' }}>
+                                UNAVAILABLE
                               </span>
                             ) : displayLocation === 1 ? (
                               <span className="lt-status-badge inside">

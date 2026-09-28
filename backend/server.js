@@ -5707,9 +5707,9 @@ const broadcastInstructorStatus = async (employeeId) => {
         ELSE (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_position_name,
       (CASE 
-        WHEN u.location_tracking_enabled = 0 THEN 0
-        WHEN u.last_location_ping IS NULL THEN 0
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 0
+        WHEN u.location_tracking_enabled = 0 THEN NULL
+        WHEN u.last_location_ping IS NULL THEN NULL
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN NULL
         ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_is_inside,
       (CASE 
@@ -5731,8 +5731,6 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
 
   const selectedDate = req.query.date || getPHTime().date;
-  const { date: todayPh, time: timePh } = getPHTime();
-  const currentPhDateTime = `${todayPh} ${timePh}`;
 
   try {
     const [rows] = await db.promise().query(`
@@ -5744,8 +5742,8 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         
         COALESCE(a.status, 
           CASE 
-            WHEN CONCAT(s.date, ' ', s.end_time) < ? AND a.time_in IS NULL THEN 'Missed Schedule'
-            WHEN CONCAT(s.date, ' ', s.start_time) <= ? AND CONCAT(s.date, ' ', s.end_time) >= ? AND a.time_in IS NULL THEN 'Absent'
+            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() AND a.time_in IS NULL THEN 'Missed Schedule'
+            WHEN CONCAT(s.date, ' ', s.start_time) <= NOW() AND CONCAT(s.date, ' ', s.end_time) >= NOW() AND a.time_in IS NULL THEN 'Absent'
             ELSE 'Scheduled'
           END
         ) AS attendance_status,
@@ -5755,7 +5753,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Unavailable'
           WHEN u.last_location_ping IS NULL THEN 'Unavailable'
           WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')) > 120 THEN 'Signal Lost'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'Signal Lost'
           ELSE COALESCE(ilt.location_name, 'Unavailable') 
         END AS last_position_name, 
         
@@ -5763,8 +5761,8 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           WHEN a.time_in IS NULL THEN NULL
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN NULL
           WHEN u.last_location_ping IS NULL THEN NULL
-          WHEN u.location_tracking_enabled = 0 THEN 0
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')) > 120 THEN 0
+          WHEN u.location_tracking_enabled = 0 THEN NULL
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN NULL
           ELSE ilt.is_inside_campus 
         END AS last_is_inside,
         
@@ -5775,7 +5773,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'GPS OFF'
           WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
           WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')) > 120 THEN 'GPS OFF'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'GPS OFF'
           ELSE 'GPS ON'
         END AS gps_status,
         
@@ -5791,7 +5789,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
       ) ilt ON u.employee_id = ilt.employee_id
       WHERE u.role = 'instructor' AND u.status = 'active' AND s.date = ?
       ORDER BY s.start_time ASC
-    `, [currentPhDateTime, currentPhDateTime, currentPhDateTime, currentPhDateTime, currentPhDateTime, selectedDate]);
+    `, [selectedDate]);
 
     rows.forEach(row => {
       if (row.campus_entry_time) row.campus_entry_time = new Date(row.campus_entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
