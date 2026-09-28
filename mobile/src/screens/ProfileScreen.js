@@ -186,7 +186,7 @@ export default function ProfileScreen({ navigation }) {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.6,
+      quality: 0.5,
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -196,42 +196,37 @@ export default function ProfileScreen({ navigation }) {
 
       try {
         const token = await AsyncStorage.getItem('auth_token');
+        
+        // Convert local image URI to Base64 string to match server.js expectations
+        const base64Image = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
 
-        // Native multipart upload to bypass React Native's FormDataPart bug
-        const uploadResult = await FileSystem.uploadAsync(
-          `${API_URL}/users/${userData.id}/profile`,
-          asset.uri,
-          {
-            httpMethod: 'PUT',
-            uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-            fieldName: 'profile_picture',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              Accept: 'application/json',
-            },
-            parameters: {
-              full_name: String(userData.name || ''),
-              email: String(userData.email || '')
-            }
+        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, {
+          full_name: userData.name,
+          email: userData.email,
+          base64_image: base64Image
+        }, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
           }
-        );
+        });
 
-        const res = JSON.parse(uploadResult.body);
-
-        if (res.success && res.profile_picture) {
+        if (res.data && res.data.success && res.data.profile_picture) {
           const baseUrl = API_URL.replace('/api', '');
-          const fullImageUrl = `${baseUrl}${res.profile_picture}`;
+          const fullImageUrl = `${baseUrl}${res.data.profile_picture}`;
           setProfileImage(fullImageUrl);
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
           Alert.alert("Success", "Profile picture updated successfully!");
         } else {
-          throw new Error(res.message || "Failed to update profile picture on server.");
+          throw new Error(res.data?.message || "Failed to save profile picture.");
         }
       } catch (err) {
         console.error("Upload Error:", err);
         const savedImage = await AsyncStorage.getItem(`@profile_picture_${userData.id}`);
         setProfileImage(savedImage || null);
-        Alert.alert("Upload Error", err.message || "Could not save profile picture to server.");
+        Alert.alert("Upload Error", err.response?.data?.message || err.message || "Could not save profile picture to server.");
       } finally {
         setIsUploadingImage(false);
       }

@@ -58,11 +58,6 @@ export default function LoginScreen({ navigation }) {
           return;
         }
 
-        // If user chose NOT to stay logged in previously, clear stale tokens
-        if (stay === 'false') {
-          await AsyncStorage.removeItem('auth_token');
-        }
-
         // Restore remembered email if available
         const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
         if (rememberedEmail) {
@@ -569,7 +564,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="New password (8+ chars, 1 upper, 1 special)"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor="#475569"
                   value={resetNewPassword}
                   onChangeText={setResetNewPassword}
                   autoFocus
@@ -578,7 +573,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="Confirm new password"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor="#475569"
                   value={resetConfirmPassword}
                   onChangeText={setResetConfirmPassword}
                 />
@@ -656,7 +651,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: '#FFFFFF', marginBottom: 8, textAlign: 'center' },
   modalSubtitle: { fontFamily: 'Inter_18pt-Regular', fontSize: 13, color: '#94A3B8', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
   
-  otpInput: { width: '100%', height: 52, borderWidth: 1, borderColor: '#1E293B', borderRadius: 12, paddingHorizontal: 16, fontFamily: 'Inter_18pt-Bold', fontSize: 24, letterSpacing: 8, backgroundColor: '#060913', marginBottom: 20, color: '#FFFFFF' },
+  otpInput: { width: '100%', height: 52, borderWidth: 1, encrypted: true, borderColor: '#1E293B', borderRadius: 12, paddingHorizontal: 16, fontFamily: 'Inter_18pt-Bold', fontSize: 24, letterSpacing: 8, backgroundColor: '#060913', marginBottom: 20, color: '#FFFFFF' },
   resetInput: { width: '100%', height: 48, borderWidth: 1, borderColor: '#1E293B', borderRadius: 12, paddingHorizontal: 16, fontFamily: 'Inter_18pt-Regular', fontSize: 14, backgroundColor: '#060913', color: '#FFFFFF', marginBottom: 16 },
   
   modalButton: { backgroundColor: '#FFFFFF', width: '100%', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
