@@ -182,7 +182,7 @@ export default function HomeScreen({ navigation }) {
     return () => { isMounted = false; };
   }, []);
 
-  // SMART GPS & PERMISSION TRACKING: Instantly reports GPS OFF to server if permissions are revoked
+  // SMART GPS & PERMISSION TRACKING: Automatically stops tracking when shift end time is reached
   useEffect(() => {
     let isCancelled = false;
 
@@ -201,11 +201,14 @@ export default function HomeScreen({ navigation }) {
           const endMinutes = endH * 60 + endM;
 
           const isClockedIn = shift.isClockedIn && !shift.isClockedOut;
-          return isClockedIn || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
+          
+          // Strict validation: Stop tracking immediately once shift end time has passed
+          const isShiftTimeValid = currentMinutes <= endMinutes;
+
+          return (isClockedIn && isShiftTimeValid) || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
         });
 
         if (hasActiveOrUpcomingShift) {
-          // Safely check device GPS toggle and app runtime permissions
           let isGpsFullyActive = false;
           try {
             const gpsHardwareOn = await Location.hasServicesEnabledAsync();
@@ -216,16 +219,13 @@ export default function HomeScreen({ navigation }) {
           }
 
           if (!isGpsFullyActive) {
-            // Permission was set to "Don't allow" or GPS disabled: immediately notify server
             await setTrackingEnabled(false);
             await sendLocationPing(0, 0, false, 'GPS Disabled');
-
             const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
             if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
             return;
           }
 
-          // GPS is active: send live position
           await setTrackingEnabled(true);
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
           
@@ -238,7 +238,6 @@ export default function HomeScreen({ navigation }) {
             );
           }
 
-          // Manage background task
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
           if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
           
@@ -259,13 +258,15 @@ export default function HomeScreen({ navigation }) {
             }
           }
         } else {
-          // Shift ended: disable tracking cleanly
+          // Shift time has ended: automatically stop background tracking and report GPS OFF
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-          if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+          if (isRegistered) {
+            await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+          }
           await setTrackingEnabled(false);
+          await sendLocationPing(0, 0, false, 'Shift Ended');
         }
       } catch (err) {
-        // Fallback: If any error occurs (like permission denial), notify server GPS is OFF
         try {
           await setTrackingEnabled(false);
           await sendLocationPing(0, 0, false, 'GPS Disabled');

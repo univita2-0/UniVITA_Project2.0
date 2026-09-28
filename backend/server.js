@@ -2306,6 +2306,7 @@ app.get('/api/schedules', (req, res) => {
 });
 
 app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
+  const phNow = getPHDateTime();
   const sql = `
     SELECT 
       s.*, 
@@ -2322,12 +2323,12 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
         WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Completed'
         WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN
           CASE 
-            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
+            WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'Missing Clock-Out'
             ELSE 'In Progress'
           END
         WHEN a.time_in IS NULL THEN
           CASE 
-            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missed Schedule'
+            WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'Missed Schedule'
             ELSE 'Scheduled'
           END
         ELSE COALESCE(a.status, 'Scheduled')
@@ -2338,9 +2339,9 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
         WHEN (ac.id IS NOT NULL AND ac.status = 'pending') OR (a.correction_status = 'pending') OR (ap.id IS NOT NULL AND ap.status = 'pending') THEN 'PENDING'
         WHEN (lr_approved.id IS NOT NULL) OR a.status = 'on leave' THEN 'ON LEAVE'
         WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'COMPLETED'
-        WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) >= NOW() THEN 'IN PROGRESS'
-        WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'MISSING CLOCK-OUT'
-        WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'MISSED SCHEDULE'
+        WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) >= ? THEN 'IN PROGRESS'
+        WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) < ? THEN 'MISSING CLOCK-OUT'
+        WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < ? THEN 'MISSED SCHEDULE'
         ELSE 'Scheduled'
       END AS attendance_status
 
@@ -2356,7 +2357,7 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
     ORDER BY s.date ASC, s.start_time ASC
   `;
   
-  db.query(sql, [req.params.employeeId], (err, result) => {
+  db.query(sql, [phNow, phNow, phNow, phNow, phNow, req.params.employeeId], (err, result) => {
     if (err) return res.status(500).json({ success: false, message: "Failed to load personal schedules." });
     res.json(result || []);
   });
@@ -5600,6 +5601,15 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       return res.json({ success: false, message: "No active shift today" });
     }
 
+    // VALIDATION: Automatically stop tracking if shift end_time has passed
+    if (currentTime > currentSchedule.end_time) {
+      await db.promise().query(
+        "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ? OR id = ?",
+        [employeeId, userId]
+      );
+      return res.json({ success: false, message: "Shift has ended. Location tracking closed." });
+    }
+
     const [lastRec] = await db.promise().query(
       `SELECT location_enabled, is_inside_campus, location_name
        FROM instructor_location_tracking 
@@ -5699,18 +5709,21 @@ const broadcastInstructorStatus = async (employeeId) => {
       u.employee_id, u.full_name, u.last_location_ping, u.location_tracking_enabled,
       s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course, s.start_time, s.end_time,
       (CASE 
+        WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
         WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
         WHEN u.last_location_ping IS NULL THEN 'Unavailable'
         WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'Signal Lost'
         ELSE (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_position_name,
       (CASE 
+        WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN NULL
         WHEN u.location_tracking_enabled = 0 THEN NULL
         WHEN u.last_location_ping IS NULL THEN NULL
         WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN NULL
         ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_is_inside,
       (CASE 
+        WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
         WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
         WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
         WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'GPS OFF'
@@ -5768,6 +5781,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         u.last_location_ping AS last_ping_time,
         
         CASE 
+          WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
           WHEN a.time_in IS NULL THEN 'GPS OFF'
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'GPS OFF'
           WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
