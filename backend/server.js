@@ -1170,6 +1170,20 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'Schedule not found.' });
     const { place: schedulePlace, end_time: scheduledEndTime } = schedRows[0];
 
+    // --- STRICT CLOCK-OUT TIMING VALIDATION ---
+    if (currentTime < scheduledEndTime) {
+      return res.status(403).json({ success: false, message: `Shift incomplete. You must stay until ${formatTo12Hour(scheduledEndTime)} to clock out.` });
+    }
+
+    // If shift end time has already passed, regular clock-out is closed (must use Attendance Correction)
+    if (currentTime > scheduledEndTime) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `Shift time has already ended (${formatTo12Hour(scheduledEndTime)}). Regular clock-out is closed. Please submit an Attendance Correction request.` 
+      });
+    }
+    // ------------------------------------------
+
     const [locRows] = await db.promise().query(
       "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
       [schedulePlace]
@@ -1189,17 +1203,6 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     );
     if (existing.length === 0) return res.status(400).json({ success: false, message: 'No active clock-in found for this schedule.' });
 
-    if (currentTime < scheduledEndTime) {
-      return res.status(403).json({ success: false, message: `Shift incomplete. You must stay until ${formatTo12Hour(scheduledEndTime)} to clock out.` });
-    }
-
-    let finalTimeOut = currentTime;
-    let isLateClockOut = false;
-    if (currentTime > scheduledEndTime) {
-      finalTimeOut = scheduledEndTime;
-      isLateClockOut = true;
-    }
-
     await db.promise().query(
       `UPDATE attendance SET 
         time_out = ?, 
@@ -1208,21 +1211,8 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
         clock_out_longitude = ?, 
         location = ? 
        WHERE id = ?`,
-      [finalTimeOut, selfiePath, parsedLat, parsedLon, schedulePlace, existing[0].id]
+      [currentTime, selfiePath, parsedLat, parsedLon, schedulePlace, existing[0].id]
     );
-
-    if (isLateClockOut) {
-      const excessMinutes = (new Date(`1970-01-01T${currentTime}`) - new Date(`1970-01-01T${scheduledEndTime}`)) / 60000;
-      if (excessMinutes > 10) {
-        const reason = "System Auto-Logged: Instructor clocked out late. Awaiting review.";
-        await db.promise().query(
-          `INSERT INTO overtime_requests 
-           (user_id, date, schedule_id, start_time, end_time, reason, scenario_type, attendance_id, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'after_shift', ?, 'pending', ?)`,
-          [userId, todayDate, schedule_id, scheduledEndTime, currentTime, reason, existing[0].id, getPHDateTime()]
-        );
-      }
-    }
 
     await db.promise().query(
       "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",

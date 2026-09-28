@@ -21,8 +21,6 @@ import {
 
 const LOCATION_TASK_NAME = 'background-location-task';
 
-
-
 const getTodayString = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 
 const getInitialMonthString = () => {
@@ -110,10 +108,7 @@ export default function HomeScreen({ navigation }) {
   const [rawSchedule, setRawSchedule] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(getInitialMonthString());
 
-  const [allTodaySchedules, setAllTodaySchedules] = useState([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [todaySchedule, setTodaySchedule] = useState(null);
-  const [attendanceStatus, setAttendanceStatus] = useState({ canClockIn: true, canClockOut: false, todayRecord: null });
   const [stats, setStats] = useState({ present: 0, absent: 0, late: 0, overtime: 0 });
   
   const [showMonthlyModal, setShowMonthlyModal] = useState(false);
@@ -131,42 +126,32 @@ export default function HomeScreen({ navigation }) {
   };
 
   const promptBatteryOptimizationOnce = async () => {
-  if (Platform.OS !== 'android') return;
-
-  try {
-    // 1. Check if the user has already been prompted
-    const hasPrompted = await AsyncStorage.getItem('@has_prompted_battery');
-    if (hasPrompted === 'true') {
-      return; // Already prompted, do nothing!
-    }
-
-    // 2. Mark as prompted immediately so it never fires again
-    await AsyncStorage.setItem('@has_prompted_battery', 'true');
-
-    // 3. Show a clear dialog explaining WHY settings are opening
-    Alert.alert(
-      "Background Location Tracking",
-      "To keep your location tracking active during work shifts while your screen is locked, please set UniVITA's battery usage to 'Unrestricted'.",
-      [
-        { text: "Dismiss", style: "cancel" },
-        {
-          text: "Open Settings",
-          onPress: async () => {
-            try {
-              await IntentLauncher.startActivityAsync(
-                IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS
-              );
-            } catch (err) {
-              console.warn("Failed to open battery optimization settings:", err);
+    if (Platform.OS !== 'android') return;
+    try {
+      const hasPrompted = await AsyncStorage.getItem('@has_prompted_battery');
+      if (hasPrompted === 'true') return;
+      await AsyncStorage.setItem('@has_prompted_battery', 'true');
+      Alert.alert(
+        "Background Location Tracking",
+        "To keep your location tracking active during work shifts while your screen is locked, please set UniVITA's battery usage to 'Unrestricted'.",
+        [
+          { text: "Dismiss", style: "cancel" },
+          {
+            text: "Open Settings",
+            onPress: async () => {
+              try {
+                await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+              } catch (err) {
+                console.warn("Failed to open battery optimization settings:", err);
+              }
             }
           }
-        }
-      ]
-    );
-  } catch (error) {
-    console.error("Battery prompt error:", error);
-  }
-};
+        ]
+      );
+    } catch (error) {
+      console.error("Battery prompt error:", error);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -182,27 +167,110 @@ export default function HomeScreen({ navigation }) {
     return () => { isMounted = false; };
   }, []);
 
+  // --- REAL-TIME DERIVED TIME CALCULATIONS (Guarantees instant button disable past shift end) ---
+  const currentMinutes = useMemo(() => {
+    return currentTime.getHours() * 60 + currentTime.getMinutes();
+  }, [currentTime]);
+
+  const todayStr = getTodayString();
+
+  const allTodaySchedules = useMemo(() => {
+    const parseMins = (ts) => {
+      if (!ts) return 0;
+      let cs = String(ts).split('.')[0].replace(',', ':');
+      const [h, m] = cs.split(':').map(Number);
+      return (h || 0) * 60 + (m || 0);
+    };
+
+    return (rawSchedule || [])
+      .filter(s => String(s.date).startsWith(todayStr))
+      .map(s => {
+        const record = (rawHistory || []).find(r => r.schedule_id === s.id);
+        const startMins = parseMins(s.start_time);
+        const endMins = parseMins(s.end_time);
+        const isPassed = currentMinutes > endMins;
+        const isActive = currentMinutes >= (startMins - 30) && currentMinutes <= endMins;
+        
+        const hasClockIn = record && record.time_in && record.time_in !== '--:--' && record.time_in !== null;
+        const hasClockOut = record && record.time_out && record.time_out !== '--:--' && record.time_out !== null;
+
+        let computedStatus = 'SCHEDULED';
+            
+            if (hasClockOut) {
+              const dbStatus = (record?.status || '').toLowerCase();
+              if (dbStatus.includes('early') || dbStatus.includes('clock out') || dbStatus.includes('departure')) {
+                computedStatus = 'COMPLETED - EARLY CLOCK OUT';
+              } else {
+                
+                computedStatus = 'COMPLETED';
+              }
+            } else if (isPassed) {
+              if (hasClockIn && !hasClockOut) {
+                computedStatus = 'MISSING CLOCK-OUT';
+              } else if (hasClockIn && hasClockOut) {
+                computedStatus = 'COMPLETED';
+              } else {
+                computedStatus = 'MISSED SCHEDULE';
+              }
+            } else if (isActive) {
+              computedStatus = hasClockIn ? 'IN PROGRESS' : 'SCHEDULED';
+            } else {
+              computedStatus = 'SCHEDULED';
+            }
+
+        return {
+          ...s,
+          startMins,
+          endMins,
+          isClockedIn: hasClockIn,
+          isClockedOut: hasClockOut,
+          computedStatus,
+          record,
+          isPassed,
+        };
+      })
+      .sort((a, b) => a.startMins - b.startMins);
+  }, [rawSchedule, rawHistory, todayStr, currentMinutes]);
+
+  const todaySchedule = useMemo(() => {
+    let active = allTodaySchedules.find(s => currentMinutes >= (s.startMins - 30) && currentMinutes <= s.endMins);
+    if (!active) active = allTodaySchedules.find(s => s.startMins > currentMinutes);
+    if (!active && allTodaySchedules.length > 0) active = allTodaySchedules[allTodaySchedules.length - 1];
+    return active || null;
+  }, [allTodaySchedules, currentMinutes]);
+
+  const attendanceStatus = useMemo(() => {
+    if (!todaySchedule) return { canClockIn: false, canClockOut: false, todayRecord: null };
+
+    const endMins = todaySchedule.endMins;
+    const isPassed = currentMinutes > endMins;
+
+    const todayRecord = (rawHistory || []).find(record => record.schedule_id === todaySchedule.id);
+    if (todayRecord) {
+      const isClockedIn = !!todayRecord.time_in && todayRecord.time_in !== '--:--';
+      const isClockedOut = todayRecord.time_out && todayRecord.time_out !== '--:--';
+      
+      return { 
+        canClockIn: false, 
+        // CRITICAL VALIDATION: If shift is done (isPassed is true), canClockOut is strictly FALSE so button is unclickable
+        canClockOut: isClockedIn && !isClockedOut && !isPassed, 
+        todayRecord: { ...todayRecord, time_in: todayRecord.time_in || '--:--', time_out: todayRecord.time_out || '--:--' } 
+      };
+    } else { 
+      return { canClockIn: !isPassed, canClockOut: false, todayRecord: null }; 
+    }
+  }, [todaySchedule, rawHistory, currentMinutes]);
+
   // SMART GPS & PERMISSION TRACKING: Automatically stops tracking when shift end time is reached
   useEffect(() => {
     let isCancelled = false;
 
     const checkAndManageTracking = async (forceRestart = false) => {
       try {
-        const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-        const todayStr = getTodayString();
-
-        const todaysShifts = (allTodaySchedules || []).filter(s => String(s.date || '').split('T')[0] === todayStr);
-
-        const hasActiveOrUpcomingShift = todaysShifts.some(shift => {
-          const [startH, startM] = String(shift.start_time || '00:00').split(':').map(Number);
-          const [endH, endM] = String(shift.end_time || '00:00').split(':').map(Number);
-          const startMinutes = startH * 60 + startM;
-          const endMinutes = endH * 60 + endM;
-
+        const hasActiveOrUpcomingShift = allTodaySchedules.some(shift => {
+          const startMinutes = shift.startMins;
+          const endMinutes = shift.endMins;
           const isClockedIn = shift.isClockedIn && !shift.isClockedOut;
-          
-          // Strict validation: Stop tracking immediately once shift end time has passed
           const isShiftTimeValid = currentMinutes <= endMinutes;
 
           return (isClockedIn && isShiftTimeValid) || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
@@ -258,7 +326,6 @@ export default function HomeScreen({ navigation }) {
             }
           }
         } else {
-          // Shift time has ended: automatically stop background tracking and report GPS OFF
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
           if (isRegistered) {
             await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
@@ -287,7 +354,7 @@ export default function HomeScreen({ navigation }) {
       subscription.remove();
       clearInterval(interval);
     };
-  }, [allTodaySchedules, todaySchedule, colors.primary]);
+  }, [allTodaySchedules, todaySchedule, colors.primary, currentMinutes]);
 
   const captureSelfie = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -311,11 +378,9 @@ export default function HomeScreen({ navigation }) {
         axios.get(`${API_URL}/overtime-requests`, config),
         axios.get(`${API_URL}/attendance/corrections/user/${empId}`, config),
         axios.get(`${API_URL}/attendance-appeals/user/${empId}`, config),
-        
       ]);
 
       let aggregated = [];
-
       const processItems = (res, type, titleField, dateField) => {
         if (res.status === 'fulfilled' && Array.isArray(res.value.data)) {
           res.value.data.forEach(item => {
@@ -338,7 +403,6 @@ export default function HomeScreen({ navigation }) {
       processItems(overtimeRes, 'Overtime', 'date', 'created_at');
       processItems(correctionsRes, 'Correction', 'attendance_date', 'attendance_date');
       processItems(appealsRes, 'Appeal', 'date', 'submitted_at');
-      
 
       aggregated.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
       setNotifications(aggregated);
@@ -364,120 +428,26 @@ export default function HomeScreen({ navigation }) {
         setRawSchedule(schedule || []);
         computeMonthlyStats(history || [], schedule || [], selectedMonth);
         await fetchNotifications(empId, token);
-
-        const todayStr = getTodayString();
-        const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-        
-        const parseMins = (ts) => {
-          if (!ts) return 0;
-          let cs = String(ts).split('.')[0].replace(',', ':');
-          const [h, m] = cs.split(':').map(Number);
-          return (h || 0) * 60 + (m || 0);
-        };
-
-        const todaySchedules = (schedule || [])
-          .filter(s => String(s.date).startsWith(todayStr))
-          .map(s => {
-            const record = (history || []).find(r => r.schedule_id === s.id);
-            const startMins = parseMins(s.start_time);
-            const endMins = parseMins(s.end_time);
-            const isPassed = currentMinutes > endMins;
-            const isActive = currentMinutes >= (startMins - 30) && currentMinutes <= endMins;
-            
-            const hasClockIn = record && record.time_in && record.time_in !== '--:--' && record.time_in !== null;
-            const hasClockOut = record && record.time_out && record.time_out !== '--:--' && record.time_out !== null;
-
-            let computedStatus = 'SCHEDULED';
-            
-            if (hasClockOut) {
-              const dbStatus = (record?.status || '').toLowerCase();
-              if (dbStatus.includes('early') || dbStatus.includes('clock out') || dbStatus.includes('departure')) {
-                computedStatus = 'COMPLETED - EARLY CLOCK OUT';
-              } else {
-                computedStatus = record?.status ? record.status.toUpperCase() : 'COMPLETED';
-              }
-            } else if (isPassed) {
-              if (hasClockIn && !hasClockOut) {
-                computedStatus = 'MISSING CLOCK-OUT';
-              } else if (hasClockIn && hasClockOut) {
-                computedStatus = record.status ? record.status.toUpperCase() : 'COMPLETED';
-              } else {
-                computedStatus = 'MISSED SCHEDULE';
-              }
-            } else if (isActive) {
-              computedStatus = hasClockIn ? 'IN PROGRESS' : 'SCHEDULED';
-            } else {
-              computedStatus = 'SCHEDULED';
-            }
-
-            return {
-              ...s,
-              startMins,
-              endMins,
-              isClockedIn: hasClockIn,
-              isClockedOut: hasClockOut,
-              computedStatus,
-              record,
-              isPassed,
-            };
-          })
-          .sort((a, b) => a.startMins - b.startMins);
-
-        setAllTodaySchedules(todaySchedules);
-
-        let activeSchedule = todaySchedules.find(s => currentMinutes >= (s.startMins - 30) && currentMinutes <= s.endMins);
-        if (!activeSchedule) activeSchedule = todaySchedules.find(s => s.startMins > currentMinutes);
-        if (!activeSchedule && todaySchedules.length > 0) activeSchedule = todaySchedules[todaySchedules.length - 1];
-        
-        setTodaySchedule(activeSchedule || null);
-        checkTodayStatus(history || [], activeSchedule, currentMinutes);
       }
     } catch (error) { console.error("LoadData error:", error); }
   }, [selectedMonth, computeMonthlyStats]);
 
   useEffect(() => { computeMonthlyStats(rawHistory, rawSchedule, selectedMonth); }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
 
-  const checkTodayStatus = (history, activeSchedule, currentMinutes) => {
-    if (!activeSchedule) { 
-      setAttendanceStatus({ canClockIn: false, canClockOut: false, todayRecord: null }); 
-      return; 
-    }
-    
-    const endMins = parseMins(activeSchedule.end_time);
-    const isPassed = currentMinutes > endMins;
-
-    const todayRecord = history.find(record => record.schedule_id === activeSchedule.id);
-    if (todayRecord) {
-      const isClockedIn = !!todayRecord.time_in && todayRecord.time_in !== '--:--';
-      const isClockedOut = todayRecord.time_out && todayRecord.time_out !== '--:--';
-      
-      setAttendanceStatus({ 
-        canClockIn: false, 
-        // Disables check-out button if shift end time has already passed
-        canClockOut: isClockedIn && !isClockedOut && !isPassed, 
-        todayRecord: { ...todayRecord, time_in: todayRecord.time_in || '--:--', time_out: todayRecord.time_out || '--:--' } 
-      });
-    } else { 
-      setAttendanceStatus({ canClockIn: !isPassed, canClockOut: false, todayRecord: null }); 
-    }
-  };
-
-  // MANDATORY GPS CHECK BEFORE CLOCK IN
+  // MANDATORY GPS CHECK BEFORE CLOCK-IN
   const handleClockIn = async () => {
     if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
     
-    // Enforce GPS / Location services enabled check first
     const isGpsReady = await checkLocationServicesEnabled();
     if (!isGpsReady) return;
 
     const selfieUri = await captureSelfie();
-    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for check-in.');
+    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for clock-in.');
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
     
     try {
       const result = await clockIn({ employee_id: String(user.employeeId || ''), latitude: String(location.coords.latitude), longitude: String(location.coords.longitude), location_enabled: 'true', schedule_id: String(todaySchedule.id), selfie: selfieUri });
-      if (result.success) { Alert.alert('Success', result.message); await loadData(); } else { Alert.alert('Check-In Error', result.message); }
+      if (result.success) { Alert.alert('Success', result.message); await loadData(); } else { Alert.alert('Clock-In Error', result.message); }
     } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
   };
 
@@ -488,7 +458,7 @@ export default function HomeScreen({ navigation }) {
     const scheduledEndTime = todaySchedule.end_time; 
     
     if (currentTimeStr < scheduledEndTime.slice(0, 5)) {
-      Alert.alert("Early Check-Out", `Your shift ends at ${formatTo12H(scheduledEndTime)}. Do you wish to request a correction for an early check-out?`, [
+      Alert.alert("Early Clock-Out", `Your shift ends at ${formatTo12H(scheduledEndTime)}. Do you wish to request a correction for an early clock-out?`, [
         { text: "Cancel", style: "cancel" },
         { text: "Request", onPress: () => navigation.navigate("Requests", { prefillTab: "correction", prefillDate: getTodayString(), prefillType: "clock_out", prefillTime: currentTimeStr, prefillReason: "Early departure requested", prefillScheduleId: todaySchedule?.id }) }
       ]);
@@ -505,7 +475,7 @@ export default function HomeScreen({ navigation }) {
         Alert.alert('Success', result.message);
         try { const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME); if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); } catch (e) {}
         await loadData();
-      } else { Alert.alert('Check-Out Error', result.message); }
+      } else { Alert.alert('Clock-Out Error', result.message); }
     } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
   };
 
@@ -565,8 +535,8 @@ export default function HomeScreen({ navigation }) {
   const getModalStatusStyle = (sched) => {
     const status = (sched.computedStatus || sched.attendance_status || '').toUpperCase();
     if (status.includes('MISSING CLOCK-OUT')) return { label: 'MISSING CLOCK-OUT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
-    else if (status.includes('MISSED SHIFT') || status.includes('ABSENT') || status.includes('DID NOT ATTEND')) return { label: 'MISSED SHIFT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
-    else if (status.includes('COMPLETED') || status.includes('PRESENT')) return { label: 'COMPLETED', bg: isLight ? '#F1F5F9' : '#334155', text: isLight ? '#64748B' : '#94A3B8' };
+    else if (status.includes('MISSED SHIFT') || status.includes('ABSENT') || status.includes('DID NOT ATTEND') || status.includes('MISSED SCHEDULE')) return { label: 'MISSED SCHEDULE', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+    else if (status.includes('COMPLETED') || status.includes('PRESENT')) return { label: 'COMPLETED', bg: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)', text: isLight ? '#059669' : '#34D399' };
     else if (status.includes('IN PROGRESS') || status.includes('LATE')) return { label: status, bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
     else return { label: 'SCHEDULED', bg: isLight ? '#EFF6FF' : 'rgba(37, 99, 235, 0.15)', text: isLight ? '#2563EB' : '#60A5FA' };
   };
@@ -667,12 +637,12 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.actionContainer}>
             <TouchableOpacity style={[styles.btnPillPrimary, !finalCanClockIn && styles.btnDisabled]} onPress={handleClockIn} disabled={!finalCanClockIn} activeOpacity={0.85}>
               <Clock size={18} color={!finalCanClockIn ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#FFFFFF" : colors.buttonText)} strokeWidth={2} />
-              <Text style={[styles.btnPillPrimaryText, !finalCanClockIn && styles.btnDisabledText]}>CHECK-IN</Text>
+              <Text style={[styles.btnPillPrimaryText, !finalCanClockIn && styles.btnDisabledText]}>CLOCK-IN</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={[styles.btnPillOutline, !finalCanClockOut && styles.btnDisabledOutline]} onPress={handleClockOut} disabled={!finalCanClockOut} activeOpacity={0.85}>
               <Clock size={18} color={!finalCanClockOut ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#0F172A" : colors.textPrimary)} strokeWidth={2} />
-              <Text style={[styles.btnPillOutlineText, !finalCanClockOut && styles.btnDisabledText]}>CHECK-OUT</Text>
+              <Text style={[styles.btnPillOutlineText, !finalCanClockOut && styles.btnDisabledText]}>CLOCK-OUT</Text>
             </TouchableOpacity>
           </View>
 
@@ -870,7 +840,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   statusBadgeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 9, letterSpacing: 0.3, textAlign: 'right' },
   statusScheduled: { backgroundColor: isLight ? '#F1F5F9' : '#334155' },
   statusInProgress: { backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.2)' },
-  statusMissed: { backgroundColor: isLight ? '#F1F5F9' : 'rgba(100, 116, 139, 0.2)' },
+  statusMissed: { backgroundColor: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)' },
   actionContainer: { flexDirection: 'row', gap: 14, marginBottom: 32 },
   btnPillPrimary: { flex: 1, flexDirection: 'row', backgroundColor: isLight ? '#0F172A' : colors.buttonBg, paddingVertical: 18, borderRadius: 30, alignItems: 'center', justifyContent: 'center', gap: 8 },
   btnPillPrimaryText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText, fontSize: 14, letterSpacing: 0.5 },

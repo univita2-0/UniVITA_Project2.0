@@ -32,6 +32,28 @@ const handleResponse = async (response) => {
   }
 };
 
+// Helper: Safely append files to FormData for React Native (iOS & Android)
+const appendFileToFormData = (formData, fieldName, fileObj) => {
+  if (!fileObj) return;
+  const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
+  if (!fileUri) return;
+
+  const filename = fileObj.name || fileUri.split('/').pop() || 'attachment.jpg';
+  let mimeType = fileObj.mimeType || 'image/jpeg';
+  if (!fileObj.mimeType) {
+    if (filename.toLowerCase().endsWith('.pdf')) mimeType = 'application/pdf';
+    else if (filename.toLowerCase().endsWith('.png')) mimeType = 'image/png';
+    else if (filename.toLowerCase().endsWith('.doc')) mimeType = 'application/msword';
+    else if (filename.toLowerCase().endsWith('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+
+  formData.append(fieldName, {
+    uri: Platform.OS === 'ios' ? fileUri.replace('file://', '') : fileUri,
+    name: filename,
+    type: mimeType,
+  });
+};
+
 // Enforce GPS / Location Services Enabled Check
 export const checkLocationServicesEnabled = async () => {
   try {
@@ -103,12 +125,7 @@ export const syncOfflineQueue = async () => {
         if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
 
         if (data.selfie) {
-          const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
-          if (selfieUri) {
-            const imgResp = await fetch(selfieUri);
-            const blob = await imgResp.blob();
-            formData.append('selfie', blob, 'offline_selfie.jpg');
-          }
+          appendFileToFormData(formData, 'selfie', data.selfie);
         }
 
         const endpoint = item.action === 'clock-in' ? '/attendance/clock-in' : '/attendance/clock-out';
@@ -176,7 +193,7 @@ export const setTrackingEnabled = async (enabled) => {
   }
 };
 
-
+// Profile Picture Base64 Upload
 export const updateProfile = async (userId, data) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
@@ -186,7 +203,6 @@ export const updateProfile = async (userId, data) => {
       const pic = data.profile_picture;
       const fileUri = typeof pic === 'string' ? pic : pic.uri;
       if (fileUri) {
-        // Read file as Base64 string directly via Expo FileSystem
         base64Image = await FileSystem.readAsStringAsync(fileUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
@@ -319,14 +335,7 @@ export const submitOvertimeRequest = async (data) => {
     if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
 
     if (data.attachment) {
-      const att = data.attachment;
-      const attUri = typeof att === 'string' ? att : att.uri;
-      if (attUri) {
-        const filename = att.name || attUri.split('/').pop() || 'overtime_proof.jpg';
-        const imgResp = await fetch(attUri);
-        const blob = await imgResp.blob();
-        formData.append('attachment', blob, filename);
-      }
+      appendFileToFormData(formData, 'attachment', data.attachment);
     }
 
     const response = await fetch(`${API_URL}/overtime-requests`, {
@@ -364,12 +373,7 @@ export const requestAttendanceCorrection = async (data) => {
     if (data.reason) formData.append('reason', String(data.reason));
 
     if (data.selfie) {
-      const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
-      if (selfieUri) {
-        const imgResp = await fetch(selfieUri);
-        const blob = await imgResp.blob();
-        formData.append('selfie', blob, 'correction.jpg');
-      }
+      appendFileToFormData(formData, 'selfie', data.selfie);
     }
 
     const response = await fetch(`${API_URL}/attendance/correction-request`, {
@@ -416,12 +420,7 @@ export const clockIn = async (data) => {
     if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
 
     if (data.selfie) {
-      const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
-      if (selfieUri) {
-        const imgResp = await fetch(selfieUri);
-        const blob = await imgResp.blob();
-        formData.append('selfie', blob, 'selfie.jpg');
-      }
+      appendFileToFormData(formData, 'selfie', data.selfie);
     }
 
     const response = await fetch(`${API_URL}/attendance/clock-in`, {
@@ -451,12 +450,7 @@ export const clockOut = async (data) => {
     if (data.schedule_id) formData.append('schedule_id', String(data.schedule_id));
 
     if (data.selfie) {
-      const selfieUri = typeof data.selfie === 'string' ? data.selfie : data.selfie.uri;
-      if (selfieUri) {
-        const imgResp = await fetch(selfieUri);
-        const blob = await imgResp.blob();
-        formData.append('selfie', blob, 'selfie.jpg');
-      }
+      appendFileToFormData(formData, 'selfie', data.selfie);
     }
 
     const response = await fetch(`${API_URL}/attendance/clock-out`, {
@@ -508,14 +502,7 @@ export const submitLeaveRequest = async (payload) => {
     for (const key in payload) {
       if (payload[key] !== null && payload[key] !== undefined) {
         if (key === 'image' || key === 'attachment') {
-          const fileObj = payload[key];
-          const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
-          if (fileUri) {
-            const filename = fileObj.name || fileUri.split('/').pop() || 'leave_proof.jpg';
-            const imgResp = await fetch(fileUri);
-            const blob = await imgResp.blob();
-            formData.append(key, blob, filename);
-          }
+          appendFileToFormData(formData, key, payload[key]);
         } else {
           formData.append(key, String(payload[key]));
         }
