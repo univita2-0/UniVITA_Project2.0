@@ -182,36 +182,38 @@ export default function HomeScreen({ navigation }) {
     return () => { isMounted = false; };
   }, []);
 
-  // SMART GPS & PERMISSION TRACKING: Continuously detects GPS status, permission changes, and boundary transitions
+  // SMART GPS & PERMISSION TRACKING: Instantly reports GPS OFF to server if permissions are revoked
   useEffect(() => {
     let isCancelled = false;
 
     const checkAndManageTracking = async (forceRestart = false) => {
-      const now = new Date();
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const todayStr = getTodayString();
+      try {
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        const todayStr = getTodayString();
 
-      // Filter today's shifts
-      const todaysShifts = (allTodaySchedules || []).filter(s => String(s.date || '').split('T')[0] === todayStr);
+        const todaysShifts = (allTodaySchedules || []).filter(s => String(s.date || '').split('T')[0] === todayStr);
 
-      // Check if ANY shift today is ongoing, upcoming (30-min buffer), or if currently clocked in
-      const hasActiveOrUpcomingShift = todaysShifts.some(shift => {
-        const [startH, startM] = String(shift.start_time || '00:00').split(':').map(Number);
-        const [endH, endM] = String(shift.end_time || '00:00').split(':').map(Number);
-        const startMinutes = startH * 60 + startM;
-        const endMinutes = endH * 60 + endM;
+        const hasActiveOrUpcomingShift = todaysShifts.some(shift => {
+          const [startH, startM] = String(shift.start_time || '00:00').split(':').map(Number);
+          const [endH, endM] = String(shift.end_time || '00:00').split(':').map(Number);
+          const startMinutes = startH * 60 + startM;
+          const endMinutes = endH * 60 + endM;
 
-        const isClockedIn = shift.isClockedIn && !shift.isClockedOut;
-        return isClockedIn || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
-      });
+          const isClockedIn = shift.isClockedIn && !shift.isClockedOut;
+          return isClockedIn || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
+        });
 
-      if (hasActiveOrUpcomingShift) {
-        try {
-          // Check both device GPS toggle and app runtime permission
-          const gpsHardwareOn = await Location.hasServicesEnabledAsync();
-          const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
-          const permissionGranted = fgStatus === 'granted';
-          const isGpsFullyActive = gpsHardwareOn && permissionGranted;
+        if (hasActiveOrUpcomingShift) {
+          // Safely check device GPS toggle and app runtime permissions
+          let isGpsFullyActive = false;
+          try {
+            const gpsHardwareOn = await Location.hasServicesEnabledAsync();
+            const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+            isGpsFullyActive = gpsHardwareOn && fgStatus === 'granted';
+          } catch (permErr) {
+            isGpsFullyActive = false;
+          }
 
           if (!isGpsFullyActive) {
             // Permission was set to "Don't allow" or GPS disabled: immediately notify server
@@ -219,72 +221,60 @@ export default function HomeScreen({ navigation }) {
             await sendLocationPing(0, 0, false, 'GPS Disabled');
 
             const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-            if (isRegistered) {
-              await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-            }
+            if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
             return;
           }
 
-          // GPS is active and allowed: mark enabled and transmit live position
+          // GPS is active: send live position
           await setTrackingEnabled(true);
-
-          try {
-            const loc = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-
-            if (!isCancelled && loc && loc.coords) {
-              await sendLocationPing(
-                loc.coords.latitude,
-                loc.coords.longitude,
-                true,
-                todaySchedule?.place || 'Campus'
-              );
-            }
-          } catch (posErr) {
-            // Fallback if location read failed due to sudden revocation
-            await sendLocationPing(0, 0, false, 'GPS Disabled');
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          
+          if (!isCancelled && loc && loc.coords) {
+            await sendLocationPing(
+              loc.coords.latitude,
+              loc.coords.longitude,
+              true,
+              todaySchedule?.place || 'Campus'
+            );
           }
 
-          // Ensure background location task is registered
+          // Manage background task
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
           if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
           
           if (!isRegistered || forceRestart) {
-            try {
-              const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
-              if (bgStatus === 'granted') {
-                await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-                  accuracy: Location.Accuracy.High, 
-                  timeInterval: 15000, 
-                  distanceInterval: 0,
-                  deferredUpdatesInterval: 15000, 
-                  showsBackgroundLocationIndicator: true,
-                  foregroundService: {
-                    notificationTitle: "Tracking Active",
-                    notificationBody: "Monitoring location for active shift",
-                    notificationColor: colors.primary
-                  },
-                });
-              }
-            } catch (foregroundErr) {}
+            const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+            if (bgStatus === 'granted') {
+              await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+                accuracy: Location.Accuracy.High, 
+                timeInterval: 15000, 
+                distanceInterval: 0,
+                showsBackgroundLocationIndicator: true,
+                foregroundService: {
+                  notificationTitle: "Tracking Active",
+                  notificationBody: "Monitoring location for active shift",
+                  notificationColor: colors.primary
+                },
+              });
+            }
           }
-        } catch (e) {}
-      } else {
-        // Shift has completed or no active shift: disable tracking cleanly
-        try {
+        } else {
+          // Shift ended: disable tracking cleanly
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-          if (isRegistered) {
-            await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-          }
+          if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
           await setTrackingEnabled(false);
+        }
+      } catch (err) {
+        // Fallback: If any error occurs (like permission denial), notify server GPS is OFF
+        try {
+          await setTrackingEnabled(false);
+          await sendLocationPing(0, 0, false, 'GPS Disabled');
         } catch (e) {}
       }
     };
 
     checkAndManageTracking();
 
-    // Check immediately upon resuming the app from device Settings
     const subscription = AppState.addEventListener('change', state => {
       if (state === 'active') checkAndManageTracking(true);
     });

@@ -5571,7 +5571,6 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
     const employeeId = userRows[0].employee_id;
     const fullName = userRows[0].full_name;
 
-    // 1. Resolve active or upcoming shift (with 30-minute early buffer or active clock-in)
     const [scheduleRows] = await db.promise().query(
       `SELECT s.id, s.place, s.start_time, s.end_time, a.time_in, a.time_out
        FROM schedules s
@@ -5601,7 +5600,6 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       return res.json({ success: false, message: "No active shift today" });
     }
 
-    // 2. Fetch previous tracking state to detect transitions
     const [lastRec] = await db.promise().query(
       `SELECT location_enabled, is_inside_campus, location_name
        FROM instructor_location_tracking 
@@ -5635,7 +5633,6 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       resolvedLocationName = isLocEnabled ? 'Outside Campus Perimeter' : 'GPS Disabled';
     }
 
-    // 3. Record tracking event in database
     await db.promise().query(
       `INSERT INTO instructor_location_tracking 
        (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
@@ -5643,13 +5640,11 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       [employeeId, currentSchedule.id, parsedLat || 0, parsedLon || 0, resolvedLocationName, isInside ? 1 : 0, isLocEnabled ? 1 : 0, phNow]
     );
 
-    // 4. Update user real-time ping and tracking status
     await db.promise().query(
       "UPDATE users SET last_location_ping = ?, location_tracking_enabled = ? WHERE employee_id = ? OR id = ?",
       [phNow, isLocEnabled ? 1 : 0, employeeId, userId]
     );
 
-    // 5. Trigger alert if GPS was turned OFF or ON
     if (lastGpsState !== null && lastGpsState !== (isLocEnabled ? 1 : 0)) {
       const alertMsg = isLocEnabled ? 'GPS turned ON' : 'GPS turned OFF';
       await insertAndBroadcastAlert(alertMsg, {
@@ -5671,7 +5666,6 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       });
     }
 
-    // 6. Trigger alert if instructor went OUTSIDE or came back INSIDE while GPS is ON
     if (isLocEnabled && lastInsideState !== null && lastInsideState !== (isInside ? 1 : 0)) {
       const alertMsg = isInside ? 'Entered campus perimeter' : 'Went outside campus perimeter';
       await insertAndBroadcastAlert(alertMsg, {
@@ -5761,6 +5755,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           ELSE COALESCE(ilt.location_name, 'Unavailable') 
         END AS last_position_name, 
         
+        -- Returns NULL when GPS is OFF so frontend shows UNAVAILABLE instead of OUTSIDE
         CASE 
           WHEN a.time_in IS NULL THEN NULL
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN NULL
