@@ -5551,80 +5551,143 @@ app.put('/api/visitor-requests/:id/destination', authenticateToken, async (req, 
 app.post('/api/instructor/location', authenticateToken, async (req, res) => {
   if (req.user.role !== 'instructor') return res.status(403).json({ error: 'Forbidden' });
 
-  const { latitude, longitude, location_enabled } = req.body;
+  let { latitude, longitude, location_enabled, location_name } = req.body;
   const userId = req.user.id;
+  const isLocEnabled = (location_enabled === true || location_enabled === 'true' || location_enabled === 1 || location_enabled === '1');
+  const phNow = getPHDateTime();
+  const { date: today, time: currentTime } = getPHTime();
 
   try {
     const [userRows] = await db.promise().query(
-      "SELECT employee_id, full_name, location_tracking_enabled FROM users WHERE id = ?",
+      "SELECT id, employee_id, full_name, location_tracking_enabled FROM users WHERE id = ?",
       [userId]
     );
     if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
 
     const employeeId = userRows[0].employee_id;
     const fullName = userRows[0].full_name;
-    const { date: today, time: currentTime } = getPHTime();
 
-    
-
+    // 1. Resolve active or upcoming shift (with 30-minute early buffer or active clock-in)
     const [scheduleRows] = await db.promise().query(
-      `SELECT id, place, start_time, end_time FROM schedules 
-       WHERE user_id = ? AND date = ? AND ? BETWEEN start_time AND end_time`,
-      [employeeId, today, currentTime]
+      `SELECT s.id, s.place, s.start_time, s.end_time, a.time_in, a.time_out
+       FROM schedules s
+       LEFT JOIN attendance a ON s.id = a.schedule_id AND a.date = s.date
+       WHERE (s.user_id = ? OR s.user_id = ?)
+         AND s.date = ?
+         AND (
+           (? BETWEEN SUBTIME(s.start_time, '00:30:00') AND s.end_time)
+           OR (a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--'))
+         )
+       ORDER BY s.start_time ASC LIMIT 1`,
+      [employeeId, userId, today, currentTime]
     );
-    const currentSchedule = scheduleRows[0];
+
+    let currentSchedule = scheduleRows[0];
     if (!currentSchedule) {
-      return res.json({ success: false, message: "No active shift" });
+      const [anySched] = await db.promise().query(
+        `SELECT id, place, start_time, end_time FROM schedules 
+         WHERE (user_id = ? OR user_id = ?) AND date = ? 
+         ORDER BY ABS(TIME_TO_SEC(TIMEDIFF(?, start_time))) ASC LIMIT 1`,
+        [employeeId, userId, today, currentTime]
+      );
+      if (anySched.length > 0) currentSchedule = anySched[0];
     }
 
+    if (!currentSchedule) {
+      return res.json({ success: false, message: "No active shift today" });
+    }
+
+    // 2. Fetch previous tracking state to detect transitions
     const [lastRec] = await db.promise().query(
-      `SELECT location_enabled, is_inside_campus 
+      `SELECT location_enabled, is_inside_campus, location_name
        FROM instructor_location_tracking 
-       WHERE employee_id = ? AND schedule_id = ? 
-       ORDER BY ping_time DESC LIMIT 1`,
-      [employeeId, currentSchedule.id]
+       WHERE employee_id = ? 
+       ORDER BY id DESC LIMIT 1`,
+      [employeeId]
     );
-    const lastGpsState = lastRec.length ? lastRec[0].location_enabled : null;
-    const lastInsideState = lastRec.length ? lastRec[0].is_inside_campus : null;
+
+    const lastGpsState = lastRec.length ? (lastRec[0].location_enabled === 1 ? 1 : 0) : null;
+    const lastInsideState = lastRec.length ? (lastRec[0].is_inside_campus === 1 ? 1 : 0) : null;
 
     let isInside = false;
-    let resolvedLocationName = 'Outside Campus';
-    if (location_enabled && latitude && longitude) {
+    let resolvedLocationName = 'GPS Disabled';
+    const parsedLat = parseFloat(latitude);
+    const parsedLon = parseFloat(longitude);
+
+    if (isLocEnabled && !isNaN(parsedLat) && !isNaN(parsedLon) && parsedLat !== 0 && parsedLon !== 0) {
       const [locRows] = await db.promise().query(
         "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
         [currentSchedule.place]
       );
       if (locRows.length > 0) {
-        const dist = getDistanceFromLatLonInMeters(latitude, longitude, locRows[0].latitude, locRows[0].longitude);
+        const dist = getDistanceFromLatLonInMeters(parsedLat, parsedLon, locRows[0].latitude, locRows[0].longitude);
         isInside = dist <= locRows[0].radius;
-        resolvedLocationName = isInside ? currentSchedule.place : 'Outside Campus';
+        resolvedLocationName = isInside ? currentSchedule.place : 'Outside Campus Perimeter';
+      } else {
+        resolvedLocationName = location_name || 'Outside Campus Perimeter';
       }
+    } else {
+      isInside = false;
+      resolvedLocationName = isLocEnabled ? 'Outside Campus Perimeter' : 'GPS Disabled';
     }
 
+    // 3. Record tracking event in database
     await db.promise().query(
       `INSERT INTO instructor_location_tracking 
        (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [employeeId, currentSchedule.id, latitude || 0, longitude || 0, resolvedLocationName, isInside ? 1 : 0, location_enabled ? 1 : 0]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [employeeId, currentSchedule.id, parsedLat || 0, parsedLon || 0, resolvedLocationName, isInside ? 1 : 0, isLocEnabled ? 1 : 0, phNow]
     );
 
+    // 4. Update user real-time ping and tracking status
     await db.promise().query(
-      "UPDATE users SET last_location_ping = NOW(), location_tracking_enabled = ? WHERE employee_id = ?",
-      [location_enabled ? 1 : 0, employeeId]
+      "UPDATE users SET last_location_ping = ?, location_tracking_enabled = ? WHERE employee_id = ? OR id = ?",
+      [phNow, isLocEnabled ? 1 : 0, employeeId, userId]
     );
 
-    if (lastGpsState !== null && lastGpsState !== (location_enabled ? 1 : 0)) {
-      const alertMsg = location_enabled ? 'GPS turned ON' : 'GPS turned OFF';
-      await insertAndBroadcastAlert(alertMsg, { employeeId, fullName, scheduleId: currentSchedule.id });
+    // 5. Trigger alert if GPS was turned OFF or ON
+    if (lastGpsState !== null && lastGpsState !== (isLocEnabled ? 1 : 0)) {
+      const alertMsg = isLocEnabled ? 'GPS turned ON' : 'GPS turned OFF';
+      await insertAndBroadcastAlert(alertMsg, {
+        employeeId,
+        fullName,
+        scheduleId: currentSchedule.id,
+        locationName: resolvedLocationName,
+        latitude: parsedLat,
+        longitude: parsedLon
+      });
+    } else if (lastGpsState === null && !isLocEnabled) {
+      await insertAndBroadcastAlert('GPS turned OFF', {
+        employeeId,
+        fullName,
+        scheduleId: currentSchedule.id,
+        locationName: resolvedLocationName,
+        latitude: parsedLat,
+        longitude: parsedLon
+      });
     }
 
-    if (lastInsideState !== null && lastInsideState !== (isInside ? 1 : 0) && location_enabled) {
-      const alertMsg = isInside ? 'Entered campus' : 'Went outside campus';
-      await insertAndBroadcastAlert(alertMsg, { employeeId, fullName, scheduleId: currentSchedule.id, locationName: resolvedLocationName });
+    // 6. Trigger alert if instructor went OUTSIDE or came back INSIDE while GPS is ON
+    if (isLocEnabled && lastInsideState !== null && lastInsideState !== (isInside ? 1 : 0)) {
+      const alertMsg = isInside ? 'Entered campus perimeter' : 'Went outside campus perimeter';
+      await insertAndBroadcastAlert(alertMsg, {
+        employeeId,
+        fullName,
+        scheduleId: currentSchedule.id,
+        locationName: resolvedLocationName,
+        latitude: parsedLat,
+        longitude: parsedLon
+      });
     }
 
     await broadcastInstructorStatus(employeeId);
-    res.json({ success: true, isInside, inShift: true });
+    res.json({ 
+      success: true, 
+      isInside, 
+      inShift: true, 
+      location_name: resolvedLocationName, 
+      gps_status: isLocEnabled ? 'GPS ON' : 'GPS OFF' 
+    });
   } catch (err) {
     console.error("Location update error:", err);
     res.status(500).json({ error: err.message });
@@ -5637,16 +5700,26 @@ const broadcastInstructorStatus = async (employeeId) => {
     SELECT 
       u.employee_id, u.full_name, u.last_location_ping, u.location_tracking_enabled,
       s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course, s.start_time, s.end_time,
-      (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_position_name,
-      (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY ping_time DESC LIMIT 1) AS last_is_inside,
       (CASE 
-        WHEN u.last_location_ping IS NULL THEN 'DISABLED'
-        WHEN u.location_tracking_enabled = 0 THEN 'DISABLED'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'DISABLED'
+        WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
+        WHEN u.last_location_ping IS NULL THEN 'Unavailable'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'Signal Lost'
+        ELSE (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
+      END) AS last_position_name,
+      (CASE 
+        WHEN u.location_tracking_enabled = 0 THEN 0
+        WHEN u.last_location_ping IS NULL THEN 0
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 0
+        ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
+      END) AS last_is_inside,
+      (CASE 
+        WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
+        WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'GPS OFF'
         ELSE 'GPS ON'
       END) AS gps_status
     FROM users u
-    LEFT JOIN schedules s ON u.employee_id = s.user_id AND DATE(s.date) = ?
+    LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND DATE(s.date) = ?
     WHERE u.employee_id = ?
   `, [today, employeeId]);
 
@@ -5669,7 +5742,6 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         s.start_time, s.end_time,
         a.time_in, a.time_out,
         
-        -- Reliable Manila-time comparison for missed vs scheduled
         COALESCE(a.status, 
           CASE 
             WHEN CONCAT(s.date, ' ', s.end_time) < ? AND a.time_in IS NULL THEN 'Missed Schedule'
@@ -5681,12 +5753,18 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         CASE 
           WHEN a.time_in IS NULL THEN 'Unavailable'
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Unavailable'
+          WHEN u.last_location_ping IS NULL THEN 'Unavailable'
+          WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')) > 120 THEN 'Signal Lost'
           ELSE COALESCE(ilt.location_name, 'Unavailable') 
         END AS last_position_name, 
         
         CASE 
           WHEN a.time_in IS NULL THEN NULL
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN NULL
+          WHEN u.last_location_ping IS NULL THEN NULL
+          WHEN u.location_tracking_enabled = 0 THEN 0
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s')) > 120 THEN 0
           ELSE ilt.is_inside_campus 
         END AS last_is_inside,
         
@@ -5705,15 +5783,15 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         (SELECT MAX(ping_time) FROM instructor_location_tracking WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 0 AND location_enabled = 1 AND ping_time > (SELECT MIN(ping_time) FROM instructor_location_tracking WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1)) AS campus_exit_time
 
       FROM users u
-      INNER JOIN schedules s ON u.employee_id = s.user_id 
-      LEFT JOIN attendance a ON s.id = a.schedule_id
+      INNER JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id)
+      LEFT JOIN attendance a ON s.id = a.schedule_id AND a.date = s.date
       LEFT JOIN (
           SELECT t1.* FROM instructor_location_tracking t1
           INNER JOIN (SELECT MAX(id) as max_id FROM instructor_location_tracking GROUP BY employee_id) t2 ON t1.id = t2.max_id
       ) ilt ON u.employee_id = ilt.employee_id
       WHERE u.role = 'instructor' AND u.status = 'active' AND s.date = ?
       ORDER BY s.start_time ASC
-    `, [currentPhDateTime, currentPhDateTime, currentPhDateTime, currentPhDateTime, selectedDate]);
+    `, [currentPhDateTime, currentPhDateTime, currentPhDateTime, currentPhDateTime, currentPhDateTime, selectedDate]);
 
     rows.forEach(row => {
       if (row.campus_entry_time) row.campus_entry_time = new Date(row.campus_entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -5736,23 +5814,26 @@ app.get('/api/location-tracking/instructor-timeline/:employeeId', authenticateTo
   
   try {
     const [rows] = await db.promise().query(`
-      SELECT ping_time, location_enabled, is_inside_campus, location_name, latitude, longitude
+      SELECT id, ping_time, location_enabled, is_inside_campus, location_name, latitude, longitude
       FROM instructor_location_tracking
-      WHERE employee_id = ? AND DATE(ping_time) = ?
-      ORDER BY ping_time ASC
-    `, [employeeId, targetDate]);
+      WHERE (employee_id = ? OR employee_id = (SELECT id FROM users WHERE employee_id = ?))
+        AND (DATE(ping_time) = ? OR DATE(CONVERT_TZ(ping_time, '+00:00', '+08:00')) = ?)
+      ORDER BY id ASC
+    `, [employeeId, employeeId, targetDate, targetDate]);
 
     const [alerts] = await db.promise().query(`
       SELECT id, alert_message, created_at
       FROM location_alerts
-      WHERE employee_id = ? AND DATE(created_at) = ?
-      ORDER BY created_at ASC
-    `, [employeeId, targetDate]);
+      WHERE (employee_id = ? OR employee_id = (SELECT id FROM users WHERE employee_id = ?))
+        AND (DATE(created_at) = ? OR DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = ?)
+      ORDER BY id ASC
+    `, [employeeId, employeeId, targetDate, targetDate]);
 
     const [schedule] = await db.promise().query(`
       SELECT start_time, end_time FROM schedules 
-      WHERE user_id = ? AND date = ? LIMIT 1
-    `, [employeeId, targetDate]);
+      WHERE (user_id = ? OR user_id = (SELECT id FROM users WHERE employee_id = ?)) AND date = ? 
+      ORDER BY start_time ASC LIMIT 1
+    `, [employeeId, employeeId, targetDate]);
 
     res.json({ 
       timeline: rows, 
@@ -5779,15 +5860,16 @@ app.get('/api/location-tracking/alerts', authenticateToken, async (req, res) => 
       SELECT 
         la.*, 
         u.full_name,
-        s.place AS location_name
+        s.place AS location_name,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
       FROM location_alerts la
-      JOIN users u ON la.employee_id = u.employee_id
-      LEFT JOIN schedules s ON la.employee_id = s.user_id AND DATE(la.created_at) = s.date
-      WHERE DATE(la.created_at) = ?
-      ORDER BY la.created_at DESC
+      JOIN users u ON (la.employee_id = u.employee_id OR la.employee_id = u.id)
+      LEFT JOIN schedules s ON (la.employee_id = s.user_id OR u.employee_id = s.user_id) AND DATE(la.created_at) = s.date
+      WHERE DATE(la.created_at) = ? OR DATE(CONVERT_TZ(la.created_at, '+00:00', '+08:00')) = ?
+      ORDER BY la.id DESC
     `;
 
-    const [rows] = await db.promise().query(sql, [targetDate]);
+    const [rows] = await db.promise().query(sql, [targetDate, targetDate]);
     res.json(rows);
   } catch (err) {
     console.error("Alert fetch error:", err);
@@ -5797,16 +5879,17 @@ app.get('/api/location-tracking/alerts', authenticateToken, async (req, res) => 
 
 async function insertAndBroadcastAlert(alertMsg, context) {
   try {
+    const phNow = getPHDateTime();
     const [result] = await db.promise().query(
       `INSERT INTO location_alerts (employee_id, alert_message, latitude, longitude, created_at)
-       SELECT ?, ?, ?, ?, NOW()
+       SELECT ?, ?, ?, ?, ?
        FROM DUAL
        WHERE NOT EXISTS (
-       SELECT 1 FROM location_alerts 
-       WHERE employee_id = ? AND alert_message = ? 
-       AND created_at > DATE_SUB(NOW(), INTERVAL 1 MINUTE)
-)`,
-      [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0, context.employeeId, alertMsg]
+         SELECT 1 FROM location_alerts 
+         WHERE employee_id = ? AND alert_message = ? 
+         AND created_at > DATE_SUB(STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s'), INTERVAL 15 SECOND)
+       )`,
+      [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0, phNow, context.employeeId, alertMsg, phNow]
     );
 
     if (result.affectedRows === 0) return;
@@ -5816,7 +5899,7 @@ async function insertAndBroadcastAlert(alertMsg, context) {
       full_name: context.fullName,
       alert_message: alertMsg,
       location_name: context.locationName || 'Unavailable',
-      created_at: new Date()
+      created_at: phNow
     };
 
     broadcastToAdminAndHR({ type: 'new_alert', alert });
@@ -5824,6 +5907,50 @@ async function insertAndBroadcastAlert(alertMsg, context) {
     console.error("Failed to insert/broadcast alert:", err);
   }
 }
+
+// Background watchdog: Automatically detects disconnected or permission-revoked instructors
+setInterval(async () => {
+  try {
+    const phNow = getPHDateTime();
+    const [offlineInstructors] = await db.promise().query(`
+      SELECT u.id, u.employee_id, u.full_name, u.last_location_ping, s.id as schedule_id, s.place
+      FROM users u
+      INNER JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND s.date = CURDATE()
+      INNER JOIN attendance a ON s.id = a.schedule_id AND a.date = s.date
+      WHERE u.role = 'instructor'
+        AND u.status = 'active'
+        AND u.location_tracking_enabled = 1
+        AND a.time_in IS NOT NULL
+        AND (a.time_out IS NULL OR a.time_out = '--:--')
+        AND TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 60
+    `);
+
+    for (const inst of offlineInstructors) {
+      await db.promise().query(
+        "UPDATE users SET location_tracking_enabled = 0 WHERE id = ?",
+        [inst.id]
+      );
+
+      await db.promise().query(
+        `INSERT INTO instructor_location_tracking 
+         (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
+         VALUES (?, ?, 0, 0, 'GPS Turned OFF / Signal Lost', 0, 0, ?)`,
+        [inst.employee_id, inst.schedule_id, phNow]
+      );
+
+      await insertAndBroadcastAlert('GPS turned OFF', {
+        employeeId: inst.employee_id,
+        fullName: inst.full_name,
+        scheduleId: inst.schedule_id,
+        locationName: 'Outside / Signal Lost'
+      });
+
+      await broadcastInstructorStatus(inst.employee_id);
+    }
+  } catch (watchdogErr) {
+    console.error("Watchdog error:", watchdogErr.message);
+  }
+}, 20000);
 
 app.get('/api/visitor-history', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {

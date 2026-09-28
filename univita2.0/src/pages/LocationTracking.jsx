@@ -146,53 +146,69 @@ const LocationTracking = () => {
 
     const isWithinShiftTime = (timeStr) => {
       if (!shiftStart || !shiftEnd) return true;
-      const t = new Date(timeStr);
-      const hours = t.getHours();
-      const minutes = t.getMinutes();
-      const totalMinutes = hours * 60 + minutes;
-      
-      const [sh, sm] = shiftStart.split(':').map(Number);
-      const [eh, em] = shiftEnd.split(':').map(Number);
-      
-      const startTotal = (sh || 0) * 60 + (sm || 0);
-      const endTotal = (eh || 0) * 60 + (em || 0);
-      
-      return totalMinutes >= startTotal && totalMinutes <= endTotal;
+      try {
+        const safeStr = String(timeStr).includes('T') ? String(timeStr).split('T')[1] : String(timeStr).split(' ')[1] || String(timeStr);
+        const [h, m] = safeStr.split(':').map(Number);
+        const totalMinutes = (h || 0) * 60 + (m || 0);
+
+        const [sh, sm] = shiftStart.split(':').map(Number);
+        const [eh, em] = shiftEnd.split(':').map(Number);
+
+        const startTotal = (sh || 0) * 60 + (sm || 0) - 30; // 30 min buffer before shift start
+        const endTotal = (eh || 0) * 60 + (em || 0) + 30;   // 30 min buffer after shift end
+
+        return totalMinutes >= startTotal && totalMinutes <= endTotal;
+      } catch (e) {
+        return true;
+      }
     };
 
     for (let i = 0; i < timeline.length; i++) {
       const curr = timeline[i];
       if (!isWithinShiftTime(curr.ping_time)) continue;
       const prev = i > 0 ? timeline[i - 1] : null;
-      if (prev && prev.location_enabled !== curr.location_enabled) {
-        events.push({ 
-          time: curr.ping_time, 
-          type: 'GPS', 
-          detail: curr.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)' 
-        });
-      }
-    }
 
-    for (let i = 0; i < timeline.length; i++) {
-      const curr = timeline[i];
-      if (!isWithinShiftTime(curr.ping_time)) continue;
-      const prev = i > 0 ? timeline[i - 1] : null;
-      if (prev && prev.is_inside_campus !== curr.is_inside_campus && curr.location_enabled) {
-        const action = curr.is_inside_campus ? 'Entered campus perimeter' : 'Exited campus perimeter';
-        events.push({ 
-          time: curr.ping_time, 
-          type: 'Campus', 
-          detail: `${action} — Zone: ${curr.location_name || 'Designated Area'}` 
+      // Log initial state on first telemetry event
+      if (i === 0) {
+        events.push({
+          time: curr.ping_time,
+          type: 'GPS',
+          detail: curr.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)'
         });
+        if (curr.location_enabled) {
+          events.push({
+            time: curr.ping_time,
+            type: 'Campus',
+            detail: curr.is_inside_campus
+              ? `Position inside perimeter — Zone: ${curr.location_name || 'Designated Area'}`
+              : `Position outside perimeter — Zone: ${curr.location_name || 'Outside Campus'}`
+          });
+        }
+      } else {
+        if (prev && prev.location_enabled !== curr.location_enabled) {
+          events.push({
+            time: curr.ping_time,
+            type: 'GPS',
+            detail: curr.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)'
+          });
+        }
+
+        if (curr.location_enabled && prev && prev.is_inside_campus !== curr.is_inside_campus) {
+          const action = curr.is_inside_campus ? 'Entered campus perimeter' : 'Exited campus perimeter';
+          events.push({
+            time: curr.ping_time,
+            type: 'Campus',
+            detail: `${action} — Zone: ${curr.location_name || 'Designated Area'}`
+          });
+        }
       }
     }
 
     (timelineData.alerts || []).forEach(alert => {
-      const sanitizedMessage = (alert.alert_message || '').replace(/departure/gi, 'clock-out');
-      events.push({ 
-        time: alert.created_at, 
-        type: 'Alert', 
-        detail: sanitizedMessage 
+      events.push({
+        time: alert.created_at,
+        type: 'Alert',
+        detail: alert.alert_message || 'Geofence compliance alert'
       });
     });
 
@@ -255,7 +271,9 @@ const LocationTracking = () => {
               <div className="stat-icon-wrapper success"><ShieldCheck size={20} /></div>
               <div className="stat-info">
                 <span className="stat-label">On-Campus Now</span>
-                <span className="stat-value">{instructors.filter(i => i.last_is_inside === 1).length}</span>
+                <span className="stat-value">
+                 {instructors.filter(i => i.last_is_inside === 1 && i.gps_status === 'GPS ON').length}
+               </span>
               </div>
             </div>
             <div className="lt-stat-card alert">
@@ -336,13 +354,17 @@ const LocationTracking = () => {
                           </td>
                           
                           <td className="text-center">
-                            {displayLocation === null ? (
-                              <span className="lt-status-badge outside" style={{ backgroundColor: '#F3F4F6', color: '#6B7280' }}>
-                                UNAVAILABLE
+                            {!displayGpsOn ? (
+                              <span className="lt-status-badge outside">
+                                OUTSIDE
+                              </span>
+                            ) : displayLocation === 1 ? (
+                              <span className="lt-status-badge inside">
+                                INSIDE
                               </span>
                             ) : (
-                              <span className={`lt-status-badge ${displayLocation === 1 ? 'inside' : 'outside'}`}>
-                                {displayLocation === 1 ? 'INSIDE' : 'OUTSIDE'}
+                              <span className="lt-status-badge outside">
+                                OUTSIDE
                               </span>
                             )}
                           </td>

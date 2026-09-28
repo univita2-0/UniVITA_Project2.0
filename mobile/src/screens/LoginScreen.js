@@ -18,6 +18,7 @@ export default function LoginScreen({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
   const [stayLoggedIn, setStayLoggedIn] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
 
   // --- Custom Animated Toast State ---
   const [toastMessage, setToastMessage] = useState('');
@@ -41,19 +42,42 @@ export default function LoginScreen({ navigation }) {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetTimer, setResetTimer] = useState(0);
 
-  // Check remembered email on mount
+  // ========================================================
+  // AUTO-LOGIN & SESSION VERIFICATION ON APP LAUNCH
+  // ========================================================
   useEffect(() => {
-    const loadRemembered = async () => {
+    const verifyAuthSession = async () => {
       try {
+        const stay = await AsyncStorage.getItem('@stay_logged_in');
+        const token = await AsyncStorage.getItem('auth_token');
+        const userStr = await AsyncStorage.getItem('user');
+
+        // If user enabled "Stay logged in" and token exists, jump straight to Main
+        if (stay === 'true' && token && userStr) {
+          navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+          return;
+        }
+
+        // If user chose NOT to stay logged in previously, clear stale tokens
+        if (stay === 'false') {
+          await AsyncStorage.removeItem('auth_token');
+        }
+
+        // Restore remembered email if available
         const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
         if (rememberedEmail) {
           setEmail(rememberedEmail);
           setStayLoggedIn(true);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.log('Error verifying auth session:', e);
+      } finally {
+        setCheckingSession(false);
+      }
     };
-    loadRemembered();
-  }, []);
+
+    verifyAuthSession();
+  }, [navigation]);
 
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
@@ -129,9 +153,12 @@ export default function LoginScreen({ navigation }) {
     if (user.employee_id) await AsyncStorage.setItem('employee_id', user.employee_id);
     if (user.full_name) await AsyncStorage.setItem('user_name', user.full_name);
 
+    // Save or clear persistence flags based on user choice
     if (stayLoggedIn) {
+      await AsyncStorage.setItem('@stay_logged_in', 'true');
       await AsyncStorage.setItem('@remembered_email', user.email);
     } else {
+      await AsyncStorage.setItem('@stay_logged_in', 'false');
       await AsyncStorage.removeItem('@remembered_email');
     }
   };
@@ -139,7 +166,6 @@ export default function LoginScreen({ navigation }) {
   const handleLogin = async () => {
     Keyboard.dismiss();
     
-    // Enhanced Validation
     if (!email.trim() || !password) {
       showToast('Please enter both email and password', 'error');
       return;
@@ -147,7 +173,7 @@ export default function LoginScreen({ navigation }) {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email.trim())) {
-      showToast('Please enter a valid email address format', 'error');
+      showToast('Please enter a valid email address', 'error');
       return;
     }
 
@@ -345,6 +371,16 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // Splash Screen while validating persistence session
+  if (checkingSession) {
+    return (
+      <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+        <StatusBar barStyle="light-content" backgroundColor="#060913" />
+        <ActivityIndicator size="large" color="#0EA5E9" />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#060913" />
@@ -533,7 +569,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="New password (8+ chars, 1 upper, 1 special)"
-                  placeholderTextColor="#475569"
+                  placeholderTextColor="#64748B"
                   value={resetNewPassword}
                   onChangeText={setResetNewPassword}
                   autoFocus
@@ -542,7 +578,7 @@ export default function LoginScreen({ navigation }) {
                   style={styles.resetInput}
                   secureTextEntry
                   placeholder="Confirm new password"
-                  placeholderTextColor="#475569"
+                  placeholderTextColor="#64748B"
                   value={resetConfirmPassword}
                   onChangeText={setResetConfirmPassword}
                 />

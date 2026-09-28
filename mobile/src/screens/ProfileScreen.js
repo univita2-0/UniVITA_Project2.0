@@ -369,10 +369,28 @@ export default function ProfileScreen({ navigation }) {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.logoutBtn} onPress={() => Alert.alert("Logout", "Are you sure you want to log out?", [{ text: "Cancel", style: "cancel" }, { text: "Logout", onPress: async () => { await AsyncStorage.clear(); navigation.replace('Login'); }, style: 'destructive' }])} activeOpacity={0.8}>
-            <LogOut size={18} color={isLight ? "#FFFFFF" : colors.buttonText} />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
+          <TouchableOpacity 
+  style={styles.logoutBtn} 
+  onPress={() => Alert.alert("Logout", "Are you sure you want to log out?", [
+    { text: "Cancel", style: "cancel" }, 
+    { 
+      text: "Logout", 
+      onPress: async () => { 
+        const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
+        await AsyncStorage.clear(); 
+        if (rememberedEmail) {
+          await AsyncStorage.setItem('@remembered_email', rememberedEmail);
+        }
+        navigation.replace('Login'); 
+      }, 
+      style: 'destructive' 
+    }
+  ])} 
+  activeOpacity={0.8}
+>
+  <LogOut size={18} color={isLight ? "#FFFFFF" : colors.buttonText} />
+  <Text style={styles.logoutText}>Logout</Text>
+</TouchableOpacity>
         </ScrollView>
 
         {/* Read-Only Employment Modal */}

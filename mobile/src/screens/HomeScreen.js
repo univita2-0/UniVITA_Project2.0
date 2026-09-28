@@ -12,7 +12,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import axios from 'axios';
 import {
-  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, checkLocationServicesEnabled, API_URL
+  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, checkLocationServicesEnabled, sendLocationPing, API_URL
 } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import {
@@ -182,8 +182,10 @@ export default function HomeScreen({ navigation }) {
     return () => { isMounted = false; };
   }, []);
 
-  // SMART GPS TRACKING: Turns off automatically after shift unless another shift exists today
+  // SMART GPS & PERMISSION TRACKING: Continuously detects GPS status, permission changes, and boundary transitions
   useEffect(() => {
+    let isCancelled = false;
+
     const checkAndManageTracking = async (forceRestart = false) => {
       const now = new Date();
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -192,57 +194,109 @@ export default function HomeScreen({ navigation }) {
       // Filter today's shifts
       const todaysShifts = (allTodaySchedules || []).filter(s => String(s.date || '').split('T')[0] === todayStr);
 
-      // Check if ANY shift today is currently ongoing or scheduled for later today
+      // Check if ANY shift today is ongoing, upcoming (30-min buffer), or if currently clocked in
       const hasActiveOrUpcomingShift = todaysShifts.some(shift => {
         const [startH, startM] = String(shift.start_time || '00:00').split(':').map(Number);
         const [endH, endM] = String(shift.end_time || '00:00').split(':').map(Number);
         const startMinutes = startH * 60 + startM;
         const endMinutes = endH * 60 + endM;
 
-        // Keep active if current time is within 30 mins before start or before/during shift end
-        return currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes;
+        const isClockedIn = shift.isClockedIn && !shift.isClockedOut;
+        return isClockedIn || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
       });
 
       if (hasActiveOrUpcomingShift) {
         try {
-          const gpsOn = await Location.hasServicesEnabledAsync();
-          if (gpsOn) {
-            await setTrackingEnabled(true);
+          // Check both device GPS toggle and app runtime permission
+          const gpsHardwareOn = await Location.hasServicesEnabledAsync();
+          const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+          const permissionGranted = fgStatus === 'granted';
+          const isGpsFullyActive = gpsHardwareOn && permissionGranted;
+
+          if (!isGpsFullyActive) {
+            // Permission was set to "Don't allow" or GPS disabled: immediately notify server
+            await setTrackingEnabled(false);
+            await sendLocationPing(0, 0, false, 'GPS Disabled');
+
             const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-            if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-            
-            if (!isRegistered || forceRestart) {
-              try {
+            if (isRegistered) {
+              await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            }
+            return;
+          }
+
+          // GPS is active and allowed: mark enabled and transmit live position
+          await setTrackingEnabled(true);
+
+          try {
+            const loc = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+
+            if (!isCancelled && loc && loc.coords) {
+              await sendLocationPing(
+                loc.coords.latitude,
+                loc.coords.longitude,
+                true,
+                todaySchedule?.place || 'Campus'
+              );
+            }
+          } catch (posErr) {
+            // Fallback if location read failed due to sudden revocation
+            await sendLocationPing(0, 0, false, 'GPS Disabled');
+          }
+
+          // Ensure background location task is registered
+          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+          if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+          
+          if (!isRegistered || forceRestart) {
+            try {
+              const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+              if (bgStatus === 'granted') {
                 await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
                   accuracy: Location.Accuracy.High, 
-                  timeInterval: 20000, 
+                  timeInterval: 15000, 
                   distanceInterval: 0,
-                  deferredUpdatesInterval: 20000, 
+                  deferredUpdatesInterval: 15000, 
                   showsBackgroundLocationIndicator: true,
-                  foregroundService: { notificationTitle: "Tracking Active", notificationBody: "Monitoring location for active shift", notificationColor: colors.primary },
+                  foregroundService: {
+                    notificationTitle: "Tracking Active",
+                    notificationBody: "Monitoring location for active shift",
+                    notificationColor: colors.primary
+                  },
                 });
-              } catch (foregroundErr) {}
-            }
+              }
+            } catch (foregroundErr) {}
           }
         } catch (e) {}
       } else {
-        // No remaining shifts today! Turn off GPS / background location tracking automatically
+        // Shift has completed or no active shift: disable tracking cleanly
         try {
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
           if (isRegistered) {
             await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
           }
           await setTrackingEnabled(false);
-          console.log("[Location] Shift ended and no more shifts today. GPS tracking turned off.");
         } catch (e) {}
       }
     };
 
     checkAndManageTracking();
-    const subscription = AppState.addEventListener('change', state => { if (state === 'active') checkAndManageTracking(true); });
-    const interval = setInterval(() => checkAndManageTracking(false), 30000); 
-    return () => { subscription.remove(); clearInterval(interval); };
-  }, [allTodaySchedules, colors.primary]);
+
+    // Check immediately upon resuming the app from device Settings
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') checkAndManageTracking(true);
+    });
+
+    const interval = setInterval(() => checkAndManageTracking(false), 15000); 
+
+    return () => {
+      isCancelled = true;
+      subscription.remove();
+      clearInterval(interval);
+    };
+  }, [allTodaySchedules, todaySchedule, colors.primary]);
 
   const captureSelfie = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
