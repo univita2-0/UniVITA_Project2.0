@@ -48,6 +48,7 @@ export default function ChatScreen({ onClose }) {
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMsg, setNewMsg] = useState('');
+  const [chatError, setChatError] = useState('');
   const [token, setToken] = useState('');
   const [myUserId, setMyUserId] = useState(null);
   const wsRef = useRef(null);
@@ -62,6 +63,8 @@ export default function ChatScreen({ onClose }) {
   const [groupName, setGroupName] = useState('');
   const [groupSearch, setGroupSearch] = useState('');
   const [selectedUsers, setSelectedUsers] = useState([]);
+  const [groupError, setGroupError] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [unreadCounts, setUnreadCounts] = useState({});
 
   useEffect(() => {
@@ -106,6 +109,7 @@ export default function ChatScreen({ onClose }) {
 
   useEffect(() => {
     if (!token || !activeRoom) return;
+    setChatError('');
     const WS_URL = getWsUrl(API_URL);
     if (!WS_URL) return;
 
@@ -117,14 +121,32 @@ export default function ChatScreen({ onClose }) {
         try {
           const data = JSON.parse(e.data);
           if (data.type === 'new_message') {
-            setMessages((prev) => [...prev, data.message]);
+            if (Number(data.message?.room_id) === Number(activeRoom.id)) {
+              setMessages((prev) => [...prev, data.message]);
+            }
             fetchUnreadCounts(token);
+          } else if (data.type === 'error') {
+            setChatError(data.message || 'Your message could not be sent. Please try again.');
           }
-        } catch (err) {}
+        } catch (err) {
+          console.error('Chat message could not be read:', err);
+          setChatError('A chat update could not be read. Please reopen the conversation.');
+        }
       };
-    } catch (wsErr) {}
+      ws.onerror = () => setChatError('Chat connection failed. Check your internet connection and try again.');
+      ws.onclose = () => {
+        if (wsRef.current === ws) setChatError('Chat connection closed. Reopen the conversation to reconnect.');
+      };
+    } catch (wsErr) {
+      setChatError('Could not connect to chat. Please try again.');
+    }
 
-    return () => { if (wsRef.current) wsRef.current.close(); };
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
   }, [token, activeRoom]);
 
   useEffect(() => {
@@ -137,45 +159,99 @@ export default function ChatScreen({ onClose }) {
     if (!activeRoom || !token) return;
     fetch(`${API_URL}/chat/history/${activeRoom.id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.json())
-      .then(data => setMessages(Array.isArray(data) ? data : []))
-      .catch(() => setMessages([]));
+      .then(data => {
+        if (Array.isArray(data)) setMessages(data);
+        else {
+          setMessages([]);
+          setChatError(data?.message || 'Could not load this conversation. Please try again.');
+        }
+      })
+      .catch(err => {
+        setMessages([]);
+        setChatError(err.message || 'Could not load this conversation. Check your connection and try again.');
+      });
   }, [activeRoom, token]);
 
   const handleSend = () => {
-    if (!newMsg || !newMsg.trim()) return Alert.alert('Validation', 'Message cannot be empty.');
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return Alert.alert('Connection Error', 'Chat connection is inactive. Please re-open the conversation.');
-    wsRef.current.send(JSON.stringify({ type: 'message', roomId: activeRoom.id, roomName: activeRoom.name, content: newMsg.trim() }));
-    setNewMsg('');
+    const content = newMsg.trim();
+    if (!content) {
+      setChatError('Enter a message before sending.');
+      return;
+    }
+    if (content.length > 2000) {
+      setChatError('Messages can be up to 2,000 characters.');
+      return;
+    }
+    if (!activeRoom?.id) {
+      setChatError('Choose a conversation before sending a message.');
+      return;
+    }
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setChatError('Chat is reconnecting. Please wait a moment and try again.');
+      return;
+    }
+    try {
+      wsRef.current.send(JSON.stringify({ type: 'message', roomId: activeRoom.id, content }));
+      setNewMsg('');
+      setChatError('');
+    } catch (err) {
+      console.error('Chat send failed:', err);
+      setChatError('Your message could not be sent. Please try again.');
+    }
   };
 
   const startDM = async (partner) => {
     try {
+      if (!partner?.id || Number(partner.id) === Number(myUserId)) {
+        setChatError('Choose a valid colleague to start a conversation.');
+        return;
+      }
       const dmRes = await fetch(`${API_URL}/chat/dm-room`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ partnerUserId: partner.id })
       });
       const dmData = await dmRes.json();
+      if (!dmRes.ok || !dmData.roomId) {
+        Alert.alert('Could not open chat', dmData.error || 'Please refresh the colleague list and try again.');
+        return;
+      }
       if (dmData.roomId) {
         const newRoom = { id: dmData.roomId, name: dmData.roomName, display_name: partner.full_name, type: 'direct' };
         setRooms(prev => [newRoom, ...prev.filter(r => r.id !== newRoom.id)]);
         setActiveRoom(newRoom);
       }
       setSearchTerm(''); setShowUserList(false);
-    } catch (err) { Alert.alert('Error', 'Could not open conversation.'); }
+    } catch (err) { Alert.alert('Could not open chat', err.message || 'Check your connection and try again.'); }
   };
 
   const createGroup = async () => {
-    if (!groupName || groupName.trim().length < 2) return Alert.alert('Validation', 'Group name must be at least 2 characters.');
-    if (selectedUsers.length < 1) return Alert.alert('Validation', 'Please choose at least one member.');
+    const cleanName = groupName.trim();
+    if (cleanName.length < 2 || cleanName.length > 50) {
+      setGroupError('Enter a group name between 2 and 50 characters.');
+      return;
+    }
+    if (selectedUsers.length < 1) {
+      setGroupError('Choose at least one colleague to add.');
+      return;
+    }
+    setIsCreatingGroup(true);
+    setGroupError('');
     try {
       const res = await fetch(`${API_URL}/chat/group-room`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: groupName.trim(), memberIds: selectedUsers.map(u => u.id) })
       });
       const data = await res.json();
-      if (data.success) {
-        fetchRooms(token);
+      if (res.ok && data.success && Number.isSafeInteger(Number(data.roomId)) && Number(data.roomId) > 0) {
+        await fetchRooms(token);
+        setActiveRoom({ id: data.roomId, name: cleanName, type: 'group' });
         setShowGroupModal(false); setGroupName(''); setSelectedUsers([]); setGroupSearch('');
-      } else { Alert.alert('Error', data.error || 'Failed to create group'); }
-    } catch (err) { Alert.alert('Network Error', 'Could not connect to server.'); }
+      } else {
+        setGroupError(data.error || data.message || 'Could not create the group. Please try again.');
+      }
+    } catch (err) {
+      setGroupError('Connection problem. Check your internet and try again.');
+    } finally {
+      setIsCreatingGroup(false);
+    }
   };
 
   const leaveRoom = async (roomId) => {
@@ -183,7 +259,7 @@ export default function ChatScreen({ onClose }) {
       await fetch(`${API_URL}/chat/rooms/${roomId}/leave`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
       setRooms(prev => prev.filter(r => r.id !== roomId));
       if (activeRoom?.id === roomId) setActiveRoom(null);
-    } catch (err) {}
+    } catch (err) { Alert.alert('Could not leave group', err.message || 'Check your connection and try again.'); }
   };
 
   const deleteRoom = async (roomId) => {
@@ -191,7 +267,7 @@ export default function ChatScreen({ onClose }) {
       await fetch(`${API_URL}/chat/rooms/${roomId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
       setRooms(prev => prev.filter(r => r.id !== roomId));
       if (activeRoom?.id === roomId) setActiveRoom(null);
-    } catch (err) {}
+    } catch (err) { Alert.alert('Could not delete conversation', err.message || 'Check your connection and try again.'); }
   };
 
   useEffect(() => {
@@ -201,7 +277,7 @@ export default function ChatScreen({ onClose }) {
     const filtered = safeUsers.filter(u => {
       if (!u || typeof u !== 'object') return false;
       const name = String(u.full_name || u.name || '').toLowerCase();
-      return name.includes(lower) && u.id !== myUserId;
+      return name.includes(lower) && Number(u.id) !== Number(myUserId);
     });
     setFilteredUsers(filtered); setShowUserList(true);
   }, [searchTerm, allUsers, myUserId]);
@@ -273,7 +349,7 @@ export default function ChatScreen({ onClose }) {
                   onBlur={() => setTimeout(() => setShowUserList(false), 200)}
                 />
               </View>
-              <TouchableOpacity style={styles.newGroupBtn} onPress={() => setShowGroupModal(true)} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.newGroupBtn} onPress={() => { setGroupError(''); setShowGroupModal(true); }} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Create group chat">
                 <Plus size={20} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
@@ -290,6 +366,9 @@ export default function ChatScreen({ onClose }) {
                   </TouchableOpacity>
                 ))}
               </View>
+            )}
+            {showUserList && filteredUsers.length === 0 && searchTerm.trim().length > 0 && (
+              <Text style={styles.helperText}>No colleagues match your search.</Text>
             )}
 
             <FlatList
@@ -332,15 +411,20 @@ export default function ChatScreen({ onClose }) {
             <View style={styles.inputArea}>
               <TextInput
                 style={styles.chatInput}
-                value={newMsg} onChangeText={setNewMsg}
+                value={newMsg}
+                maxLength={2000}
+                onChangeText={(value) => { setNewMsg(value); setChatError(''); }}
                 placeholder="Type a message..."
                 placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
                 onSubmitEditing={handleSend} returnKeyType="send"
+                accessibilityLabel="Chat message"
               />
-              <TouchableOpacity onPress={handleSend} style={styles.sendBtn} activeOpacity={0.8} disabled={!newMsg.trim()}>
+              <TouchableOpacity onPress={handleSend} style={[styles.sendBtn, !newMsg.trim() && styles.sendBtnDisabled]} activeOpacity={0.8} disabled={!newMsg.trim()} accessibilityRole="button" accessibilityLabel="Send message">
                 <Send size={18} color={newMsg.trim() ? "#FFFFFF" : "rgba(255,255,255,0.5)"} />
               </TouchableOpacity>
             </View>
+            {!!chatError && <Text accessibilityLiveRegion="polite" style={styles.chatError}>{chatError}</Text>}
+            <Text style={styles.messageCounter}>{newMsg.length}/2000 characters</Text>
           </View>
         )}
 
@@ -352,10 +436,14 @@ export default function ChatScreen({ onClose }) {
                 <Text style={styles.modalTitle}>New Group Chat</Text>
                 <TouchableOpacity onPress={() => setShowGroupModal(false)}><X size={24} color={colors.textSecondary} /></TouchableOpacity>
               </View>
-              <Text style={styles.label}>Group Name (Min 2 chars)</Text>
-              <TextInput style={styles.modalInput} placeholder="e.g. IT Department" placeholderTextColor={colors.textSecondary} value={groupName} onChangeText={setGroupName} />
+              <Text style={styles.label}>Group Name</Text>
+              <TextInput style={styles.modalInput} placeholder="e.g. IT Department" placeholderTextColor={colors.textSecondary} value={groupName} maxLength={50} onChangeText={(value) => { setGroupName(value); setGroupError(''); }} accessibilityLabel="Group name" />
+              <Text style={styles.helperText}>Use 2–50 characters.</Text>
               <Text style={styles.label}>Add Members</Text>
-              <TextInput style={styles.modalInput} placeholder="Search colleagues..." placeholderTextColor={colors.textSecondary} value={groupSearch} onChangeText={setGroupSearch} />
+              <TextInput style={styles.modalInput} placeholder="Search colleagues..." placeholderTextColor={colors.textSecondary} value={groupSearch} onChangeText={(value) => { setGroupSearch(value); setGroupError(''); }} accessibilityLabel="Search colleagues to add" />
+              <Text style={styles.helperText}>
+                {selectedUsers.length === 0 ? 'Select at least one colleague. You will be included automatically.' : `${selectedUsers.length} colleague${selectedUsers.length === 1 ? '' : 's'} selected. You will be included automatically.`}
+              </Text>
               <ScrollView style={styles.memberList} showsVerticalScrollIndicator={false}>
                 {(Array.isArray(allUsers) ? allUsers : [])
                   .filter(u => {
@@ -367,15 +455,21 @@ export default function ChatScreen({ onClose }) {
                   .map(u => {
                     const isSelected = selectedUsers.some(s => s.id === u.id);
                     return (
-                      <TouchableOpacity key={u.id} style={[styles.memberItem, isSelected && styles.memberItemSelected]} onPress={() => { setSelectedUsers(prev => isSelected ? prev.filter(s => s.id !== u.id) : [...prev, u]); }}>
+                      <TouchableOpacity key={u.id} style={[styles.memberItem, isSelected && styles.memberItemSelected]} onPress={() => { setSelectedUsers(prev => isSelected ? prev.filter(s => s.id !== u.id) : [...prev, u]); setGroupError(''); }} accessibilityRole="checkbox" accessibilityState={{ checked: isSelected }}>
                         <View style={styles.avatarCircleSmall}><Text style={styles.avatarTextSmall}>{getInitials(u.full_name)}</Text></View>
                         <View style={{ flex: 1 }}><Text style={styles.memberItemName}>{u.full_name}</Text><Text style={styles.memberItemRole}>{u.role}</Text></View>
                         <View style={[styles.checkbox, isSelected && styles.checkboxActive]} />
                       </TouchableOpacity>
                     );
                   })}
+                {allUsers.filter(u => u && Number(u.id) !== Number(myUserId) && String(u.full_name || u.name || '').toLowerCase().includes(groupSearch.trim().toLowerCase())).length === 0 && (
+                  <Text style={styles.helperText}>{groupSearch.trim() ? 'No colleagues match your search.' : 'No colleagues are available to add.'}</Text>
+                )}
               </ScrollView>
-              <TouchableOpacity onPress={createGroup} style={styles.createBtn} activeOpacity={0.8}><Text style={styles.createBtnText}>Create Group</Text></TouchableOpacity>
+              {!!groupError && <Text accessibilityLiveRegion="polite" style={styles.chatError}>{groupError}</Text>}
+              <TouchableOpacity onPress={createGroup} style={[styles.createBtn, (isCreatingGroup || groupName.trim().length < 2 || groupName.trim().length > 50 || selectedUsers.length < 1) && styles.disabledButton]} activeOpacity={0.8} disabled={isCreatingGroup || groupName.trim().length < 2 || groupName.trim().length > 50 || selectedUsers.length < 1} accessibilityRole="button">
+                {isCreatingGroup ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.createBtnText}>Create Group</Text>}
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
@@ -437,12 +531,16 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   sentMessageText: { color: '#FFFFFF' },
   inputArea: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
   chatInput: { flex: 1, minHeight: 40, maxHeight: 90, backgroundColor: colors.background, borderRadius: 20, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, fontSize: 14, fontFamily: 'Inter_18pt-Medium', color: colors.textPrimary, borderWidth: 1, borderColor: colors.border },
+  sendBtnDisabled: { backgroundColor: colors.border },
+  chatError: { color: colors.danger || '#DC2626', fontFamily: 'Inter_18pt-Medium', fontSize: 12, paddingHorizontal: 16, paddingTop: 4 },
+  messageCounter: { color: colors.textSecondary, fontFamily: 'Inter_18pt-Regular', fontSize: 10, textAlign: 'right', paddingHorizontal: 18, paddingBottom: 4 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#0D9488', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: colors.surface, borderRadius: 20, padding: 20, width: '100%', maxWidth: 380, borderWidth: 1, borderColor: colors.border },
+  modalContent: { backgroundColor: colors.surface, borderRadius: 20, padding: 20, width: '100%', maxWidth: 380, maxHeight: '85%', borderWidth: 1, borderColor: colors.border },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 17, color: colors.textPrimary },
   label: { fontFamily: 'Inter_18pt-Bold', fontSize: 11, color: colors.textSecondary, marginBottom: 6, marginTop: 10, textTransform: 'uppercase' },
+  helperText: { color: colors.textSecondary, fontFamily: 'Inter_18pt-Regular', fontSize: 11, marginTop: 4, marginBottom: 8 },
   modalInput: { fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: colors.textPrimary, backgroundColor: colors.background },
   memberList: { maxHeight: 180, marginTop: 6, marginBottom: 16 },
   memberItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, marginBottom: 4, gap: 10 },
@@ -454,5 +552,6 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: colors.border },
   checkboxActive: { backgroundColor: '#0D9488', borderColor: '#0D9488' },
   createBtn: { backgroundColor: '#0D9488', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  disabledButton: { opacity: 0.55 },
   createBtnText: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF', fontSize: 14 }
 });

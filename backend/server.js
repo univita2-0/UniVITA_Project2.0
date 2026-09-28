@@ -431,7 +431,12 @@ const uploadProfilePic = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, profilePicDir),
     filename: (req, file, cb) => cb(null, `profile_${Date.now()}${path.extname(file.originalname)}`)
-  })
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Invalid file type. Only images are allowed.'));
+  }
 });
 
 // 1. LEAVE IMAGES
@@ -850,7 +855,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   });
 });
 
-app.put('/api/users/:id/profile', authenticateToken, async (req, res) => {
+app.put('/api/users/:id/profile', authenticateToken, uploadProfilePic.single('profile_picture'), async (req, res) => {
   const userId = req.params.id;
   if (req.user.id.toString() !== userId.toString() && req.user.role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
@@ -860,7 +865,9 @@ app.put('/api/users/:id/profile', authenticateToken, async (req, res) => {
 
   try {
     let profile_picture = null;
-    if (base64_image) {
+    if (req.file) {
+      profile_picture = `/uploads/profile_pictures/${req.file.filename}`;
+    } else if (base64_image) {
       const buffer = Buffer.from(base64_image, 'base64');
       const filename = `profile_${Date.now()}.jpg`;
       const filePath = path.join(profilePicDir, filename);
@@ -4344,6 +4351,33 @@ app.put('/api/applicants/:id', authenticateToken, (req, res) => {
 // 11. CHAT & WEBSOCKETS
 // ============================================
 
+const authorizeChatRoom = (roomId, user, callback) => {
+  db.query("SELECT id, name, type FROM chat_rooms WHERE id = ?", [roomId], (err, rows) => {
+    if (err) return callback(err);
+    if (rows.length === 0) return callback(null, false, 404);
+
+    const room = rows[0];
+    if (room.type === 'direct') {
+      const participants = room.name.split('_').slice(1).map(Number);
+      return callback(null, participants.includes(Number(user.id)), 403, room);
+    }
+
+    const isPrivileged = ['admin', 'security', 'hr_admin'].includes(user.role);
+    if (Number(room.id) === 1 || (Number(room.id) <= 4 && isPrivileged)) {
+      return callback(null, true, 403, room);
+    }
+
+    db.query(
+      "SELECT 1 FROM chat_room_members WHERE room_id = ? AND user_id = ? LIMIT 1",
+      [roomId, user.id],
+      (memberErr, members) => {
+        if (memberErr) return callback(memberErr);
+        callback(null, members.length > 0, 403, room);
+      }
+    );
+  });
+};
+
 app.get('/api/chat/rooms', authenticateToken, (req, res) => {
   const userId = req.user.id;
   const sql = `
@@ -4371,24 +4405,42 @@ app.get('/api/chat/rooms', authenticateToken, (req, res) => {
 });
 
 app.get('/api/chat/history/:roomId', authenticateToken, (req, res) => {
-  const { roomId } = req.params;
-  const limit = parseInt(req.query.limit) || 50;
-  db.query("SELECT cm.*, u.full_name, u.employee_id FROM chat_messages cm JOIN users u ON cm.user_id = u.id WHERE cm.room_id = ? ORDER BY cm.sent_at DESC LIMIT ?", [roomId, limit], (err, messages) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(messages.reverse());
+  const roomId = Number(req.params.roomId);
+  const requestedLimit = Number(req.query.limit) || 50;
+  if (!Number.isSafeInteger(roomId) || roomId < 1) {
+    return res.status(400).json({ success: false, message: 'Invalid chat room.' });
+  }
+  const limit = Math.min(Math.max(Math.trunc(requestedLimit), 1), 100);
+
+  authorizeChatRoom(roomId, req.user, (accessErr, allowed, status) => {
+    if (accessErr) return res.status(500).json({ success: false, message: 'Could not verify chat room access.' });
+    if (!allowed) return res.status(status).json({ success: false, message: status === 404 ? 'Chat room not found.' : 'You are not a member of this conversation.' });
+
+    db.query("SELECT cm.*, u.full_name, u.employee_id FROM chat_messages cm JOIN users u ON cm.user_id = u.id WHERE cm.room_id = ? ORDER BY cm.sent_at DESC LIMIT ?", [roomId, limit], (err, messages) => {
+      if (err) return res.status(500).json({ success: false, message: 'Could not load chat history.' });
+      res.json(messages.reverse());
+    });
   });
 });
 
 app.post('/api/chat/dm-room', authenticateToken, (req, res) => {
-  const partnerId = req.body.partnerUserId;
+  const partnerId = Number(req.body?.partnerUserId);
   const userId = req.user.id;
+  if (!Number.isSafeInteger(partnerId) || partnerId < 1 || partnerId === Number(userId)) {
+    return res.status(400).json({ success: false, error: 'Choose a valid colleague to start a conversation.' });
+  }
   const ids = [userId, partnerId].sort((a,b)=>a-b);
   const roomName = `dm_${ids[0]}_${ids[1]}`;
-  db.query("INSERT INTO chat_rooms (name, type) VALUES (?, 'direct') ON DUPLICATE KEY UPDATE name=name", [roomName], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    db.query("SELECT id FROM chat_rooms WHERE name = ?", [roomName], (err, rows) => {
-      if (err || rows.length === 0) return res.status(500).json({ error: 'Failed to get DM room' });
-      res.json({ roomId: rows[0].id, roomName });
+  db.query("SELECT id FROM users WHERE id IN (?, ?) AND status = 'active'", ids, (userErr, users) => {
+    if (userErr) return res.status(500).json({ success: false, error: 'Could not verify the selected colleague.' });
+    if (users.length !== 2) return res.status(404).json({ success: false, error: 'Selected colleague was not found or is inactive.' });
+
+    db.query("INSERT INTO chat_rooms (name, type) VALUES (?, 'direct') ON DUPLICATE KEY UPDATE name=name", [roomName], (err) => {
+      if (err) return res.status(500).json({ success: false, error: 'Could not create the conversation.' });
+      db.query("SELECT id FROM chat_rooms WHERE name = ?", [roomName], (err, rows) => {
+        if (err || rows.length === 0) return res.status(500).json({ success: false, error: 'Could not open the conversation.' });
+        res.json({ roomId: rows[0].id, roomName });
+      });
     });
   });
 });
@@ -4439,10 +4491,19 @@ app.delete('/api/chat/rooms/:roomId/leave', authenticateToken, (req, res) => {
 
 app.post('/api/chat/read/:roomId', authenticateToken, (req, res) => {
   const userId = req.user.id;
-  const { roomId } = req.params;
-  db.query("INSERT INTO user_chat_read (user_id, room_id, last_read_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE last_read_at = NOW()", [userId, roomId], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true });
+  const roomId = Number(req.params.roomId);
+  if (!Number.isSafeInteger(roomId) || roomId < 1) {
+    return res.status(400).json({ success: false, message: 'Invalid chat room.' });
+  }
+
+  authorizeChatRoom(roomId, req.user, (accessErr, allowed, status) => {
+    if (accessErr) return res.status(500).json({ success: false, message: 'Could not verify chat room access.' });
+    if (!allowed) return res.status(status).json({ success: false, message: status === 404 ? 'Chat room not found.' : 'You are not a member of this conversation.' });
+
+    db.query("INSERT INTO user_chat_read (user_id, room_id, last_read_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE last_read_at = NOW()", [userId, roomId], (err) => {
+      if (err) return res.status(500).json({ success: false, message: 'Could not update read status.' });
+      res.json({ success: true });
+    });
   });
 });
 
@@ -4454,21 +4515,77 @@ app.get('/api/chat/unread-counts', authenticateToken, (req, res) => {
   });
 });
 
-app.post('/api/chat/group-room', authenticateToken, (req, res) => {
-  const { name, memberIds } = req.body;
-  if (!name || !memberIds || !Array.isArray(memberIds) || memberIds.length < 2) return res.status(400).json({ error: 'Group name and at least 2 members required.' });
-  const creatorId = req.user.id;
-  if (!memberIds.includes(creatorId)) memberIds.push(creatorId);
-  db.query("INSERT INTO chat_rooms (name, type) VALUES (?, 'group')", [name], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const roomId = result.insertId;
-    const values = memberIds.map(id => [roomId, id]);
-    db.query("INSERT INTO chat_room_members (room_id, user_id) VALUES ?", [values], (err2) => {
-      if (err2) return res.status(500).json({ error: err2.message });
-      db.query("INSERT INTO user_chat_read (user_id, room_id) VALUES ?", [values], () => {});
-      res.json({ success: true, roomId });
-    });
-  });
+app.post('/api/chat/group-room', authenticateToken, async (req, res) => {
+  const { name, memberIds } = req.body || {};
+  const groupName = typeof name === 'string' ? name.trim() : '';
+  if (groupName.length < 2 || groupName.length > 50) {
+    return res.status(400).json({ success: false, error: 'Group name must be between 2 and 50 characters.' });
+  }
+  if (!Array.isArray(memberIds)) {
+    return res.status(400).json({ success: false, error: 'Choose at least one colleague for the group.' });
+  }
+
+  const creatorId = Number(req.user.id);
+  const selectedIds = [...new Set(memberIds.map(Number))];
+  if (selectedIds.some(id => !Number.isSafeInteger(id) || id < 1 || id === creatorId)) {
+    return res.status(400).json({ success: false, error: 'One or more selected members are invalid.' });
+  }
+  if (selectedIds.length < 1) {
+    return res.status(400).json({ success: false, error: 'Choose at least one colleague for the group.' });
+  }
+
+  let connection;
+  try {
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+
+    const [existingRooms] = await connection.query("SELECT id FROM chat_rooms WHERE name = ?", [groupName]);
+    if (existingRooms.length > 0) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, error: 'A conversation already uses this group name. Choose another name.' });
+    }
+
+    const [users] = await connection.query(
+      "SELECT id FROM users WHERE id IN (?) AND status = 'active'",
+      [selectedIds]
+    );
+    if (users.length !== selectedIds.length) {
+      await connection.rollback();
+      return res.status(400).json({ success: false, error: 'One or more selected members are unavailable. Refresh and try again.' });
+    }
+
+    const allMemberIds = [...selectedIds, creatorId];
+    const [roomResult] = await connection.query(
+      "INSERT INTO chat_rooms (name, type) VALUES (?, 'group')",
+      [groupName]
+    );
+    const roomId = roomResult.insertId;
+    await connection.query(
+      "INSERT INTO chat_room_members (room_id, user_id) VALUES ?",
+      [allMemberIds.map(id => [roomId, id])]
+    );
+    await connection.query(
+      "INSERT INTO user_chat_read (user_id, room_id) VALUES ?",
+      [allMemberIds.map(id => [id, roomId])]
+    );
+    await connection.commit();
+    return res.json({ success: true, roomId });
+  } catch (err) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackErr) {
+        console.error('Could not roll back group creation:', rollbackErr.message);
+      }
+    }
+    console.error('Chat group creation failed:', err.message);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, error: 'A conversation already uses this group name. Choose another name.' });
+    }
+    return res.status(500).json({ success: false, error: 'Could not create the group. Please try again.' });
+  } finally {
+    if (connection) connection.release();
+  }
 });
 
 
@@ -6851,7 +6968,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`UniVITA Backend running on http://0.0.0.0:${PORT}`);
 });
 
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ server, maxPayload: 16 * 1024 });
 
 const broadcastToAdminAndHR = (data) => {
   wss.clients.forEach(client => {
@@ -6882,53 +6999,96 @@ wss.on('connection', (ws, req) => {
       const user = rows[0];
       ws.user = user;
       wsClients.set(user.id, ws);
+      ws.on('error', socketErr => console.error('Chat websocket error:', socketErr.message));
       
       ws.on('message', (data) => {
         let msgData;
-        try { 
-          msgData = JSON.parse(data); 
-        } catch (e) { 
-          return; 
+        try {
+          msgData = JSON.parse(data.toString());
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid chat message format.' }));
+          return;
+        }
+        if (!msgData || typeof msgData !== 'object' || Array.isArray(msgData)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid chat message format.' }));
+          return;
         }
         
         if (msgData.type === 'message') {
-          const { roomId, roomName, content } = msgData;
-          if (!roomId || !content.trim()) return;
-          
-          if (!roomName?.startsWith('dm_')) {
-            if (roomId !== 1 && user.role !== 'admin' && user.role !== 'security' && user.role !== 'hr_admin') {
-              ws.send(JSON.stringify({ type: 'error', message: 'Access denied to this room' }));
+          const roomId = Number(msgData.roomId);
+          const content = typeof msgData.content === 'string' ? msgData.content.trim() : '';
+          if (!Number.isSafeInteger(roomId) || roomId < 1) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Choose a valid conversation.' }));
+            return;
+          }
+          if (!content) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Type a message before sending.' }));
+            return;
+          }
+          if (content.length > 2000) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Messages can be up to 2,000 characters.' }));
+            return;
+          }
+
+          authorizeChatRoom(roomId, user, (accessErr, allowed, status, room) => {
+            if (accessErr) {
+              ws.send(JSON.stringify({ type: 'error', message: 'Could not verify conversation access. Please try again.' }));
               return;
             }
-          }
-          
-          db.query("INSERT INTO chat_messages (room_id, user_id, message) VALUES (?, ?, ?)", [roomId, user.id, content.trim()], (err, result) => {
-            if (err) return;
-            
-            const messageObj = { 
-              id: result.insertId, 
-              room_id: roomId, 
-              user_id: user.id, 
-              full_name: user.email, 
-              message: content.trim(), 
-              sent_at: new Date().toISOString() 
-            };
-            
-            if (roomName && roomName.startsWith('dm_')) {
-              const participantIds = roomName.split('_').slice(1).map(Number);
-              participantIds.forEach(pid => {
-                const client = wsClients.get(pid);
-                if (client && client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ type: 'new_message', message: messageObj }));
-                }
-              });
-            } else {
-              wss.clients.forEach(client => { 
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ type: 'new_message', message: messageObj })); 
-                }
-              });
+            if (!allowed) {
+              ws.send(JSON.stringify({ type: 'error', message: status === 404 ? 'Conversation not found.' : 'You are not a member of this conversation.' }));
+              return;
             }
+
+            db.query("INSERT INTO chat_messages (room_id, user_id, message) VALUES (?, ?, ?)", [roomId, user.id, content], (err, result) => {
+              if (err) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Message could not be sent. Please try again.' }));
+                return;
+              }
+
+              const messageObj = {
+                id: result.insertId,
+                room_id: roomId,
+                user_id: user.id,
+                full_name: user.email,
+                message: content,
+                sent_at: new Date().toISOString()
+              };
+              const broadcast = (recipientIds) => {
+                recipientIds.forEach(recipientId => {
+                  const client = wsClients.get(Number(recipientId));
+                  if (client && client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'new_message', message: messageObj }));
+                  }
+                });
+              };
+
+              if (room.type === 'direct') {
+                broadcast(room.name.split('_').slice(1).map(Number));
+              } else if (Number(room.id) === 1) {
+                wss.clients.forEach(client => {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'new_message', message: messageObj }));
+                  }
+                });
+              } else {
+                db.query("SELECT user_id FROM chat_room_members WHERE room_id = ?", [roomId], (memberErr, members) => {
+                  if (memberErr) {
+                    console.error('Could not find chat group recipients:', memberErr.message);
+                    return;
+                  }
+                  const recipientIds = members.map(member => member.user_id);
+                  if (Number(room.id) <= 4) {
+                    wss.clients.forEach(client => {
+                      if (client.user && ['admin', 'security', 'hr_admin'].includes(client.user.role)) {
+                        recipientIds.push(client.user.id);
+                      }
+                    });
+                  }
+                  broadcast([...new Set(recipientIds.map(Number))]);
+                });
+              }
+            });
           });
         }
       });

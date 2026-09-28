@@ -19,6 +19,7 @@ const ChatPanel = ({ token }) => {
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMsg, setNewMsg] = useState('');
+  const [chatError, setChatError] = useState('');
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const [myUserId, setMyUserId] = useState(null);
@@ -42,6 +43,8 @@ const ChatPanel = ({ token }) => {
   const [groupName, setGroupName] = useState('');
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [groupSearch, setGroupSearch] = useState('');
+  const [groupError, setGroupError] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
 
   // Delete / Leave modals
   const [showDeleteRoomModal, setShowDeleteRoomModal] = useState(false);
@@ -71,11 +74,13 @@ const ChatPanel = ({ token }) => {
 
   useEffect(() => {
     if (!token) return;
+    setChatError('');
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       setMyUserId(payload.id);
     } catch (e) {}
 
+    if (!open) return;
     fetchUnreadCounts();
 
     const ws = new WebSocket(`${WS_URL}?token=${token}`);
@@ -98,13 +103,23 @@ const ChatPanel = ({ token }) => {
             }));
             setUnreadTotal(prev => prev + 1);
           }
+        } else if (data.type === 'error') {
+          setChatError(data.message || 'Your message could not be sent. Please try again.');
         }
       } catch (err) {
         console.error('Web WS message parse error:', err);
+        setChatError('A chat update could not be read. Please reopen the conversation.');
       }
     };
-    return () => ws.close();
-  }, [token, fetchUnreadCounts]);
+    ws.onerror = () => setChatError('Chat connection failed. Check your internet connection and try again.');
+    ws.onclose = () => {
+      if (wsRef.current === ws) setChatError('Chat connection closed. Reopen the panel to reconnect.');
+    };
+    return () => {
+      if (wsRef.current === ws) wsRef.current = null;
+      ws.close();
+    };
+  }, [token, open, fetchUnreadCounts]);
 
   useEffect(() => {
     const interval = setInterval(fetchUnreadCounts, 10000);
@@ -130,7 +145,7 @@ const ChatPanel = ({ token }) => {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      setRooms(data || []);
+      setRooms(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Fetch rooms error:', err);
     }
@@ -142,7 +157,7 @@ const ChatPanel = ({ token }) => {
     if (!token) return;
     fetch(`${API_BASE}/api/employees`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.json())
-      .then(data => setAllUsers(data || []))
+      .then(data => setAllUsers(Array.isArray(data) ? data : []))
       .catch(console.error);
   }, [token]);
 
@@ -154,7 +169,7 @@ const ChatPanel = ({ token }) => {
       return;
     }
     const filtered = allUsers.filter(u =>
-      u.full_name.toLowerCase().includes(cleanSearch) && u.id !== myUserId
+      String(u?.full_name || u?.name || '').toLowerCase().includes(cleanSearch) && Number(u?.id) !== Number(myUserId)
     );
     setFilteredUsers(filtered);
     setShowSearchResults(true);
@@ -175,8 +190,18 @@ const ChatPanel = ({ token }) => {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(res => res.json())
-      .then(data => setMessages(data || []))
-      .catch(console.error);
+      .then(data => {
+        if (Array.isArray(data)) setMessages(data);
+        else {
+          setMessages([]);
+          setChatError(data?.message || 'Could not load this conversation. Please try again.');
+        }
+      })
+      .catch(err => {
+        console.error('Chat history error:', err);
+        setMessages([]);
+        setChatError('Could not load this conversation. Check your connection and try again.');
+      });
   }, [activeRoom, token]);
 
   useEffect(() => {
@@ -185,22 +210,43 @@ const ChatPanel = ({ token }) => {
 
   // VALIDATION FLOW: Robust check before dispatching message via WebSocket
   const handleSend = () => {
-    if (!newMsg || !newMsg.trim()) return;
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      alert('Chat connection is inactive. Please re-open the panel.');
+    const content = newMsg.trim();
+    if (!content) {
+      setChatError('Enter a message before sending.');
       return;
     }
-    wsRef.current.send(JSON.stringify({
-      type: 'message',
-      roomId: activeRoom.id,
-      roomName: activeRoom.name,
-      content: newMsg.trim()
-    }));
-    setNewMsg('');
+    if (content.length > 2000) {
+      setChatError('Messages can be up to 2,000 characters.');
+      return;
+    }
+    if (!activeRoom?.id) {
+      setChatError('Choose a conversation before sending a message.');
+      return;
+    }
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setChatError('Chat is reconnecting. Please wait a moment and try again.');
+      return;
+    }
+    try {
+      wsRef.current.send(JSON.stringify({
+        type: 'message',
+        roomId: activeRoom.id,
+        content
+      }));
+      setNewMsg('');
+      setChatError('');
+    } catch (err) {
+      console.error('Web chat send failed:', err);
+      setChatError('Your message could not be sent. Please try again.');
+    }
   };
 
   const startDM = async (partner) => {
     try {
+      if (!partner?.id || Number(partner.id) === Number(myUserId)) {
+        setChatError('Choose a valid colleague to start a conversation.');
+        return;
+      }
       const dmRes = await fetch(`${API_BASE}/api/chat/dm-room`, {
         method: 'POST',
         headers: {
@@ -210,6 +256,10 @@ const ChatPanel = ({ token }) => {
         body: JSON.stringify({ partnerUserId: partner.id })
       });
       const dmData = await dmRes.json();
+      if (!dmRes.ok || !dmData.roomId) {
+        setChatError(dmData.error || 'Could not open this conversation. Refresh the colleague list and try again.');
+        return;
+      }
       if (dmData.roomId) {
         const newRoom = {
           id: dmData.roomId,
@@ -224,20 +274,23 @@ const ChatPanel = ({ token }) => {
       setShowSearchResults(false);
     } catch (err) {
       console.error('Start DM error:', err);
+      setChatError('Could not open this conversation. Check your connection and try again.');
     }
   };
 
   // VALIDATION FLOW: Strict Group Creation Validation
   const createGroup = async () => {
-    if (!groupName || groupName.trim().length < 2) {
-      alert('Group name must be at least 2 characters.');
+    const cleanName = groupName.trim();
+    if (cleanName.length < 2 || cleanName.length > 50) {
+      setGroupError('Enter a group name between 2 and 50 characters.');
       return;
     }
     if (selectedUsers.length < 1) {
-      alert('Please select at least one member for the group.');
+      setGroupError('Choose at least one colleague to add. You will be included automatically.');
       return;
     }
-    
+    setIsCreatingGroup(true);
+    setGroupError('');
     try {
       const res = await fetch(`${API_BASE}/api/chat/group-room`, {
         method: 'POST',
@@ -245,20 +298,23 @@ const ChatPanel = ({ token }) => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ name: groupName.trim(), memberIds: selectedUsers.map(u => u.id) })
+        body: JSON.stringify({ name: cleanName, memberIds: selectedUsers.map(u => u.id) })
       });
       const data = await res.json();
-      if (data.success) {
-        fetchRooms();
+      if (res.ok && data.success && Number.isSafeInteger(Number(data.roomId)) && Number(data.roomId) > 0) {
+        await fetchRooms();
+        setActiveRoom({ id: data.roomId, name: cleanName, type: 'group' });
         setShowGroupModal(false);
         setGroupName('');
         setSelectedUsers([]);
         setGroupSearch('');
       } else {
-        alert(data.error || 'Failed to create group');
+        setGroupError(data.error || data.message || 'Could not create the group. Please try again.');
       }
     } catch (err) {
-      alert('Network error while creating group.');
+      setGroupError('Connection problem. Check your internet and try again.');
+    } finally {
+      setIsCreatingGroup(false);
     }
   };
 
@@ -272,7 +328,10 @@ const ChatPanel = ({ token }) => {
         setRooms(prev => prev.filter(r => r.id !== roomId));
         if (activeRoom?.id === roomId) setActiveRoom(null);
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error('Delete chat error:', err);
+      setChatError('Could not delete this conversation. Please try again.');
+    }
   };
 
   const leaveRoom = async (roomId) => {
@@ -285,13 +344,16 @@ const ChatPanel = ({ token }) => {
         setRooms(prev => prev.filter(r => r.id !== roomId));
         if (activeRoom?.id === roomId) setActiveRoom(null);
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error('Leave chat group error:', err);
+      setChatError('Could not leave this group. Please try again.');
+    }
   };
 
   const togglePanel = () => setOpen(!open);
   
-  const isSendDisabled = !newMsg.trim();
-  const isGroupCreateDisabled = !groupName.trim() || groupName.trim().length < 2 || selectedUsers.length < 1;
+  const isSendDisabled = !newMsg.trim() || newMsg.length > 2000;
+  const isGroupCreateDisabled = isCreatingGroup || groupName.trim().length < 2 || groupName.trim().length > 50 || selectedUsers.length < 1;
 
   return (
     <>
@@ -304,6 +366,12 @@ const ChatPanel = ({ token }) => {
 
       {open && (
         <div className="cp-panel">
+          {chatError && (
+            <div className="cp-validation cp-validation-error" role="alert">
+              <span>{chatError}</span>
+              <button type="button" aria-label="Dismiss message" onClick={() => setChatError('')}><X size={14} /></button>
+            </div>
+          )}
           {!activeRoom ? (
             <div className="cp-view">
               <div className="cp-header">
@@ -317,7 +385,8 @@ const ChatPanel = ({ token }) => {
                   type="text"
                   placeholder="Find a colleague..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  aria-label="Find a colleague to chat with"
+                  onChange={(e) => { setSearchTerm(e.target.value); setChatError(''); }}
                   onFocus={() => searchTerm.trim() && setShowSearchResults(true)}
                   onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
                 />
@@ -348,7 +417,7 @@ const ChatPanel = ({ token }) => {
                     <div
                       key={room.id}
                       className={`cp-room-item ${unread > 0 ? 'unread' : ''}`}
-                      onClick={() => setActiveRoom(room)}
+                      onClick={() => { setChatError(''); setActiveRoom(room); }}
                     >
                       <div className="cp-room-icon">
                         {isGroup ? <Users size={16} /> : <MessageSquare size={16} />}
@@ -374,7 +443,7 @@ const ChatPanel = ({ token }) => {
               </div>
 
               <div className="cp-footer">
-                <button className="cp-btn-create" onClick={() => setShowGroupModal(true)}>
+                <button className="cp-btn-create" onClick={() => { setGroupError(''); setShowGroupModal(true); }}>
                   <Plus size={16} /> Create Group
                 </button>
               </div>
@@ -409,17 +478,21 @@ const ChatPanel = ({ token }) => {
                   type="text"
                   placeholder="Type your message..."
                   value={newMsg}
-                  onChange={(e) => setNewMsg(e.target.value)}
+                  maxLength={2000}
+                  aria-label="Chat message"
+                  onChange={(e) => { setNewMsg(e.target.value); setChatError(''); }}
                   onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                 />
                 <button 
                   onClick={handleSend} 
                   className="cp-btn-send"
                   disabled={isSendDisabled}
+                  aria-label="Send message"
                 >
                   <Send size={16} />
                 </button>
               </div>
+              <div className="cp-input-hint">{newMsg.length}/2000 characters</div>
             </div>
           )}
         </div>
@@ -431,33 +504,48 @@ const ChatPanel = ({ token }) => {
           <div className="cp-modal">
             <h4>Create Group Chat</h4>
             <div className="cp-form-group">
-              <label>Group Name (Min 2 chars)</label>
-              <input placeholder="e.g. Project Alpha" value={groupName} onChange={e => setGroupName(e.target.value)} />
+              <label htmlFor="chat-group-name">Group Name</label>
+              <input id="chat-group-name" placeholder="e.g. Project Alpha" value={groupName} maxLength={50} aria-invalid={Boolean(groupError)} onChange={e => { setGroupName(e.target.value); setGroupError(''); }} />
+              <small>Use 2–50 characters.</small>
             </div>
             <div className="cp-form-group">
-              <label>Search Members</label>
-              <input placeholder="Search to add..." value={groupSearch} onChange={e => setGroupSearch(e.target.value)} />
+              <label htmlFor="chat-group-search">Search Members</label>
+              <input id="chat-group-search" placeholder="Search to add..." value={groupSearch} onChange={e => { setGroupSearch(e.target.value); setGroupError(''); }} />
             </div>
             
             <div className="cp-member-list">
               {allUsers
-                .filter(u => u.full_name.toLowerCase().includes(groupSearch.trim().toLowerCase()) && u.id !== myUserId)
+                .filter(u => u && String(u.full_name || u.name || '').toLowerCase().includes(groupSearch.trim().toLowerCase()) && Number(u.id) !== Number(myUserId))
                 .map(u => (
-                  <div key={u.id} className="cp-member-item" onClick={() => {
+                  <div key={u.id} className="cp-member-item" role="checkbox" tabIndex={0} aria-checked={selectedUsers.some(s => s.id === u.id)} onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedUsers(prev => prev.some(s => s.id === u.id) ? prev.filter(s => s.id !== u.id) : [...prev, u]);
+                      setGroupError('');
+                    }
+                  }} onClick={() => {
                     setSelectedUsers(prev => prev.some(s => s.id === u.id) ? prev.filter(s => s.id !== u.id) : [...prev, u]);
+                    setGroupError('');
                   }}>
-                    <input type="checkbox" checked={selectedUsers.some(s => s.id === u.id)} readOnly />
+                    <input type="checkbox" checked={selectedUsers.some(s => s.id === u.id)} readOnly aria-hidden="true" tabIndex={-1} />
                     <div className="cp-member-info">
-                      <span className="cp-member-name">{u.full_name}</span>
+                      <span className="cp-member-name">{u.full_name || u.name || 'Colleague'}</span>
                       <span className="cp-member-role">{u.role}</span>
                     </div>
                   </div>
                 ))}
+              {allUsers.filter(u => u && String(u.full_name || u.name || '').toLowerCase().includes(groupSearch.trim().toLowerCase()) && Number(u.id) !== Number(myUserId)).length === 0 && (
+                <div className="cp-search-empty">{groupSearch.trim() ? 'No colleagues match your search.' : 'No colleagues are available to add.'}</div>
+              )}
             </div>
+            <div className="cp-selection-hint">
+              {selectedUsers.length === 0 ? 'Select at least one colleague. You will be included automatically.' : `${selectedUsers.length} colleague${selectedUsers.length === 1 ? '' : 's'} selected. You will be included automatically.`}
+            </div>
+            {groupError && <div className="cp-validation cp-validation-error" role="alert">{groupError}</div>}
             
             <div className="cp-modal-actions">
               <button className="cp-btn-cancel" onClick={() => setShowGroupModal(false)}>Cancel</button>
-              <button className="cp-btn-confirm" onClick={createGroup} disabled={isGroupCreateDisabled}>Create</button>
+              <button className="cp-btn-confirm" onClick={createGroup} disabled={isGroupCreateDisabled}>{isCreatingGroup ? 'Creating…' : 'Create'}</button>
             </div>
           </div>
         </div>
@@ -493,4 +581,3 @@ const ChatPanel = ({ token }) => {
 };
 
 export default ChatPanel;
-

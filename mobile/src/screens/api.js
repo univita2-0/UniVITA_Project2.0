@@ -1,7 +1,7 @@
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, Alert } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const LOCAL_IP = "192.168.86.5"; 
 
@@ -189,10 +189,14 @@ export const updateProfile = async (userId, data) => {
     const fileUri = pic ? (typeof pic === 'string' ? pic : pic.uri) : null;
 
     if (fileUri) {
+      const mimeType = typeof pic === 'object' && pic.mimeType
+        ? pic.mimeType
+        : fileUri.toLowerCase().split('?')[0].endsWith('.png') ? 'image/png' : 'image/jpeg';
       const uploadResult = await FileSystem.uploadAsync(`${API_URL}/users/${userId}/profile`, fileUri, {
         httpMethod: 'PUT',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'profile_picture',
+        mimeType,
         headers: {
           Authorization: `Bearer ${token || ''}`,
           Accept: 'application/json',
@@ -511,8 +515,6 @@ export const submitLeaveRequest = async (payload) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
     
-    // If payload is already FormData (unlikely here since RequestsScreen loops and fetches directly), 
-    // but if passed as object:
     const imageObj = payload.image || payload.attachment;
     const imageUri = imageObj ? (typeof imageObj === 'string' ? imageObj : imageObj.uri) : null;
 

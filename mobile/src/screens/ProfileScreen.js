@@ -15,7 +15,6 @@ import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import { API_URL, updateProfile } from './api';
-import * as FileSystem from 'expo-file-system';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -195,38 +194,26 @@ export default function ProfileScreen({ navigation }) {
       setIsUploadingImage(true);
 
       try {
-        const token = await AsyncStorage.getItem('auth_token');
-        
-        // Convert local image URI to Base64 string to match server.js expectations
-        const base64Image = await FileSystem.readAsStringAsync(asset.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-
-        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, {
+        const res = await updateProfile(userData.id, {
           full_name: userData.name,
           email: userData.email,
-          base64_image: base64Image
-        }, {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+          profile_picture: asset
         });
 
-        if (res.data && res.data.success && res.data.profile_picture) {
+        if (res.success && res.profile_picture) {
           const baseUrl = API_URL.replace('/api', '');
-          const fullImageUrl = `${baseUrl}${res.data.profile_picture}`;
+          const fullImageUrl = `${baseUrl}${res.profile_picture}`;
           setProfileImage(fullImageUrl);
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
           Alert.alert("Success", "Profile picture updated successfully!");
         } else {
-          throw new Error(res.data?.message || "Failed to save profile picture.");
+          throw new Error(res.message || "Failed to save profile picture.");
         }
       } catch (err) {
         console.error("Upload Error:", err);
         const savedImage = await AsyncStorage.getItem(`@profile_picture_${userData.id}`);
         setProfileImage(savedImage || null);
-        Alert.alert("Upload Error", err.response?.data?.message || err.message || "Could not save profile picture to server.");
+        Alert.alert("Upload Error", err.message || "Could not save profile picture to server.");
       } finally {
         setIsUploadingImage(false);
       }

@@ -2,37 +2,58 @@
 import React, { useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
-  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar, Platform
+  TextInput, Alert, ActivityIndicator, Image, Modal as RNModal, StatusBar
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { API_URL } from './api';
 import { Upload, X, Calendar as CalendarIcon, Clock, ArrowLeft } from 'lucide-react-native';
 
-const appendFileToFormData = (formData, fieldName, fileObj) => {
-  if (!fileObj) return;
+const uploadRequestWithFile = async (url, token, fieldName, fileObj, parameters) => {
+  if (!fileObj) throw new Error('Please attach a file before submitting this request.');
   const fileUri = typeof fileObj === 'string' ? fileObj : fileObj.uri;
-  if (!fileUri) return;
+  if (!fileUri) throw new Error('The selected file is no longer available. Please attach it again.');
 
-  const filename = fileObj.name || fileUri.split('/').pop() || 'attachment.jpg';
-  let mimeType = fileObj.mimeType || 'image/jpeg';
-  if (!fileObj.mimeType) {
-    if (filename.toLowerCase().endsWith('.pdf')) mimeType = 'application/pdf';
-    else if (filename.toLowerCase().endsWith('.png')) mimeType = 'image/png';
-    else if (filename.toLowerCase().endsWith('.doc')) mimeType = 'application/msword';
-    else if (filename.toLowerCase().endsWith('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  }
+  const filename = (typeof fileObj === 'object' && fileObj.name) || fileUri.split('/').pop() || 'attachment';
+  const extension = filename.split('.').pop().toLowerCase();
+  const mimeType = (typeof fileObj === 'object' && fileObj.mimeType) || ({
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    pdf: 'application/pdf',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  })[extension] || 'application/octet-stream';
 
-  formData.append(fieldName, {
-    uri: Platform.OS === 'ios' ? fileUri.replace('file://', '') : fileUri,
-    name: filename,
-    type: mimeType,
+  const uploadResult = await FileSystem.uploadAsync(url, fileUri, {
+    httpMethod: 'POST',
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName,
+    mimeType,
+    headers: {
+      Authorization: `Bearer ${token || ''}`,
+      Accept: 'application/json',
+    },
+    parameters: Object.fromEntries(
+      Object.entries(parameters)
+        .filter(([, value]) => value !== '' && value !== null && value !== undefined)
+        .map(([key, value]) => [key, String(value)])
+    ),
   });
+
+  let result;
+  try {
+    result = JSON.parse(uploadResult.body);
+  } catch {
+    result = { success: false, message: uploadResult.body || 'Server upload error.' };
+  }
+  return { ...result, ok: uploadResult.status >= 200 && uploadResult.status < 300 };
 };
 
 const formatTo12Hour = (timeStr) => {
@@ -378,27 +399,14 @@ export default function RequestsScreen({ navigation, route }) {
       let lastMessage = '';
 
       for (const item of leaveBreakdown) {
-        const formData = new FormData();
-        formData.append('type', String(leaveType));
-        formData.append('reason', String(leaveReason ? leaveReason.trim() : ''));
-        formData.append('request_date', String(item.date));
-        formData.append('duration', String(item.duration));
-        formData.append('is_paid', '1');
-
-        if (leaveImage) {
-          appendFileToFormData(formData, 'image', leaveImage);
-        }
-
-        const response = await fetch(`${API_URL}/leave-requests`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
+        const result = await uploadRequestWithFile(`${API_URL}/leave-requests`, token, 'image', leaveImage, {
+          type: leaveType,
+          reason: leaveReason.trim(),
+          request_date: item.date,
+          duration: item.duration,
+          is_paid: '1',
         });
-
-        const result = await parseServerResponse(response);
-        if (response && response.ok && result.success) {
+        if (result.ok && result.success) {
           successCount++;
         } else {
           lastMessage = result.message || 'Failed to submit request.';
@@ -438,27 +446,14 @@ export default function RequestsScreen({ navigation, route }) {
     try {
       const token = await AsyncStorage.getItem('auth_token');
 
-      const formData = new FormData();
-      formData.append('date', String(appealDate));
-      formData.append('reason', String(appealReason.trim()));
-      if (prefill.prefillScheduleId) formData.append('schedule_id', String(prefill.prefillScheduleId));
-      if (appealTimeIn) formData.append('time_in', String(formatTimeForDB(appealTimeIn)));
-      if (appealTimeOut) formData.append('time_out', String(formatTimeForDB(appealTimeOut)));
-      
-      if (appealImage) { 
-        appendFileToFormData(formData, 'image', appealImage);
-      }
-
-      const response = await fetch(`${API_URL}/attendance-appeals`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
+      const result = await uploadRequestWithFile(`${API_URL}/attendance-appeals`, token, 'image', appealImage, {
+        date: appealDate,
+        reason: appealReason.trim(),
+        schedule_id: prefill.prefillScheduleId || '',
+        time_in: appealTimeIn ? formatTimeForDB(appealTimeIn) : '',
+        time_out: appealTimeOut ? formatTimeForDB(appealTimeOut) : '',
       });
-
-      const result = await parseServerResponse(response);
-      if (response.ok && (result.success || result.success === undefined)) {
+      if (result.ok && (result.success || result.success === undefined)) {
         Alert.alert('Success', 'Attendance appeal submitted successfully.');
         setAppealDate(''); 
         setAppealTimeIn(''); 
@@ -502,31 +497,16 @@ export default function RequestsScreen({ navigation, route }) {
       const finalReason = correctionType === 'early_out' ? `[Early Departure] ${correctionReason.trim()}` : correctionReason.trim();
       const formattedTime = formatTimeForDB(correctionTime);
 
-      const formData = new FormData();
-      formData.append('employee_id', String(employeeId));
-      formData.append('date', String(correctionDate));
-      formData.append('type', String(dbType));
-      formData.append('time', String(formattedTime));
-      formData.append('reason', String(finalReason));
-      if (correctionScheduleId) {
-        formData.append('schedule_id', String(correctionScheduleId));
-      }
-
-      if (correctionAttachment) {
-        appendFileToFormData(formData, 'attachment', correctionAttachment);
-      }
-
-      const response = await fetch(`${API_URL}/attendance/correction-request`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
+      const res = await uploadRequestWithFile(`${API_URL}/attendance/correction-request`, token, 'attachment', correctionAttachment, {
+        employee_id: employeeId,
+        date: correctionDate,
+        type: dbType,
+        time: formattedTime,
+        reason: finalReason,
+        schedule_id: correctionScheduleId || '',
       });
-
-      const res = await parseServerResponse(response);
       
-      if (response && response.ok && (res.success || res.success === undefined)) {
+      if (res.ok && (res.success || res.success === undefined)) {
         Alert.alert('Success', res.message || 'Correction request submitted.');
         setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionAttachment(null); 
         setCorrectionType('clock_in'); setCorrectionScheduleId(null); setCorrectionStep(1);
@@ -562,25 +542,14 @@ export default function RequestsScreen({ navigation, route }) {
       const scheduleId = prefill?.prefillScheduleId || null;
 
       if (overtimeImage) {
-        const formData = new FormData();
-        formData.append('date', String(overtimeDate));
-        formData.append('start_time', String(formatTimeForDB(overtimeStart)));
-        formData.append('end_time', String(formatTimeForDB(overtimeEnd)));
-        formData.append('reason', String(overtimeReason ? overtimeReason.trim() : ''));
-        formData.append('scenario_type', String(dbScenarioType));
-        formData.append('overtime_type', String(overtimeType));
-        if (scheduleId) {
-          formData.append('schedule_id', String(scheduleId));
-        }
-
-        appendFileToFormData(formData, 'attachment', overtimeImage);
-
-        response = await fetch(`${API_URL}/overtime-requests`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
+        response = await uploadRequestWithFile(`${API_URL}/overtime-requests`, token, 'attachment', overtimeImage, {
+          date: overtimeDate,
+          start_time: formatTimeForDB(overtimeStart),
+          end_time: formatTimeForDB(overtimeEnd),
+          reason: overtimeReason.trim(),
+          scenario_type: dbScenarioType,
+          overtime_type: overtimeType,
+          schedule_id: scheduleId || '',
         });
       } else {
         response = await fetch(`${API_URL}/overtime-requests`, {
@@ -601,8 +570,8 @@ export default function RequestsScreen({ navigation, route }) {
         });
       }
 
-      const result = await parseServerResponse(response);
-      if (response && response.ok && (result.success || result.success === undefined)) {
+      const result = response?.ok !== undefined ? response : await parseServerResponse(response);
+      if (response && result.ok && (result.success || result.success === undefined)) {
         Alert.alert('Success', result.message || 'Overtime request submitted successfully.');
         setOvertimeDate('');
         setOvertimeStart('');
