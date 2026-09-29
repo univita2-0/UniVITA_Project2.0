@@ -354,11 +354,14 @@ const verifyOwnership = (req, res, next) => {
 };
 
 function logVisitorHistory(visitorId, visitorName, bleId, floor, currentRoom, eventType, x = null, y = null) {
+  const phNow = getPHDateTime(); 
+
+ 
   const sql = `INSERT INTO visitor_history 
     (visitor_id, visitor_name, ble_id, floor, current_room, event_type, x, y, created_at) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`;
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     
-  db.query(sql, [visitorId, visitorName, bleId, floor, currentRoom, eventType, x, y], (err) => {
+  db.query(sql, [visitorId, visitorName, bleId, floor, currentRoom, eventType, x, y, phNow], (err) => {
     if (err) console.error('Failed to log visitor history:', err);
   });
 }
@@ -3531,31 +3534,30 @@ setInterval(async () => {
 
   // 2. Evaluate all live visitors currently tracked in memory
   for (const bleId in liveVisitors) {
-    // If the visitor returned their tag or was marked No Show, purge them from memory
     if (!validBleIds.has(String(bleId).trim())) {
-      console.log(`🧹 Purging returned tag from memory: ${bleId}`);
       delete liveVisitors[bleId];
       delete lastKnownVisitorsData[bleId];
       continue;
     }
 
     const visitor = liveVisitors[bleId];
+    const timeSinceLastPing = now - visitor.lastSeen;
 
-    // Log connection / reconnection history if this is a newly detected beacon or recovered signal
-    if (!lastKnownVisitorsData[bleId] || lastKnownVisitorsData[bleId].isDisconnected) {
-      console.log(`✅ Visitor ${bleId} connected.`);
-      logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'connect', visitor.x, visitor.y);
-    }
-
-    // Flag signal loss if scanner hasn't heard the beacon in over 45 seconds
-    if (now - visitor.lastSeen > INACTIVITY_THRESHOLD_MS) {
+    // CHECK 1: Has the signal been lost for more than 45 seconds?
+    if (timeSinceLastPing > INACTIVITY_THRESHOLD_MS) {
       if (!visitor.isDisconnected) {
         console.log(`⚠️ Visitor ${bleId} signal lost in ${visitor.currentRoom}.`);
         visitor.isDisconnected = true;
         visitor.disconnectedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'disconnect', null, null);
       }
-    } else {
+    } 
+    // CHECK 2: Signal is ACTIVE. Is this a brand-new connection or a recovery from a signal drop?
+    else {
+      if (!lastKnownVisitorsData[bleId] || lastKnownVisitorsData[bleId].isDisconnected) {
+        console.log(`✅ Visitor ${bleId} connected/reconnected.`);
+        logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'connect', visitor.x, visitor.y);
+      }
       visitor.isDisconnected = false;
     }
 

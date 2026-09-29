@@ -383,24 +383,35 @@ const BuildingVisitorTracking = () => {
                       <div className="visitor-status live"></div>
                     </div>
                     <div className="visitor-details">
-                      <div className="detail-row"><span>BLE: {visitor.bleId}</span></div>
-                      <div className="detail-row"><span>Current: <strong>{visitor.currentRoom}</strong></span></div>
-                      <div className="detail-row"><span>Destination: <strong>{visitor.destination}</strong></span></div>
-                      <div className="detail-row last-seen">
-  <span>
-    {visitor.isPendingDetection 
-      ? 'Awaiting scanner...' 
-      : typeof visitor.lastSeen === 'number' 
-        ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
-        : (visitor.lastSeen || 'Just now')}
-  </span>
+  <div className="detail-row"><span>BLE: {visitor.bleId}</span></div>
+  
+  <div className="detail-row">
+    {visitor.isDisconnected ? (
+      <span style={{ color: '#DC2626' }}>Last Known: <strong>{visitor.currentRoom}</strong></span>
+    ) : (
+      <span>Current: <strong>{visitor.currentRoom}</strong></span>
+    )}
+  </div>
+  
+  <div className="detail-row"><span>Destination: <strong>{visitor.destination}</strong></span></div>
+  
+  <div className="detail-row last-seen">
+    <span style={{ color: visitor.isDisconnected ? '#DC2626' : 'inherit', fontWeight: visitor.isDisconnected ? '500' : 'normal' }}>
+      {visitor.isPendingDetection 
+        ? 'Awaiting scanner...' 
+        : visitor.isDisconnected
+          ? `Signal Lost at: ${visitor.disconnectedAt || (typeof visitor.lastSeen === 'number' ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unknown')}`
+          : typeof visitor.lastSeen === 'number' 
+            ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
+            : (visitor.lastSeen || 'Just now')}
+    </span>
+  </div>
 </div>
-                    </div>
-                    <div className="edit-destination-hint">Click to edit destination</div>
-                  </div>
-                ))
-              )}
-            </div>
+<div className="edit-destination-hint">Click to edit destination</div>
+</div>
+))
+)}
+</div>
 
             {/* Disconnected panel */}
             {disconnectedVisitors.length > 0 && (
@@ -469,94 +480,148 @@ const BuildingVisitorTracking = () => {
       </FormalModal>
 
       {/* History Modal */}
-      <FormalModal
-        show={showHistoryModal}
-        onClose={() => setShowHistoryModal(false)}
-        title="Visitor Movement History"
-        size="large"
-        footer={
-          <button className="btn-modal-submit" onClick={() => setShowHistoryModal(false)}>Close</button>
-        }
-      >
-        <div className="history-modal-toolbar">
-          <div className="history-search-box">
-            <Search size={16} className="history-search-icon" />
-            <input
-              type="text"
-              placeholder="Search name, tag, or room..."
-              value={historySearchTerm}
-              onChange={(e) => { setHistorySearchTerm(e.target.value); setHistoryCurrentPage(1); }}
-            />
-          </div>
-          <div className="history-date-filter">
-            <input
-              type="date"
-              value={historyDateFilter}
-              onChange={(e) => { setHistoryDateFilter(e.target.value); setHistoryCurrentPage(1); }}
-            />
-            {historyDateFilter && (
-              <button className="history-date-clear" onClick={() => { setHistoryDateFilter(''); setHistoryCurrentPage(1); }}>
-                <X size={14} />
-              </button>
-            )}
+<FormalModal
+  show={showHistoryModal}
+  onClose={() => setShowHistoryModal(false)}
+  title="Visitor Movement & Alert History"
+  wide
+  footer={
+    <button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>Close Window</button>
+  }
+>
+  <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+    <div style={{ flex: 1, minWidth: '250px', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#F8FAFC', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.5rem 1rem' }}>
+      <Search size={18} color="#64748B" />
+      <input
+        type="text"
+        placeholder="Search visitor name, BLE tag, or room..."
+        value={historySearchTerm}
+        onChange={(e) => { setHistorySearchTerm(e.target.value); setHistoryCurrentPage(1); }}
+        style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '0.95rem', color: '#0F172A' }}
+      />
+    </div>
+    
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>Filter Date:</label>
+      <input
+        type="date"
+        value={historyDateFilter}
+        onChange={(e) => { setHistoryDateFilter(e.target.value); setHistoryCurrentPage(1); }}
+        style={{ padding: '0.5rem', border: '1px solid #CBD5E1', borderRadius: '6px', outline: 'none', color: '#0F172A' }}
+      />
+      {historyDateFilter && (
+        <button 
+          onClick={() => { setHistoryDateFilter(''); setHistoryCurrentPage(1); }}
+          style={{ background: '#FEE2E2', border: 'none', padding: '0.5rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          title="Clear Date Filter"
+        >
+          <X size={16} color="#DC2626" />
+        </button>
+      )}
+    </div>
+  </div>
+
+  {historyLoading ? (
+    <div style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>
+      <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
+      <p>Loading history logs...</p>
+    </div>
+  ) : currentHistoryData.length === 0 ? (
+    <div style={{ textAlign: 'center', padding: '3rem', background: '#F8FAFC', borderRadius: '8px', border: '1px dashed #CBD5E1', color: '#64748B' }}>
+      <p>No visitor history records found matching your filters.</p>
+    </div>
+  ) : (
+    <>
+      <div style={{ maxHeight: '60vh', overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+          <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: '#F1F5F9', borderBottom: '2px solid #E2E8F0' }}>
+            <tr>
+              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Timestamp</th>
+              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Visitor Details</th>
+              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Event Action</th>
+              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Location / Room</th>
+            </tr>
+          </thead>
+          <tbody>
+            {currentHistoryData.map((record, index) => {
+              // Dynamic Badge Styling
+              let badgeStyle = { backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1' };
+              let eventLabel = record.event_type;
+              
+              if (record.event_type === 'connect' || record.event_type === 'enter') {
+                badgeStyle = { backgroundColor: '#DEF7EC', color: '#03543F', border: '1px solid #84E1BC' };
+                eventLabel = record.event_type === 'connect' ? 'Connected / Detected' : 'Entered Campus';
+              } else if (record.event_type === 'disconnect' || record.event_type === 'Exit / Returned') {
+                badgeStyle = { backgroundColor: '#FDE8E8', color: '#9B1C1C', border: '1px solid #F8B4B4' };
+                eventLabel = 'Signal Lost / Exited';
+              } else if (record.event_type === 'move') {
+                badgeStyle = { backgroundColor: '#E1EFFE', color: '#1E429F', border: '1px solid #A4CAFE' };
+                eventLabel = 'Moved Location';
+              } else if (record.event_type === 'loitering') {
+                badgeStyle = { backgroundColor: '#FEECDC', color: '#8A2C0D', border: '1px solid #FDBA8C' };
+                eventLabel = 'Loitering Warning';
+              }
+
+              return (
+                <tr key={record.id} style={{ borderBottom: '1px solid #E2E8F0', background: index % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                  <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: '#334155', fontFamily: 'monospace' }}>
+                    {new Date(record.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' })}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ fontWeight: 600, color: '#0F172A' }}>{record.visitor_name}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '2px' }}>TAG: {record.ble_id}</div>
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, ...badgeStyle }}>
+                      {eventLabel}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ fontWeight: 600, color: '#334155' }}>
+                      {record.current_room ? `${record.current_room}` : 'Unknown Location'}
+                    </div>
+                    {record.floor && (
+                      <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '2px' }}>
+                        Floor {record.floor}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      
+      {historyTotalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #E2E8F0' }}>
+          <span style={{ fontSize: '0.875rem', color: '#64748B' }}>
+            Showing {historyStartIndex + 1} to {Math.min(historyStartIndex + historyRowsPerPage, filteredHistory.length)} of {filteredHistory.length} logs
+          </span>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button
+              style={{ padding: '0.4rem 0.8rem', border: '1px solid #CBD5E1', borderRadius: '6px', background: historyCurrentPage === 1 ? '#F8FAFC' : '#FFF', cursor: historyCurrentPage === 1 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}
+              disabled={historyCurrentPage === 1}
+              onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
+            >
+              <ChevronLeft size={16} color={historyCurrentPage === 1 ? '#94A3B8' : '#0F172A'} />
+            </button>
+            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#0F172A' }}>
+              Page {historyCurrentPage} of {historyTotalPages}
+            </span>
+            <button
+              style={{ padding: '0.4rem 0.8rem', border: '1px solid #CBD5E1', borderRadius: '6px', background: historyCurrentPage === historyTotalPages ? '#F8FAFC' : '#FFF', cursor: historyCurrentPage === historyTotalPages ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}
+              disabled={historyCurrentPage === historyTotalPages}
+              onClick={() => setHistoryCurrentPage(p => Math.min(historyTotalPages, p + 1))}
+            >
+              <ChevronRight size={16} color={historyCurrentPage === historyTotalPages ? '#94A3B8' : '#0F172A'} />
+            </button>
           </div>
         </div>
-
-        {historyLoading ? (
-          <div className="loading-state"><div className="spinner"></div><p>Loading history...</p></div>
-        ) : currentHistoryData.length === 0 ? (
-          <div className="empty-state"><p>No visitor history records found matching your filters.</p></div>
-        ) : (
-          <>
-            <div className="history-list">
-              {currentHistoryData.map(record => (
-                <div key={record.id} className="history-record">
-                  <div className="record-header">
-                    <span><strong>{record.visitor_name}</strong> ({record.ble_id})</span>
-                    <span className={`event-badge ${record.event_type}`}>
-                      {record.event_type === 'enter' ? 'Entered' : 
-                       record.event_type === 'move' ? 'Moved' : 
-                       record.event_type === 'connect' ? 'Connected' : 
-                       record.event_type === 'loitering' ? 'Loitering' : 
-                       record.event_type === 'disconnect' ? 'Disconnected' : record.event_type}
-                    </span>
-                  </div>
-                  <div className="record-details">
-                    <span>📍 {record.current_room || 'Unknown'}</span>
-                    <span>Floor {record.floor}</span>
-                  </div>
-                  <div className="timestamp">{new Date(record.timestamp).toLocaleString()}</div>
-                </div>
-              ))}
-            </div>
-            
-            {historyTotalPages > 1 && (
-              <div className="history-pagination">
-                <span className="history-page-info">
-                  Showing {historyStartIndex + 1} to {Math.min(historyStartIndex + historyRowsPerPage, filteredHistory.length)} of {filteredHistory.length}
-                </span>
-                <div className="history-page-controls">
-                  <button
-                    className="history-page-btn"
-                    disabled={historyCurrentPage === 1}
-                    onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  <span className="history-page-current">{historyCurrentPage} / {historyTotalPages}</span>
-                  <button
-                    className="history-page-btn"
-                    disabled={historyCurrentPage === historyTotalPages}
-                    onClick={() => setHistoryCurrentPage(p => Math.min(historyTotalPages, p + 1))}
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </FormalModal>
+      )}
+    </>
+  )}
+</FormalModal>
 
       {/* Toast messages */}
       {toastMessage && (

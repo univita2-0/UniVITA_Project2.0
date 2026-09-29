@@ -95,7 +95,9 @@ export default function useBLEPositions() {
           bleId: v.bleId || id,
           currentRoom: v.currentRoom || 'Waiting for Scanner...',
           destination: v.destination || 'Unknown',
-          lastSeen: formattedTime
+          lastSeen: formattedTime,
+          isDisconnected: v.isDisconnected || false,
+          disconnectedAt: v.disconnectedAt || null
         };
       });
 

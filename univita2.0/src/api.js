@@ -1,6 +1,6 @@
 /* univita2.0/src/api.js */
 
-const USE_REMOTE = false; 
+const USE_REMOTE = true; 
 
 const REMOTE_URL = "https://api.univitahct.tech";
 const LOCAL_URL = "http://localhost:5000";
