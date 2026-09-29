@@ -55,11 +55,13 @@
 .expert-clean-input.border:focus { border-color: #0D9488; box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1); }
 
 .sc-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+.sc-form-group-full { grid-column: span 2; }
 .sc-actions { display: flex; justify-content: flex-end; gap: 1rem; padding-top: 1.5rem; border-top: 1px solid #E2E8F0; }
 
 @media (max-width: 768px) {
   .expert-container { padding: 1.5rem; }
   .sc-form-grid { grid-template-columns: 1fr; }
+  .sc-form-group-full { grid-column: span 1; }
   .sc-actions { flex-direction: column; }
   .expert-btn-secondary, .expert-btn-primary { width: 100%; justify-content: center; }
 }

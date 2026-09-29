@@ -3061,6 +3061,7 @@ app.get('/api/ble-tags', authenticateToken, (req, res) => {
       t.ble_id, 
       t.label, 
       t.mac_address,
+      t.battery_level,
       VR_ACTIVE.first_name AS active_first,
       VR_ACTIVE.last_name AS active_last,
       DATE_FORMAT(DATE_ADD(VR_ACTIVE.arrived_at, INTERVAL 8 HOUR), '%Y-%m-%d %h:%i:%s %p') AS active_arrived_at,
@@ -3504,6 +3505,52 @@ app.get('/api/dashboard/summary', async (req, res) => {
 });
 
 
+
+setInterval(async () => {
+  try {
+    
+    const [rows] = await db.promise().query(
+      "SELECT config_value FROM system_settings WHERE config_key = 'loiter_threshold_minutes'"
+    );
+    const thresholdMinutes = rows.length > 0 ? parseInt(rows[0].config_value, 10) : 30;
+    const LOITER_THRESHOLD_MS = thresholdMinutes * 60 * 1000;
+
+    const now = Date.now();
+
+    for (const bleId in liveVisitors) {
+      const visitor = liveVisitors[bleId];
+      if (visitor && !visitor.isDisconnected && visitor.roomEnteredAt) {
+        const stayDurationMs = now - visitor.roomEnteredAt;
+        const totalMinutes = Math.floor(stayDurationMs / 60000);
+
+        if (stayDurationMs >= LOITER_THRESHOLD_MS && !visitor.loiterAlertSent) {
+          visitor.loiterAlertSent = true; 
+
+          const hours = Math.floor(totalMinutes / 60);
+          const mins = totalMinutes % 60;
+          const durationText = hours > 0 ? `${hours} hr ${mins} mins` : `${mins} mins`;
+
+          const actionLabel = `Loitering Alert (Stayed: ${durationText})`;
+          const alertMessage = `Visitor ${visitor.name} (Tag: ${visitor.bleId}) has been lingering in ${visitor.currentRoom} for ${durationText}.`;
+
+          logVisitorHistory(
+            visitor.id, visitor.name, visitor.bleId, 
+            visitor.floor, visitor.currentRoom, actionLabel, visitor.x, visitor.y
+          );
+
+          await db.promise().query(
+            "INSERT INTO emergency_alerts (title, message, severity, target_roles) VALUES (?, ?, 'warning', '[\"security\", \"admin\"]')",
+            ['Extended Stay / Loitering', alertMessage]
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Loitering Watchdog Error:", err);
+  }
+}, 60000);
+
+
 setInterval(async () => {
   try {
     
@@ -3731,7 +3778,7 @@ app.post('/api/scan', async (req, res) => {
     const detectedFloor = String(scannerRows[0].assigned_floor);
     const detectedCurrentRoom = scannerRows[0].assigned_room;
 
-   const sql = `
+    const sql = `
       SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
       FROM visitor_requests vr
       JOIN ble_tags bt ON (
@@ -3750,7 +3797,7 @@ app.post('/api/scan', async (req, res) => {
     const [visitorRows] = await db.promise().query(sql, [tagMac.trim()]);
     
     if (visitorRows.length === 0) {
-      // Debug helper: log if tag exists in inventory at all
+      
       const [tagCheck] = await db.promise().query("SELECT * FROM ble_tags WHERE UPPER(mac_address) = UPPER(?)", [tagMac.trim()]);
       if (tagCheck.length === 0) {
         console.warn(`[SCAN REJECTED] MAC ${tagMac} is NOT registered in ble_tags table!`);
@@ -3767,8 +3814,18 @@ app.post('/api/scan', async (req, res) => {
 
     const coords = getRoomCoords(detectedFloor, detectedCurrentRoom);
 
-    if (liveVisitors[bleId] && liveVisitors[bleId].currentRoom !== detectedCurrentRoom) {
-      logVisitorHistory(bleId, visitorName, bleId, detectedFloor, detectedCurrentRoom, 'move', coords.x, coords.y);
+    
+    let roomEnteredAt = Date.now();
+    let loiterAlertSent = false;
+
+    if (liveVisitors[bleId]) {
+      if (liveVisitors[bleId].currentRoom !== detectedCurrentRoom) {
+        logVisitorHistory(bleId, visitorName, bleId, detectedFloor, detectedCurrentRoom, 'move', coords.x, coords.y);
+      } else {
+        
+        roomEnteredAt = liveVisitors[bleId].roomEnteredAt || Date.now();
+        loiterAlertSent = liveVisitors[bleId].loiterAlertSent || false;
+      }
     }
 
     liveVisitors[bleId] = {
@@ -3776,11 +3833,13 @@ app.post('/api/scan', async (req, res) => {
       name: visitorName,
       bleId: bleId,
       floor: detectedFloor,
-      currentRoom: detectedCurrentRoom, // Physical room from scanner (Classroom 1)
-      destination: plannedDestination,   // Target destination
+      currentRoom: detectedCurrentRoom, 
+      destination: plannedDestination,   
       x: coords.x,
       y: coords.y,
       lastSeen: Date.now(),
+      roomEnteredAt: roomEnteredAt,       
+      loiterAlertSent: loiterAlertSent,   
       isDetected: true,
       isDisconnected: false,
       rssi: rssi || -50
@@ -7104,6 +7163,43 @@ app.post('/api/admin/landing/facilities/upload', authenticateToken, (req, res) =
     const urls = files.map(file => `/uploads/facilities/${file.filename}`);
     res.json({ success: true, urls, url: urls[0] });
   });
+});
+
+
+// Get system settings
+app.get('/api/settings', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  try {
+    const [rows] = await db.promise().query("SELECT config_key, config_value FROM system_settings");
+    const settings = {};
+    rows.forEach(r => settings[r.config_key] = r.config_value);
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to fetch settings.' });
+  }
+});
+
+// Update system settings
+app.put('/api/settings', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  const { loiter_threshold_minutes } = req.body;
+  if (loiter_threshold_minutes === undefined) {
+    return res.status(400).json({ success: false, message: 'Missing threshold value.' });
+  }
+
+  try {
+    await db.promise().query(
+      "INSERT INTO system_settings (config_key, config_value) VALUES ('loiter_threshold_minutes', ?) ON DUPLICATE KEY UPDATE config_value = ?",
+      [loiter_threshold_minutes, loiter_threshold_minutes]
+    );
+    res.json({ success: true, message: 'Settings updated successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to update settings.' });
+  }
 });
 
 

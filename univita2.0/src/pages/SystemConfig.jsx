@@ -13,7 +13,8 @@ const DEFAULT_CONFIG = {
   password_expiry_days: 365,
   otp_expiry_minutes: 5,
   geofence_default_radius: 200,
-  max_login_attempts: 5
+  max_login_attempts: 5,
+  loiter_threshold_minutes: 30
 };
 
 const SystemConfig = () => {
@@ -33,7 +34,8 @@ const SystemConfig = () => {
         password_expiry_days: res.data.password_expiry_days ?? 365,
         otp_expiry_minutes: res.data.otp_expiry_minutes ?? 5,
         geofence_default_radius: res.data.geofence_default_radius ?? 200,
-        max_login_attempts: res.data.max_login_attempts ?? 5
+        max_login_attempts: res.data.max_login_attempts ?? 5,
+        loiter_threshold_minutes: res.data.loiter_threshold_minutes ?? 30
       });
     } catch (err) {
       console.error('Failed to fetch config', err);
@@ -48,6 +50,7 @@ const SystemConfig = () => {
     const otpExpiry = parseInt(config.otp_expiry_minutes, 10);
     const radius = parseInt(config.geofence_default_radius, 10);
     const maxAttempts = parseInt(config.max_login_attempts, 10);
+    const loiterThreshold = parseInt(config.loiter_threshold_minutes, 10);
 
     if (isNaN(pwdExpiry) || pwdExpiry < 0 || pwdExpiry > 1095) {
       return toast.error('Password expiry must be between 0 (disabled) and 1095 days.');
@@ -61,6 +64,9 @@ const SystemConfig = () => {
     if (isNaN(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) {
       return toast.error('Max login attempts must be between 1 and 10.');
     }
+    if (isNaN(loiterThreshold) || loiterThreshold < 1 || loiterThreshold > 180) {
+      return toast.error('Loitering threshold must be between 1 and 180 minutes.');
+    }
 
     setSaving(true);
     try {
@@ -68,7 +74,8 @@ const SystemConfig = () => {
         password_expiry_days: pwdExpiry,
         otp_expiry_minutes: otpExpiry,
         geofence_default_radius: radius,
-        max_login_attempts: maxAttempts
+        max_login_attempts: maxAttempts,
+        loiter_threshold_minutes: loiterThreshold
       };
       const res = await axios.put(`${API_BASE}/system-config`, payload, getAuthHeaders());
       toast.success(res.data.message || 'System configuration actively applied.');
@@ -92,17 +99,12 @@ const SystemConfig = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            <p className="expert-subtitle">Manage global security policies, authentication timeouts, and geofence parameters.</p>
+            <p className="expert-subtitle">Manage global security policies, authentication timeouts, geofences, and visitor tracking rules.</p>
           </div>
         </div>
-        
       </div>
 
       <div className="expert-card" style={{ padding: '2rem' }}>
-        
-
-        
-        
         <div className="sc-form-grid">
           <div className="set-form-group">
             <label>Password Expiry (Days)</label>
@@ -154,6 +156,19 @@ const SystemConfig = () => {
               max="10"
             />
             <span className="set-hint">Failed password attempts before a 15-minute account lockout (1–10).</span>
+          </div>
+
+          <div className="set-form-group">
+            <label>Loitering Alert Threshold (Minutes)</label>
+            <input
+              type="number"
+              className="expert-clean-input border"
+              value={config.loiter_threshold_minutes}
+              onChange={e => setConfig({ ...config, loiter_threshold_minutes: e.target.value })}
+              min="1"
+              max="180"
+            />
+            <span className="set-hint">Time threshold before a visitor lingering in a single room triggers an extended stay alert (1–180 mins).</span>
           </div>
         </div>
 
