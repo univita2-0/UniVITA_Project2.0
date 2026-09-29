@@ -3695,6 +3695,7 @@ app.post('/api/ble-data', async (req, res) => {
 
 app.post('/api/scan', async (req, res) => {
   const hardwareApiKey = req.headers['x-api-key'];
+  const phNow = getPHDateTime();
   if (process.env.HARDWARE_API_KEY && hardwareApiKey !== process.env.HARDWARE_API_KEY) {
     return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
@@ -3716,8 +3717,8 @@ app.post('/api/scan', async (req, res) => {
     }
 
     await db.promise().query(
-      "UPDATE scanners SET last_ping = NOW(), status = 'ONLINE' WHERE scanner_id = ?", 
-      [scannerId.trim()]
+      "UPDATE scanners SET last_ping = ?, status = 'ONLINE' WHERE scanner_id = ?", 
+      [phNow, scannerId.trim()]
     );
 
     if (vbatt && vbatt > 0) {
