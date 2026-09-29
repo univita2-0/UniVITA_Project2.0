@@ -179,22 +179,17 @@
   table-layout: fixed !important;
 }
 
-
-.formal-modal-content .tv-table th:nth-child(1), 
-.formal-modal-content .tv-table td:nth-child(1), 
-.formal-modal-content .tv-table th:nth-child(3), 
-.formal-modal-content .tv-table td:nth-child(3), 
-.formal-modal-content .tv-table th:nth-child(5), 
-.formal-modal-content .tv-table td:nth-child(5)   {
+/* Updated to 5-column layout for the BLE Inventory Modal */
+.formal-modal-content .tv-table th,
+.formal-modal-content .tv-table td {
   white-space: nowrap !important;
 }
 
-
-.formal-modal-content .tv-table th:nth-child(1), .formal-modal-content .tv-table td:nth-child(1) { width: 16%; }
-.formal-modal-content .tv-table th:nth-child(2), .formal-modal-content .tv-table td:nth-child(2) { width: 18%; }
-.formal-modal-content .tv-table th:nth-child(3), .formal-modal-content .tv-table td:nth-child(3) { width: 20%; }
-.formal-modal-content .tv-table th:nth-child(4), .formal-modal-content .tv-table td:nth-child(4) { width: 30%; }
-.formal-modal-content .tv-table th:nth-child(5), .formal-modal-content .tv-table td:nth-child(5) { width: 16%; }
+.formal-modal-content .tv-table th:nth-child(1), .formal-modal-content .tv-table td:nth-child(1) { width: 15%; }
+.formal-modal-content .tv-table th:nth-child(2), .formal-modal-content .tv-table td:nth-child(2) { width: 20%; }
+.formal-modal-content .tv-table th:nth-child(3), .formal-modal-content .tv-table td:nth-child(3) { width: 25%; }
+.formal-modal-content .tv-table th:nth-child(4), .formal-modal-content .tv-table td:nth-child(4) { width: 25%; }
+.formal-modal-content .tv-table th:nth-child(5), .formal-modal-content .tv-table td:nth-child(5) { width: 15%; text-align: center; }
 
 
 /* Table Specific Cells */
@@ -363,6 +358,84 @@
 
 .text-center { text-align: center !important; }
 .text-right { text-align: right !important; }
+
+.tv-batt-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 130px;
+}
+
+.tv-batt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tv-batt-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: #E2E8F0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.tv-batt-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+/* Good State */
+.tv-batt-val.good, .tv-batt-pct.good { color: #059669; }
+.tv-batt-bar-fill.good { background: #10B981; }
+
+/* Warning State */
+.tv-batt-val.warning, .tv-batt-pct.warning { color: #D97706; }
+.tv-batt-bar-fill.warning { background: #F59E0B; }
+
+/* Critical State */
+.tv-batt-val.critical, .tv-batt-pct.critical { color: #DC2626; }
+.tv-batt-bar-fill.critical { background: #EF4444; }
+
+.tv-batt-status.critical {
+  font-size: 0.75rem;
+  color: #DC2626;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* Anomaly / Error State (Filters out the 19724mV shifts) */
+.tv-batt-alert {
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-batt-val.error {
+  color: #991B1B;
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tv-batt-status.error {
+  color: #DC2626;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: #FEF2F2;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  width: fit-content;
+  margin-top: 4px;
+  border: 1px solid #FECACA;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
 /* Responsive Adjustments */
 @media (max-width: 1024px) {

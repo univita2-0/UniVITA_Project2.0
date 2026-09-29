@@ -3503,6 +3503,33 @@ app.get('/api/dashboard/summary', async (req, res) => {
   } catch (err) { res.status(500).send(err); }
 });
 
+
+setInterval(async () => {
+  try {
+    
+    const [deadScanners] = await db.promise().query(`
+      SELECT scanner_id, assigned_room FROM scanners 
+      WHERE last_ping < NOW() - INTERVAL 5 MINUTE AND status = 'ONLINE'
+    `);
+
+    for (const scanner of deadScanners) {
+      // Mark as offline
+      await db.promise().query("UPDATE scanners SET status = 'OFFLINE' WHERE scanner_id = ?", [scanner.scanner_id]);
+      
+      
+      const alertMsg = `CRITICAL: Scanner ${scanner.scanner_id} in ${scanner.assigned_room} has gone offline. Please check power and Wi-Fi.`;
+      
+      await db.promise().query(
+        "INSERT INTO emergency_alerts (title, message, severity, target_roles) VALUES (?, ?, 'critical', '[\"security\", \"admin\"]')",
+        ['Scanner Offline', alertMsg]
+      );
+      console.log(`[ALERT] Scanner ${scanner.scanner_id} went offline!`);
+    }
+  } catch (err) {
+    console.error("Scanner Watchdog Error:", err);
+  }
+}, 60000);
+
 // ============================================
 // UNIFIED VISITOR TRACKING WATCHDOG (Single Timer)
 // ============================================
@@ -3672,13 +3699,12 @@ app.post('/api/scan', async (req, res) => {
     return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
 
-  const { scannerId, tagMac, rssi } = req.body;
+  const { scannerId, tagMac, rssi, vbatt } = req.body;
   if (!scannerId || !tagMac) {
     return res.status(400).json({ success: false, message: "Missing scannerId or tagMac." });
   }
 
   try {
-    // 1. Get scanner room assignment
     const [scannerRows] = await db.promise().query(
       "SELECT assigned_floor, assigned_room FROM scanners WHERE scanner_id = ?",
       [scannerId.trim()]
@@ -3687,6 +3713,18 @@ app.post('/api/scan', async (req, res) => {
     if (scannerRows.length === 0) {
       console.warn(`[SCAN] Unregistered scanner ID: ${scannerId}`);
       return res.status(404).json({ success: false, message: `Scanner '${scannerId}' is not registered.` });
+    }
+
+    await db.promise().query(
+      "UPDATE scanners SET last_ping = NOW(), status = 'ONLINE' WHERE scanner_id = ?", 
+      [scannerId.trim()]
+    );
+
+    if (vbatt && vbatt > 0) {
+      await db.promise().query(
+        "UPDATE ble_tags SET battery_level = ? WHERE UPPER(mac_address) = UPPER(?)",
+        [vbatt, tagMac.trim()]
+      );
     }
 
     const detectedFloor = String(scannerRows[0].assigned_floor);
