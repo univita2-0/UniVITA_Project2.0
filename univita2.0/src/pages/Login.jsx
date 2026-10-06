@@ -262,155 +262,151 @@ const Login = ({ onBack }) => {
   };
 
   return (
-    <div className="modern-login-wrapper">
+    <div className="cl-login-wrapper">
       <div className="login-ambient-bg">
         <div className="orb orb-1"></div>
         <div className="orb orb-2"></div>
         <div className="orb orb-3"></div>
       </div>
 
-      <button className="btn-glass-back" onClick={onBack}>
-        <ArrowLeft size={16} /> Back
+      <button className="cl-btn-back" onClick={onBack}>
+        <ArrowLeft size={18} /> Back
       </button>
 
-      <div className="glass-login-card">
+      <div className="cl-login-card fade-in">
         {step === 'login' && (
-          <div className="gl-brand-header gl-stagger-1">
-            <div className="gl-brand-icon">
-              <ShieldCheck size={28} strokeWidth={2} />
-            </div>
-            <h1 className="gl-brand-title">Welcome back!</h1>
+          <div className="cl-header">
+            
+            <h1 className="cl-title">Welcome back</h1>
+            <p className="cl-subtitle">Sign in to your account to continue</p>
           </div>
         )}
 
         {/* Step: Login */}
         {step === 'login' && (
-          <div className="gl-auth-container gl-fade-in-up">
-            <form onSubmit={handleLogin}>
-              <div className="gl-input-group gl-stagger-2">
-                <Mail size={18} className="gl-input-icon" />
+          <form onSubmit={handleLogin} className="cl-step-form">
+            <div className="cl-form-group">
+              <label className="cl-label">Email Address</label>
+              <div className="cl-input-wrap">
+                <Mail size={18} className="cl-input-icon" />
                 <input
                   type="email"
-                  className="gl-input"
-                  placeholder="Email"
+                  className="cl-input"
+                  placeholder="email@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
-              
-              <div className="gl-input-group gl-stagger-3" style={{ position: 'relative' }}>
-                <Lock size={18} className="gl-input-icon" />
+            </div>
+            
+            <div className="cl-form-group">
+              <div className="cl-label-row">
+                <label className="cl-label">Password</label>
+                <button type="button" className="cl-text-btn" onClick={() => setStep('forgot-password')}>
+                  Forgot Password?
+                </button>
+              </div>
+              <div className="cl-input-wrap">
+                <Lock size={18} className="cl-input-icon" />
                 <input
                   type={showPassword ? "text" : "password"}
-                  className="gl-input"
-                  placeholder="Password"
+                  className="cl-input"
+                  placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  style={{ paddingRight: '40px' }}
                 />
                 <button
                   type="button"
+                  className="cl-eye-btn"
                   onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#9CA3AF',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+            </div>
 
-              <div className="gl-options gl-stagger-4">
-                <button type="button" className="gl-text-link" onClick={() => setStep('forgot-password')}>
-                  Forgot Password?
-                </button>
-              </div>
-
-              <button type="submit" className="btn-gl-primary gl-stagger-5" disabled={otpLoading}>
-                {otpLoading ? 'Authenticating...' : 'Sign In'}
-              </button>
-            </form>
-          </div>
+            <button type="submit" className="cl-btn-primary mt-2" disabled={otpLoading}>
+              {otpLoading ? 'Authenticating...' : 'Sign In'}
+            </button>
+          </form>
         )}
 
         {/* Step: OTP */}
         {step === 'otp' && (
-          <div className="gl-auth-container gl-fade-in-up">
-            <div className="gl-instruction gl-stagger-2">
+          <div className="cl-form">
+            <div className="cl-instruction">
               <h4>Two-Factor Authentication</h4>
               <p>Enter the 6-digit security code sent to <strong>{email}</strong>.</p>
             </div>
 
-            <form onSubmit={handleVerifyOtp}>
-              <div className="gl-input-group otp-group gl-stagger-3">
+            <form onSubmit={handleVerifyOtp} className="cl-step-form">
+              <div className="cl-form-group">
                 <input
                   type="text"
-                  className="gl-input gl-otp-input"
-                  placeholder="0 0 0 0 0 0"
+                  className="cl-input cl-otp-input"
+                  placeholder="000000"
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
                   maxLength={6}
                   required
                   autoFocus
                 />
+                {/* Resend Timer positioned left under the input */}
+                <div className="cl-resend-left">
+                  {resendTimer > 0 ? (
+                    <span>Resend code in {resendTimer}s</span>
+                  ) : (
+                    <button type="button" onClick={handleResendOtp} disabled={otpLoading} className="cl-text-btn">
+                      {otpLoading ? 'Sending...' : 'Resend Code'}
+                    </button>
+                  )}
+                </div>
               </div>
-              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={otp.length < 6 || otpLoading}>
-                {otpLoading ? 'Verifying...' : 'Verify & Proceed'}
-              </button>
-            </form>
-
-            <div className="gl-resend-timer gl-stagger-5">
-              {resendTimer > 0 ? (
-                <span>Resend code in {resendTimer}s</span>
-              ) : (
-                <button onClick={handleResendOtp} disabled={otpLoading} className="gl-text-link">
-                  {otpLoading ? 'Sending...' : 'Resend Code'}
+              
+              {/* Buttons moved into the same row */}
+              <div className="cl-btn-row">
+                <button type="button" className="cl-btn-secondary" onClick={() => { setStep('login'); setOtp(''); }}>
+                  Cancel
                 </button>
-              )}
-            </div>
-
-            <button className="btn-gl-secondary mt-3 gl-stagger-6" onClick={() => { setStep('login'); setOtp(''); }}>
-              Cancel
-            </button>
+                <button type="submit" className="cl-btn-primary" disabled={otp.length < 6 || otpLoading}>
+                  {otpLoading ? 'Verifying...' : 'Verify'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
         {/* Step: Forgot Password (Email Input) */}
         {step === 'forgot-password' && (
-          <div className="gl-auth-container gl-fade-in-up">
-            <div className="gl-instruction gl-stagger-2">
+          <div className="cl-form">
+            <div className="cl-instruction">
               <h4>Reset Password</h4>
-              <p>Enter your registered admin/HR email to receive a secure reset code.</p>
+              <p>Enter your registered account email to receive a secure reset code.</p>
             </div>
 
-            <form onSubmit={handleForgotPasswordSubmit}>
-              <div className="gl-input-group gl-stagger-3">
-                <Mail size={18} className="gl-input-icon" />
-                <input
-                  type="email"
-                  className="gl-input"
-                  placeholder="Account Email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
+            <form onSubmit={handleForgotPasswordSubmit} className="cl-step-form">
+              <div className="cl-form-group">
+                <label className="cl-label">Account Email</label>
+                <div className="cl-input-wrap">
+                  <Mail size={18} className="cl-input-icon" />
+                  <input
+                    type="email"
+                    className="cl-input"
+                    placeholder="name@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
               </div>
-              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={otpLoading}>
+              <button type="submit" className="cl-btn-primary mt-2" disabled={otpLoading}>
                 {otpLoading ? 'Sending Request...' : 'Send Reset Code'}
               </button>
             </form>
 
-            <button className="btn-gl-secondary mt-3 gl-stagger-5" onClick={() => setStep('login')}>
+            <button className="cl-btn-secondary mt-2" onClick={() => setStep('login')}>
               Return to Login
             </button>
           </div>
@@ -418,108 +414,104 @@ const Login = ({ onBack }) => {
 
         {/* Step: Reset OTP Input Modal */}
         {step === 'reset-otp' && (
-          <div className="gl-auth-container gl-fade-in-up">
-            <div className="gl-instruction gl-stagger-2">
+          <div className="cl-form">
+            <div className="cl-instruction">
               <h4>Enter Reset Code</h4>
               <p>Enter the 6-digit code sent to <strong>{email}</strong>.</p>
             </div>
 
-            <form onSubmit={handleVerifyResetOtp}>
-              <div className="gl-input-group otp-group gl-stagger-3">
+            <form onSubmit={handleVerifyResetOtp} className="cl-step-form">
+              <div className="cl-form-group">
                 <input
                   type="text"
-                  className="gl-input gl-otp-input"
-                  placeholder="0 0 0 0 0 0"
+                  className="cl-input cl-otp-input"
+                  placeholder="000000"
                   value={resetOtp}
                   onChange={(e) => setResetOtp(e.target.value.replace(/\D/g, ''))}
                   maxLength={6}
                   required
                   autoFocus
                 />
+                <div className="cl-resend-left">
+                  {resendTimer > 0 ? (
+                    <span>Resend in {resendTimer}s</span>
+                  ) : (
+                    <button type="button" onClick={handleForgotPasswordSubmit} disabled={otpLoading} className="cl-text-btn">
+                      Resend Code
+                    </button>
+                  )}
+                </div>
               </div>
-              <button type="submit" className="btn-gl-primary gl-stagger-4" disabled={resetOtp.length < 6 || otpLoading}>
-                {otpLoading ? 'Validating...' : 'Verify Code'}
-              </button>
-            </form>
-
-            <div className="gl-resend-timer gl-stagger-5">
-              {resendTimer > 0 ? (
-                <span>Resend in {resendTimer}s</span>
-              ) : (
-                <button onClick={handleForgotPasswordSubmit} disabled={otpLoading} className="gl-text-link">
-                  Resend Code
+              
+              <div className="cl-btn-row">
+                <button type="button" className="cl-btn-secondary" onClick={() => { setStep('login'); setResetOtp(''); }}>
+                  Cancel
                 </button>
-              )}
-            </div>
-
-            <button className="btn-gl-secondary mt-3 gl-stagger-6" onClick={() => { setStep('login'); setResetOtp(''); }}>
-              Cancel
-            </button>
+                <button type="submit" className="cl-btn-primary" disabled={resetOtp.length < 6 || otpLoading}>
+                  {otpLoading ? 'Validating...' : 'Verify'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
         {/* Step: Reset New Password & Confirmation Modal */}
         {step === 'reset-new-password' && (
-          <div className="gl-auth-container gl-fade-in-up">
-            <div className="gl-instruction gl-stagger-2">
+          <div className="cl-form">
+            <div className="cl-instruction">
               <h4>Create New Password</h4>
               <p>Enter and confirm your new secure password below.</p>
             </div>
 
-            <form onSubmit={handleResetPasswordSubmit}>
-              <div className="gl-input-group gl-stagger-3" style={{ position: 'relative' }}>
-                <Lock size={18} className="gl-input-icon" />
-                <input
-                  type={showNewPassword ? "text" : "password"}
-                  className="gl-input"
-                  placeholder="New Password (min 8 chars)"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  minLength={8}
-                  required
-                  style={{ paddingRight: '40px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPassword(!showNewPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: '#9CA3AF',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
-                >
-                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            <form onSubmit={handleResetPasswordSubmit} className="cl-step-form">
+              <div className="cl-form-group">
+                <label className="cl-label">New Password</label>
+                <div className="cl-input-wrap">
+                  <Lock size={18} className="cl-input-icon" />
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    className="cl-input"
+                    placeholder="Min. 8 characters"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    minLength={8}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="cl-eye-btn"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                  >
+                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="cl-form-group">
+                <label className="cl-label">Confirm Password</label>
+                <div className="cl-input-wrap">
+                  <KeyRound size={18} className="cl-input-icon" />
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    className="cl-input"
+                    placeholder="Repeat new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    minLength={8}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="cl-btn-row mt-2">
+                <button type="button" className="cl-btn-secondary" onClick={() => { setStep('login'); setResetOtp(''); setNewPassword(''); setConfirmPassword(''); }}>
+                  Cancel
+                </button>
+                <button type="submit" className="cl-btn-primary" disabled={otpLoading || newPassword.length < 8 || confirmPassword.length < 8}>
+                  {otpLoading ? 'Updating System...' : 'Update Password'}
                 </button>
               </div>
-
-              <div className="gl-input-group gl-stagger-4" style={{ position: 'relative' }}>
-                <KeyRound size={18} className="gl-input-icon" />
-                <input
-                  type={showNewPassword ? "text" : "password"}
-                  className="gl-input"
-                  placeholder="Confirm New Password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  minLength={8}
-                  required
-                />
-              </div>
-
-              <button type="submit" className="btn-gl-primary gl-stagger-5" disabled={otpLoading || newPassword.length < 8 || confirmPassword.length < 8}>
-                {otpLoading ? 'Updating System...' : 'Update Password'}
-              </button>
             </form>
-
-            <button className="btn-gl-secondary mt-3 gl-stagger-6" onClick={() => { setStep('login'); setResetOtp(''); setNewPassword(''); setConfirmPassword(''); }}>
-              Cancel
-            </button>
           </div>
         )}
       </div>

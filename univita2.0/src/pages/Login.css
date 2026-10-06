@@ -1,9 +1,9 @@
-/* src/pages/Login.css - Ultra-Modern Animated Glassmorphism Redesign */
+/* src/pages/Login.css - Modern White Card + Original Dark Orbs Background */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 /* ---------- GLOBAL CONTAINER & ANIMATED BACKGROUND ---------- */
-.modern-login-wrapper {
+.cl-login-wrapper {
   position: relative;
   min-height: 100vh;
   width: 100%;
@@ -11,8 +11,9 @@
   align-items: center;
   justify-content: center;
   font-family: 'Inter', system-ui, sans-serif;
-  background-color: #0F172A; /* Deep Slate Base */
+  background-color: #0F172A; /* Restored deep slate dark background */
   overflow: hidden;
+  padding: 1.5rem;
   box-sizing: border-box; 
 }
 
@@ -61,10 +62,11 @@
   100% { transform: translate(0, 0) scale(1); }
 }
 
-/* ---------- NAVIGATION ---------- */
-.btn-glass-back {
+/* ---------- BACK BUTTON (Glassmorphism for Dark Bg) ---------- */
+.cl-btn-back {
   position: absolute;
-  top: 2rem; left: 2rem;
+  top: 2rem; 
+  left: 2rem;
   z-index: 10;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
@@ -82,171 +84,256 @@
   transition: all 0.3s ease;
 }
 
-.btn-glass-back:hover {
+.cl-btn-back:hover {
   background: rgba(255, 255, 255, 0.2);
   transform: translateX(-4px);
 }
 
-/* ---------- GLASSMORPHISM LOGIN CARD ---------- */
-.glass-login-card {
+/* ---------- LOGIN CARD (Clean White) ---------- */
+.cl-login-card {
   position: relative;
   z-index: 10;
   width: 100%;
-  max-width: 440px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 24px;
-  padding: 3rem 2.5rem;
-  box-shadow: 
-    0 25px 50px -12px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.2) inset;
-  animation: cardEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  max-width: 420px;
+  background: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 2.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); /* Deeper shadow for dark bg */
   box-sizing: border-box;
 }
 
-@keyframes cardEntrance {
-  from { opacity: 0; transform: scale(0.95) translateY(20px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+.fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* ---------- ANIMATION STAGGERS ---------- */
-.gl-fade-in-up { animation: glFadeInUp 0.5s ease-out forwards; }
-
-@keyframes glFadeInUp {
+@keyframes fadeIn {
   from { opacity: 0; transform: translateY(15px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.gl-stagger-1 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.1s; }
-.gl-stagger-2 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.2s; }
-.gl-stagger-3 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.3s; }
-.gl-stagger-4 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.4s; }
-.gl-stagger-5 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.5s; }
-.gl-stagger-6 { opacity: 0; animation: glFadeInUp 0.5s ease-out forwards; animation-delay: 0.6s; }
-
-/* ---------- BRAND HEADER ---------- */
-.gl-brand-header {
+/* ---------- HEADER ---------- */
+.cl-header {
   text-align: center;
-  margin-bottom: 2.5rem;
+  margin-bottom: 2rem;
 }
 
-.gl-brand-icon {
-  width: 56px; height: 56px;
+.cl-brand-icon {
+  width: 48px; 
+  height: 48px;
   background: #F0FDFA;
-  color: #0D9488;
-  border-radius: 16px;
-  display: flex; align-items: center; justify-content: center;
+  color: #0D9488; /* Teal brand accent */
+  border-radius: 12px;
+  display: flex; 
+  align-items: center; 
+  justify-content: center;
   margin: 0 auto 1rem auto;
-  box-shadow: 0 8px 16px rgba(13, 148, 136, 0.15);
 }
 
-.gl-brand-title {
+.cl-title {
   font-size: 1.5rem;
-  font-weight: 800;
-  color: #111827;
-  margin: 0 0 0.25rem 0;
-  letter-spacing: -0.02em;
-}
-
-/* ---------- FORM ELEMENTS ---------- */
-.gl-auth-container {
-  display: flex;
-  flex-direction: column;
-}
-
-.gl-instruction {
-  text-align: center;
-  margin-bottom: 1.5rem;
-}
-
-.gl-instruction h4 {
-  font-size: 1.25rem;
   font-weight: 700;
-  color: #111827;
+  color: #0F172A;
   margin: 0 0 0.5rem 0;
+  letter-spacing: -0.01em;
 }
 
-.gl-instruction p {
+.cl-subtitle {
   font-size: 0.9rem;
-  color: #6B7280;
-  line-height: 1.5;
+  color: #64748B;
   margin: 0;
 }
 
-.gl-input-group {
-  position: relative;
-  margin-bottom: 1.25rem;
+/* ---------- FORM & SPACING FIXES ---------- */
+.cl-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem; 
 }
 
-.gl-input-icon {
-  position: absolute;
-  left: 1.25rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #9CA3AF;
+.cl-step-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem; 
+}
+
+.cl-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cl-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cl-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.cl-input-wrap {
+  position: relative;
   display: flex;
   align-items: center;
-  transition: color 0.3s ease;
 }
 
-.gl-input {
+.cl-input-icon {
+  position: absolute;
+  left: 1rem;
+  color: #94A3B8;
+  pointer-events: none;
+}
+
+.cl-input {
   width: 100%;
-  padding: 0.9rem 1.25rem 0.9rem 3rem;
-  border: 1px solid #E5E7EB;
-  border-radius: 12px;
+  padding: 0.75rem 1rem 0.75rem 2.75rem;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
   font-size: 0.95rem;
-  color: #111827;
-  background: #FAFAFA;
+  color: #0F172A;
+  background: #FFFFFF;
   outline: none;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s ease;
   box-sizing: border-box;
 }
 
-/* FIX: Hide Microsoft Edge / Browser Default Eye Icon */
+/* Remove default eye icon in Edge/Webkit */
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear,
 input::-webkit-credentials-auto-fill-button {
   display: none !important;
 }
 
-.gl-input:focus {
+.cl-input:focus {
   border-color: #0D9488;
-  background: #FFFFFF;
-  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.1);
-  transform: translateY(-2px);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
-.gl-input:focus + .gl-input-icon,
-.gl-input:not(:placeholder-shown) ~ .gl-input-icon {
-  color: #0D9488;
+.cl-input::placeholder {
+  color: #94A3B8;
 }
 
-.gl-input::placeholder {
-  color: #9CA3AF;
-  font-weight: 400;
+.cl-eye-btn {
+  position: absolute;
+  right: 0.75rem;
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0.25rem;
 }
 
-/* OTP Input Specific */
-.otp-group .gl-input-icon { display: none; }
-.otp-group .gl-otp-input {
+.cl-eye-btn:hover {
+  color: #475569;
+}
+
+/* OTP Specific Styling */
+.cl-otp-input {
   padding-left: 1rem;
   text-align: center;
   font-size: 1.5rem;
-  letter-spacing: 0.25em;
+  letter-spacing: 0.5em;
   font-family: monospace;
+  font-weight: 700;
+  color: #0F172A;
+}
+
+/* ---------- INSTRUCTIONS (Modals) ---------- */
+.cl-instruction {
+  text-align: center;
+}
+
+.cl-instruction h4 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0 0 0.5rem 0;
+}
+
+.cl-instruction p {
+  font-size: 0.9rem;
+  color: #64748B;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ---------- LEFT ALIGNED TIMER ---------- */
+.cl-resend-left {
+  text-align: left;
+  font-size: 0.85rem;
+  color: #64748B;
+  font-weight: 500;
+  padding-top: 0.25rem;
+  padding-left: 0.25rem;
+}
+
+.cl-resend-left .cl-text-btn {
+  margin: 0;
+  padding: 0;
+}
+
+/* ---------- BUTTONS ---------- */
+.cl-btn-primary {
+  width: 100%;
+  padding: 0.8rem;
+  background: #0F172A;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
   font-weight: 600;
-  color: #0D9488;
+  cursor: pointer;
+  transition: background 0.2s ease;
 }
 
-.gl-options {
+.cl-btn-primary:hover:not(:disabled) {
+  background: #1E293B;
+}
+
+.cl-btn-primary:disabled {
+  background: #94A3B8;
+  cursor: not-allowed;
+}
+
+.cl-btn-secondary {
+  width: 100%;
+  padding: 0.8rem;
+  background: #FFFFFF;
+  color: #334155;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cl-btn-secondary:hover {
+  background: #F8FAFC;
+  border-color: #94A3B8;
+}
+
+/* Grouped button row (50/50 split) */
+.cl-btn-row {
   display: flex;
-  justify-content: center;
-  margin-bottom: 1.5rem;
+  gap: 1rem;
+  width: 100%;
+  margin-top: 0.5rem;
 }
 
-.gl-text-link {
+.cl-btn-row button {
+  flex: 1; /* Makes Cancel and Verify exact equal width */
+  padding: 0.8rem 0.5rem;
+}
+
+.cl-text-btn {
   background: transparent;
   border: none;
   color: #0D9488;
@@ -254,100 +341,31 @@ input::-webkit-credentials-auto-fill-button {
   font-weight: 600;
   cursor: pointer;
   padding: 0;
-  transition: color 0.2s;
 }
 
-.gl-text-link:hover {
-  color: #0F766E;
+.cl-text-btn:hover {
   text-decoration: underline;
 }
 
-/* ---------- BUTTONS ---------- */
-.btn-gl-primary {
-  width: 100%;
-  padding: 0.9rem;
-  background: #0D9488;
-  color: #FFFFFF;
-  border: none;
-  border-radius: 12px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.2);
-}
-
-.btn-gl-primary:hover:not(:disabled) {
-  background: #0F766E;
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(13, 148, 136, 0.3);
-}
-
-.btn-gl-primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-gl-primary:disabled {
-  background: #D1D5DB;
-  box-shadow: none;
-  cursor: not-allowed;
-  color: #9CA3AF;
-}
-
-.btn-gl-secondary {
-  width: 100%;
-  padding: 0.9rem;
-  background: #FFFFFF;
-  color: #4B5563;
-  border: 1px solid #E5E7EB;
-  border-radius: 12px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-gl-secondary:hover {
-  background: #F9FAFB;
-  color: #111827;
-  border-color: #D1D5DB;
-}
-
-.gl-resend-timer {
-  text-align: center;
-  margin-top: 1.25rem;
-  font-size: 0.85rem;
-  color: #6B7280;
-  font-weight: 500;
-}
-
-.mt-3 { margin-top: 1rem; }
+/* ---------- UTILS ---------- */
+.mt-2 { margin-top: 0.5rem; }
 
 /* ---------- RESPONSIVE ---------- */
-@media (max-width: 600px) {
-  .modern-login-wrapper { 
-    padding: 1.5rem; 
+@media (max-width: 480px) {
+  .cl-login-wrapper {
+    padding: 1rem;
   }
-  .glass-login-card { 
-    padding: 2rem 1.5rem; 
-    border-radius: 20px; 
-    width: 100%;
-    max-width: 100%; 
+  .cl-login-card {
+    padding: 2rem 1.5rem;
+    border-radius: 12px;
   }
-  .btn-glass-back { 
-    top: 1.5rem; 
-    left: 1.5rem; 
-    padding: 0.5rem 1rem; 
-    font-size: 0.8rem;
+  .cl-btn-back {
+    top: 1rem;
+    left: 1rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
   }
-  .gl-brand-icon { 
-    width: 48px; 
-    height: 48px; 
-    margin-bottom: 0.75rem; 
-  }
-  .gl-brand-title { 
-    font-size: 1.35rem; 
+  .cl-btn-row {
+    gap: 0.75rem;
   }
 }

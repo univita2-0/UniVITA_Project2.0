@@ -364,7 +364,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
       setTimeout(() => {
         const element = document.getElementById(id);
         if (element) {
-          const headerOffset = 75; 
+          const headerOffset = 90; 
           const elementPosition = element.getBoundingClientRect().top;
           const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
           window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
@@ -373,7 +373,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
     } else {
       const element = document.getElementById(id);
       if (element) {
-        const headerOffset = 75; 
+        const headerOffset = 90; 
         const elementPosition = element.getBoundingClientRect().top;
         const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
         window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
@@ -622,12 +622,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
   return (
     <div className="ap-landing">
-      {/* HEADER */}
+      {/* MODERN FLOATING HEADER */}
       <header className="ap-header">
         <div className="ap-header-container">
           <div className="ap-brand" onClick={() => scrollToSection('home')}>
             <div className="ap-brand-icon-wrapper">
-              <Stethoscope size={24} />
+              <Stethoscope size={22} />
             </div>
             <span className="ap-brand-name">HCT Academy</span>
           </div>
@@ -787,22 +787,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <div className="ap-container">
               <div className="ap-section-header">
                 <span className="ap-tag">Educational Programs</span>
-                <h2>Clinical Education & Certification Programs</h2>
+                <h2>Clinical Education & Certification</h2>
                 <p>Explore accredited clinical certifications, life support programs, and continuing professional development modules.</p>
-              </div>
-
-              <div className="ap-clean-track-tabs">
-                {courseCategories.map((cat, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className={`ap-track-tab-btn ${idx === currentCourseIndex ? 'active' : ''}`}
-                    onClick={() => setCurrentCourseIndex(idx)}
-                  >
-                    <span>{cat.title.split('(')[0].trim()}</span>
-                    <span className="ap-track-badge">{(cat.courses || []).length}</span>
-                  </button>
-                ))}
               </div>
 
               {courseCategories.length > 0 && activeCourse && (
@@ -817,19 +803,10 @@ const AppointmentPage = ({ onAdminLogin }) => {
                       <span className="ap-clean-card-count">{(activeCourse.courses || []).length} Modules</span>
                     </div>
 
-                    <h3 className="ap-clean-card-title">{activeCourse.title}</h3>
-                    <p className="ap-clean-card-sub">{activeCourse.subtitle}</p>
-                    <p className="ap-clean-card-desc">{activeCourse.description}</p>
-
-                    <div className="ap-clean-modules-preview">
-                      <span className="ap-clean-preview-heading">Featured Topics & Syllabi (Alphabetical)</span>
-                      <div className="ap-clean-chip-row">
-                        {(activeCourse.courses || []).map((cName, cIdx) => (
-                          <span key={cIdx} className="ap-clean-module-chip">
-                            <Check size={13} className="chip-check" /> {cName}
-                          </span>
-                        ))}
-                      </div>
+                    <div className="ap-clean-card-body">
+                      <h3 className="ap-clean-card-title">{activeCourse.title}</h3>
+                      <p className="ap-clean-card-sub">{activeCourse.subtitle}</p>
+                      <p className="ap-clean-card-desc">{activeCourse.description}</p>
                     </div>
 
                     <div className="ap-clean-card-footer">
@@ -838,7 +815,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                         className="btn-ap-clean-curriculum"
                         onClick={() => setSelectedCourseModal(activeCourse)}
                       >
-                        <BookOpen size={16} /> View Complete Curriculum
+                        View
                       </button>
                     </div>
                   </div>
@@ -1003,20 +980,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 <p>Help educate and inspire the next generation of healthcare professionals with modern clinical simulation tools and institutional growth opportunities.</p>
               </div>
 
-              <div className="ap-clean-perks-bar">
-                <div className="ap-clean-perk">
-                  <Award size={18} className="perk-icon" />
-                  <span>CPD Medical Units Provided</span>
-                </div>
-                <div className="ap-clean-perk">
-                  <Zap size={18} className="perk-icon" />
-                  <span>Advanced Simulation Labs</span>
-                </div>
-                <div className="ap-clean-perk">
-                  <HeartHandshake size={18} className="perk-icon" />
-                  <span>Statutory Benefits & Overtime</span>
-                </div>
-              </div>
+              
             </div>
           </section>
 
@@ -1170,7 +1134,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
             <p className="ap-time-modal-subtitle">{selectedCourseModal.description}</p>
             
-            <div className="ap-modal-section-title">Course Modules (Alphabetical):</div>
+            <div className="ap-modal-section-title">Course Modules:</div>
             <div className="ap-subcourses-list">
               {(selectedCourseModal.courses || []).map((course, i) => (
                 <div key={i} className="ap-subcourse-item">
@@ -1363,7 +1327,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <div className="ap-companions-list">
                     {additionalVisitors.map((v, idx) => (
                       <div key={idx} className="ap-companion-row">
-                        <span className="ap-companion-index">#{idx + 1}</span>
+                        <span className="ap-companion-index">{idx + 1}</span>
                         <input 
                           type="text" 
                           placeholder="Companion Full Name (e.g. Maria Santos)" 
