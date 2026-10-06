@@ -2783,7 +2783,7 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to edit this profile.' });
   }
 
-  // CRITICAL FIX: Guarantee body is an object to prevent undefined crashes
+  // Guarantee body is an object to prevent undefined crashes
   const data = req.body ? { ...req.body } : {};
   const updates = { ...data };
 
@@ -2791,13 +2791,40 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
     return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
   }
 
+  // Role Normalization Helper: maps frontend display titles to database ENUM/keys
+  const normalizeRole = (roleStr) => {
+    if (!roleStr) return roleStr;
+    const clean = roleStr.toString().trim().toLowerCase();
+    const roleMap = {
+      'system admin': 'admin',
+      'system_admin': 'admin',
+      'administrator': 'admin',
+      'admin': 'admin',
+      'hr admin': 'hr_admin',
+      'hr_admin': 'hr_admin',
+      'hr administrator': 'hr_admin',
+      'security guard': 'security',
+      'security': 'security',
+      'campus security': 'security',
+      'employee': 'employee',
+      'staff': 'employee',
+      'faculty': 'employee'
+    };
+    return roleMap[clean] || clean;
+  };
+
   try {
     const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [employeeId]);
     if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
     const oldData = oldRecord[0];
 
+    // Normalize incoming role fields before mapping
+    if (updates.role !== undefined) updates.role = normalizeRole(updates.role);
+    if (updates.system_role !== undefined) updates.system_role = normalizeRole(updates.system_role);
+
     if (!isPrivileged) {
       delete updates.role;
+      delete updates.system_role;
       delete updates.status;
       delete updates.monthly_salary;
       delete updates.work_days_per_month;
@@ -2833,6 +2860,7 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       contract_type: 'contract_type',
       status: 'status',
       role: 'role',
+      system_role: 'role', // Catches payload if frontend uses system_role
       date_of_joining: 'date_of_joining',
       monthly_salary: 'monthly_salary',
       work_days_per_month: 'work_days_per_month',
@@ -2879,24 +2907,27 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       }
     }
 
-    if (setClauses.length === 0) return res.status(400).json({ success: false, message: 'No valid fields provided to update.' });
+    if (setClauses.length === 0) {
+      return res.status(400).json({ success: false, message: 'No valid fields provided to update.' });
+    }
 
     values.push(employeeId);
     const sql = `UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`;
 
-    db.query(sql, values, (err, result) => {
-      if (err) {
-        if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Email is already in use by another account.' });
-        console.error("DB Update Error:", err.message);
-        return res.status(500).json({ success: false, message: 'Database error during update.' });
-      }
-      
+    await db.promise().query(sql, values);
+
+    if (typeof logAction === 'function') {
       logAction(req.user.id, 'UPDATE_EMPLOYEE', 'user', employeeId, req, oldData, updates);
-      res.json({ success: true, message: 'Employee profile updated successfully.' });
-    });
+    }
+
+    return res.json({ success: true, message: 'Employee profile updated successfully.' });
+
   } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ success: false, message: 'Email is already in use by another account.' });
+    }
     console.error("Update Employee Error:", error.message);
-    res.status(500).json({ success: false, message: 'Server connection failed.' });
+    return res.status(500).json({ success: false, message: `Database error during update: ${error.message}` });
   }
 });
 
