@@ -2884,7 +2884,6 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       position: 'position',
     };
 
-    const dateColumns = ['date_of_joining', 'date_of_birth', 'account_expiration_date'];
     const numColumns = ['monthly_salary', 'work_days_per_month'];
 
     const setClauses = [];
@@ -2896,10 +2895,13 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
         handledColumns.add(dbField);
         let val = updates[frontField];
         
-        if (dateColumns.includes(dbField) && val === '') {
-          val = null;
-        } else if (numColumns.includes(dbField) && val === '') {
-          val = 0;
+        // Convert all blank strings to NULL (or 0 for numbers) to prevent MySQL truncation errors
+        if (val === '') {
+          if (numColumns.includes(dbField)) {
+            val = 0;
+          } else {
+            val = null;
+          }
         }
         
         setClauses.push(`${dbField} = ?`);
