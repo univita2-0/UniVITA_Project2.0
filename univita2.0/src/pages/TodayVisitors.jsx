@@ -23,13 +23,13 @@ const formatTo12Hour = (timeStr) => {
   return `${h}:${minute} ${ampm}`;
 };
 
-// --- NEW: STRICT BATTERY VALIDATION & UI RENDERER ---
+// --- STRICT BATTERY VALIDATION & UI RENDERER ---
 const renderBatteryValidation = (mV) => {
   if (!mV || isNaN(mV) || mV <= 0) {
     return <span className="tv-mono-text" style={{ color: '#94A3B8' }}>Awaiting Telemetry...</span>;
   }
 
-  // Filter out ESP32 packet shift anomalies (CR2032 limits are ~2000mV to ~3300mV)
+  // Filter out ESP32 packet shift anomalies (CR2032 physical limits are 2000mV to 3600mV)
   if (mV > 3600 || mV < 2000) {
     return (
       <div className="tv-batt-alert">
@@ -39,8 +39,10 @@ const renderBatteryValidation = (mV) => {
     );
   }
 
-  // Calculate percentage (2600mV is dead, 3200mV is 100%)
-  const percentage = Math.min(100, Math.max(0, Math.round(((mV - 2600) / (3200 - 2600)) * 100)));
+  // Corrected CR2032 percentage calculation (2000mV is 0%, 3000mV is 100%)
+  const minVoltage = 2000;
+  const maxVoltage = 3000;
+  const percentage = Math.min(100, Math.max(0, Math.round(((mV - minVoltage) / (maxVoltage - minVoltage)) * 100)));
   
   let statusClass = 'good';
   if (percentage <= 20) statusClass = 'critical';
