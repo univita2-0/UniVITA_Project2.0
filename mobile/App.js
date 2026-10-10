@@ -186,7 +186,9 @@ function AppContent() {
     const loadAlerts = async () => {
       try {
         const alerts = await fetchEmergencyAlerts(userId);
-        const unreadAlerts = alerts.filter(a => !a.read_at);
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const unreadAlerts = alerts.filter(a => !a.read_at && new Date(a.sent_at) > oneDayAgo);
+        
         if (unreadAlerts.length > 0 && activeAlertId.current !== unreadAlerts[0].id) {
           setAlertQueue(unreadAlerts);
           showNextAlert(unreadAlerts[0]);

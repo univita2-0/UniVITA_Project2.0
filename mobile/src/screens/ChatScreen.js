@@ -324,7 +324,11 @@ export default function ChatScreen({ onClose }) {
     <View style={{ flex: 1, backgroundColor: colors.surface, paddingTop: safeTopPadding }}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.surface} translucent={true} />
       
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
         {!activeRoom ? (
           <View style={{ flex: 1 }}>
             

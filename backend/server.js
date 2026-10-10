@@ -341,10 +341,14 @@ const verifyOwnership = (req, res, next) => {
     return res.status(400).json({ error: "Missing employee identifier in request." });
   }
 
-  db.query("SELECT employee_id FROM users WHERE id = ?", [req.user.id], (err, rows) => {
+  db.query("SELECT id, employee_id FROM users WHERE id = ?", [req.user.id], (err, rows) => {
     if (err) return res.status(500).json({ error: "Database verification error" });
     
-    if (rows.length === 0 || rows[0].employee_id !== requestedEmployeeId) {
+    if (rows.length === 0) {
+      return res.status(403).json({ error: "Forbidden: User not found." });
+    }
+
+    if (rows[0].employee_id !== requestedEmployeeId && rows[0].id.toString() !== requestedEmployeeId.toString()) {
       console.warn(`IDOR Blocked: User ID ${req.user.id} attempted to access ${requestedEmployeeId}`);
       return res.status(403).json({ error: "Forbidden: You can only access your own data." });
     }

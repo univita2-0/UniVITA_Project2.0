@@ -263,13 +263,22 @@ export default function ProfileScreen({ navigation }) {
     setLoadingPwd(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      const res = await axios.put(`${API_URL}/users/${userData.id}/update-password`, { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() }, { headers: { Authorization: `Bearer ${token}` } });
+      
+      const empIdentifier = (fullDetails.employee_id && fullDetails.employee_id !== '—') ? fullDetails.employee_id : userData.id;
+      
+      const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`, { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() }, { headers: { Authorization: `Bearer ${token}` } });
+      
       if (res.data.success) {
         setShowPasswordModal(false);
         Alert.alert("Security Updated", "Your password has been changed successfully. Please sign in again.", [{ text: "Sign In", onPress: async () => { await AsyncStorage.clear(); navigation.replace('Login'); } }]);
-      } else { Alert.alert("Error", res.data.message || "Password update failed."); }
-    } catch (error) { Alert.alert("Error", error.response?.data?.message || "Network error occurred."); } 
-    finally { setLoadingPwd(false); }
+      } else { 
+        Alert.alert("Error", res.data.message || "Password update failed."); 
+      }
+    } catch (error) { 
+      Alert.alert("Error", error.response?.data?.message || "Network error occurred."); 
+    } finally { 
+      setLoadingPwd(false); 
+    }
   };
 
   const MenuItem = ({ icon: Icon, title, subtitle, onPress }) => (
