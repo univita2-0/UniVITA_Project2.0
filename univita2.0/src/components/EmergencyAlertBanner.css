@@ -1,70 +1,135 @@
-.emergency-banner-container {
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+.ap-emergency-banner-container {
   position: sticky;
-  top: 0;
+  top: 1rem;
   z-index: 9999;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem 1.5rem 0 1.5rem;
+  gap: 0.75rem;
+  padding: 0 1.5rem;
   background: transparent;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
-.emergency-banner {
+.ap-emergency-banner {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 0.85rem 1.25rem;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
   font-family: 'Inter', system-ui, sans-serif;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  animation: slideDown 0.3s ease-out;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  animation: apSlideDownFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-@keyframes slideDown {
-  from { transform: translateY(-10px); opacity: 0; }
+@keyframes apSlideDownFade {
+  from { transform: translateY(-15px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 
-.emergency-banner.critical {
-  background-color: #FEF2F2;
-  color: #991B1B;
+/* Severity Theme: Critical */
+.ap-severity-critical {
+  background-color: rgba(254, 242, 242, 0.95);
   border: 1px solid #FECACA;
 }
+.ap-severity-critical .ap-banner-icon-wrapper { color: #DC2626; background: #FEE2E2; }
+.ap-severity-critical .ap-banner-title { color: #991B1B; }
+.ap-severity-critical .ap-banner-message { color: #7F1D1D; }
+.ap-severity-critical .ap-banner-dismiss-btn { color: #DC2626; background: rgba(220, 38, 38, 0.1); }
 
-.emergency-banner.warning {
-  background-color: #FFFBEB;
-  color: #92400E;
+/* Severity Theme: Warning */
+.ap-severity-warning {
+  background-color: rgba(255, 251, 235, 0.95);
   border: 1px solid #FDE68A;
 }
+.ap-severity-warning .ap-banner-icon-wrapper { color: #D97706; background: #FEF3C7; }
+.ap-severity-warning .ap-banner-title { color: #92400E; }
+.ap-severity-warning .ap-banner-message { color: #78350F; }
+.ap-severity-warning .ap-banner-dismiss-btn { color: #D97706; background: rgba(217, 119, 6, 0.1); }
 
-.emergency-banner.info {
-  background-color: #EFF6FF;
-  color: #1E40AF;
+/* Severity Theme: Info */
+.ap-severity-info {
+  background-color: rgba(239, 246, 255, 0.95);
   border: 1px solid #BFDBFE;
 }
+.ap-severity-info .ap-banner-icon-wrapper { color: #2563EB; background: #DBEAFE; }
+.ap-severity-info .ap-banner-title { color: #1E40AF; }
+.ap-severity-info .ap-banner-message { color: #1E3A8A; }
+.ap-severity-info .ap-banner-dismiss-btn { color: #2563EB; background: rgba(37, 99, 235, 0.1); }
 
-.emergency-banner-content {
+/* Internal Layout Elements */
+.ap-banner-icon-wrapper {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex: 1;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.emergency-banner-dismiss {
-  background: none;
+.ap-banner-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ap-banner-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ap-banner-message {
+  margin: 0;
+  font-size: 0.925rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.ap-banner-dismiss-btn {
   border: none;
   cursor: pointer;
-  color: inherit;
-  opacity: 0.7;
   display: flex;
   align-items: center;
-  padding: 4px;
-  border-radius: 4px;
-  transition: opacity 0.2s;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
-.emergency-banner-dismiss:hover {
-  opacity: 1;
-  background: rgba(0, 0, 0, 0.05);
+.ap-banner-dismiss-btn:hover {
+  transform: scale(1.05);
+  filter: brightness(0.95);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .ap-emergency-banner-container {
+    padding: 0 1rem;
+    top: 0.75rem;
+  }
+  .ap-emergency-banner {
+    padding: 0.85rem 1rem;
+    gap: 1rem;
+  }
+  .ap-banner-icon-wrapper {
+    width: 36px;
+    height: 36px;
+  }
+  .ap-banner-title {
+    font-size: 0.85rem;
+  }
+  .ap-banner-message {
+    font-size: 0.875rem;
+  }
 }

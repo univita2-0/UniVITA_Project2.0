@@ -60,8 +60,10 @@ const EmergencyAlertBanner = () => {
 
         const allAlerts = res.data || [];
         
-        // FIX: Only display alerts that are unread (!alert.read_at)
-        const activeUnreadAlerts = allAlerts.filter(a => !a.read_at);
+        // FIX: Display only UNREAD alerts that were broadcasted within the LAST 24 HOURS
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const activeUnreadAlerts = allAlerts.filter(a => !a.read_at && new Date(a.sent_at) > oneDayAgo);
+        
         setAlerts(activeUnreadAlerts);
 
         // Retrieve already-heard alerts from this session
@@ -110,18 +112,21 @@ const EmergencyAlertBanner = () => {
   if (alerts.length === 0) return null;
 
   return (
-    <div className="emergency-banner-container">
+    <div className="ap-emergency-banner-container">
       {alerts.map(alert => (
-        <div key={alert.id} className={`emergency-banner ${alert.severity}`}>
-          <div className="emergency-banner-content">
-            {alert.severity === 'critical' ? <AlertOctagon size={18} /> :
-             alert.severity === 'warning' ? <AlertTriangle size={18} /> : <Info size={18} />}
-            <div>
-              <strong>{alert.title}:</strong> {alert.message}
-            </div>
+        <div key={alert.id} className={`ap-emergency-banner ap-severity-${alert.severity}`}>
+          <div className="ap-banner-icon-wrapper">
+            {alert.severity === 'critical' ? <AlertOctagon size={20} strokeWidth={2.5} /> :
+             alert.severity === 'warning' ? <AlertTriangle size={20} strokeWidth={2.5} /> : <Info size={20} strokeWidth={2.5} />}
           </div>
-          <button className="emergency-banner-dismiss" onClick={() => handleDismiss(alert.id)} title="Dismiss">
-            <X size={16} />
+          
+          <div className="ap-banner-content-wrapper">
+            <h4 className="ap-banner-title">{alert.severity === 'critical' ? 'CRITICAL ALERT' : alert.severity === 'warning' ? 'WARNING' : 'SYSTEM INFO'}: {alert.title}</h4>
+            <p className="ap-banner-message">{alert.message}</p>
+          </div>
+          
+          <button className="ap-banner-dismiss-btn" onClick={() => handleDismiss(alert.id)} title="Acknowledge & Dismiss">
+            <X size={18} />
           </button>
         </div>
       ))}
