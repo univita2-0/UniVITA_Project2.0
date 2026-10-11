@@ -6095,21 +6095,21 @@ const broadcastInstructorStatus = async (employeeId) => {
         WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
         WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
         WHEN u.last_location_ping IS NULL THEN 'Unavailable'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'Signal Lost'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 300 THEN 'Signal Lost'
         ELSE (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_position_name,
       (CASE 
         WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN NULL
         WHEN u.location_tracking_enabled = 0 THEN NULL
         WHEN u.last_location_ping IS NULL THEN NULL
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN NULL
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 300 THEN NULL
         ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_is_inside,
       (CASE 
         WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
         WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
         WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'GPS OFF'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 300 THEN 'GPS OFF'
         ELSE 'GPS ON'
       END) AS gps_status
     FROM users u
@@ -6147,7 +6147,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Unavailable'
           WHEN u.last_location_ping IS NULL THEN 'Unavailable'
           WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'Signal Lost'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 300 THEN 'Signal Lost'
           ELSE COALESCE(ilt.location_name, 'Unavailable') 
         END AS last_position_name, 
         
@@ -6157,7 +6157,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN NULL
           WHEN u.last_location_ping IS NULL THEN NULL
           WHEN u.location_tracking_enabled = 0 THEN NULL
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN NULL
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 300 THEN NULL
           ELSE ilt.is_inside_campus 
         END AS last_is_inside,
         
@@ -6169,7 +6169,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'GPS OFF'
           WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
           WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 120 THEN 'GPS OFF'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 300 THEN 'GPS OFF'
           ELSE 'GPS ON'
         END AS gps_status,
         
@@ -6316,7 +6316,7 @@ setInterval(async () => {
         AND u.location_tracking_enabled = 1
         AND a.time_in IS NOT NULL
         AND (a.time_out IS NULL OR a.time_out = '--:--')
-        AND TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 60
+        AND TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > 300
     `);
 
     for (const inst of offlineInstructors) {

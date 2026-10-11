@@ -359,7 +359,13 @@ export default function HomeScreen({ navigation }) {
   const captureSelfie = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Camera permission needed'); return null; }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+    
+    
+    const result = await ImagePicker.launchCameraAsync({ 
+      quality: 0.2, 
+      allowsEditing: true,
+      aspect: [3, 4]
+    });
     return !result.canceled ? result.assets[0].uri : null;
   };
 
