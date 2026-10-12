@@ -139,13 +139,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
   return (
     <div className="expert-container">
       {/* Header Section */}
-      <div className="expert-header">
-        <div className="expert-title-group">
-          <div>
-            <p className="expert-subtitle">Overview of global system health, active personnel, and pending operational requests.</p>
-          </div>
-        </div>
-      </div>
+     
 
       {/* System Health Banner */}
       <section className="expert-banner">

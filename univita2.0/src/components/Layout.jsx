@@ -203,7 +203,7 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
             </button>
             {showBack && (
               <button className="lay-back-btn" onClick={onBack}>
-                <ArrowLeft size={16} /> <span className="hide-on-mobile">Back</span>
+                <ArrowLeft size={16} /> 
               </button>
             )}
             <div className="lay-header-info">
@@ -214,7 +214,7 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
           <div className="lay-header-right">
             <div className="lay-profile-trigger" onClick={() => handleNavClick('profile')}>
               <div className="lay-avatar">
-                <User size={16} color="white" />
+                <User size={18} color="white" strokeWidth={2.5} />
               </div>
               <span className="lay-profile-name">Administrator</span>
             </div>
