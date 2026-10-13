@@ -1,9 +1,9 @@
+// src/pages/CoursesManagement.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Edit3, Trash2, BookOpen, Search, X, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
+import { Plus, Edit3, Trash2, Search, X, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 import './CoursesManagement.css';
 
@@ -120,55 +120,51 @@ const CoursesManagement = () => {
   const currentCourses = filteredCourses.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
-    <div className="expert-container">
+    <div className="cm-container">
       {/* Header Section */}
-      <div className="expert-header">
-        <div className="expert-title-group">
-          
+      <div className="cm-header">
+        <div className="cm-title-group">
           <div>
-            
-            <p className="expert-subtitle">Manage academic courses and subjects for instructor assignment.</p>
+            <p className="cm-subtitle">Manage academic courses and subjects for instructor assignment.</p>
           </div>
         </div>
-        <button className="expert-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
+        <button className="cm-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
           <Plus size={16} /> Add New Course
         </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="expert-search-card" style={{ padding: '12px 20px' }}>
-        <div className="expert-search-row">
-          <div className="expert-search-input-group" style={{ maxWidth: '500px' }}>
-            <Search size={18} className="text-muted" />
+      <div className="cm-content-card">
+        {/* Search & Toolbar */}
+        <div className="cm-toolbar border-bottom">
+          <div className="cm-search-input-group">
+            <Search size={16} className="text-muted" />
             <input 
               type="text" 
-              placeholder="Search courses..." 
+              placeholder="Search courses by name..." 
               value={searchQuery} 
               onChange={e => setSearchQuery(e.target.value)} 
-              className="expert-clean-input" 
+              className="cm-clean-input" 
             />
-            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+            {searchQuery && <X size={14} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
           </div>
-          <div className="expert-stats-badge">
+          <div className="cm-stats-badge">
             Total Courses: <strong>{courses.length}</strong>
           </div>
         </div>
-      </div>
 
-      {/* Main Table Card */}
-      <div className="expert-card">
+        {/* Main Table Area */}
         {loading ? (
-          <div className="expert-loading">Loading courses...</div>
+          <div className="cm-loading">Loading courses...</div>
         ) : filteredCourses.length === 0 ? (
-          <div className="expert-empty">
-            <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
+          <div className="cm-empty">
+            <AlertCircle size={36} className="text-muted" style={{ marginBottom: '1rem' }} />
             <p>No courses found.</p>
             {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Add New Course" to create your first subject.</span>}
           </div>
         ) : (
           <>
-            <div className="expert-table-wrapper">
-              <table className="expert-table">
+            <div className="cm-table-wrapper">
+              <table className="cm-table">
                 <thead>
                   <tr>
                     <th>Course Name</th>
@@ -179,15 +175,15 @@ const CoursesManagement = () => {
                   {currentCourses.map(course => (
                     <tr key={course.id}>
                       <td>
-                        <span className="font-semibold text-dark">{course.name}</span>
+                        <span className="font-medium text-dark">{course.name}</span>
                       </td>
                       <td>
-                        <div className="expert-action-group right">
-                          <button className="expert-btn-icon" onClick={() => handleEdit(course)} title="Edit Course">
-                            <Edit3 size={18} color="#475569" />
+                        <div className="cm-action-group right">
+                          <button className="cm-icon-btn edit" onClick={() => handleEdit(course)} title="Edit Course">
+                            <Edit3 size={16} />
                           </button>
-                          <button className="expert-btn-icon danger" onClick={() => handleDeleteClick(course.id, course.name)} title="Delete Course">
-                            <Trash2 size={18} />
+                          <button className="cm-icon-btn danger" onClick={() => handleDeleteClick(course.id, course.name)} title="Delete Course">
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       </td>
@@ -199,12 +195,12 @@ const CoursesManagement = () => {
 
             {/* Pagination Controls */}
             {totalPages > 1 && (
-              <div className="expert-pagination">
-                <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredCourses.length)} of {filteredCourses.length} entries</span>
-                <div className="expert-page-controls">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
-                  <span className="expert-page-current">{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
+              <div className="cm-pagination">
+                <span className="cm-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredCourses.length)} of {filteredCourses.length}</span>
+                <div className="cm-page-controls">
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="cm-page-btn"><ChevronLeft size={16} /></button>
+                  <span className="cm-page-current">{currentPage} / {totalPages}</span>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="cm-page-btn"><ChevronRight size={16} /></button>
                 </div>
               </div>
             )}
@@ -212,60 +208,73 @@ const CoursesManagement = () => {
         )}
       </div>
 
-      {/* Add/Edit Modal */}
-      <FormalModal
-        show={showModal}
-        onClose={() => { setShowModal(false); resetForm(); }}
-        title={editingCourse ? 'Edit Course' : 'Add New Course'}
-        footer={
-          <>
-            <button className="expert-btn-secondary" onClick={() => { setShowModal(false); resetForm(); }} disabled={processing}>Cancel</button>
-            <button className="expert-btn-primary" onClick={handleSave} disabled={processing}>
-              {processing ? 'Saving...' : (editingCourse ? 'Update Course' : 'Save Course')}
-            </button>
-          </>
-        }
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ fontSize: '0.85rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase' }}>Course Name <span className="text-danger">*</span></label>
-          <input 
-            type="text" 
-            className="expert-clean-input border" 
-            value={courseName} 
-            onChange={e => setCourseName(e.target.value)} 
-            placeholder="e.g. Web Development 101" 
-            disabled={processing}
-            autoFocus
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
-          />
-        </div>
-      </FormalModal>
+      {/* ADD/EDIT COURSE MODAL */}
+      {showModal && (
+        <div className="cm-custom-modal-backdrop" onClick={() => { setShowModal(false); resetForm(); }}>
+          <div className="cm-custom-modal small" onClick={e => e.stopPropagation()}>
+            <div className="cm-custom-modal-header">
+              <h3>{editingCourse ? 'Edit Course' : 'Add New Course'}</h3>
+              <button className="cm-custom-close-btn" onClick={() => { setShowModal(false); resetForm(); }}>
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="cm-custom-modal-body">
+              <div className="cm-form-group">
+                <label>Course Name <span className="text-danger">*</span></label>
+                <input 
+                  type="text" 
+                  className="cm-clean-input border" 
+                  value={courseName} 
+                  onChange={e => setCourseName(e.target.value)} 
+                  placeholder="e.g. Web Development 101" 
+                  disabled={processing}
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
+                />
+              </div>
+            </div>
 
-      {/* Delete Confirmation Modal */}
-      <FormalModal
-        show={showConfirm}
-        onClose={() => setShowConfirm(false)}
-        title="Delete Course"
-        footer={
-          <>
-            <button className="expert-btn-secondary" onClick={() => setShowConfirm(false)} disabled={processing}>Cancel</button>
-            <button className="expert-btn-primary bg-red" onClick={confirmDelete} disabled={processing}>
-              {processing ? 'Processing...' : 'Yes, Delete Course'}
-            </button>
-          </>
-        }
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <p style={{ fontSize: '0.95rem', color: '#334155', margin: 0 }}>
-            Are you sure you want to permanently delete <strong>"{deleteTargetName}"</strong>?
-          </p>
-          <div style={{ background: '#FEF2F2', padding: '12px', borderRadius: '8px', border: '1px solid #FECACA', marginTop: '8px' }}>
-            <p style={{ fontSize: '0.85rem', color: '#DC2626', margin: 0, fontWeight: '500' }}>
-              Warning: This action cannot be undone and may affect instructors currently assigned to this course.
-            </p>
+            <div className="cm-custom-modal-footer">
+              <button className="cm-btn-outline" onClick={() => { setShowModal(false); resetForm(); }} disabled={processing}>Cancel</button>
+              <button className="cm-btn-primary" onClick={handleSave} disabled={processing}>
+                {processing ? 'Saving...' : (editingCourse ? 'Update Course' : 'Save Course')}
+              </button>
+            </div>
           </div>
         </div>
-      </FormalModal>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {showConfirm && (
+        <div className="cm-custom-modal-backdrop" onClick={() => setShowConfirm(false)}>
+          <div className="cm-custom-modal small" onClick={e => e.stopPropagation()}>
+            <div className="cm-custom-modal-header">
+              <h3>Delete Course</h3>
+              <button className="cm-custom-close-btn" onClick={() => setShowConfirm(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="cm-custom-modal-body">
+              <p style={{ fontSize: '0.95rem', color: '#334155', margin: '0 0 1rem 0' }}>
+                Are you sure you want to permanently delete <strong>"{deleteTargetName}"</strong>?
+              </p>
+              <div className="cm-alert-box danger">
+                <AlertCircle size={16} /> 
+                <span>Warning: This action cannot be undone and may affect instructors currently assigned to this course.</span>
+              </div>
+            </div>
+
+            <div className="cm-custom-modal-footer">
+              <button className="cm-btn-outline" onClick={() => setShowConfirm(false)} disabled={processing}>Cancel</button>
+              <button className="cm-btn-primary bg-red" onClick={confirmDelete} disabled={processing}>
+                {processing ? 'Processing...' : 'Delete Course'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -198,7 +198,7 @@ const LocationsManagement = () => {
           </div>
         </div>
         <button className="expert-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-          <Plus size={16} /> Register New Campus
+          <Plus size={16} /> Register New Location
         </button>
       </div>
 
@@ -230,7 +230,7 @@ const LocationsManagement = () => {
           <div className="expert-empty">
             <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
             <p>No locations found.</p>
-            {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Register New Campus" to configure options.</span>}
+            {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Register New Location" to configure options.</span>}
           </div>
         ) : (
           <>
@@ -238,7 +238,7 @@ const LocationsManagement = () => {
               <table className="expert-table">
                 <thead>
                   <tr>
-                    <th>Campus / Location Name</th>
+                    <th>Location Name</th>
                     <th className="text-center">Latitude</th>
                     <th className="text-center">Longitude</th>
                     <th className="text-center">Radius (m)</th>
@@ -291,7 +291,7 @@ const LocationsManagement = () => {
       <FormalModal
         show={showModal}
         onClose={() => { setShowModal(false); resetForm(); }}
-        title={editingLocation ? 'Edit Campus Location' : 'Register New Campus'}
+        title={editingLocation ? 'Edit Campus Location' : 'Register New Location'}
         wide
         footer={
           <>

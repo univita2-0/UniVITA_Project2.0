@@ -234,7 +234,7 @@ const HRDashboard = ({ setView }) => {
                   <div className="expert-task-info">
                     <AlertCircle size={18} className="text-muted" />
                     <div>
-                      <p className="expert-task-text"><strong>{task.type}</strong> – {task.title}</p>
+                      <p className="expert-task-text"><strong>{task.type}</strong> </p>
                       <p className="expert-task-subtext">{task.date?.split('T')[0] || 'Pending'}</p>
                     </div>
                   </div>

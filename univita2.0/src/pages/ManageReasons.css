@@ -10,7 +10,7 @@
 
 /* Buttons */
 .expert-btn-primary, .expert-btn-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.65rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease; border: none; }
-.expert-btn-primary { background: #0F172A; color: #FFFFFF; }
+.expert-btn-primary { background: #0B1F33; color: #FFFFFF; }
 .expert-btn-primary:hover:not(:disabled) { background: #334155; }
 .expert-btn-primary.bg-red { background: #EF4444; }
 .expert-btn-primary.bg-red:hover:not(:disabled) { background: #DC2626; }

@@ -1,8 +1,8 @@
+// src/pages/LeaveBalancesManagement.jsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { RefreshCw, Edit3, Save, X, AlertCircle, Search, ChevronLeft, ChevronRight, Plus, Settings } from 'lucide-react';
-import FormalModal from '../components/FormalModal';
+import { RefreshCw, Edit3, Save, X, AlertCircle, Search, ChevronLeft, ChevronRight, Plus, Calendar } from 'lucide-react';
 import { API_BASE } from '../api';
 import './LeaveBalancesManagement.css';
 
@@ -192,154 +192,153 @@ const LeaveBalancesManagement = () => {
   const currentEmployees = filteredEmployees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
-    <div className="expert-container">
-      <div className="expert-header">
-        <div className="expert-title-group">
+    <div className="lbm-container">
+      <div className="lbm-header">
+        <div className="lbm-title-group">
           <div>
-            <p className="expert-subtitle">Monitor quotas, manage CTO leave conversions, and configure active leave types.</p>
+            <p className="lbm-subtitle">Monitor quotas, manage CTO leave conversions, and configure active leave types.</p>
           </div>
         </div>
-        <div className="lbm-controls">
+      </div>
+
+      <div className="lbm-toolbar">
+        <div className="lbm-tabs">
           <button 
-            className={`expert-btn-secondary ${activeSubTab === 'balances' ? 'active-tab' : ''}`} 
+            className={`lbm-tab ${activeSubTab === 'balances' ? 'active' : ''}`} 
             onClick={() => setActiveSubTab('balances')}
           >
             Employee Quotas
           </button>
           <button 
-            className={`expert-btn-secondary ${activeSubTab === 'types' ? 'active-tab' : ''}`} 
+            className={`lbm-tab ${activeSubTab === 'types' ? 'active' : ''}`} 
             onClick={() => setActiveSubTab('types')}
           >
-             Leave Types Config
+            Leave Types Config
           </button>
+        </div>
+
+        <div className="lbm-actions-group">
           {activeSubTab === 'balances' && (
             <div className="lbm-year-selector">
-              <label>Fiscal Year</label>
+              <Calendar size={14} className="text-muted" />
               <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))}>
                 {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => (
-                  <option key={y} value={y}>{y}</option>
+                  <option key={y} value={y}>{y} Year</option>
                 ))}
               </select>
             </div>
           )}
-          <button className="expert-btn-secondary" onClick={loadEmployees} disabled={loading}>
-            <RefreshCw size={16} className={loading ? "spin-icon" : ""} /> Refresh
+          <button className="lbm-btn-outline" onClick={loadEmployees} disabled={loading}>
+            <RefreshCw size={14} className={loading ? "spin-icon" : ""} /> Refresh
           </button>
         </div>
       </div>
 
       {activeSubTab === 'balances' ? (
-        <>
-          <div className="expert-search-card" style={{ padding: '12px 20px' }}>
-            <div className="expert-search-row">
-              <div className="expert-search-input-group" style={{ maxWidth: '500px' }}>
-                <Search size={18} className="text-muted" />
-                <input 
-                  type="text" 
-                  placeholder="Search by employee name or ID..." 
-                  value={searchQuery} 
-                  onChange={e => setSearchQuery(e.target.value)} 
-                  className="expert-clean-input" 
-                />
-                {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
-              </div>
-              <div className="expert-stats-badge">
-                Active Instructors: <strong>{employees.length}</strong>
-              </div>
+        <div className="lbm-content-card">
+          <div className="lbm-search-row border-bottom">
+            <div className="lbm-search-input-group">
+              <Search size={16} className="text-muted" />
+              <input 
+                type="text" 
+                placeholder="Search by employee name or ID..." 
+                value={searchQuery} 
+                onChange={e => setSearchQuery(e.target.value)} 
+                className="lbm-clean-input" 
+              />
+              {searchQuery && <X size={14} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+            </div>
+            <div className="lbm-stats-badge">
+              Active Instructors: <strong>{employees.length}</strong>
             </div>
           </div>
 
-          <div className="expert-card">
-            {loading ? (
-              <div className="expert-loading">Loading employees...</div>
-            ) : filteredEmployees.length === 0 ? (
-              <div className="expert-empty">
-                <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
-                <p>No active employees found.</p>
-                {searchQuery && <span>Try adjusting your search criteria.</span>}
-              </div>
-            ) : (
-              <>
-                <div className="expert-table-wrapper">
-                  <table className="expert-table">
-                    <thead>
-                      <tr>
-                        <th>Employee ID</th>
-                        <th>Full Name</th>
-                        <th>Email Address</th>
-                        <th className="text-right">Action</th>
+          {loading ? (
+            <div className="lbm-loading">Loading employees...</div>
+          ) : filteredEmployees.length === 0 ? (
+            <div className="lbm-empty">
+              <AlertCircle size={36} className="text-muted" style={{ marginBottom: '1rem' }} />
+              <p>No active employees found.</p>
+              {searchQuery && <span>Try adjusting your search criteria.</span>}
+            </div>
+          ) : (
+            <>
+              <div className="lbm-table-wrapper">
+                <table className="lbm-table">
+                  <thead>
+                    <tr>
+                      <th>Employee ID</th>
+                      <th>Full Name</th>
+                      <th>Email Address</th>
+                      <th className="text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentEmployees.map(emp => (
+                      <tr key={emp.id}>
+                        <td className="font-mono text-muted">{emp.employee_id}</td>
+                        <td className="font-medium text-dark">{emp.full_name}</td>
+                        <td className="text-muted">{emp.email}</td>
+                        <td className="text-right">
+                          <button className="lbm-btn-view" onClick={() => openBalanceModal(emp)}>
+                            View Balances & CTO
+                          </button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {currentEmployees.map(emp => (
-                        <tr key={emp.id}>
-                          <td className="font-mono text-muted">{emp.employee_id}</td>
-                          <td><span className="font-semibold text-dark">{emp.full_name}</span></td>
-                          <td className="text-muted">{emp.email}</td>
-                          <td>
-                            <div className="expert-action-group right">
-                              <button className="lbm-btn-view" onClick={() => openBalanceModal(emp)}>
-                                View Balances & CTO
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-                {totalPages > 1 && (
-                  <div className="expert-pagination">
-                    <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredEmployees.length)} of {filteredEmployees.length} entries</span>
-                    <div className="expert-page-controls">
-                      <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
-                      <span className="expert-page-current">{currentPage} / {totalPages}</span>
-                      <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
-                    </div>
+              {totalPages > 1 && (
+                <div className="lbm-pagination">
+                  <span className="lbm-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredEmployees.length)} of {filteredEmployees.length}</span>
+                  <div className="lbm-page-controls">
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="lbm-page-btn"><ChevronLeft size={16} /></button>
+                    <span className="lbm-page-current">{currentPage} / {totalPages}</span>
+                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="lbm-page-btn"><ChevronRight size={16} /></button>
                   </div>
-                )}
-              </>
-            )}
-          </div>
-        </>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       ) : (
-        <div className="expert-card">
-          <div style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #E2E8F0' }}>
+        <div className="lbm-content-card">
+          <div className="lbm-search-row border-bottom">
             <div>
-              
-              <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748B' }}>Add new types or toggle availability. Disabled types will instantly disappear from the mobile request form.</p>
+              <h4 style={{ margin: '0 0 4px 0', color: '#0F172A', fontSize: '1rem' }}>Configuration Rules</h4>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748B' }}>Disabled types will instantly disappear from the mobile request form.</p>
             </div>
-            <button className="expert-btn-primary" onClick={() => setShowAddTypeModal(true)}>
+            <button className="lbm-btn-primary" onClick={() => setShowAddTypeModal(true)}>
               <Plus size={16} /> Add Leave Type
             </button>
           </div>
 
-          <div className="expert-table-wrapper">
-            <table className="expert-table">
+          <div className="lbm-table-wrapper">
+            <table className="lbm-table">
               <thead>
                 <tr>
                   <th>Leave Type Name</th>
-                  <th className="text-center">Default Annual Quota</th>
-                  <th className="text-center">Status (Mobile Sync)</th>
+                  <th className="text-center">Default Quota</th>
+                  <th className="text-center">Mobile Sync Status</th>
                   <th className="text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {allLeaveTypes.map(lt => (
                   <tr key={lt.id}>
-                    <td className="font-semibold text-dark">{lt.name}</td>
-                    <td className="text-center">{lt.annual_quota || 15} days</td>
+                    <td className="font-medium text-dark">{lt.name}</td>
+                    <td className="text-center text-muted">{lt.annual_quota || 15} days</td>
                     <td className="text-center">
-                      <span className={`expert-chip ${lt.is_active ? 'success' : 'danger'}`}>
+                      <span className={`lbm-status-dot ${lt.is_active ? 'active' : 'disabled'}`}>
                         {lt.is_active ? 'ACTIVE & ENABLED' : 'DISABLED'}
                       </span>
                     </td>
                     <td className="text-right">
                       <button 
-                        className="expert-btn-secondary" 
+                        className={`lbm-btn-toggle ${lt.is_active ? 'disable' : 'enable'}`}
                         onClick={() => handleToggleLeaveType(lt.id)}
-                        style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}
                       >
                         {lt.is_active ? 'Disable' : 'Enable'}
                       </button>
@@ -353,136 +352,147 @@ const LeaveBalancesManagement = () => {
       )}
 
       {/* EMPLOYEE BALANCES MODAL */}
-      <FormalModal
-        show={showBalanceModal}
-        onClose={() => {
-          setShowBalanceModal(false);
-          setSelectedEmployee(null);
-          setEditingBalance(null);
-        }}
-        title={`Leave Balances & CTO Credits: ${selectedEmployee?.full_name}`}
-        wide
-        footer={
-          <button className="expert-btn-secondary" onClick={() => setShowBalanceModal(false)}>
-            Close Window
-          </button>
-        }
-      >
-        {modalLoading ? (
-          <div className="expert-loading">Loading balances...</div>
-        ) : (
-          <>
-            <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '8px', border: '1px solid #E2E8F0', marginBottom: '16px' }}>
-              <p style={{ fontSize: '0.9rem', color: '#334155', margin: 0 }}>
-                Displaying balances for fiscal year <strong>{selectedYear}</strong>. Compensatory Time Off (CTO) credits automatically accrue when approved overtime hours are converted.
-              </p>
+      {showBalanceModal && (
+        <div className="lbm-custom-modal-backdrop" onClick={() => { setShowBalanceModal(false); setSelectedEmployee(null); setEditingBalance(null); }}>
+          <div className="lbm-custom-modal" onClick={e => e.stopPropagation()}>
+            <div className="lbm-custom-modal-header">
+              <div>
+                <h3>Leave Balances & CTO Credits</h3>
+                <p className="lbm-custom-modal-subtitle">Managing quota for {selectedEmployee?.full_name}</p>
+              </div>
+              <button className="lbm-custom-close-btn" onClick={() => { setShowBalanceModal(false); setSelectedEmployee(null); setEditingBalance(null); }}>
+                <X size={18} />
+              </button>
             </div>
             
-            <div className="expert-table-wrapper" style={{ marginBottom: '16px', border: '1px solid #E2E8F0' }}>
-              <table className="expert-table">
-                <thead>
-                  <tr>
-                    <th>Leave Type</th>
-                    <th className="text-center">Annual Quota</th>
-                    <th className="text-center">Remaining Days</th>
-                    <th className="text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {balances.length === 0 ? (
-                    <tr>
-                      <td colSpan="4" className="expert-empty" style={{ padding: '2rem' }}>No leave types configured in the system.</td>
-                    </tr>
-                  ) : (
-                    balances.map(balance => (
-                      <tr key={balance.leave_type_id}>
-                        <td className="font-medium text-dark">{balance.leave_type}</td>
-                        <td className="text-center text-muted">{balance.annual_quota} days</td>
-                        <td className="text-center">
-                          {editingBalance === balance.leave_type_id ? (
-                            <input
-                              type="number"
-                              step="0.5"
-                              value={tempValue}
-                              onChange={(e) => setTempValue(e.target.value)}
-                              className="expert-clean-input border text-center"
-                              style={{ width: '80px', padding: '0.4rem', height: '32px' }}
-                              autoFocus
-                            />
-                          ) : (
-                            <span className="expert-chip success">{balance.remaining_days} days</span>
-                          )}
-                        </td>
-                        <td>
-                          {editingBalance === balance.leave_type_id ? (
-                            <div className="expert-action-group right">
-                              <button onClick={cancelEdit} className="expert-btn-icon" title="Cancel">
-                                <X size={16} />
-                              </button>
-                              <button onClick={() => handleSaveBalance(balance)} disabled={saving} className="expert-btn-icon success" title="Save">
-                                <Save size={16} />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="expert-action-group right">
-                              <button onClick={() => handleEditBalance(balance)} className="expert-btn-icon" title="Edit">
-                                <Edit3 size={16} color="#0D9488" />
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div className="lbm-custom-modal-body">
+              {modalLoading ? (
+                <div className="lbm-loading">Loading balances...</div>
+              ) : (
+                <>
+                  <div className="lbm-info-box">
+                    <p>Displaying balances for fiscal year <strong>{selectedYear}</strong>. Compensatory Time Off (CTO) credits automatically accrue when approved overtime hours are converted.</p>
+                  </div>
+                  
+                  <div className="lbm-minimal-card" style={{ border: '1px solid #E2E8F0', borderRadius: '8px' }}>
+                    <table className="lbm-table">
+                      <thead>
+                        <tr>
+                          <th>Leave Type</th>
+                          <th className="text-center">Annual Quota</th>
+                          <th className="text-center">Remaining Days</th>
+                          <th className="text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {balances.length === 0 ? (
+                          <tr>
+                            <td colSpan="4" className="lbm-empty" style={{ padding: '2rem' }}>No leave types configured in the system.</td>
+                          </tr>
+                        ) : (
+                          balances.map(balance => (
+                            <tr key={balance.leave_type_id}>
+                              <td className="font-medium text-dark">{balance.leave_type}</td>
+                              <td className="text-center text-muted">{balance.annual_quota} days</td>
+                              <td className="text-center">
+                                {editingBalance === balance.leave_type_id ? (
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    value={tempValue}
+                                    onChange={(e) => setTempValue(e.target.value)}
+                                    className="lbm-inline-input"
+                                    autoFocus
+                                  />
+                                ) : (
+                                  <span className="lbm-balance-badge">{balance.remaining_days} days</span>
+                                )}
+                              </td>
+                              <td className="text-right">
+                                {editingBalance === balance.leave_type_id ? (
+                                  <div className="lbm-action-group right">
+                                    <button onClick={cancelEdit} className="lbm-icon-btn cancel" title="Cancel">
+                                      <X size={14} />
+                                    </button>
+                                    <button onClick={() => handleSaveBalance(balance)} disabled={saving} className="lbm-icon-btn save" title="Save">
+                                      <Save size={14} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="lbm-action-group right">
+                                    <button onClick={() => handleEditBalance(balance)} className="lbm-icon-btn edit" title="Edit">
+                                      <Edit3 size={14} />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="lbm-alert-box">
+                    <AlertCircle size={14} /> 
+                    <span>Approved leave requests automatically deduct 1 day from the respective remaining balance.</span>
+                  </div>
+                </>
+              )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#FEF2F2', padding: '12px 16px', borderRadius: '8px', border: '1px solid #FECACA', color: '#DC2626' }}>
-              <AlertCircle size={16} /> 
-              <span style={{ fontSize: '0.85rem', fontWeight: '500' }}>Approved leave requests automatically deduct 1 day from the respective remaining balance.</span>
+            <div className="lbm-custom-modal-footer">
+              <button className="lbm-btn-outline" onClick={() => { setShowBalanceModal(false); setSelectedEmployee(null); setEditingBalance(null); }}>Close Window</button>
             </div>
-          </>
-        )}
-      </FormalModal>
+          </div>
+        </div>
+      )}
 
       {/* ADD LEAVE TYPE MODAL */}
-      <FormalModal
-        show={showAddTypeModal}
-        onClose={() => setShowAddTypeModal(false)}
-        title="Add New Leave Type"
-        footer={
-          <>
-            <button className="expert-btn-secondary" onClick={() => setShowAddTypeModal(false)}>Cancel</button>
-            <button className="expert-btn-primary" onClick={handleCreateLeaveType} disabled={saving}>Save Leave Type</button>
-          </>
-        }
-      >
-        <form onSubmit={handleCreateLeaveType} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div>
-            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Leave Type Name</label>
-            <input 
-              type="text" 
-              placeholder="e.g. Bereavement Leave, Maternity Leave" 
-              value={newTypeName} 
-              onChange={e => setNewTypeName(e.target.value)}
-              className="expert-clean-input border"
-              required
-            />
+      {showAddTypeModal && (
+        <div className="lbm-custom-modal-backdrop" onClick={() => setShowAddTypeModal(false)}>
+          <div className="lbm-custom-modal small" onClick={e => e.stopPropagation()}>
+            <div className="lbm-custom-modal-header">
+              <h3>Add New Leave Type</h3>
+              <button className="lbm-custom-close-btn" onClick={() => setShowAddTypeModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="lbm-custom-modal-body">
+              <form id="addLeaveForm" onSubmit={handleCreateLeaveType} className="lbm-form-grid">
+                <div className="lbm-form-group">
+                  <label>Leave Type Name</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Bereavement Leave, Maternity Leave" 
+                    value={newTypeName} 
+                    onChange={e => setNewTypeName(e.target.value)}
+                    className="lbm-clean-input border"
+                    required
+                  />
+                </div>
+                <div className="lbm-form-group">
+                  <label>Default Annual Quota (Days)</label>
+                  <input 
+                    type="number" 
+                    step="0.5" 
+                    value={newTypeQuota} 
+                    onChange={e => setNewTypeQuota(e.target.value)}
+                    className="lbm-clean-input border"
+                    required
+                  />
+                </div>
+              </form>
+            </div>
+
+            <div className="lbm-custom-modal-footer">
+              <button className="lbm-btn-outline" onClick={() => setShowAddTypeModal(false)}>Cancel</button>
+              <button type="submit" form="addLeaveForm" className="lbm-btn-primary" disabled={saving}>Save</button>
+            </div>
           </div>
-          <div>
-            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Default Annual Quota (Days)</label>
-            <input 
-              type="number" 
-              step="0.5" 
-              value={newTypeQuota} 
-              onChange={e => setNewTypeQuota(e.target.value)}
-              className="expert-clean-input border"
-              required
-            />
-          </div>
-        </form>
-      </FormalModal>
+        </div>
+      )}
     </div>
   );
 };

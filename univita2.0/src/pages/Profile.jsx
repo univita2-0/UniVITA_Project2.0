@@ -60,101 +60,98 @@ const Profile = () => {
   };
 
   return (
-    <div className="modern-pro-container">
-      {/* Hero Banner Header */}
-      <div className="modern-pro-hero">
-        <div className="modern-pro-hero-left">
-          <div className="modern-pro-avatar">
-            <span>{user.name ? user.name.charAt(0).toUpperCase() : '?'}</span>
-          </div>
-          <div className="modern-pro-hero-meta">
-            <h2>{user.name}</h2>
-            <div className="modern-pro-badges">
-              <span className="modern-pro-pill role">
-                <Shield size={13} /> {getRoleLabel(user.role)}
-              </span>
-              <span className="modern-pro-pill id">
-                ID: {user.employeeId || 'N/A'}
-              </span>
+    <div className="up-container">
+      <div className="up-wrapper">
+        
+        {/* Unified Profile Card */}
+        <div className="up-card">
+          
+          {/* Left Sidebar: Identity Anchor */}
+          <div className="up-sidebar">
+            <div className="up-avatar">
+              {user.name ? user.name.charAt(0).toUpperCase() : '?'}
             </div>
+            <h2 className="up-name">{user.name}</h2>
+            <p className="up-role-text"></p>
+            
+           
+
+            <div className="up-status-indicator">
+              <CheckCircle size={16} className="up-success-icon" />
+              <span>Account is active & secured</span>
+            </div>
+          </div>
+
+          {/* Right Main: Details List */}
+          <div className="up-main-content">
+            
+            <div className="up-section">
+              <h3 className="up-section-title">Personal Information</h3>
+              <div className="up-list">
+                
+                <div className="up-list-item">
+                  <div className="up-item-label">
+                    <Mail size={16} />
+                    <span>Email Address</span>
+                  </div>
+                  <div className="up-item-value">{user.email}</div>
+                </div>
+
+                <div className="up-list-item">
+                  <div className="up-item-label">
+                    <Phone size={16} />
+                    <span>Contact Number</span>
+                  </div>
+                  <div className="up-item-value">{user.phone || 'Not provided'}</div>
+                </div>
+
+                <div className="up-list-item">
+                  <div className="up-item-label">
+                    <Briefcase size={16} />
+                    <span>Official Position</span>
+                  </div>
+                  <div className="up-item-value uppercase">{getDisplayPosition()}</div>
+                </div>
+
+                <div className="up-list-item">
+                  <div className="up-item-label">
+                    <UserCircle size={16} />
+                    <span>Personnel Identifier</span>
+                  </div>
+                  <div className="up-item-value">{user.employeeId || 'N/A'}</div>
+                </div>
+
+              </div>
+            </div>
+
+            <div className="up-divider"></div>
+
+            <div className="up-section">
+              <h3 className="up-section-title">System Access</h3>
+              <div className="up-list">
+                
+                <div className="up-list-item">
+                  <div className="up-item-label">
+                    <Clock size={16} />
+                    <span>Last Authentication</span>
+                  </div>
+                  <div className="up-item-value">{user.lastLogin}</div>
+                </div>
+
+                <div className="up-list-item">
+                  <div className="up-item-label">
+                    <Shield size={16} />
+                    <span>Security Clearance</span>
+                  </div>
+                  <div className="up-item-value uppercase">{user.role} tier</div>
+                </div>
+
+              </div>
+            </div>
+
           </div>
         </div>
-      </div>
-
-      {/* Resizable Fluid Grid Layout */}
-      <div className="modern-pro-grid">
-        {/* Primary Details Card */}
-        <div className="modern-pro-card">
-          <div className="modern-pro-card-header">
-            <h3>Account & Personal Information</h3>
-          </div>
-          <div className="modern-pro-card-body">
-            <div className="modern-pro-field-grid">
-              <div className="modern-pro-field">
-                <div className="field-icon"><Mail size={18} /></div>
-                <div className="field-content">
-                  <label>Email Address</label>
-                  <span className="field-value">{user.email}</span>
-                </div>
-              </div>
-
-              <div className="modern-pro-field">
-                <div className="field-icon"><Phone size={18} /></div>
-                <div className="field-content">
-                  <label>Contact Number</label>
-                  <span className="field-value">{user.phone || 'Not provided'}</span>
-                </div>
-              </div>
-
-              <div className="modern-pro-field">
-                <div className="field-icon"><Briefcase size={18} /></div>
-                <div className="field-content">
-                  <label>Official Position / Authorization</label>
-                  <span className="field-value uppercase">{getDisplayPosition()}</span>
-                </div>
-              </div>
-
-              <div className="modern-pro-field">
-                <div className="field-icon"><UserCircle size={18} /></div>
-                <div className="field-content">
-                  <label>Personnel Identifier</label>
-                  <span className="field-value">{user.employeeId || 'N/A'}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* System Access & Status Card */}
-        <div className="modern-pro-card">
-          <div className="modern-pro-card-header">
-            <h3>System Access & Status</h3>
-          </div>
-          <div className="modern-pro-card-body">
-            <div className="modern-pro-field-grid">
-              <div className="modern-pro-field">
-                <div className="field-icon"><Clock size={18} /></div>
-                <div className="field-content">
-                  <label>Last Authentication</label>
-                  <span className="field-value">{user.lastLogin}</span>
-                </div>
-              </div>
-
-              <div className="modern-pro-field">
-                <div className="field-icon"><Shield size={18} /></div>
-                <div className="field-content">
-                  <label>Security Clearance</label>
-                  <span className="field-value uppercase">{user.role} tier</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="modern-pro-notice-box">
-              <CheckCircle size={16} />
-              <span>Your account is active, verified, and secured under enterprise encryption standards.</span>
-            </div>
-          </div>
-        </div>
+        
       </div>
     </div>
   );

@@ -5523,44 +5523,101 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
   }
 
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
   const monthYear = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
 
   try {
-    const [employees] = await db.promise().query(
-      "SELECT id, employee_id, full_name, monthly_salary, work_days_per_month FROM users WHERE LOWER(role) = 'instructor' AND status = 'active'"
-    );
+    // 1. Gather all logged hours, late minutes, leaves, and overtime
+    const [attSummary] = await db.promise().query(`
+      SELECT 
+        u.id,
+        u.employee_id, 
+        u.full_name,
+        u.monthly_salary,
+        u.work_days_per_month,
+        COALESCE(SUM(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60), 0) AS regular_hours,
+        (SELECT COALESCE(SUM(TIMESTAMPDIFF(MINUTE, start_time, end_time)/60), 0) FROM overtime_requests WHERE user_id = u.id AND date BETWEEN ? AND ? AND status = 'approved') AS overtime_hours,
+        COALESCE(SUM(CASE WHEN a.status = 'on leave' THEN 1 ELSE 0 END), 0) AS leave_days,
+        COALESCE(SUM(
+          CASE 
+            WHEN a.time_in IS NOT NULL 
+                 AND s.start_time IS NOT NULL 
+                 AND TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) > 900
+            THEN TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) / 60
+            ELSE 0
+          END
+        ), 0) AS late_minutes
+      FROM users u
+      LEFT JOIN attendance a ON u.employee_id = a.user_id 
+        AND a.date BETWEEN ? AND ? 
+        AND a.status NOT IN ('on leave', 'absent')
+      LEFT JOIN schedules s ON a.schedule_id = s.id
+      WHERE u.role = 'instructor' AND u.status = 'active'
+      GROUP BY u.id
+    `, [startDate, endDate, startDate, endDate]);
 
-    if (employees.length === 0) {
+    if (attSummary.length === 0) {
       return res.status(400).json({ success: false, message: 'No active instructors found to process.' });
     }
 
     const processed = [];
     const skipped = [];
+    
+    // Philippine TRAIN Law Tax Brackets
+    const taxTable = [
+      { min: 0, max: 20833, rate: 0, base: 0 },
+      { min: 20833, max: 33332, rate: 0.15, base: 0 },
+      { min: 33332, max: 66666, rate: 0.20, base: 1875 }, 
+      { min: 66666, max: 166666, rate: 0.25, base: 8541.67 }, 
+      { min: 166666, max: 666666, rate: 0.30, base: 33541.67 },
+      { min: 666666, max: Infinity, rate: 0.35, base: 183541.67 }, 
+    ];
 
-    for (const emp of employees) {
+    for (const emp of attSummary) {
       const [existing] = await db.promise().query("SELECT id FROM payroll WHERE user_id = ? AND month_year = ?", [emp.id, monthYear]);
       if (existing.length > 0) {
         skipped.push({ employee: emp.full_name, reason: 'Already finalized' });
         continue;
       }
 
-      const [attendance] = await db.promise().query(
-        `SELECT COALESCE(SUM(TIMESTAMPDIFF(MINUTE, time_in, time_out) / 60), 0) as total_hours 
-         FROM attendance 
-         WHERE user_id = ? AND date BETWEEN ? AND ? AND status IN ('present', 'late')`,
-        [emp.employee_id, startDate, endDate]
-      );
+      let monthlySalary = Number(emp.monthly_salary) || 0;
+      let workDays = Number(emp.work_days_per_month) || 22;
+      const hourlyRate = workDays > 0 ? (monthlySalary / workDays / 8) : 0;
       
-      const totalHours = parseFloat(attendance[0]?.total_hours || 0);
+      const regularHours = Number(emp.regular_hours);
+      const leaveDays = Number(emp.leave_days);
+      const paidLeaveHours = leaveDays * 8; // Convert approved leaves to paid hours
+      const baseEarnings = (regularHours + paidLeaveHours) * hourlyRate;
 
-      const monthlySalary = parseFloat(emp.monthly_salary) || 0;
-      const workDays = parseFloat(emp.work_days_per_month) || 22;
-      const hourlyRate = (monthlySalary > 0 && workDays > 0) ? (monthlySalary / workDays) / 8 : 0;
+      const overtimeHours = Number(emp.overtime_hours);
+      const overtimePay = overtimeHours * hourlyRate * 1.25;
+
+      let lateMinutes = Number(emp.late_minutes);
+      const lateDeduction = (lateMinutes / 60) * hourlyRate;
+
+      const grossPay = baseEarnings + overtimePay;
       
-      const grossPay = totalHours * hourlyRate;
-      const tax = grossPay * 0.10;
-      const netPay = grossPay - tax;
+      // Deduct lates BEFORE statutory deductions
+      const netBaseForStatutory = Math.max(0, (monthlySalary > 0 ? monthlySalary : baseEarnings) - lateDeduction);
+
+      const sssCredit = Math.min(netBaseForStatutory, 35000); 
+      let sss = (sssCredit * 0.05); 
+      let philHealth = (netBaseForStatutory * 0.025); 
+      let pagIbig = (netBaseForStatutory * 0.02); 
+
+      // Tax computation based on taxable income
+      const taxableIncome = Math.max(0, (baseEarnings + overtimePay - lateDeduction) - sss - philHealth - pagIbig);
+      
+      let tax = 0;
+      for (let bracket of taxTable) {
+        if (taxableIncome > bracket.min && taxableIncome <= bracket.max) {
+          tax = bracket.base + (taxableIncome - bracket.min) * bracket.rate;
+          break;
+        }
+      }
+
+      const netPay = Math.max(0, grossPay - lateDeduction - sss - philHealth - pagIbig - tax);
 
       await db.promise().query(
         `INSERT INTO payroll 
@@ -5568,12 +5625,17 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
            transport_allowance, meal_allowance, housing_allowance, sss_deduction, philhealth_deduction,
            pagibig_deduction, loan_deduction, other_deduction, gross_pay, tax_deduction, net_pay,
            status, total_earnings)
-         VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?, ?, 'paid', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, 0, 0, ?, ?, ?, 'paid', ?)`,
         [
           emp.id, 
           monthYear, 
           hourlyRate.toFixed(2), 
-          totalHours.toFixed(2), 
+          (regularHours + paidLeaveHours).toFixed(2), 
+          overtimeHours.toFixed(2),
+          overtimePay.toFixed(2),
+          sss.toFixed(2),
+          philHealth.toFixed(2),
+          pagIbig.toFixed(2),
           grossPay.toFixed(2), 
           tax.toFixed(2), 
           netPay.toFixed(2), 
@@ -5581,7 +5643,7 @@ app.post('/api/payroll/run-monthly', authenticateToken, async (req, res) => {
         ]
       );
 
-      processed.push({ employee: emp.full_name, totalHours, netPay: netPay.toFixed(2) });
+      processed.push({ employee: emp.full_name, totalHours: regularHours, netPay: netPay.toFixed(2) });
     }
 
     logAction(req.user.id, 'RUN_MONTHLY_PAYROLL', 'payroll', null, req);

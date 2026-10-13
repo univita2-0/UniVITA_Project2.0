@@ -1,3 +1,4 @@
+// src/pages/Settings.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -13,6 +14,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
 
 const Settings = () => {
+  // activeTab now supports 'profile', 'password', and 'pin'
   const [activeTab, setActiveTab] = useState('profile');
   const [user, setUser] = useState(null);
   
@@ -199,239 +201,276 @@ const Settings = () => {
     }
   };
 
-  if (!user) return <div className="expert-loading">Loading settings...</div>;
+  if (!user) return <div className="stx-loading">Loading settings...</div>;
 
   return (
-    <div className="expert-container">
-      <div className="expert-header">
-        <div className="expert-title-group">
-          <div>
-            <p className="expert-subtitle">Manage your profile and security credentials.</p>
-          </div>
-        </div>
+    <div className="stx-container">
+      
+      <div className="stx-header">
+        
+        <p>Manage your preferences, profile details, and security configurations.</p>
       </div>
 
-      <div className="set-tabs">
-        <button className={`set-tab ${activeTab === 'profile' ? 'active' : ''}`} onClick={() => setActiveTab('profile')}>
-          <User size={16} /> <span>Profile Information</span>
-        </button>
-        <button className={`set-tab ${activeTab === 'security' ? 'active' : ''}`} onClick={() => setActiveTab('security')}>
-          <Lock size={16} /> <span>Security & Access</span>
-        </button>
-      </div>
+      <div className="stx-layout">
+        
+        {/* Left Sidebar Navigation */}
+        <aside className="stx-sidebar">
+          <nav className="stx-nav">
+            <button 
+              className={`stx-nav-item ${activeTab === 'profile' ? 'active' : ''}`} 
+              onClick={() => setActiveTab('profile')}
+            >
+              <User size={18} /> Profile Information
+            </button>
+            <button 
+              className={`stx-nav-item ${activeTab === 'password' ? 'active' : ''}`} 
+              onClick={() => setActiveTab('password')}
+            >
+              <Lock size={18} /> Account Password
+            </button>
+            {canChangePin && (
+              <button 
+                className={`stx-nav-item ${activeTab === 'pin' ? 'active' : ''}`} 
+                onClick={() => setActiveTab('pin')}
+              >
+                <ShieldCheck size={18} /> Payroll Security PIN
+              </button>
+            )}
+          </nav>
+        </aside>
 
-      <div className="set-content">
-        {activeTab === 'profile' && (
-          <div className="expert-card" style={{ padding: '2rem' }}>
-            <div className="set-card-header">
-              <h3>Personal Information</h3>
-            </div>
-            <form onSubmit={handleProfileUpdate} className="set-form">
-              <div className="set-form-group">
-                <label>Full Name <span className="set-required">*</span></label>
-                <input
-                  type="text"
-                  className="expert-clean-input border"
-                  value={profileData.full_name}
-                  onChange={(e) => setProfileData({ ...profileData, full_name: e.target.value })}
-                  placeholder="Enter your full name"
-                  required
-                />
+        {/* Right Main Content Area */}
+        <main className="stx-main">
+          
+          {/* PROFILE TAB */}
+          {activeTab === 'profile' && (
+            <section className="stx-section">
+              <div className="stx-section-header">
+                
+                <p>Update your basic profile details and contact information.</p>
               </div>
-              <div className="set-form-group">
-                <label>Email Address <span className="set-required">*</span></label>
-                <input
-                  type="email"
-                  className="expert-clean-input border"
-                  value={profileData.email}
-                  onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                  placeholder="Enter your email"
-                  required
-                />
-              </div>
-              <div className="set-form-group">
-                <label>Phone Number</label>
-                <input
-                  type="tel"
-                  className="expert-clean-input border"
-                  value={profileData.phone}
-                  onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
-                  placeholder="e.g. +63 912 345 6789"
-                />
-              </div>
-              <div className="set-form-actions">
-                <button type="submit" className="expert-btn-primary" disabled={loadingProfile}>
-                  <Save size={16} />
-                  {loadingProfile ? 'Saving Changes...' : 'Save Changes'}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
 
-        {activeTab === 'security' && (
-          <div className="set-security-layout">
-            <div className="expert-card" style={{ padding: '2rem' }}>
-              <div className="set-card-header">
-                <ShieldCheck size={20} className="set-icon-accent" />
-                <h3>Change Account Password</h3>
+              <form onSubmit={handleProfileUpdate} className="stx-form">
+                <div className="stx-form-group">
+                  <label>Full Name <span className="stx-required">*</span></label>
+                  <input
+                    type="text"
+                    className="stx-input"
+                    value={profileData.full_name}
+                    onChange={(e) => setProfileData({ ...profileData, full_name: e.target.value })}
+                    placeholder="Enter your full name"
+                    required
+                  />
+                </div>
+                
+                <div className="stx-form-row">
+                  <div className="stx-form-group">
+                    <label>Email Address <span className="stx-required">*</span></label>
+                    <input
+                      type="email"
+                      className="stx-input"
+                      value={profileData.email}
+                      onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                      placeholder="Enter your email"
+                      required
+                    />
+                  </div>
+                  <div className="stx-form-group">
+                    <label>Phone Number</label>
+                    <input
+                      type="tel"
+                      className="stx-input"
+                      value={profileData.phone}
+                      onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                      placeholder="e.g. +63 912 345 6789"
+                    />
+                  </div>
+                </div>
+
+                <div className="stx-actions">
+                  <button type="submit" className="stx-btn-primary" disabled={loadingProfile}>
+                    {loadingProfile ? 'Saving...' : 'Save Profile Changes'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {/* PASSWORD TAB */}
+          {activeTab === 'password' && (
+            <section className="stx-section">
+              <div className="stx-section-header">
+                
+                <p>Ensure your account is using a long, random password to stay secure.</p>
               </div>
-              <form onSubmit={handlePasswordChange} className="set-form">
-                <div className="set-form-group">
-                  <label>Current Password <span className="set-required">*</span></label>
-                  <div className="set-input-icon-wrapper">
+
+              <form onSubmit={handlePasswordChange} className="stx-form">
+                <div className="stx-form-group">
+                  <label>Current Password <span className="stx-required">*</span></label>
+                  <div className="stx-input-wrapper">
                     <input
                       type={showCurrent ? 'text' : 'password'}
-                      className="expert-clean-input border"
+                      className="stx-input"
                       value={passwordData.currentPassword}
                       onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
                       required
                     />
-                    <button type="button" className="set-eye-btn" onClick={() => setShowCurrent(!showCurrent)} tabIndex="-1">
+                    <button type="button" className="stx-eye-btn" onClick={() => setShowCurrent(!showCurrent)} tabIndex="-1">
                       {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
 
-                <div className="set-form-group">
-                  <label>New Password <span className="set-required">*</span></label>
-                  <div className="set-input-icon-wrapper">
-                    <input
-                      type={showNew ? 'text' : 'password'}
-                      className="expert-clean-input border"
-                      value={passwordData.newPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                      required
-                    />
-                    <button type="button" className="set-eye-btn" onClick={() => setShowNew(!showNew)} tabIndex="-1">
-                      {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
+                <div className="stx-divider"></div>
+
+                <div className="stx-form-row align-start">
+                  <div className="stx-form-group">
+                    <label>New Password <span className="stx-required">*</span></label>
+                    <div className="stx-input-wrapper">
+                      <input
+                        type={showNew ? 'text' : 'password'}
+                        className="stx-input"
+                        value={passwordData.newPassword}
+                        onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                        required
+                      />
+                      <button type="button" className="stx-eye-btn" onClick={() => setShowNew(!showNew)} tabIndex="-1">
+                        {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+
+                    {/* Password Checklist inline */}
+                    <div className="stx-checklist">
+                      <div className={`stx-check-item ${hasLength ? 'pass' : ''}`}>
+                        {hasLength ? <Check size={14} /> : <span className="dot" />} At least 8 characters
+                      </div>
+                      <div className={`stx-check-item ${hasUppercase ? 'pass' : ''}`}>
+                        {hasUppercase ? <Check size={14} /> : <span className="dot" />} At least 1 uppercase letter
+                      </div>
+                      <div className={`stx-check-item ${hasSpecial ? 'pass' : ''}`}>
+                        {hasSpecial ? <Check size={14} /> : <span className="dot" />} At least 1 special character
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="stx-form-group">
+                    <label>Confirm New Password <span className="stx-required">*</span></label>
+                    <div className="stx-input-wrapper">
+                      <input
+                        type={showConfirm ? 'text' : 'password'}
+                        className="stx-input"
+                        value={passwordData.confirmPassword}
+                        onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                        required
+                      />
+                      <button type="button" className="stx-eye-btn" onClick={() => setShowConfirm(!showConfirm)} tabIndex="-1">
+                        {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    {passwordData.confirmPassword.length > 0 && (
+                      <span className={`stx-match-text ${passwordsMatch ? 'match' : 'error'}`}>
+                        {passwordsMatch ? 'Passwords match' : 'Passwords do not match'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* Password Complexity Checklist Card */}
-                <div className="sec-checklist-card">
-                  <div className="sec-checkRow">
-                    {hasLength ? <Check size={14} color="#059669" /> : <X size={14} color="#64748B" />}
-                    <span className={hasLength ? 'sec-checkPassed' : 'sec-checkText'}>At least 8 characters</span>
-                  </div>
-                  <div className="sec-checkRow">
-                    {hasUppercase ? <Check size={14} color="#059669" /> : <X size={14} color="#64748B" />}
-                    <span className={hasUppercase ? 'sec-checkPassed' : 'sec-checkText'}>At least 1 uppercase letter</span>
-                  </div>
-                  <div className="sec-checkRow">
-                    {hasSpecial ? <Check size={14} color="#059669" /> : <X size={14} color="#64748B" />}
-                    <span className={hasSpecial ? 'sec-checkPassed' : 'sec-checkText'}>At least 1 special character (!@#$...)</span>
-                  </div>
-                </div>
-
-                <div className="set-form-group">
-                  <label>Confirm New Password <span className="set-required">*</span></label>
-                  <div className="set-input-icon-wrapper">
-                    <input
-                      type={showConfirm ? 'text' : 'password'}
-                      className="expert-clean-input border"
-                      value={passwordData.confirmPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                      required
-                    />
-                    <button type="button" className="set-eye-btn" onClick={() => setShowConfirm(!showConfirm)} tabIndex="-1">
-                      {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                  {passwordData.confirmPassword.length > 0 && (
-                    <span style={{ fontSize: '0.8rem', marginTop: '4px', color: passwordsMatch ? '#059669' : '#DC2626', fontWeight: 600 }}>
-                      {passwordsMatch ? '✓ Passwords match' : '✕ Passwords do not match'}
-                    </span>
-                  )}
-                </div>
-
-                <div className="set-form-actions">
-                  <button type="submit" className="expert-btn-primary" disabled={loadingPassword || !hasLength || !hasUppercase || !hasSpecial || !passwordsMatch}>
-                    <Lock size={16} />
+                <div className="stx-actions">
+                  <button type="submit" className="stx-btn-primary" disabled={loadingPassword || !hasLength || !hasUppercase || !hasSpecial || !passwordsMatch}>
                     {loadingPassword ? 'Updating...' : 'Update Password'}
                   </button>
                 </div>
               </form>
-            </div>
+            </section>
+          )}
 
-            {canChangePin && (
-              <div className="expert-card" style={{ padding: '2rem' }}>
-                <div className="set-card-header">
-                  <h3>Payroll Security PIN</h3>
+          {/* SECURITY PIN TAB (Admins/HR Only) */}
+          {activeTab === 'pin' && canChangePin && (
+            <section className="stx-section">
+              <div className="stx-section-header">
+                <div className="stx-header-title-row">
+                  
+                  
                 </div>
-                <p className="set-card-desc">Your 4 to 6 digit numerical PIN is required to access sensitive payroll modules and records.</p>
-                
-                {!showPinChange ? (
-                  <button className="expert-btn-secondary" onClick={() => setShowPinChange(true)}>
+                <p>Your 4 to 6 digit numerical PIN is required to access sensitive payroll modules and records.</p>
+              </div>
+              
+              {!showPinChange ? (
+                <div className="stx-actions" style={{ marginTop: '0' }}>
+                  <button className="stx-btn-secondary" onClick={() => setShowPinChange(true)}>
                     Change Security PIN
                   </button>
-                ) : (
-                  <form onSubmit={handlePinChange} className="set-form mt-3">
-                    <div className="set-form-group">
-                      <label>Current PIN <span className="set-required">*</span></label>
-                      <div className="set-input-icon-wrapper">
+                </div>
+              ) : (
+                <form onSubmit={handlePinChange} className="stx-form">
+                  <div className="stx-form-group" style={{ maxWidth: '48%' }}>
+                    <label>Current PIN <span className="stx-required">*</span></label>
+                    <div className="stx-input-wrapper">
+                      <input
+                        type={showCurrentPin ? 'text' : 'password'}
+                        className="stx-input"
+                        maxLength="6"
+                        value={pinData.currentPin}
+                        onChange={(e) => setPinData({ ...pinData, currentPin: e.target.value.replace(/\D/g, '') })}
+                        required
+                      />
+                      <button type="button" className="stx-eye-btn" onClick={() => setShowCurrentPin(!showCurrentPin)} tabIndex="-1">
+                        {showCurrentPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="stx-divider"></div>
+
+                  <div className="stx-form-row">
+                    <div className="stx-form-group">
+                      <label>New PIN <span className="stx-required">*</span></label>
+                      <div className="stx-input-wrapper">
                         <input
-                          type={showCurrentPin ? 'text' : 'password'}
-                          className="expert-clean-input border"
+                          type={showNewPin ? 'text' : 'password'}
+                          className="stx-input"
                           maxLength="6"
-                          value={pinData.currentPin}
-                          onChange={(e) => setPinData({ ...pinData, currentPin: e.target.value.replace(/\D/g, '') })}
+                          value={pinData.newPin}
+                          onChange={(e) => setPinData({ ...pinData, newPin: e.target.value.replace(/\D/g, '') })}
                           required
                         />
-                        <button type="button" className="set-eye-btn" onClick={() => setShowCurrentPin(!showCurrentPin)} tabIndex="-1">
-                          {showCurrentPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                        <button type="button" className="stx-eye-btn" onClick={() => setShowNewPin(!showNewPin)} tabIndex="-1">
+                          {showNewPin ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
+                      <span className="stx-hint">Numeric digits only (4-6 digits).</span>
                     </div>
-                    <div className="set-form-row">
-                      <div className="set-form-group">
-                        <label>New PIN <span className="set-required">*</span></label>
-                        <div className="set-input-icon-wrapper">
-                          <input
-                            type={showNewPin ? 'text' : 'password'}
-                            className="expert-clean-input border"
-                            maxLength="6"
-                            value={pinData.newPin}
-                            onChange={(e) => setPinData({ ...pinData, newPin: e.target.value.replace(/\D/g, '') })}
-                            required
-                          />
-                          <button type="button" className="set-eye-btn" onClick={() => setShowNewPin(!showNewPin)} tabIndex="-1">
-                            {showNewPin ? <EyeOff size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
-                        <span className="set-hint">Numeric digits only (4 to 6 digits).</span>
-                      </div>
-                      <div className="set-form-group">
-                        <label>Confirm PIN <span className="set-required">*</span></label>
-                        <input
-                          type="password"
-                          className="expert-clean-input border"
-                          maxLength="6"
-                          value={pinData.confirmPin}
-                          onChange={(e) => setPinData({ ...pinData, confirmPin: e.target.value.replace(/\D/g, '') })}
-                          required
-                        />
-                      </div>
+
+                    <div className="stx-form-group">
+                      <label>Confirm New PIN <span className="stx-required">*</span></label>
+                      <input
+                        type="password"
+                        className="stx-input"
+                        maxLength="6"
+                        value={pinData.confirmPin}
+                        onChange={(e) => setPinData({ ...pinData, confirmPin: e.target.value.replace(/\D/g, '') })}
+                        required
+                      />
                     </div>
-                    <div className="set-form-actions split">
-                      <button type="button" className="expert-btn-secondary" onClick={() => { 
-                        setShowPinChange(false); 
-                        setPinData({ currentPin: '', newPin: '', confirmPin: '' }); 
-                      }}>
-                        Cancel
-                      </button>
-                      <button type="submit" className="expert-btn-primary" disabled={loadingPin}>
-                        <Save size={16} />
-                        {loadingPin ? 'Saving...' : 'Save New PIN'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+                  </div>
+                  
+                  <div className="stx-actions split">
+                    <button type="button" className="stx-btn-secondary" onClick={() => { 
+                      setShowPinChange(false); 
+                      setPinData({ currentPin: '', newPin: '', confirmPin: '' }); 
+                    }}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="stx-btn-primary" disabled={loadingPin}>
+                      {loadingPin ? 'Saving...' : 'Save New PIN'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </section>
+          )}
+
+        </main>
       </div>
     </div>
   );

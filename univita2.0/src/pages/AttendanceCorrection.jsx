@@ -404,50 +404,56 @@ const AttendanceCorrection = () => {
               ) : pendingCorrections.length === 0 ? (
                 <div className="ac-empty-state">No pending correction requests at this time.</div>
               ) : (
-                <div className="ac-custom-requests-list">
+                <div className="ac-minimal-list">
                   {currentPending.map(c => (
-                    <div key={c.id} className="ac-custom-request-card">
-                      <div className="ac-custom-req-top">
-                        <div>
-                          <span className="ac-custom-name">{c.full_name}</span>
-                          <span className="ac-custom-id-tag">{c.employee_id}</span>
+                    <div key={c.id} className="ac-minimal-card">
+                      
+                      <div className="ac-minimal-header">
+                        <div className="ac-minimal-user">
+                          <div className="ac-minimal-avatar">
+                            {c.full_name ? c.full_name.charAt(0).toUpperCase() : 'U'}
+                          </div>
+                          <div className="ac-minimal-user-info">
+                            <span className="ac-minimal-name">{c.full_name}</span>
+                            <span className="ac-minimal-id">{c.employee_id}</span>
+                          </div>
                         </div>
-                        <span className="ac-custom-type-pill">{c.requested_clock_in ? 'Clock In Correction' : 'Clock Out Correction'}</span>
+                        <span className="ac-minimal-type-badge">
+                          {c.requested_clock_in ? 'Clock In Correction' : 'Clock Out Correction'}
+                        </span>
                       </div>
 
-                      <div className="ac-custom-details-grid">
-                        <div className="ac-custom-prop">
-                          <label>Attendance Date</label>
-                          <span className="nowrap">{formatDate(c.attendance_date)}</span>
+                      <div className="ac-minimal-body">
+                        <div className="ac-minimal-grid">
+                          <div className="ac-minimal-field">
+                            <label>Attendance Date</label>
+                            <span>{formatDate(c.attendance_date)}</span>
+                          </div>
+                          <div className="ac-minimal-field">
+                            <label>Requested Time</label>
+                            <span>{formatTo12Hour(c.requested_clock_in || c.requested_clock_out)}</span>
+                          </div>
                         </div>
-                        <div className="ac-custom-prop">
-                          <label>Requested Time</label>
-                          <span className="nowrap">{formatTo12Hour(c.requested_clock_in || c.requested_clock_out)}</span>
-                        </div>
-                        <div className="ac-custom-prop full-width">
+
+                        <div className="ac-minimal-field full-width" style={{ marginTop: '0.5rem' }}>
                           <label>Reason for Correction</label>
-                          <span className="reason-text">{c.reason}</span>
+                          <p>{c.reason || '—'}</p>
                         </div>
+
                         {c.selfie_url && (
-                          <div className="ac-custom-prop full-width">
-                            <label>Attached Verification Proof</label>
-                            <span>
-                              <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${c.selfie_url}`)} className="ac-link-btn" style={{ border: 'none', cursor: 'pointer', background: 'transparent' }}>
-                                <Eye size={14} /> View Selfie Verification
-                              </button>
-                            </span>
+                          <div className="ac-minimal-field full-width">
+                            <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${c.selfie_url}`)} className="ac-minimal-link" style={{ border: 'none', cursor: 'pointer', background: 'transparent', padding: 0 }}>
+                              <Eye size={14} /> View Proof
+                            </button>
                           </div>
                         )}
                       </div>
 
-                      <div className="ac-custom-req-actions">
-                        <button className="ac-btn-reject-custom" onClick={() => handleCorrectionAction(c.id, 'rejected')}>
-                          <XCircle size={16} /> Reject Correction
-                        </button>
-                        <button className="ac-btn-approve-custom" onClick={() => handleCorrectionAction(c.id, 'approved')}>
-                          <CheckCircle size={16} /> Approve Correction
-                        </button>
+                      <div className="ac-minimal-footer">
+                        <button className="ac-btn-min-reject" onClick={() => handleCorrectionAction(c.id, 'rejected')}>Reject</button>
+                        <button className="ac-btn-min-approve" onClick={() => handleCorrectionAction(c.id, 'approved')}>Approve</button>
                       </div>
+
                     </div>
                   ))}
                 </div>

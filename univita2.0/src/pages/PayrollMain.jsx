@@ -1,10 +1,10 @@
 // src/pages/PayrollMain.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import './Payroll.css';
+import './PayrollMain.css';
 import {
   ChevronLeft, ChevronRight, Search, History, CalendarDays,
   Download, Eye, DollarSign, Users, TrendingUp, Wallet, CheckCircle,
-  FileText, ShieldCheck
+  ShieldCheck, X, Lock, FileText
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -15,7 +15,7 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Philippine TRAIN Law Monthly Tax Brackets[cite: 21]
+// Philippine TRAIN Law Monthly Tax Brackets
 const taxTable = [
   { min: 0, max: 20833, rate: 0, base: 0 },
   { min: 20833, max: 33332, rate: 0.15, base: 0 },
@@ -36,7 +36,7 @@ const computeMonthlyTax = (taxableIncome) => {
 
 const OT_MULTIPLIER = 1.25;
 
-const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
+const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
   const [employees, setEmployees] = useState([]);
   const [attendanceSummary, setAttendanceSummary] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -97,6 +97,18 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Securely locks module utilizing SPA routing
+  const handleLockModule = () => {
+    localStorage.removeItem('payroll_token'); 
+    if (onLock) {
+      onLock();
+    } else if (setView) {
+      setView('payroll');
+    } else {
+      window.location.href = '/payroll';
+    }
+  };
+
   const filteredEmployees = employees.filter(emp =>
     (emp.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (emp.employee_id || '').toLowerCase().includes(searchQuery.toLowerCase())
@@ -108,8 +120,11 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     let workDays = Number(emp.work_days_per_month) || 22;
     
     const hourlyRate = workDays > 0 ? (monthlySalary / workDays / 8) : 0;
+    
     const regularHours = Number(att.regularHours);
-    const baseEarnings = regularHours * hourlyRate; 
+    const leaveDays = Number(att.leaveDays);
+    const paidLeaveHours = leaveDays * 8; 
+    const baseEarnings = (regularHours + paidLeaveHours) * hourlyRate; 
 
     const overtimeHours = Number(att.overtimeHours);
     const overtimePay = overtimeHours * hourlyRate * OT_MULTIPLIER;
@@ -123,14 +138,15 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     const bonusPay = Number(extras.bonus) || 0;
     
     const grossPay = baseEarnings + overtimePay + allowances + bonusPay;
-    const baseForStatutory = monthlySalary > 0 ? monthlySalary : baseEarnings;
+    
+    const netBaseForStatutory = Math.max(0, (monthlySalary > 0 ? monthlySalary : baseEarnings) - lateDeduction);
 
-    const sssCredit = Math.min(baseForStatutory, 35000); 
+    const sssCredit = Math.min(netBaseForStatutory, 35000); 
     let sss = (extras.sssOverride != null) ? Number(extras.sssOverride) : (sssCredit * 0.05); 
-    let philHealth = (extras.philHealthOverride != null) ? Number(extras.philHealthOverride) : (baseForStatutory * 0.025); 
-    let pagIbig = (extras.pagIbigOverride != null) ? Number(extras.pagIbigOverride) : (baseForStatutory * 0.02); 
+    let philHealth = (extras.philHealthOverride != null) ? Number(extras.philHealthOverride) : (netBaseForStatutory * 0.025); 
+    let pagIbig = (extras.pagIbigOverride != null) ? Number(extras.pagIbigOverride) : (netBaseForStatutory * 0.02); 
 
-    const taxableIncome = Math.max(0, (baseEarnings + overtimePay - lateDeduction) - sss - philHealth - pagIbig);
+    const taxableIncome = Math.max(0, (baseEarnings + overtimePay + allowances + bonusPay - lateDeduction) - sss - philHealth - pagIbig);
     const tax = computeMonthlyTax(taxableIncome);
     
     const loans = Number(extras.loans) || 0;
@@ -140,7 +156,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     const netPay = Math.max(0, grossPay - totalDeductions);
 
     return {
-      regularHours, overtimeHours, overtimePay, allowances, bonusPay, grossPay, baseEarnings,
+      regularHours, leaveDays, paidLeaveHours, overtimeHours, overtimePay, allowances, bonusPay, grossPay, baseEarnings,
       sss, philHealth, pagIbig, loans, other, tax, netPay, totalDeductions,
       monthlySalary, hourlyRate, workDays, lateMinutes, lateDeduction,
     };
@@ -153,7 +169,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     
     const payload = {
       user_id: emp.id, month_year: monthYear, salary_rate: calc.hourlyRate,
-      total_hours: calc.regularHours, overtime_hours: calc.overtimeHours,
+      total_hours: calc.regularHours + calc.paidLeaveHours, overtime_hours: calc.overtimeHours,
       overtime_pay: calc.overtimePay, transport_allowance: employeeExtras[emp.employee_id]?.transport || 0,
       meal_allowance: employeeExtras[emp.employee_id]?.meal || 0, housing_allowance: employeeExtras[emp.employee_id]?.housing || 0,
       sss_deduction: calc.sss, philhealth_deduction: calc.philHealth, pagibig_deduction: calc.pagIbig,
@@ -270,7 +286,7 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
           <h4 class="box-title">Earnings & Allowances</h4>
           <table>
             <tr><td>Hourly Rate</td><td class="right">₱${calc.hourlyRate.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Base Pay (${calc.regularHours} hrs)</td><td class="right">₱${calc.baseEarnings.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
+            <tr><td>Base Pay (${calc.regularHours}h logged + ${calc.paidLeaveHours}h leave)</td><td class="right">₱${calc.baseEarnings.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
             <tr><td>Overtime Pay (${calc.overtimeHours} hrs)</td><td class="right">₱${calc.overtimePay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
             <tr><td>Transport Allowance</td><td class="right">₱${(Number(extras.transport)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
             <tr><td>Meal Allowance</td><td class="right">₱${(Number(extras.meal)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
@@ -308,14 +324,14 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
   const exportToCSV = () => {
     if (filteredEmployees.length === 0) return toast.warning("No data to export.");
     const headers = [
-      "Full Name","Employee ID","Regular Hours","Overtime Hours","Late Minutes","Late Deduction",
+      "Full Name","Employee ID","Regular Hours","Paid Leave Hours", "Overtime Hours","Late Minutes","Late Deduction",
       "Base Earnings","Overtime Pay","Allowances", "13th Month / Bonus", "Gross Pay",
       "SSS","PhilHealth","Pag-IBIG","Loans","Other Deductions","Tax","Net Pay"
     ];
     const rows = filteredEmployees.map(emp => {
       const calc = computePayroll(emp);
       return [
-        emp.full_name, emp.employee_id, calc.regularHours, calc.overtimeHours, calc.lateMinutes, calc.lateDeduction,
+        emp.full_name, emp.employee_id, calc.regularHours, calc.paidLeaveHours, calc.overtimeHours, calc.lateMinutes, calc.lateDeduction,
         calc.baseEarnings, calc.overtimePay, calc.allowances, calc.bonusPay, calc.grossPay, 
         calc.sss, calc.philHealth, calc.pagIbig, calc.loans, calc.other, calc.tax, calc.netPay
       ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
@@ -327,6 +343,58 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     link.setAttribute("download", `Payroll_Export_${monthName}_${selectedYear}.csv`);
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
     toast.info('CSV export downloaded.');
+  };
+
+  // --- NEW: Statutory Remittance Export Logic ---
+  const exportRemittance = () => {
+    if (filteredEmployees.length === 0) return toast.warning("No data to export.");
+    
+    const headers = [
+      "Employee ID", "Full Name", 
+      "SSS Number", "SSS Deduction", 
+      "PhilHealth PIN", "PhilHealth Deduction", 
+      "Pag-IBIG MID", "Pag-IBIG Deduction", 
+      "TIN", "Withholding Tax"
+    ];
+
+    const rows = filteredEmployees.map(emp => {
+      const calc = computePayroll(emp);
+      let sssNo = 'Not Provided', phicNo = 'Not Provided', hdmfNo = 'Not Provided', tinNo = 'Not Provided';
+      
+      // Safely parse the additional_info JSON object to extract Government IDs
+      if (emp.additional_info) {
+        try {
+          const info = typeof emp.additional_info === 'string' ? JSON.parse(emp.additional_info) : emp.additional_info;
+          sssNo = info.sss || info.sss_no || info.sss_number || 'Not Provided';
+          phicNo = info.philhealth || info.philhealth_no || info.philhealth_pin || 'Not Provided';
+          hdmfNo = info.pagibig || info.pagibig_no || info.pagibig_mid || 'Not Provided';
+          tinNo = info.tin || info.tin_no || info.taxpayer_id || 'Not Provided';
+        } catch(e) {
+          console.warn(`Failed to parse statutory IDs for ${emp.employee_id}`);
+        }
+      }
+
+      // The ="value" format forces Excel to treat the IDs as text strings, 
+      // completely preventing it from stripping zeros or doing math on the dashes!
+      return [
+        `"${emp.employee_id}"`,
+        `"${emp.full_name}"`,
+        `="${sssNo}"`, calc.sss.toFixed(2),
+        `="${phicNo}"`, calc.philHealth.toFixed(2),
+        `="${hdmfNo}"`, calc.pagIbig.toFixed(2),
+        `="${tinNo}"`, calc.tax.toFixed(2)
+      ].join(',');
+    });
+
+    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `Govt_Remittance_${monthName}_${selectedYear}.csv`);
+    document.body.appendChild(link); 
+    link.click(); 
+    document.body.removeChild(link);
+    toast.info('Statutory Remittance CSV generated successfully.');
   };
 
   const summary = !isFutureMonth ? filteredEmployees.reduce((acc, emp) => {
@@ -342,45 +410,35 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
     return ['Full-time', 'Regular', 'Provisionary'].includes(type);
   };
 
-  const modalStyles = {
-    container: { display: 'flex', flexDirection: 'column', gap: '24px', width: '100%', boxSizing: 'border-box' },
-    grid: { display: 'flex', flexWrap: 'wrap', gap: '20px', width: '100%', alignItems: 'stretch' },
-    card: { flex: '1 1 300px', border: '1px solid #E2E8F0', borderRadius: '8px', background: '#FFFFFF', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-    header: { background: '#F8FAFC', padding: '16px 20px', borderBottom: '1px solid #E2E8F0', fontWeight: 'bold', color: '#334155', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em' },
-    body: { padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 },
-    row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #F1F5F9', paddingBottom: '10px' },
-    rowNoBorder: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px' },
-    label: { color: '#475569', fontSize: '14px', fontWeight: 500, flex: '1 1 auto', paddingRight: '10px' },
-    value: { color: '#0F172A', fontSize: '14px', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' },
-    divider: { height: '1px', background: '#E2E8F0', margin: '8px 0' },
-    subtitle: { fontSize: '12px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', margin: '4px 0' },
-    input: { width: '30%', minWidth: '80px', maxWidth: '120px', padding: '6px 10px', border: '1px solid #CBD5E1', borderRadius: '6px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#0F172A', outline: 'none' },
-    banner: { display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', padding: '24px', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: '8px', gap: '10px' },
-    bannerLabel: { fontSize: '16px', fontWeight: 700, color: '#475569', textTransform: 'uppercase' },
-    bannerAmount: { fontSize: '32px', fontWeight: 800, color: '#10B981', whiteSpace: 'nowrap' },
-    footerBtns: { display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end', width: '100%', paddingTop: '16px' },
-    btnCancel: { padding: '10px 20px', borderRadius: '8px', border: '1px solid #CBD5E1', background: '#FFFFFF', color: '#334155', fontWeight: 600, cursor: 'pointer', outline: 'none' },
-    btnPrimary: { padding: '10px 20px', borderRadius: '8px', border: 'none', background: '#0F172A', color: '#FFFFFF', fontWeight: 600, cursor: 'pointer', outline: 'none' }
-  };
-
   return (
     <div className="pm-container">
-      {/* Month Navigation */}
-      <div className="pm-date-nav">
-        <button className="pm-nav-btn" onClick={() => {
-          if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear(selectedYear - 1); }
-          else { setSelectedMonth(selectedMonth - 1); }
-        }}><ChevronLeft size={20}/></button>
-        
-        <div className="pm-date-display">
-          <CalendarDays size={18} className="pm-date-icon" />
-          <span>{monthName} {selectedYear}</span>
+      
+      {/* Top Header Bar with Date Nav and Lock Button */}
+      <div className="pm-top-bar">
+        <div className="pm-date-navigator">
+          <button className="pm-nav-arrow" onClick={() => {
+            if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear(selectedYear - 1); }
+            else { setSelectedMonth(selectedMonth - 1); }
+          }}>
+            <ChevronLeft size={20}/>
+          </button>
+          
+          <div className="pm-current-date">
+            <CalendarDays size={18} />
+            <span>{monthName} {selectedYear}</span>
+          </div>
+          
+          <button className="pm-nav-arrow" onClick={() => {
+            if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear(selectedYear + 1); }
+            else { setSelectedMonth(selectedMonth + 1); }
+          }}>
+            <ChevronRight size={20}/>
+          </button>
         </div>
-        
-        <button className="pm-nav-btn" onClick={() => {
-          if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear(selectedYear + 1); }
-          else { setSelectedMonth(selectedMonth + 1); }
-        }}><ChevronRight size={20}/></button>
+
+        <button className="pm-btn-lock" onClick={handleLockModule} title="Lock Payroll Module">
+          <Lock size={16} /> Lock Access
+        </button>
       </div>
 
       {isFutureMonth ? (
@@ -391,97 +449,104 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
         </div>
       ) : (
         <>
-          {/* Summary Metric Cards */}
+          {/* Horizontal 4-Column Metrics Grid */}
           <div className="pm-metrics-grid">
             <div className="pm-metric-card">
-              <div className="pm-metric-icon neutral"><Users size={22} /></div>
+              <div className="pm-metric-icon bg-slate"><Users size={22} /></div>
               <div className="pm-metric-data">
-                <label>Eligible Employees</label>
-                <h3>{summary.totalEmployees}</h3>
+                <span className="pm-metric-label">Eligible Instructors</span>
+                <span className="pm-metric-value">{summary.totalEmployees}</span>
               </div>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon primary"><Wallet size={22} /></div>
+              <div className="pm-metric-icon bg-teal"><Wallet size={22} /></div>
               <div className="pm-metric-data">
-                <label>Total Gross Pay</label>
-                <h3>₱{summary.totalGross.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</h3>
+                <span className="pm-metric-label">Total Gross Pay</span>
+                <span className="pm-metric-value">₱{summary.totalGross.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon danger"><TrendingUp size={22} /></div>
+              <div className="pm-metric-icon bg-rose"><TrendingUp size={22} /></div>
               <div className="pm-metric-data">
-                <label>Total Tax Withheld</label>
-                <h3>₱{summary.totalTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</h3>
+                <span className="pm-metric-label">Tax Withheld</span>
+                <span className="pm-metric-value">₱{summary.totalTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon success"><DollarSign size={22} /></div>
+              <div className="pm-metric-icon bg-emerald"><DollarSign size={22} /></div>
               <div className="pm-metric-data">
-                <label>Total Net Pay</label>
-                <h3 className="text-success">₱{summary.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</h3>
+                <span className="pm-metric-label">Total Net Pay</span>
+                <span className="pm-metric-value text-success">₱{summary.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
           </div>
 
-          <div className="pm-card">
-            {/* Toolbar */}
+          {/* Main Roster Container */}
+          <div className="pm-roster-container">
             <div className="pm-toolbar">
-              <div className="pm-toolbar-title">
-                <h3>Payroll Roster</h3>
+              <div className="pm-search-box">
+                <Search size={16} />
+                <input type="text" placeholder="Search employee..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
               </div>
               <div className="pm-toolbar-actions">
-                <div className="pm-search-box">
-                  <Search size={16} />
-                  <input type="text" placeholder="Search employee..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-                </div>
-                <button className="btn-pm-primary" onClick={() => setShowMonthlyModal(true)}>
-                  <CalendarDays size={16} /> Run Monthly
+                <button className="pm-btn-outline" onClick={onShowHistory}>
+                  <History size={15} /> Logs
                 </button>
-                <button className="btn-pm-outline" onClick={exportToCSV}>
-                  <Download size={16} /> Export
+                <button className="pm-btn-outline" onClick={exportToCSV}>
+                  <Download size={15} /> Payroll CSV
                 </button>
-                <button className="btn-pm-outline" onClick={onShowHistory}>
-                  <History size={16} /> Logs
+                {/* NEW Govt Remittance Button */}
+                <button className="pm-btn-outline" onClick={exportRemittance} title="Export SSS, PhilHealth, Pag-IBIG spreadsheet">
+                  <FileText size={15} /> Govt Remittance
+                </button>
+                <button className="pm-btn-primary" onClick={() => setShowMonthlyModal(true)}>
+                  <CalendarDays size={15} /> Run Batch
                 </button>
               </div>
             </div>
 
-            {/* Main Table - Kept strictly 5 columns */}
             <div className="pm-table-wrapper">
               {loading ? (
                 <div className="pm-empty-state">
                   <ShieldCheck size={32} className="pm-empty-icon animate-pulse" />
-                  <p>Calculating Payroll Logic...</p>
+                  <p>Calculating Payroll Data...</p>
                 </div>
               ) : (
                 <table className="pm-table">
                   <thead>
                     <tr>
-                      <th>Employee ID</th>
-                      <th>Full Name</th>
-                      <th>Hours Logged</th>
+                      <th>Employee Details</th>
+                      <th>Hours Rendered</th>
                       <th className="text-right">Est. Net Pay</th>
                       <th className="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredEmployees.length === 0 ? (
-                      <tr><td colSpan="5"><div className="pm-empty-state"><p>No matching employees found.</p></div></td></tr>
+                      <tr><td colSpan="4"><div className="pm-empty-state"><p>No matching employees found.</p></div></td></tr>
                     ) : (
                       filteredEmployees.map(emp => {
                         const calc = computePayroll(emp);
                         return (
                           <tr key={emp.employee_id}>
-                            <td><span className="pm-mono-text">{emp.employee_id}</span></td>
-                            <td><strong>{emp.full_name}</strong></td>
-                            <td><span className="pm-badge">{calc.regularHours} hrs</span></td>
-                            <td className="text-right"><strong>₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></td>
+                            <td>
+                              <div className="pm-emp-info">
+                                <span className="pm-emp-name">{emp.full_name}</span>
+                                <span className="pm-emp-id">{emp.employee_id}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <span className="pm-badge-neutral">{calc.regularHours + calc.paidLeaveHours} hrs</span>
+                            </td>
+                            <td className="text-right">
+                              <span className="pm-amount">₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            </td>
                             <td className="text-right">
                               <div className="pm-action-group">
-                                <button className="btn-icon-neutral" onClick={() => openPayslip(emp)} title="Edit Payslip">
+                                <button className="pm-icon-btn" onClick={() => openPayslip(emp)} title="Review Payslip">
                                   <Eye size={16} />
                                 </button>
-                                <button className="btn-pm-success-sm" onClick={() => handleFinalize(emp)}>
+                                <button className="pm-btn-success" onClick={() => handleFinalize(emp)}>
                                   <CheckCircle size={14} /> Finalize
                                 </button>
                               </div>
@@ -498,167 +563,175 @@ const PayrollMain = ({ setView, onChangePin, onShowHistory }) => {
         </>
       )}
 
-      {/* Monthly Run Modal */}
-      <FormalModal 
-        show={showMonthlyModal} 
-        onClose={() => setShowMonthlyModal(false)} 
-        title="Process Monthly Batch" 
-        footer={
-          <>
-            <button className="btn-pm-cancel" onClick={() => setShowMonthlyModal(false)}>Cancel</button>
-            <button className="btn-pm-primary" onClick={handleMonthlyPayroll} disabled={isProcessing}>
-              {isProcessing ? 'Processing...' : 'Run Batch Payroll'}
-            </button>
-          </>
-        }
-      >
-        <p className="pm-modal-desc">Calculate and finalize base pay for all active instructors for the selected period using verified attendance logs.</p>
-        <div className="pm-form-row">
-          <div className="pm-form-group">
-            <label>Month</label>
-            <select value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))} className="pm-input">
-              {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-                <option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('default', { month: 'long' })}</option>
-              ))}
-            </select>
-          </div>
-          <div className="pm-form-group">
-            <label>Year</label>
-            <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="pm-input">
-              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </FormalModal>
-
-      {/* Payslip Editor Modal */}
-      <FormalModal 
-        show={showPayslipModal && !!payslipEmployee} 
-        onClose={() => { setShowPayslipModal(false); setPayslipEmployee(null); }} 
-        title="Payslip Breakdown & Adjustments" 
-        wide={true}
-        footer={
-          <div style={modalStyles.footerBtns}>
-            <button style={modalStyles.btnCancel} onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}>Close</button>
-            <button style={modalStyles.btnPrimary} onClick={() => printPayslip(payslipEmployee)}>Print / Export</button>
-          </div>
-        }
-      >
-        {payslipEmployee && (() => {
-          const emp = payslipEmployee;
-          const calc = computePayroll(emp);
-          const extras = employeeExtras[emp.employee_id] || {};
-          const eligible = isAllowanceEligible(emp);
-          
-          return (
-            <div style={modalStyles.container}>
-              <div style={modalStyles.grid}>
-                
-                {/* EARNINGS PANE */}
-                <div style={modalStyles.card}>
-                  <div style={modalStyles.header}>Earnings & Allowances</div>
-                  <div style={modalStyles.body}>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Hourly Rate</span>
-                      <strong style={modalStyles.value}>₱{calc.hourlyRate.toLocaleString('en-PH', { minimumFractionDigits: 2 })}/hr</strong>
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Base Pay ({calc.regularHours} hrs)</span>
-                      <strong style={modalStyles.value}>₱{calc.baseEarnings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Overtime Pay ({calc.overtimeHours} hrs)</span>
-                      <strong style={modalStyles.value}>₱{calc.overtimePay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    
-                    <div style={modalStyles.divider}></div>
-                    <div style={modalStyles.subtitle}>
-                      Allowances & Bonuses {!eligible && <span style={{color: '#EF4444', textTransform: 'none', fontWeight: 500}}>(Allowances Not Eligible)</span>}
-                    </div>
-                    
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>13th Month / Bonus</span>
-                      <input type="text" value={extras.bonus || ''} onChange={e => updateExtras(emp.employee_id, 'bonus', e.target.value)} style={modalStyles.input} placeholder="0.00" />
-                    </div>
-
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Transport</span>
-                      {eligible ? <input type="text" value={extras.transport || ''} onChange={e => updateExtras(emp.employee_id, 'transport', e.target.value)} style={modalStyles.input} placeholder="0.00" /> : <strong style={modalStyles.value}>₱0.00</strong>}
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Meal</span>
-                      {eligible ? <input type="text" value={extras.meal || ''} onChange={e => updateExtras(emp.employee_id, 'meal', e.target.value)} style={modalStyles.input} placeholder="0.00" /> : <strong style={modalStyles.value}>₱0.00</strong>}
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Housing</span>
-                      {eligible ? <input type="text" value={extras.housing || ''} onChange={e => updateExtras(emp.employee_id, 'housing', e.target.value)} style={modalStyles.input} placeholder="0.00" /> : <strong style={modalStyles.value}>₱0.00</strong>}
-                    </div>
-                    
-                    <div style={{ ...modalStyles.rowNoBorder, marginTop: 'auto', borderTop: '1px solid #E2E8F0', paddingTop: '16px' }}>
-                      <span style={{ ...modalStyles.label, fontWeight: 800, color: '#0F172A' }}>Gross Earnings</span>
-                      <strong style={{ ...modalStyles.value, fontWeight: 800, fontSize: '15px' }}>₱{calc.grossPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                  </div>
+      {/* Monthly Batch Modal */}
+      {showMonthlyModal && (
+        <div className="pm-modal-backdrop" onClick={() => setShowMonthlyModal(false)}>
+          <div className="pm-modal-card small" onClick={e => e.stopPropagation()}>
+            <div className="pm-modal-header">
+              <h3>Process Monthly Batch</h3>
+              <button className="pm-modal-close" onClick={() => setShowMonthlyModal(false)}><X size={18}/></button>
+            </div>
+            <div className="pm-modal-body">
+              <p className="pm-modal-desc">Calculate and finalize base pay for all active instructors using the recorded attendance logs.</p>
+              <div className="pm-form-row">
+                <div className="pm-form-group">
+                  <label>Month</label>
+                  <select value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))} className="pm-input">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                      <option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('default', { month: 'long' })}</option>
+                    ))}
+                  </select>
                 </div>
-
-                {/* DEDUCTIONS PANE */}
-                <div style={modalStyles.card}>
-                  <div style={modalStyles.header}>Taxes & Deductions</div>
-                  <div style={modalStyles.body}>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Withholding Tax</span>
-                      <strong style={modalStyles.value}>₱{calc.tax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Late Deductions ({calc.lateMinutes} mins)</span>
-                      <strong style={{...modalStyles.value, color: '#EF4444'}}>-₱{calc.lateDeduction.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                    
-                    <div style={modalStyles.divider}></div>
-                    <div style={modalStyles.subtitle}>Statutory & Custom</div>
-
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>SSS Contribution</span>
-                      <input type="text" value={extras.sssOverride != null ? extras.sssOverride : calc.sss.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'sssOverride', e.target.value)} style={modalStyles.input} />
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>PhilHealth</span>
-                      <input type="text" value={extras.philHealthOverride != null ? extras.philHealthOverride : calc.philHealth.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'philHealthOverride', e.target.value)} style={modalStyles.input} />
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Pag-IBIG</span>
-                      <input type="text" value={extras.pagIbigOverride != null ? extras.pagIbigOverride : calc.pagIbig.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'pagIbigOverride', e.target.value)} style={modalStyles.input} />
-                    </div>
-                    
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Loans / Advances</span>
-                      <input type="text" value={extras.loans || ''} onChange={e => updateExtras(emp.employee_id, 'loans', e.target.value)} style={modalStyles.input} placeholder="0.00" />
-                    </div>
-                    <div style={modalStyles.row}>
-                      <span style={modalStyles.label}>Other Deductions</span>
-                      <input type="text" value={extras.other || ''} onChange={e => updateExtras(emp.employee_id, 'other', e.target.value)} style={modalStyles.input} placeholder="0.00" />
-                    </div>
-
-                    <div style={{ ...modalStyles.rowNoBorder, marginTop: 'auto', borderTop: '1px solid #E2E8F0', paddingTop: '16px' }}>
-                      <span style={{ ...modalStyles.label, fontWeight: 800, color: '#0F172A' }}>Total Deductions</span>
-                      <strong style={{ ...modalStyles.value, fontWeight: 800, fontSize: '15px', color: '#EF4444' }}>-₱{calc.totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                    </div>
-                  </div>
+                <div className="pm-form-group">
+                  <label>Year</label>
+                  <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="pm-input">
+                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
                 </div>
-
-              </div>
-
-              {/* NET PAY BANNER */}
-              <div style={modalStyles.banner}>
-                <span style={modalStyles.bannerLabel}>TOTAL NET PAY</span>
-                <span style={modalStyles.bannerAmount}>₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
-          );
-        })()}
-      </FormalModal>
+            <div className="pm-modal-footer">
+              <button className="pm-btn-outline" onClick={() => setShowMonthlyModal(false)}>Cancel</button>
+              <button className="pm-btn-primary" onClick={handleMonthlyPayroll} disabled={isProcessing}>
+                {isProcessing ? 'Processing...' : 'Run Batch Payroll'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modern Split-Pane Payslip Modal */}
+      {showPayslipModal && payslipEmployee && (() => {
+        const emp = payslipEmployee;
+        const calc = computePayroll(emp);
+        const extras = employeeExtras[emp.employee_id] || {};
+        const eligible = isAllowanceEligible(emp);
+        
+        return (
+          <div className="pm-modal-backdrop" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}>
+            <div className="pm-modal-card wide" onClick={e => e.stopPropagation()}>
+              
+              <div className="pm-modal-header">
+                <div>
+                  <h3>Payslip Breakdown</h3>
+                  <span className="pm-modal-subtitle">{emp.full_name} ({emp.employee_id}) • {monthName} {selectedYear}</span>
+                </div>
+                <button className="pm-modal-close" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}><X size={18}/></button>
+              </div>
+              
+              <div className="pm-modal-body bg-gray">
+                <div className="pm-payslip-grid">
+                  
+                  {/* Left Column: Earnings */}
+                  <div className="pm-payslip-pane">
+                    <h4 className="pm-pane-title text-success">Earnings & Additions</h4>
+                    <div className="pm-payslip-list">
+                      <div className="pm-list-item">
+                        <span>Hourly Rate</span>
+                        <strong>₱{calc.hourlyRate.toLocaleString('en-PH', { minimumFractionDigits: 2 })}/hr</strong>
+                      </div>
+                      <div className="pm-list-item">
+                        <span>Base Pay ({calc.regularHours}h logged + {calc.paidLeaveHours}h leave)</span>
+                        <strong>₱{calc.baseEarnings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="pm-list-item">
+                        <span>Overtime Pay ({calc.overtimeHours} hrs)</span>
+                        <strong>₱{calc.overtimePay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      
+                      <div className="pm-divider"></div>
+                      <span className="pm-section-label">Allowances & Bonuses {!eligible && <span className="text-danger">(Ineligible)</span>}</span>
+                      
+                      <div className="pm-list-item input-row">
+                        <span>13th Month / Bonus</span>
+                        <input type="text" value={extras.bonus || ''} onChange={e => updateExtras(emp.employee_id, 'bonus', e.target.value)} className="pm-amount-input" placeholder="0.00" />
+                      </div>
+                      <div className="pm-list-item input-row">
+                        <span>Transport</span>
+                        {eligible ? <input type="text" value={extras.transport || ''} onChange={e => updateExtras(emp.employee_id, 'transport', e.target.value)} className="pm-amount-input" placeholder="0.00" /> : <strong>₱0.00</strong>}
+                      </div>
+                      <div className="pm-list-item input-row">
+                        <span>Meal</span>
+                        {eligible ? <input type="text" value={extras.meal || ''} onChange={e => updateExtras(emp.employee_id, 'meal', e.target.value)} className="pm-amount-input" placeholder="0.00" /> : <strong>₱0.00</strong>}
+                      </div>
+                      <div className="pm-list-item input-row">
+                        <span>Housing</span>
+                        {eligible ? <input type="text" value={extras.housing || ''} onChange={e => updateExtras(emp.employee_id, 'housing', e.target.value)} className="pm-amount-input" placeholder="0.00" /> : <strong>₱0.00</strong>}
+                      </div>
+                    </div>
+                    
+                    <div className="pm-pane-footer">
+                      <span>Gross Earnings</span>
+                      <strong className="text-success">₱{calc.grossPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Deductions */}
+                  <div className="pm-payslip-pane">
+                    <h4 className="pm-pane-title text-danger">Taxes & Deductions</h4>
+                    <div className="pm-payslip-list">
+                      <div className="pm-list-item">
+                        <span>Withholding Tax</span>
+                        <strong>₱{calc.tax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="pm-list-item">
+                        <span>Late Deductions ({calc.lateMinutes} mins)</span>
+                        <strong className="text-danger">-₱{calc.lateDeduction.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      
+                      <div className="pm-divider"></div>
+                      <span className="pm-section-label">Statutory & Custom</span>
+
+                      <div className="pm-list-item input-row">
+                        <span>SSS Contribution</span>
+                        <input type="text" value={extras.sssOverride != null ? extras.sssOverride : calc.sss.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'sssOverride', e.target.value)} className="pm-amount-input" />
+                      </div>
+                      <div className="pm-list-item input-row">
+                        <span>PhilHealth</span>
+                        <input type="text" value={extras.philHealthOverride != null ? extras.philHealthOverride : calc.philHealth.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'philHealthOverride', e.target.value)} className="pm-amount-input" />
+                      </div>
+                      <div className="pm-list-item input-row">
+                        <span>Pag-IBIG</span>
+                        <input type="text" value={extras.pagIbigOverride != null ? extras.pagIbigOverride : calc.pagIbig.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'pagIbigOverride', e.target.value)} className="pm-amount-input" />
+                      </div>
+                      
+                      <div className="pm-list-item input-row">
+                        <span>Loans / Advances</span>
+                        <input type="text" value={extras.loans || ''} onChange={e => updateExtras(emp.employee_id, 'loans', e.target.value)} className="pm-amount-input" placeholder="0.00" />
+                      </div>
+                      <div className="pm-list-item input-row">
+                        <span>Other Deductions</span>
+                        <input type="text" value={extras.other || ''} onChange={e => updateExtras(emp.employee_id, 'other', e.target.value)} className="pm-amount-input" placeholder="0.00" />
+                      </div>
+                    </div>
+
+                    <div className="pm-pane-footer">
+                      <span>Total Deductions</span>
+                      <strong className="text-danger">-₱{calc.totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Net Pay Banner */}
+                <div className="pm-net-banner">
+                  <span className="pm-net-label">Total Net Pay</span>
+                  <span className="pm-net-amount">₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              <div className="pm-modal-footer">
+                <button className="pm-btn-outline" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}>Close</button>
+                <button className="pm-btn-primary" onClick={() => printPayslip(payslipEmployee)}>Print / Export PDF</button>
+              </div>
+              
+            </div>
+          </div>
+        );
+      })()}
+      
     </div>
   );
 };

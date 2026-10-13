@@ -362,43 +362,46 @@ const ManageRequest = () => {
               ) : filteredPending.length === 0 ? (
                 <div className="vm-empty">No pending visitor requests match your criteria.</div>
               ) : (
-                <div className="vm-custom-requests-list">
+                <div className="vm-minimal-list">
                   {currentPending.map(req => (
-                    <div key={req.id} className="vm-custom-request-card">
-                      <div className="vm-custom-req-top">
-                        <div>
-                          <span className="vm-custom-name">{req.first_name} {req.last_name}</span>
-                          <span className="vm-custom-email-tag">{req.email}</span>
+                    <div key={req.id} className="vm-minimal-card">
+                      
+                      <div className="vm-minimal-header">
+                        <div className="vm-minimal-user">
+                          <div className="vm-minimal-avatar">
+                            {req.first_name ? req.first_name.charAt(0).toUpperCase() : 'V'}
+                          </div>
+                          <div className="vm-minimal-user-info">
+                            <span className="vm-minimal-name">{req.first_name} {req.last_name}</span>
+                            <span className="vm-minimal-id">{req.email}</span>
+                          </div>
                         </div>
-                        <span className="vm-custom-date-pill">{formatDate(req.visit_date)}</span>
+                        <span className="vm-minimal-type-badge">{formatDate(req.visit_date)}</span>
                       </div>
 
-                      <div className="vm-custom-details-grid">
-                        <div className="vm-custom-prop">
-                          <label>Visit Time</label>
-                          <span className="nowrap">{formatTime(req.visit_time)}</span>
+                      <div className="vm-minimal-body">
+                        <div className="vm-minimal-grid">
+                          <div className="vm-minimal-field">
+                            <label>Visit Time</label>
+                            <span>{formatTime(req.visit_time)}</span>
+                          </div>
+                          <div className="vm-minimal-field">
+                            <label>Contact Number</label>
+                            <span>{req.phone || 'N/A'}</span>
+                          </div>
                         </div>
-                        <div className="vm-custom-prop">
-                          <label>Contact Phone</label>
-                          <span className="nowrap">{req.phone || 'N/A'}</span>
-                        </div>
-                        <div className="vm-custom-prop full-width">
+
+                        <div className="vm-minimal-field full-width" style={{ marginTop: '0.5rem' }}>
                           <label>Purpose of Visit</label>
-                          <span className="reason-text">{req.reason || '—'}</span>
+                          <p>{req.reason || '—'}</p>
                         </div>
                       </div>
 
-                      <div className="vm-custom-req-actions">
-                        <button className="vm-btn-view-details" onClick={() => openPendingDetails(req)}>
-                          <Eye size={14} /> Inspect Full Details
-                        </button>
-                        <button className="vm-btn-reject-custom" onClick={() => openRejectModal(req)}>
-                          <XCircle size={16} /> Reject Request
-                        </button>
-                        <button className="vm-btn-approve-custom" onClick={() => handleApprove(req)}>
-                          <CheckCircle size={16} /> Approve Visit
-                        </button>
+                      <div className="vm-minimal-footer">
+                        <button className="vm-btn-min-reject" onClick={() => openRejectModal(req)}>Reject</button>
+                        <button className="vm-btn-min-approve" onClick={() => handleApprove(req)}>Approve</button>
                       </div>
+
                     </div>
                   ))}
                 </div>

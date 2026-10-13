@@ -10,7 +10,7 @@ import ChatPanel from './ChatPanel';
 
 // Menu configuration
 const menuConfig = [
-  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} />, path: 'dashboard', roles: ['admin', 'hr_admin', 'security'] },
+  { id: 'dashboard', label: 'Overview', icon: <LayoutDashboard size={18} />, path: 'dashboard', roles: ['admin', 'hr_admin', 'security'] },
   { id: 'recruitment', label: 'Recruitment', icon: <Briefcase size={18} />, path: 'job-postings', roles: ['hr_admin'] },
   { id: 'employees', label: 'Employees', icon: <Users size={18} />, path: 'employee-management', roles: ['admin', 'hr_admin'] },
   {
@@ -201,11 +201,7 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
             <button className="lay-hamburger" onClick={() => setSidebarOpen(true)}>
               <Menu size={20} />
             </button>
-            {showBack && (
-              <button className="lay-back-btn" onClick={onBack}>
-                <ArrowLeft size={16} /> 
-              </button>
-            )}
+            
             <div className="lay-header-info">
               <h2>{title}</h2>
               <p>{dateString}</p>

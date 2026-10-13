@@ -335,50 +335,54 @@ const LeaveManagement = () => {
               ) : filteredPending.length === 0 ? (
                 <div className="expert-empty">No pending leave requests match your criteria.</div>
               ) : (
-                <div className="lm-custom-requests-list">
+                <div className="lm-minimal-list">
                   {currentPending.map(group => (
-                    <div key={group.ids?.[0] || Math.random()} className="lm-custom-request-card">
-                      <div className="lm-custom-req-top">
-                        <div>
-                          <span className="lm-custom-name">{group.full_name}</span>
-                          <span className="lm-custom-id-tag">{group.employee_id || '—'}</span>
+                    <div key={group.ids?.[0] || Math.random()} className="lm-minimal-card">
+                      
+                      <div className="lm-minimal-header">
+                        <div className="lm-minimal-user">
+                          <div className="lm-minimal-avatar">
+                            {group.full_name ? group.full_name.charAt(0).toUpperCase() : 'U'}
+                          </div>
+                          <div className="lm-minimal-user-info">
+                            <span className="lm-minimal-name">{group.full_name}</span>
+                            <span className="lm-minimal-id">{group.employee_id || '—'}</span>
+                          </div>
                         </div>
-                        <span className="lm-custom-type-pill">{group.type || 'Leave'}</span>
+                        <span className="lm-minimal-type-badge">{group.type || 'Leave'}</span>
                       </div>
 
-                      <div className="lm-custom-details-grid">
-                        <div className="lm-custom-prop">
-                          <label>Date Range</label>
-                          <span className="nowrap">{formatDateRange(group.start_date, group.end_date)}</span>
+                      <div className="lm-minimal-body">
+                        <div className="lm-minimal-grid">
+                          <div className="lm-minimal-field">
+                            <label>Date Range</label>
+                            <span>{formatDateRange(group.start_date, group.end_date)}</span>
+                          </div>
+                          <div className="lm-minimal-field">
+                            <label>Total Duration</label>
+                            <span>{group.request_count || 1} day(s)</span>
+                          </div>
                         </div>
-                        <div className="lm-custom-prop">
-                          <label>Total Duration</label>
-                          <span className="nowrap">{group.request_count || 1} day(s)</span>
-                        </div>
-                        <div className="lm-custom-prop full-width">
+                        
+                        <div className="lm-minimal-field full-width" style={{ marginTop: '0.5rem' }}>
                           <label>Reason for Leave</label>
-                          <span className="reason-text">{group.reason || '—'}</span>
+                          <p>{group.reason || '—'}</p>
                         </div>
+
                         {group.image_url && (
-                          <div className="lm-custom-prop full-width">
-                            <label>Supporting Document</label>
-                            <span>
-                              <a href={`${API_BASE.replace(/\/api$/, '')}${group.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                                <ExternalLink size={14} /> View Attached Document / Proof
-                              </a>
-                            </span>
+                          <div className="lm-minimal-field full-width">
+                            <a href={`${API_BASE.replace(/\/api$/, '')}${group.image_url}`} target="_blank" rel="noopener noreferrer" className="lm-minimal-link">
+                              <ExternalLink size={14} /> View Attached Document / Proof
+                            </a>
                           </div>
                         )}
                       </div>
 
-                      <div className="lm-custom-req-actions">
-                        <button className="lm-btn-reject-custom" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Rejected'); }}>
-                          <XCircle size={16} /> Reject Request
-                        </button>
-                        <button className="lm-btn-approve-custom" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Approved'); }}>
-                          <CheckCircle size={16} /> Approve Leave
-                        </button>
+                      <div className="lm-minimal-footer">
+                        <button className="lm-btn-min-reject" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Rejected'); }}>Reject</button>
+                        <button className="lm-btn-min-approve" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Approved'); }}>Approve</button>
                       </div>
+
                     </div>
                   ))}
                 </div>

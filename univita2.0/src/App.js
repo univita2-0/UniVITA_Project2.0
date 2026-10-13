@@ -142,7 +142,7 @@ function App() {
   const getHeaderTitle = () => {
     if (showHistoryDetail) return { title: 'Visitor History' };
     switch (currentView) {
-      case 'dashboard': return { title: 'Dashboard' };
+      case 'dashboard': return { title: 'Overview' };
       case 'manage-request': return { title: 'Manage Request' };
       case 'history': return { title: 'History' };
       case 'track-visitor': return { title: 'Building Visitor Tracking' };
@@ -161,9 +161,9 @@ function App() {
       case 'employee-management': return { title: 'Employee Management' };
       case 'locations': return { title: 'Manage Locations' };
       case 'courses': return { title: 'Manage Courses' };
-      case 'leave-balances': return { title: 'Leave Balances' };
+      case 'leave-balances': return { title: 'Leave Balance' };
       case 'emergency-alerts': return { title: 'Emergency Alerts' };
-      case 'profile': return { title: 'Admin Profile' };
+      case 'profile': return { title: 'Profile' };
       case 'job-postings': return { title: 'Job Postings' };
       case 'performance': return { title: 'Performance Evaluation' };
       case 'policies': return { title: 'HR Policies' };

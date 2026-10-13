@@ -1,6 +1,6 @@
 /* src/pages/Dashboard.css - Unified Enterprise Redesign (Grayscale) */
 
-.expert-container { background: #F8FAFC; padding: 2rem; min-height: 100vh; font-family: 'Inter', system-ui, sans-serif; }
+.expert-container { background: #F8FAFC; min-height: 100vh; font-family: 'Inter', system-ui, sans-serif; }
 .expert-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
 .expert-title-group { display: flex; align-items: center; gap: 1rem; }
 .expert-icon-wrapper { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }

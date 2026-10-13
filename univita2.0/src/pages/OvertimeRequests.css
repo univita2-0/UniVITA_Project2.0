@@ -55,35 +55,69 @@
 .ot-empty, .ot-loading { padding: 4rem 2rem; text-align: center; color: #64748B; font-weight: 500; font-size: 0.95rem; }
 .ot-loading { color: #0D9488; }
 
-.ot-custom-modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 1rem; }
-.ot-custom-modal { background: #FFFFFF; border-radius: 12px; width: 100%; max-width: 680px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); border: 1px solid #E2E8F0; }
-.ot-custom-modal-header { padding: 1.25rem 1.75rem; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; justify-content: space-between; }
+/* Modal & Background Overlay */
+.ot-custom-modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 1rem; }
+.ot-custom-modal { background: #FFFFFF; border-radius: 12px; width: 100%; max-width: 600px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); border: 1px solid #E2E8F0; }
+.ot-custom-modal-header { padding: 1.25rem 1.5rem; background: #FFFFFF; border-bottom: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: space-between; border-radius: 12px 12px 0 0; }
 .ot-custom-modal-header h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #0F172A; }
-.ot-custom-close-btn { background: transparent; border: none; color: #64748B; cursor: pointer; padding: 4px; border-radius: 6px; display: flex; align-items: center; }
-.ot-custom-close-btn:hover { background: #E2E8F0; color: #0F172A; }
-.ot-custom-modal-body { padding: 1.75rem; overflow-y: auto; flex: 1; }
-.ot-custom-requests-list { display: flex; flex-direction: column; gap: 1.25rem; }
-.ot-custom-request-card { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-.ot-custom-req-top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 0.75rem; border-bottom: 1px solid #F1F5F9; }
-.ot-custom-name { font-size: 1rem; font-weight: 700; color: #0F172A; margin-right: 8px; }
-.ot-custom-id-tag { font-size: 0.75rem; font-family: monospace; color: #64748B; background: #F1F5F9; padding: 0.15rem 0.4rem; border-radius: 4px; border: 1px solid #E2E8F0; }
-.ot-custom-scenario-pill { background: #F1F5F9; color: #475569; padding: 0.2rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; border: 1px solid #E2E8F0; }
-.ot-custom-details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.5rem; }
-.ot-custom-prop { display: flex; flex-direction: column; gap: 0.15rem; }
-.ot-custom-prop.full-width { grid-column: span 2; }
-.ot-custom-prop label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; }
-.ot-custom-prop span { font-size: 0.9rem; font-weight: 600; color: #1E293B; }
-.ot-custom-prop .reason-text { font-weight: 500; color: #475569; word-break: break-word; }
-.ot-custom-req-actions { display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #F1F5F9; }
-.ot-btn-approve-custom, .ot-btn-reject-custom { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; border: 1px solid transparent; }
-.ot-btn-approve-custom { background: #ECFDF5; color: #059669; border-color: #A7F3D0; }
-.ot-btn-reject-custom { background: #FEF2F2; color: #DC2626; border-color: #FECACA; }
-.ot-custom-modal-footer { padding: 1rem 1.75rem; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; justify-content: flex-end; gap: 0.75rem; }
+.ot-custom-close-btn { background: transparent; border: none; color: #94A3B8; cursor: pointer; padding: 4px; border-radius: 6px; display: flex; align-items: center; transition: all 0.2s; }
+.ot-custom-close-btn:hover { background: #F1F5F9; color: #0F172A; }
 
+.ot-custom-modal-body { padding: 1.5rem; overflow-y: auto; flex: 1; background: #FAFAFA; }
+.ot-minimal-list { display: flex; flex-direction: column; gap: 1.25rem; }
+
+/* Minimal Card Design */
+.ot-minimal-card { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px; display: flex; flex-direction: column; box-shadow: 0 1px 2px rgba(0,0,0,0.02); overflow: hidden; transition: border-color 0.2s; }
+.ot-minimal-card:hover { border-color: #D1D5DB; }
+
+/* Header */
+.ot-minimal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid #F3F4F6; gap: 1rem; }
+.ot-minimal-user { display: flex; align-items: center; gap: 0.75rem; }
+.ot-minimal-avatar { width: 34px; height: 34px; border-radius: 50%; background: #F0FDFA; color: #0D9488; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.95rem; border: 1px solid #CCFBF1; }
+.ot-minimal-user-info { display: flex; flex-direction: column; gap: 0.1rem; }
+.ot-minimal-name { font-size: 0.95rem; font-weight: 600; color: #111827; line-height: 1.2; }
+.ot-minimal-id { font-size: 0.75rem; color: #6B7280; font-family: 'SF Mono', monospace; }
+
+.ot-minimal-type-badge { background: #F8FAFC; color: #4B5563; padding: 0.25rem 0.6rem; border-radius: 6px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; border: 1px solid #E2E8F0; }
+
+/* Status dot for view details */
+.ot-status-dot { padding: 0.25rem 0.6rem; border-radius: 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.03em; border: 1px solid transparent; }
+.ot-status-dot.pending { background: #FFFBEB; color: #B45309; border-color: #FDE68A; }
+.ot-status-dot.approved { background: #ECFDF5; color: #059669; border-color: #A7F3D0; }
+.ot-status-dot.rejected { background: #FEF2F2; color: #DC2626; border-color: #FECACA; }
+.ot-status-dot.cancelled { background: #F1F5F9; color: #475569; border-color: #E2E8F0; }
+
+/* Body */
+.ot-minimal-body { padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+.ot-minimal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1rem; }
+.ot-minimal-field { display: flex; flex-direction: column; gap: 0.2rem; }
+.ot-minimal-field.full-width { grid-column: 1 / -1; }
+.ot-minimal-field label { font-size: 0.7rem; font-weight: 500; color: #6B7280; }
+.ot-minimal-field span { font-size: 0.9rem; font-weight: 500; color: #111827; }
+.ot-minimal-field p { margin: 0; font-size: 0.9rem; color: #374151; line-height: 1.5; white-space: pre-wrap; }
+
+.ot-minimal-link { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; font-weight: 500; color: #0D9488; text-decoration: none; transition: color 0.2s; margin-top: 0.5rem; }
+.ot-minimal-link:hover { color: #0F766E; text-decoration: underline; }
+
+/* Footer */
+.ot-minimal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.75rem 1.25rem; border-top: 1px solid #F3F4F6; background: #FAFAFA; }
+.ot-btn-min-reject, .ot-btn-min-approve { padding: 0.45rem 1rem; border-radius: 6px; font-weight: 500; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; border: 1px solid transparent; }
+.ot-btn-min-reject { background: #FFFFFF; color: #DC2626; border-color: #E5E7EB; }
+.ot-btn-min-reject:hover { background: #FEF2F2; border-color: #FECACA; }
+.ot-btn-min-approve { background: #0D9488; color: #FFFFFF; }
+.ot-btn-min-approve:hover { background: #0F766E; }
+
+.ot-custom-modal-footer { padding: 1rem 1.5rem; background: #FFFFFF; border-top: 1px solid #F1F5F9; display: flex; justify-content: flex-end; border-radius: 0 0 12px 12px; }
+
+/* Mobile Media Queries */
 @media (max-width: 768px) {
   .ot-container { padding: 1.5rem; }
   .ot-search-input-group { max-width: 100% !important; }
-  .ot-pagination, .ot-custom-modal-pagination { justify-content: center; }
-  .ot-custom-details-grid { grid-template-columns: 1fr; }
-  .ot-custom-prop.full-width { grid-column: span 1; }
+  .ot-pagination { justify-content: center; }
+}
+
+@media (max-width: 640px) {
+  .ot-minimal-header { flex-direction: column; align-items: flex-start; }
+  .ot-minimal-footer { flex-direction: column; }
+  .ot-btn-min-reject, .ot-btn-min-approve { width: 100%; text-align: center; }
 }

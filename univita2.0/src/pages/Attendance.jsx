@@ -202,7 +202,7 @@ const Attendance = () => {
     <div className="attendance-container">
       <div className="att-header-row">
         <div>
-          <h2 className="att-page-title">Attendance Tracker</h2>
+          
           <p className="att-page-subtitle">Monitor and review employee attendance records.</p>
         </div>
       </div>

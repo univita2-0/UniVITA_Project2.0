@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
 import './Payroll.css';
-import { LockKeyhole, ShieldAlert, Fingerprint } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Lock } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE } from '../api';
 
@@ -18,7 +18,9 @@ const Payroll = ({ onUnlock, adminEmail }) => {
     }
   }, [locked]);
 
-  const handleUnlock = async () => {
+  const handleUnlock = async (e) => {
+    if (e) e.preventDefault();
+    
     if (!code.trim()) {
       toast.warning('Please enter your security PIN.');
       return;
@@ -54,19 +56,19 @@ const Payroll = ({ onUnlock, adminEmail }) => {
   return (
     <div className="pr-container">
       <div className="pr-auth-card">
-        <div className="pr-brand-badge">
-          <LockKeyhole size={28} color="#0D9488" strokeWidth={2.5} />
+        
+        <div className="pr-icon-wrapper">
+          <ShieldCheck size={28} strokeWidth={2.5} />
         </div>
         
-        <h2 className="pr-title">Secure Payroll Access</h2>
+        <h2 className="pr-title">Security Clearance</h2>
         <p className="pr-subtitle">
-          This module contains highly sensitive compensation data. Enter your authorized security PIN to unlock the dashboard.
+          Payroll data is restricted. Enter your administrative PIN to authenticate as <strong>{adminEmail}</strong>.
         </p>
-        
-        <div className="pr-form-group">
-          <label className="pr-label">Administrator PIN</label>
-          <div className="pr-input-wrapper">
-            <Fingerprint size={20} className="pr-input-icon" />
+
+        <form onSubmit={handleUnlock} className="pr-form">
+          <div className="pr-input-container">
+            <Lock size={18} className="pr-input-icon" />
             <input
               ref={inputRef}
               type="password"
@@ -74,26 +76,27 @@ const Payroll = ({ onUnlock, adminEmail }) => {
               value={code}
               maxLength={6}
               disabled={locked || loading}
-              placeholder={locked ? 'Access Suspended (15m)' : '• • • • • •'}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} // Validation: Strict digits only
-              onKeyDown={(e) => { if (e.key === 'Enter') handleUnlock(); }}
+              placeholder={locked ? "Suspended" : "Enter PIN"}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
             />
           </div>
+
           {locked && (
             <div className="pr-alert-danger">
               <ShieldAlert size={14} />
-              <span>Too many failed attempts. Device locked.</span>
+              <span>Access temporarily suspended (15m).</span>
             </div>
           )}
-        </div>
-        
-        <button 
-          className="btn-pr-unlock" 
-          onClick={handleUnlock} 
-          disabled={loading || locked || code.length < 4}
-        >
-          {loading ? 'Authenticating...' : 'Unlock System'}
-        </button>
+
+          <button 
+            type="submit" 
+            className="pr-btn-unlock" 
+            disabled={loading || locked || code.length < 4}
+          >
+            {loading ? 'Verifying Credentials...' : 'Unlock '}
+          </button>
+        </form>
+
       </div>
     </div>
   );

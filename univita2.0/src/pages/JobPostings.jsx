@@ -308,7 +308,7 @@ const JobPostings = () => {
           </div>
         </div>
         <button className="expert-btn-primary" onClick={() => openJobForm()}>
-          <Plus size={16} /> <span>New Job Posting</span>
+          <Plus size={16} /> <span>New Post</span>
         </button>
       </div>
 
@@ -317,14 +317,14 @@ const JobPostings = () => {
         <div className="jp-toolbar">
           <div className="jp-tabs">
             <button className={`jp-tab ${activeTab === 'active' ? 'active' : ''}`} onClick={() => { setActiveTab('active'); setCurrentPage(1); }}>
-              Active Postings <span className="jp-tab-count">{jobs.filter(j => j.status === 'open').length}</span>
+              Active Post<span className="jp-tab-count">{jobs.filter(j => j.status === 'open').length}</span>
             </button>
             <button className={`jp-tab ${activeTab === 'closed' ? 'active' : ''}`} onClick={() => { setActiveTab('closed'); setCurrentPage(1); }}>
               Closed <span className="jp-tab-count">{jobs.filter(j => j.status === 'closed').length}</span>
             </button>
           </div>
           
-          <div className="expert-search-input-group" style={{ maxWidth: '320px', height: '42px', margin: 0 }}>
+          <div className="expert-search-input-group" style={{ maxWidth: '320px', height: '30px', margin: 0 }}>
             <Search size={16} className="text-muted" />
             <input 
               type="text" placeholder="Search job titles..." 
@@ -454,7 +454,7 @@ const JobPostings = () => {
       <FormalModal
         show={showJobModal}
         onClose={() => setShowJobModal(false)}
-        title={editingJob ? 'Edit Job Posting' : 'Create New Job Posting'}
+        title={editingJob ? 'Edit Job Posting' : 'Create New Job Post'}
         footer={
           <>
             <button className="expert-btn-secondary" onClick={() => setShowJobModal(false)}>Cancel</button>

@@ -310,50 +310,54 @@ const AttendanceAppeals = () => {
               ) : filteredPending.length === 0 ? (
                 <div className="aa-empty">No pending appeals match your criteria.</div>
               ) : (
-                <div className="aa-custom-requests-list">
+                <div className="aa-minimal-list">
                   {currentPending.map(appeal => (
-                    <div key={appeal.id} className="aa-custom-request-card">
-                      <div className="aa-custom-req-top">
-                        <div>
-                          <span className="aa-custom-name">{appeal.full_name}</span>
-                          <span className="aa-custom-id-tag">{appeal.employee_id}</span>
+                    <div key={appeal.id} className="aa-minimal-card">
+                      
+                      <div className="aa-minimal-header">
+                        <div className="aa-minimal-user">
+                          <div className="aa-minimal-avatar">
+                            {appeal.full_name ? appeal.full_name.charAt(0).toUpperCase() : 'U'}
+                          </div>
+                          <div className="aa-minimal-user-info">
+                            <span className="aa-minimal-name">{appeal.full_name}</span>
+                            <span className="aa-minimal-id">{appeal.employee_id}</span>
+                          </div>
                         </div>
-                        <span className="aa-custom-date-pill">{formatDate(appeal.date)}</span>
+                        <span className="aa-minimal-type-badge">{formatDate(appeal.date)}</span>
                       </div>
 
-                      <div className="aa-custom-details-grid">
-                        <div className="aa-custom-prop">
-                          <label>Requested Time In</label>
-                          <span className="nowrap">{formatTo12Hour(appeal.requested_time_in)}</span>
+                      <div className="aa-minimal-body">
+                        <div className="aa-minimal-grid">
+                          <div className="aa-minimal-field">
+                            <label>Requested Time In</label>
+                            <span>{formatTo12Hour(appeal.requested_time_in)}</span>
+                          </div>
+                          <div className="aa-minimal-field">
+                            <label>Requested Time Out</label>
+                            <span>{formatTo12Hour(appeal.requested_time_out)}</span>
+                          </div>
                         </div>
-                        <div className="aa-custom-prop">
-                          <label>Requested Time Out</label>
-                          <span className="nowrap">{formatTo12Hour(appeal.requested_time_out)}</span>
-                        </div>
-                        <div className="aa-custom-prop full-width">
+
+                        <div className="aa-minimal-field full-width" style={{ marginTop: '0.5rem' }}>
                           <label>Dispute Reason</label>
-                          <span className="reason-text">{appeal.reason}</span>
+                          <p>{appeal.reason || '—'}</p>
                         </div>
+
                         {appeal.image_url && (
-                          <div className="aa-custom-prop full-width">
-                            <label>Attached Proof</label>
-                            <span>
-                              <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link">
-                                <ExternalLink size={14} /> View Supporting Image
-                              </a>
-                            </span>
+                          <div className="aa-minimal-field full-width">
+                            <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-minimal-link">
+                              <ExternalLink size={14} /> View Supporting Image
+                            </a>
                           </div>
                         )}
                       </div>
 
-                      <div className="aa-custom-req-actions">
-                        <button className="aa-btn-reject-custom" onClick={() => openRemarkModal(appeal, 'rejected')}>
-                          <XCircle size={16} /> Reject Appeal
-                        </button>
-                        <button className="aa-btn-approve-custom" onClick={() => openRemarkModal(appeal, 'approved')}>
-                          <CheckCircle size={16} /> Approve Appeal
-                        </button>
+                      <div className="aa-minimal-footer">
+                        <button className="aa-btn-min-reject" onClick={() => openRemarkModal(appeal, 'rejected')}>Reject</button>
+                        <button className="aa-btn-min-approve" onClick={() => openRemarkModal(appeal, 'approved')}>Approve</button>
                       </div>
+
                     </div>
                   ))}
                 </div>
