@@ -144,15 +144,15 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
       {/* System Health Banner */}
       <section className="expert-banner">
         <div className="expert-banner-item">
-          <ShieldCheck size={18} className="text-muted" />
+          
           <span>Security Protocol: <strong>Active</strong></span>
         </div>
         <div className="expert-banner-item">
-          <Activity size={18} className="text-muted" />
+          
           <span>System Status: <strong>{stats.systemStatus}</strong></span>
         </div>
         <div className="expert-banner-item">
-          <Clock size={18} className="text-muted" />
+          
           <span>Last Synchronized: <strong>{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</strong></span>
         </div>
       </section>
@@ -161,7 +161,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
       <section className="expert-stats-grid grid-3">
         <div className="expert-stat-card" onClick={() => setView('employee-management')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Users size={20} /></div>
+            
             <span className="expert-stat-label">Active Personnel</span>
           </div>
           <div className="expert-stat-value">{stats.totalEmployees}</div>
@@ -169,7 +169,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
 
         <div className="expert-stat-card" onClick={() => setView('manage-request')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Calendar size={20} /></div>
+            
             <span className="expert-stat-label">Today's Visitors</span>
           </div>
           <div className="expert-stat-value">{stats.todayVisitors}</div>
@@ -177,7 +177,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
 
         <div className="expert-stat-card" onClick={() => setView('leave-management')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Bell size={20} /></div>
+            
             <span className="expert-stat-label">Pending Leaves</span>
           </div>
           <div className="expert-stat-value">{stats.pendingLeaves}</div>
@@ -189,7 +189,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
         <div className="expert-panel flex-2">
           <div className="expert-panel-header">
             <div className="expert-ph-title">
-              <AlertCircle size={18} className="text-muted" />
+              
               <span>Pending Requests Summary</span>
             </div>
           </div>
@@ -222,7 +222,7 @@ const AdminDashboard = ({ setView, onShowPayrollHistory }) => {
         <div className="expert-panel flex-1">
           <div className="expert-panel-header">
             <div className="expert-ph-title">
-              <Zap size={18} className="text-muted" />
+              
               <span>System Shortcuts</span>
             </div>
           </div>

@@ -200,19 +200,19 @@ const TodayVisitors = () => {
 
       <div className="tv-stats-grid">
         <div className="tv-stat-card">
-          <div className="tv-stat-header"><div className="tv-stat-icon"><Users size={20} color="#0F172A" /></div><span>Scheduled Today</span></div>
+          <div className="tv-stat-header"><span>Scheduled Today</span></div>
           <div className="tv-stat-value">{stats.total}</div>
         </div>
         <div className="tv-stat-card">
-          <div className="tv-stat-header"><div className="tv-stat-icon"><UserCheck size={20} color="#0F172A" /></div><span>Checked In</span></div>
+          <div className="tv-stat-header"><span>Checked In</span></div>
           <div className="tv-stat-value">{stats.arrived}</div>
         </div>
         <div className="tv-stat-card">
-          <div className="tv-stat-header"><div className="tv-stat-icon"><XCircle size={20} color="#0F172A" /></div><span>No Show</span></div>
+          <div className="tv-stat-header"><span>No Show</span></div>
           <div className="tv-stat-value">{stats.noShow}</div>
         </div>
         <div className="tv-stat-card">
-          <div className="tv-stat-header"><div className="tv-stat-icon"><ArrowLeftRight size={20} color="#0F172A" /></div><span>Tags Returned</span></div>
+          <div className="tv-stat-header"><span>Tags Returned</span></div>
           <div className="tv-stat-value">{stats.returned}</div>
         </div>
       </div>

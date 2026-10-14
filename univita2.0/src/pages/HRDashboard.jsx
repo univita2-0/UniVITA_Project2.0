@@ -157,15 +157,15 @@ const HRDashboard = ({ setView }) => {
       {/* System Health Banner */}
       <section className="expert-banner">
         <div className="expert-banner-item">
-          <Users size={18} className="text-muted" />
+          
           <span>HR Active: <strong>{stats.totalEmployees} Instructors</strong></span>
         </div>
         <div className="expert-banner-item">
-          <Clock size={18} className="text-muted" />
+         
           <span>Present Today: <strong>{stats.presentToday}</strong></span>
         </div>
         <div className="expert-banner-item">
-          <AlertCircle size={18} className="text-muted" />
+         
           <span>Total Pending Actions: <strong>{totalPendingActions}</strong></span>
         </div>
       </section>
@@ -174,7 +174,7 @@ const HRDashboard = ({ setView }) => {
       <section className="expert-stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <div className="expert-stat-card" onClick={() => handleNavigate('employee-management')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Users size={18} /></div>
+            
             <span className="expert-stat-label">Instructors</span>
           </div>
           <div className="expert-stat-value">{stats.totalEmployees}</div>
@@ -182,7 +182,7 @@ const HRDashboard = ({ setView }) => {
 
         <div className="expert-stat-card" onClick={() => handleNavigate('leave-management')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><FileText size={18} /></div>
+            
             <span className="expert-stat-label">Leaves</span>
           </div>
           <div className="expert-stat-value">{stats.pendingLeaves}</div>
@@ -190,7 +190,7 @@ const HRDashboard = ({ setView }) => {
 
         <div className="expert-stat-card" onClick={() => handleNavigate('overtime-requests')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Clock3 size={18} /></div>
+            
             <span className="expert-stat-label">Overtime</span>
           </div>
           <div className="expert-stat-value">{stats.pendingOvertime}</div>
@@ -198,7 +198,7 @@ const HRDashboard = ({ setView }) => {
 
         <div className="expert-stat-card" onClick={() => handleNavigate('attendance-correction')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><FileSpreadsheet size={18} /></div>
+            
             <span className="expert-stat-label">Corrections</span>
           </div>
           <div className="expert-stat-value">{stats.pendingCorrections}</div>
@@ -206,7 +206,7 @@ const HRDashboard = ({ setView }) => {
 
         <div className="expert-stat-card" onClick={() => handleNavigate('attendance-appeals')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><AlertCircle size={18} /></div>
+            
             <span className="expert-stat-label">Appeals</span>
           </div>
           <div className="expert-stat-value">{stats.pendingAppeals}</div>
@@ -218,7 +218,7 @@ const HRDashboard = ({ setView }) => {
         <div className="expert-panel flex-2">
           <div className="expert-panel-header">
             <div className="expert-ph-title">
-              <Clock size={18} className="text-muted" />
+              
               <span>HR Tasks Requiring Action</span>
             </div>
           </div>
@@ -250,7 +250,7 @@ const HRDashboard = ({ setView }) => {
         <div className="expert-panel flex-1">
           <div className="expert-panel-header">
             <div className="expert-ph-title">
-              <Zap size={18} className="text-muted" />
+            
               <span>HR Shortcuts</span>
             </div>
           </div>

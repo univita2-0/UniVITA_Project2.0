@@ -3545,7 +3545,6 @@ app.get('/api/dashboard/summary', async (req, res) => {
 
 setInterval(async () => {
   try {
-    
     const [rows] = await db.promise().query(
       "SELECT config_value FROM system_settings WHERE config_key = 'loiter_threshold_minutes'"
     );
@@ -3568,17 +3567,14 @@ setInterval(async () => {
           const durationText = hours > 0 ? `${hours} hr ${mins} mins` : `${mins} mins`;
 
           const actionLabel = `Loitering Alert (Stayed: ${durationText})`;
-          const alertMessage = `Visitor ${visitor.name} (Tag: ${visitor.bleId}) has been lingering in ${visitor.currentRoom} for ${durationText}.`;
 
           logVisitorHistory(
             visitor.id, visitor.name, visitor.bleId, 
             visitor.floor, visitor.currentRoom, actionLabel, visitor.x, visitor.y
           );
 
-          await db.promise().query(
-            "INSERT INTO emergency_alerts (title, message, severity, target_roles) VALUES (?, ?, 'warning', '[\"security\", \"admin\"]')",
-            ['Extended Stay / Loitering', alertMessage]
-          );
+          
+          console.log(`[SYSTEM ALERT] Loitering logged for ${visitor.name} (${durationText})`);
         }
       }
     }
@@ -3590,24 +3586,17 @@ setInterval(async () => {
 
 setInterval(async () => {
   try {
-    
     const [deadScanners] = await db.promise().query(`
       SELECT scanner_id, assigned_room FROM scanners 
       WHERE last_ping < NOW() - INTERVAL 5 MINUTE AND status = 'ONLINE'
     `);
 
     for (const scanner of deadScanners) {
-      // Mark as offline
+      
       await db.promise().query("UPDATE scanners SET status = 'OFFLINE' WHERE scanner_id = ?", [scanner.scanner_id]);
       
       
-      const alertMsg = `CRITICAL: Scanner ${scanner.scanner_id} in ${scanner.assigned_room} has gone offline. Please check power and Wi-Fi.`;
-      
-      await db.promise().query(
-        "INSERT INTO emergency_alerts (title, message, severity, target_roles) VALUES (?, ?, 'critical', '[\"security\", \"admin\"]')",
-        ['Scanner Offline', alertMsg]
-      );
-      console.log(`[ALERT] Scanner ${scanner.scanner_id} went offline!`);
+      console.log(`[SYSTEM ALERT] Scanner ${scanner.scanner_id} went offline! Updated status in database.`);
     }
   } catch (err) {
     console.error("Scanner Watchdog Error:", err);

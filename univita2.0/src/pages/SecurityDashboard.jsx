@@ -149,15 +149,15 @@ const SecurityDashboard = ({ setView }) => {
 
       <section className="expert-banner">
         <div className="expert-banner-item">
-          <ShieldCheck size={18} className="text-muted" />
+          
           <span>Security Protocol: <strong>Active</strong></span>
         </div>
         <div className="expert-banner-item">
-          <MapPin size={18} className="text-muted" />
+          
           <span>Active BLE Tags: <strong>{stats.activeBleTags}</strong></span>
         </div>
         <div className="expert-banner-item">
-          <Users size={18} className="text-muted" />
+          
           <span>Total Daily Visitors: <strong>{stats.totalVisitorsToday}</strong></span>
         </div>
       </section>
@@ -165,21 +165,21 @@ const SecurityDashboard = ({ setView }) => {
       <section className="expert-stats-grid grid-3">
         <div className="expert-stat-card" onClick={() => handleNavigate('manage-request')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Calendar size={20} /></div>
+            
             <span className="expert-stat-label">Scheduled Today</span>
           </div>
           <div className="expert-stat-value">{stats.approvedToday}</div>
         </div>
         <div className="expert-stat-card" onClick={() => handleNavigate('visitor-history')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><Users size={20} /></div>
+            
             <span className="expert-stat-label">Total Visitors</span>
           </div>
           <div className="expert-stat-value">{stats.totalVisitorsToday}</div>
         </div>
         <div className="expert-stat-card" onClick={() => handleNavigate('ble-tags')}>
           <div className="expert-stat-header">
-            <div className="expert-stat-icon bg-slate text-muted"><MapPin size={20} /></div>
+            
             <span className="expert-stat-label">Active BLE Tags</span>
           </div>
           <div className="expert-stat-value">{stats.activeBleTags}</div>
@@ -195,13 +195,13 @@ const SecurityDashboard = ({ setView }) => {
                 onClick={() => setActiveTab('visitors')}
                 style={{ flex: 1, padding: '1.25rem', background: activeTab === 'visitors' ? '#FFFFFF' : '#F8FAFC', border: 'none', borderBottom: activeTab === 'visitors' ? '2px solid #0F172A' : '1px solid #E2E8F0', cursor: 'pointer', fontWeight: 700, color: activeTab === 'visitors' ? '#0F172A' : '#64748B', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
               >
-                <UserCheck size={18} /> Current Visitors
+                 Current Visitors
               </button>
               <button 
                 onClick={() => setActiveTab('alerts')}
                 style={{ flex: 1, padding: '1.25rem', background: activeTab === 'alerts' ? '#FFFFFF' : '#F8FAFC', border: 'none', borderBottom: activeTab === 'alerts' ? '2px solid #DC2626' : '1px solid #E2E8F0', cursor: 'pointer', fontWeight: 700, color: activeTab === 'alerts' ? '#DC2626' : '#64748B', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
               >
-                <Bell size={18} /> System Alerts 
+                 System Alerts 
                 {visibleAlerts.length > 0 && (
                   <span style={{ background: '#DC2626', color: '#FFF', padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem' }}>{visibleAlerts.length}</span>
                 )}
@@ -269,7 +269,7 @@ const SecurityDashboard = ({ setView }) => {
         <div className="expert-panel flex-1">
           <div className="expert-panel-header">
             <div className="expert-ph-title">
-              <Zap size={18} className="text-muted" />
+              
               <span>Security Shortcuts</span>
             </div>
           </div>
