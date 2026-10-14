@@ -132,6 +132,14 @@ function App() {
     setCurrentView('payroll-main');
   };
 
+  // NEW: Forcefully clears the token from App state to ensure prompt on next visit
+  const handlePayrollLock = () => {
+    setPayrollToken(null);
+    setPayrollLocked(true);
+    localStorage.removeItem('payroll_token');
+    setCurrentView('payroll');
+  };
+
   const openPinModalForAdmin = (email) => {
     setPinAdminEmail(email);
     setShowPinModal(true);
@@ -222,6 +230,7 @@ function App() {
         return (
           <PayrollMain
             setView={handleSetView}
+            onLock={handlePayrollLock} /* Passed lock function down */
             onChangePin={() => openPinModalForAdmin(adminEmail)}
             onShowHistory={openPayrollHistory}
           />
@@ -259,7 +268,6 @@ function App() {
 
   return (
     <NotificationProvider>
-      {/* Global Live Emergency Banner for Web Users (Admins, HR, Security, Instructors) */}
       <div className="global-alerts-overlay">
         <EmergencyAlertBanner />
       </div>

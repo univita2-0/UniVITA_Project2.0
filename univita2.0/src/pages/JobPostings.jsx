@@ -6,7 +6,7 @@ import {
   Plus, Edit3, Trash2, Eye, Calendar as CalendarIcon,
   Users, FileText, CheckCircle, XCircle, Power,
   MapPin, DollarSign, Search, ChevronLeft, ChevronRight,
-  Building2, Clock, Mail, Phone, Briefcase
+  Building2, Clock, Mail, Phone, Briefcase, MoreVertical
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
@@ -56,7 +56,7 @@ const JobPostings = () => {
   const [applicantTab, setApplicantTab] = useState('all');
   const [applicantSearch, setApplicantSearch] = useState('');
   const [applicantsPage, setApplicantsPage] = useState(1);
-  const applicantsPerPage = 8;
+  const applicantsPerPage = 7; // Adjusted to fit the new sleek list
 
   // Applicant Details State
   const [showApplicantDetailsModal, setShowApplicantDetailsModal] = useState(false);
@@ -71,6 +71,9 @@ const JobPostings = () => {
   const [deleteJobId, setDeleteJobId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Dropdown Menu State
+  const [openDropdownId, setOpenDropdownId] = useState(null);
 
   const fetchJobs = useCallback(async () => {
     setLoading(true);
@@ -86,6 +89,18 @@ const JobPostings = () => {
   }, []);
 
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
+
+  // Handle closing dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => setOpenDropdownId(null);
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
+
+  const toggleDropdown = (e, id) => {
+    e.stopPropagation();
+    setOpenDropdownId(prev => prev === id ? null : id);
+  };
 
   const filteredJobs = jobs.filter(job => {
     if (activeTab === 'active' && job.status !== 'open') return false;
@@ -127,7 +142,6 @@ const JobPostings = () => {
       return toast.warning('Title and description are required.');
     }
     
-    // NEW VALIDATION: Ensure salary range is logical
     if (jobForm.salary_min && jobForm.salary_max) {
       if (Number(jobForm.salary_max) < Number(jobForm.salary_min)) {
         return toast.warning('Maximum salary must be greater than or equal to minimum salary.');
@@ -306,17 +320,15 @@ const JobPostings = () => {
   return (
     <div className="jp-wrapper">
       
-      {/* Main Container Card */}
       <div className="jp-main-card">
         
-        {/* Top Control Bar */}
         <div className="jp-control-bar">
           <div className="jp-segmented-tabs">
             <button 
               className={`jp-seg-tab ${activeTab === 'active' ? 'active' : ''}`}
               onClick={() => { setActiveTab('active'); setCurrentPage(1); }}
             >
-              Active Postings <span className={`jp-badge ${activeTab === 'active' ? 'blue' : ''}`}>{activeCount}</span>
+              Active Post <span className={`jp-badge ${activeTab === 'active' ? 'blue' : ''}`}>{activeCount}</span>
             </button>
             <button 
               className={`jp-seg-tab ${activeTab === 'closed' ? 'active' : ''}`}
@@ -342,7 +354,6 @@ const JobPostings = () => {
           </div>
         </div>
 
-        {/* Data Grid */}
         <div className="jp-table-container">
           {loading ? (
             <div className="jp-empty-box">Loading records...</div>
@@ -385,33 +396,51 @@ const JobPostings = () => {
                       </td>
                       <td>
                         <div className="jp-app-count">
-                          
                           <span>{job.applicant_count} </span>
                         </div>
                       </td>
                       <td className="text-right">
-                        <div className="jp-actions">
-                          <button className="jp-action-btn view" onClick={() => { setSelectedJob(job); setShowJobDetails(true); }} title="View Details">
-                            <Eye size={16} />
+                        
+                        <div className="jp-actions-row">
+                          <button 
+                            className="jp-action-btn-text primary" 
+                            onClick={() => viewApplicants(job)}
+                          >
+                            View applicants
                           </button>
                           
-                          <button className="jp-action-btn users relative" onClick={() => viewApplicants(job)} title="View Applicants">
-                            <Users size={16} />
-                            {job.applicant_count > 0 && <span className="jp-red-dot" />}
+                          <button 
+                            className="jp-action-btn-text" 
+                            onClick={() => openJobForm(job)}
+                          >
+                            Edit
                           </button>
 
-                          <button className="jp-action-btn edit" onClick={() => openJobForm(job)} title="Edit Posting">
-                            <Edit3 size={16} />
-                          </button>
-
-                          <button className="jp-action-btn toggle" onClick={() => handleToggleClick(job)} title={job.status === 'open' ? 'Close Job' : 'Reopen Job'}>
-                            {job.status === 'open' ? <Power size={16} /> : <CheckCircle size={16} />}
-                          </button>
-
-                          <button className="jp-action-btn delete" onClick={() => { setDeleteJobId(job.id); setShowDeleteConfirm(true); }} title="Delete">
-                            <Trash2 size={16} />
-                          </button>
+                          <div className="jp-dropdown-container">
+                            <button 
+                              className="jp-action-btn-icon" 
+                              onClick={(e) => toggleDropdown(e, job.id)}
+                            >
+                              <MoreVertical size={16} />
+                            </button>
+                            
+                            {openDropdownId === job.id && (
+                              <div className="jp-dropdown-menu">
+                                <button className="jp-dropdown-item" onClick={() => { setOpenDropdownId(null); setSelectedJob(job); setShowJobDetails(true); }}>
+                                  <Eye size={14} className="text-muted" /> View Details
+                                </button>
+                                <button className="jp-dropdown-item" onClick={() => { setOpenDropdownId(null); handleToggleClick(job); }}>
+                                  {job.status === 'open' ? <XCircle size={14} className="text-muted"/> : <CheckCircle size={14} className="text-muted" />}
+                                  {job.status === 'open' ? 'Close Job' : 'Reopen Job'}
+                                </button>
+                                <button className="jp-dropdown-item danger" onClick={() => { setOpenDropdownId(null); setDeleteJobId(job.id); setShowDeleteConfirm(true); }}>
+                                  <Trash2 size={14} /> Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
+
                       </td>
                     </tr>
                   ))
@@ -421,7 +450,6 @@ const JobPostings = () => {
           )}
         </div>
 
-        {/* Pagination */}
         {totalPages > 1 && (
           <div className="jp-pagination">
             <span className="jp-page-text">Showing {(currentPage - 1) * itemsPerPage + 1}-{Math.min(currentPage * itemsPerPage, filteredJobs.length)} of {filteredJobs.length} records</span>
@@ -440,7 +468,6 @@ const JobPostings = () => {
 
       {/* --- FORMAL MODALS --- */}
 
-      {/* Status Toggle Modal */}
       <FormalModal 
         show={showStatusConfirm} 
         onClose={() => setShowStatusConfirm(false)} 
@@ -464,7 +491,6 @@ const JobPostings = () => {
         </div>
       </FormalModal>
 
-      {/* Create/Edit Job Modal */}
       <FormalModal
         show={showJobModal}
         onClose={() => setShowJobModal(false)}
@@ -527,7 +553,6 @@ const JobPostings = () => {
         </div>
       </FormalModal>
 
-      {/* View Job Details Modal */}
       <FormalModal 
         show={showJobDetails} 
         onClose={() => setShowJobDetails(false)} 
@@ -572,20 +597,21 @@ const JobPostings = () => {
         </div>
       </FormalModal>
 
-      {/* Applicants List Modal */}
+      {/* --- REPLACED: Modern Applicants ATS Pipeline Modal --- */}
       <FormalModal 
         show={showApplicantsModal} 
         onClose={() => setShowApplicantsModal(false)} 
-        title={`Applicants: ${currentJobForApplicants?.title}`} 
+        title={`Pipeline: ${currentJobForApplicants?.title}`} 
         footer={<button className="jp-btn-cancel" onClick={() => setShowApplicantsModal(false)}>Close</button>}
       >
-        <div className="jp-modal-widen jp-pipeline-view">
-          <div className="jp-pipeline-toolbar">
-            <div className="jp-pipeline-tabs">
+        <div className="jp-modal-widen jp-ats-wrapper hide-scrollbar">
+          
+          <div className="jp-ats-toolbar">
+            <div className="jp-ats-segmented">
               {['all', 'new', 'reviewed', 'shortlisted', 'rejected', 'hired'].map(tab => (
                 <button 
                   key={tab} 
-                  className={`jp-pipe-tab ${applicantTab === tab ? 'active' : ''}`} 
+                  className={`jp-ats-tab ${applicantTab === tab ? 'active' : ''}`} 
                   onClick={() => { setApplicantTab(tab); setApplicantsPage(1); }}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -598,37 +624,37 @@ const JobPostings = () => {
             </div>
           </div>
           
-          <div className="jp-table-container outline">
-            <table className="jp-data-table">
-              <thead>
-                <tr>
-                  <th>Candidate Name</th>
-                  <th>Status</th>
-                  <th className="text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedApplicants.length === 0 ? (
-                  <tr><td colSpan="3"><div className="jp-empty-box small">No candidates found.</div></td></tr>
-                ) : (
-                  paginatedApplicants.map(app => (
-                    <tr key={app.id}>
-                      <td><div className="jp-cell-primary">{app.full_name}</div></td>
-                      <td><span className={`jp-app-badge ${app.status}`}>{app.status.toUpperCase()}</span></td>
-                      <td className="text-right">
-                        <button className="jp-btn-review" onClick={() => openApplicantDetails(app)}>
-                          Review Profile
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+          <div className="jp-ats-list-container">
+            {paginatedApplicants.length === 0 ? (
+              <div className="jp-empty-box small">No candidates match the current filters.</div>
+            ) : (
+              <div className="jp-ats-list">
+                {paginatedApplicants.map(app => (
+                  <div className="jp-ats-row" key={app.id}>
+                    <div className="jp-ats-candidate">
+                      <div className="jp-ats-avatar">
+                        {app.full_name ? app.full_name.charAt(0).toUpperCase() : '?'}
+                      </div>
+                      <span className="jp-ats-name">{app.full_name}</span>
+                    </div>
+                    
+                    <div className="jp-ats-status">
+                      <span className={`jp-app-badge ${app.status}`}>{app.status.toUpperCase()}</span>
+                    </div>
+                    
+                    <div className="jp-ats-action">
+                      <button className="jp-ats-review-btn" onClick={() => openApplicantDetails(app)}>
+                        Review Profile <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           
           {totalApplicantPages > 1 && (
-            <div className="jp-pagination small">
+            <div className="jp-pagination small ats-pagination">
               <span className="jp-page-text">Page {applicantsPage} of {totalApplicantPages}</span>
               <div className="jp-page-controls">
                 <button onClick={() => setApplicantsPage(p => Math.max(1, p - 1))} disabled={applicantsPage === 1}><ChevronLeft size={14}/></button>
@@ -639,7 +665,6 @@ const JobPostings = () => {
         </div>
       </FormalModal>
 
-      {/* Applicant Detailed Profile Modal */}
       <FormalModal 
         show={showApplicantDetailsModal} 
         onClose={() => setShowApplicantDetailsModal(false)} 
@@ -708,7 +733,6 @@ const JobPostings = () => {
         </div>
       </FormalModal>
 
-      {/* Schedule Interview Modal */}
       <FormalModal 
         show={showInterviewModal} 
         onClose={() => setShowInterviewModal(false)} 
@@ -750,7 +774,6 @@ const JobPostings = () => {
         </div>
       </FormalModal>
 
-      {/* Delete Confirmation Modal */}
       <FormalModal 
         show={showDeleteConfirm} 
         onClose={() => setShowDeleteConfirm(false)} 

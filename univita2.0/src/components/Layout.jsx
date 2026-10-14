@@ -24,7 +24,8 @@ const menuConfig = [
     ],
     roles: ['admin', 'hr_admin']
   },
-  { id: 'salary-list', label: 'Payroll', icon: <Wallet size={18} />, path: 'payroll-main', roles: ['hr_admin'] },
+  // FIXED: Added 'admin' role so the Administrator can see the menu, matching your screenshot.
+  { id: 'salary-list', label: 'Payroll', icon: <Wallet size={18} />, path: 'payroll-main', roles: ['admin', 'hr_admin'] },
   {
     id: 'leave-management', label: 'Leave Management', icon: <FileText size={18} />,
     submenu: [
@@ -96,7 +97,11 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
     setExpandedMenus(prev => ({ ...prev, [menuId]: !prev[menuId] }));
   };
 
-  const isActive = (path) => currentView === path;
+  // FIXED: Keeps the "Payroll" sidebar item highlighted even when you are on the Security PIN page
+  const isActive = (path) => {
+    if (path === 'payroll-main' && currentView.startsWith('payroll')) return true;
+    return currentView === path;
+  };
 
   const handleNavClick = (path) => {
     setView(path);
@@ -168,7 +173,6 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
           <X size={20} />
         </button>
         
-        {/* Updated Brand matching the mobile login design */}
         <div className="lay-brand">
           <h1>Uni<span className="lay-brand-vita">VÍTA</span></h1>
         </div>

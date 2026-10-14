@@ -57,13 +57,12 @@ const Payroll = ({ onUnlock, adminEmail }) => {
     <div className="pr-container">
       <div className="pr-auth-card">
         
-        <div className="pr-icon-wrapper">
-          <ShieldCheck size={28} strokeWidth={2.5} />
-        </div>
+       
         
         <h2 className="pr-title">Security Clearance</h2>
         <p className="pr-subtitle">
-          Payroll data is restricted. Enter your administrative PIN to authenticate as <strong>{adminEmail}</strong>.
+          Payroll data is restricted. <br/> Enter your administrative
+          PIN.
         </p>
 
         <form onSubmit={handleUnlock} className="pr-form">
@@ -93,7 +92,7 @@ const Payroll = ({ onUnlock, adminEmail }) => {
             className="pr-btn-unlock" 
             disabled={loading || locked || code.length < 4}
           >
-            {loading ? 'Verifying Credentials...' : 'Unlock '}
+            {loading ? 'Verifying...' : 'Unlock'}
           </button>
         </form>
 

@@ -1,24 +1,32 @@
-/* src/pages/Payroll.css */
+.lay-page-wrapper > .pr-container {
+  background: linear-gradient(135deg, #FFFFFF 0%, #0B1F33 100%) !important;
+}
 
 .pr-container {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 80vh;
-  background: transparent;
-  font-family: 'Inter', system-ui, sans-serif;
   
+ 
+  margin: -1.5rem -2rem; 
+  min-height: calc(100vh - 74px); 
+  padding: 2rem;
+  
+  font-family: 'Inter', system-ui, sans-serif;
   box-sizing: border-box;
 }
 
 .pr-auth-card {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 16px;
+  
+  background: #FFFFFF !important; 
+  border: none !important;
+  border-radius: 16px !important;
   padding: 2.5rem 3rem;
   width: 100%;
   max-width: 420px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 10px 15px -3px rgba(0, 0, 0, 0.02);
+  
+
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 10px 15px -3px rgba(0, 0, 0, 0.2) !important;
   text-align: center;
   box-sizing: border-box;
 }
@@ -126,19 +134,19 @@
 .pr-btn-unlock {
   width: 100%;
   padding: 0.85rem;
-  background: #0F172A;
-  color: #FFFFFF;
+  background: #64748B !important;
+  color: #FFFFFF !important;
   border: none;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .pr-btn-unlock:hover:not(:disabled) {
-  background: #1E293B;
-  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.1);
+  background: #475569 !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .pr-btn-unlock:disabled {
@@ -147,7 +155,12 @@
 }
 
 /* Mobile Responsiveness */
-@media (max-width: 480px) {
+@media (max-width: 640px) {
+  .pr-container {
+    margin: -1rem -0.5rem;
+    padding: 1rem;
+    min-height: calc(100vh - 60px);
+  }
   .pr-auth-card {
     padding: 2rem 1.5rem;
   }

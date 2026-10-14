@@ -332,7 +332,7 @@ const LeaveBalancesManagement = () => {
                     <td className="text-center text-muted">{lt.annual_quota || 15} days</td>
                     <td className="text-center">
                       <span className={`lbm-status-dot ${lt.is_active ? 'active' : 'disabled'}`}>
-                        {lt.is_active ? 'ACTIVE & ENABLED' : 'DISABLED'}
+                        {lt.is_active ? 'ENABLED' : 'DISABLED'}
                       </span>
                     </td>
                     <td className="text-right">
