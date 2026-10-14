@@ -1,7 +1,7 @@
 // src/pages/Profile.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import './Profile.css';
-import { Mail, Shield, Clock, Phone, Briefcase, UserCircle, CheckCircle } from 'lucide-react';
+import { Mail, Shield, Clock, Phone, Briefcase, UserCircle, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE } from '../api';
 
@@ -60,98 +60,83 @@ const Profile = () => {
   };
 
   return (
-    <div className="up-container">
-      <div className="up-wrapper">
+    <div className="pro-container">
+      <div className="pro-layout-grid">
         
-        {/* Unified Profile Card */}
-        <div className="up-card">
-          
-          {/* Left Sidebar: Identity Anchor */}
-          <div className="up-sidebar">
-            <div className="up-avatar">
+        {/* Left Column: Identity Anchor */}
+        <div className="pro-identity-pane">
+          <div className="pro-avatar-wrapper">
+            <div className="pro-avatar">
               {user.name ? user.name.charAt(0).toUpperCase() : '?'}
             </div>
-            <h2 className="up-name">{user.name}</h2>
-            <p className="up-role-text"></p>
-            
-           
-
-            <div className="up-status-indicator">
-              <CheckCircle size={16} className="up-success-icon" />
-              <span>Account is active & secured</span>
-            </div>
+            <div className="pro-status-dot" title="Active Authentication"></div>
           </div>
+          
+          <h2 className="pro-user-name">{user.name}</h2>
+          <span className="pro-role-badge">{getRoleLabel(user.role)}</span>
 
-          {/* Right Main: Details List */}
-          <div className="up-main-content">
-            
-            <div className="up-section">
-              <h3 className="up-section-title">Personal Information</h3>
-              <div className="up-list">
-                
-                <div className="up-list-item">
-                  <div className="up-item-label">
-                    <Mail size={16} />
-                    <span>Email Address</span>
-                  </div>
-                  <div className="up-item-value">{user.email}</div>
-                </div>
-
-                <div className="up-list-item">
-                  <div className="up-item-label">
-                    <Phone size={16} />
-                    <span>Contact Number</span>
-                  </div>
-                  <div className="up-item-value">{user.phone || 'Not provided'}</div>
-                </div>
-
-                <div className="up-list-item">
-                  <div className="up-item-label">
-                    <Briefcase size={16} />
-                    <span>Official Position</span>
-                  </div>
-                  <div className="up-item-value uppercase">{getDisplayPosition()}</div>
-                </div>
-
-                <div className="up-list-item">
-                  <div className="up-item-label">
-                    <UserCircle size={16} />
-                    <span>Personnel Identifier</span>
-                  </div>
-                  <div className="up-item-value">{user.employeeId || 'N/A'}</div>
-                </div>
-
-              </div>
+          <div className="pro-contact-block">
+            <div className="pro-contact-row">
+              <Mail size={15} className="pro-contact-icon" />
+              <span>{user.email}</span>
             </div>
-
-            <div className="up-divider"></div>
-
-            <div className="up-section">
-              <h3 className="up-section-title">System Access</h3>
-              <div className="up-list">
-                
-                <div className="up-list-item">
-                  <div className="up-item-label">
-                    <Clock size={16} />
-                    <span>Last Authentication</span>
-                  </div>
-                  <div className="up-item-value">{user.lastLogin}</div>
-                </div>
-
-                <div className="up-list-item">
-                  <div className="up-item-label">
-                    <Shield size={16} />
-                    <span>Security Clearance</span>
-                  </div>
-                  <div className="up-item-value uppercase">{user.role} tier</div>
-                </div>
-
-              </div>
+            <div className="pro-contact-row">
+              <Phone size={15} className="pro-contact-icon" />
+              <span>{user.phone || 'No phone registered'}</span>
             </div>
-
           </div>
         </div>
-        
+
+        {/* Right Column: Detailed Specifications */}
+        <div className="pro-details-pane">
+          
+          {/* Section 1: Administrative Profile */}
+          <div className="pro-detail-card">
+            <div className="pro-card-header">
+              
+              <h3>Administrative Profile</h3>
+            </div>
+            <div className="pro-card-body">
+              <div className="pro-data-row">
+                <span className="pro-label">Personnel Identifier</span>
+                <span className="pro-value mono">{user.employeeId || 'N/A'}</span>
+              </div>
+              <div className="pro-data-row">
+                <span className="pro-label">Assigned Designation</span>
+                <span className="pro-value uppercase">{getDisplayPosition()}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Security & System Access */}
+          <div className="pro-detail-card">
+            <div className="pro-card-header">
+              <div className="pro-header-icon teal">
+                <ShieldCheck size={18} />
+              </div>
+              <h3>Security & Authentication</h3>
+            </div>
+            <div className="pro-card-body">
+              <div className="pro-data-row">
+                <span className="pro-label">Authorization Tier</span>
+                <span className="pro-value highlight uppercase">{user.role} LEVEL</span>
+              </div>
+              <div className="pro-data-row">
+                <span className="pro-label">Last Authentication</span>
+                <span className="pro-value">{user.lastLogin}</span>
+              </div>
+              <div className="pro-data-row">
+                <span className="pro-label">Session Status</span>
+                <div className="pro-value-badge success">
+                  <CheckCircle2 size={14} />
+                  <span>Secured & Encrypted</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
       </div>
     </div>
   );

@@ -141,10 +141,7 @@ const CompletedVisits = () => {
           </div>
 
           <div className="cv-action-group">
-            <button className="btn-search-modern" onClick={fetchHistory} disabled={loading}>
-              <Search size={16} /> 
-              <span>{loading ? 'Searching...' : 'Search Records'}</span>
-            </button>
+            
             <button className="btn-export-modern" onClick={exportToCSV} disabled={visitors.length === 0}>
               <Download size={16} /> 
               <span>Export CSV</span>

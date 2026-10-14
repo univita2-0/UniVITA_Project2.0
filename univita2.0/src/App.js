@@ -164,7 +164,7 @@ function App() {
       case 'leave-balances': return { title: 'Leave Balance' };
       case 'emergency-alerts': return { title: 'Emergency Alerts' };
       case 'profile': return { title: 'Profile' };
-      case 'job-postings': return { title: 'Job Postings' };
+      case 'job-postings': return { title: 'Recruitment' };
       case 'performance': return { title: 'Performance Evaluation' };
       case 'policies': return { title: 'HR Policies' };
       case 'settings': return { title: 'Settings' };

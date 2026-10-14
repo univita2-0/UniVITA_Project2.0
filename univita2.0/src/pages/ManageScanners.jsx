@@ -168,7 +168,7 @@ const ManageScanners = () => {
           </div>
         </div>
         <button className="expert-btn-primary" onClick={() => { handleFloorChange('5'); setShowAddModal(true); }}>
-          <Plus size={16} /> Register / Assign Scanner
+          <Plus size={16} /> Assign Scanner
         </button>
       </div>
 
