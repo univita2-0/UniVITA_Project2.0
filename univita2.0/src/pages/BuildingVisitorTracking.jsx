@@ -221,13 +221,25 @@ const BuildingVisitorTracking = () => {
     }
   };
 
+  useEffect(() => {
+    let interval;
+    if (showHistoryModal) {
+      fetchVisitorHistory(); 
+      interval = setInterval(() => {
+        fetchVisitorHistory();
+      }, 5000); 
+    }
+    return () => clearInterval(interval);
+  }, [showHistoryModal]);
+
   const openHistoryModal = () => {
-    fetchVisitorHistory();
     setHistorySearchTerm('');
     setHistoryDateFilter('');
     setHistoryCurrentPage(1);
     setShowHistoryModal(true);
   };
+
+ 
 
   // History Filtering Logic
   const filteredHistory = visitorHistory.filter(item => {
@@ -257,10 +269,28 @@ const BuildingVisitorTracking = () => {
   const historyStartIndex = (historyCurrentPage - 1) * historyRowsPerPage;
   const currentHistoryData = filteredHistory.slice(historyStartIndex, historyStartIndex + historyRowsPerPage);
 
+
+  const [loiterThresholdMs, setLoiterThresholdMs] = useState(2 * 60 * 1000); // Default to 2 minutes
+
+ 
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/settings`, getAuthHeaders());
+        if (res.data && res.data.loiter_threshold_minutes) {
+          setLoiterThresholdMs(parseInt(res.data.loiter_threshold_minutes, 10) * 60 * 1000);
+        }
+      } catch (err) {
+        console.error('Failed to fetch system settings:', err);
+      }
+    };
+    fetchSettings();
+  }, []);
+
   useEffect(() => {
     const currentVisitorIds = visitors.map(v => v.id);
     const now = Date.now();
-    const IDLE_LIMIT_MS = 2 * 60 * 1000;
+    const IDLE_LIMIT_MS = loiterThresholdMs;
 
     prevVisitorsRef.current.forEach(prevVisitor => {
       if (!currentVisitorIds.includes(prevVisitor.id)) {
@@ -306,7 +336,7 @@ const BuildingVisitorTracking = () => {
     });
 
     prevVisitorsRef.current = visitors;
-  }, [visitors]);
+  }, [visitors, , loiterThresholdMs]);
 
   const currentVisitors = visitors.filter(v => 
     v.floor === currentFloor && 
@@ -569,7 +599,8 @@ const BuildingVisitorTracking = () => {
               } else if (record.event_type === 'move') {
                 badgeStyle = { backgroundColor: '#E1EFFE', color: '#1E429F', border: '1px solid #A4CAFE' };
                 eventLabel = 'Moved Location';
-              } else if (record.event_type === 'loitering') {
+              } else if (record.event_type && record.event_type.toLowerCase().includes('loitering')) {
+                
                 badgeStyle = { backgroundColor: '#FEECDC', color: '#8A2C0D', border: '1px solid #FDBA8C' };
                 eventLabel = 'Loitering Warning';
               }

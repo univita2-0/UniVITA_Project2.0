@@ -3582,12 +3582,13 @@ app.get('/api/dashboard/summary', async (req, res) => {
 });
 
 
-
 setInterval(async () => {
   try {
+    
     const [rows] = await db.promise().query(
       "SELECT config_value FROM system_settings WHERE config_key = 'loiter_threshold_minutes'"
     );
+    
     
     const thresholdMinutes = rows.length > 0 ? parseInt(rows[0].config_value, 10) : 2;
     const LOITER_THRESHOLD_MS = thresholdMinutes * 60 * 1000;
@@ -3599,7 +3600,7 @@ setInterval(async () => {
       if (visitor && !visitor.isDisconnected && visitor.roomEnteredAt) {
         const stayDurationMs = now - visitor.roomEnteredAt;
         
-        
+       
         const inWrongRoom = visitor.destination && visitor.destination !== 'Unknown' && 
                             visitor.currentRoom !== 'Unknown' && visitor.currentRoom !== visitor.destination;
 
@@ -3612,14 +3613,14 @@ setInterval(async () => {
             visitor.floor, visitor.currentRoom, 'loitering', visitor.x, visitor.y
           );
 
-          console.log(`[SYSTEM ALERT] Loitering logged for ${visitor.name}`);
+          console.log(`[SYSTEM ALERT] Loitering logged for ${visitor.name} (${thresholdMinutes} mins)`);
         }
       }
     }
   } catch (err) {
     console.error("Loitering Watchdog Error:", err);
   }
-}, 60000);
+}, 10000);
 
 
 setInterval(async () => {
@@ -3966,23 +3967,23 @@ app.get('/api/positions', async (req, res) => {
           floor: live.floor,
           currentRoom: live.currentRoom,
           destination: v.destination,
-          x: null,                       // HIDE PIN FROM MAP WHEN SIGNAL IS LOST
+          x: null,                      
           y: null,
           lastSeen: live.lastSeen,
           isDisconnected: true,
           disconnectedAt: live.disconnectedAt || 'Recent'
         });
       } 
-      // Checked in at reception desk, but NO scanner has detected the beacon yet
+      
       else {
         result.push({
           id: bleId,
           name: fullName,
           bleId: bleId,
           floor: "5",
-          currentRoom: "Waiting for Scanner...", // Not in any room yet
+          currentRoom: "Waiting for Scanner...", 
           destination: v.destination,
-          x: null,                               // NO PIN PLOTTED ON BLUEPRINT
+          x: null,                               
           y: null,
           lastSeen: now,
           isDisconnected: false,
