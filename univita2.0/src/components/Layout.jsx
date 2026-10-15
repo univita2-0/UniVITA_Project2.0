@@ -25,7 +25,7 @@ const menuConfig = [
     roles: ['admin', 'hr_admin']
   },
   // FIXED: Added 'admin' role so the Administrator can see the menu, matching your screenshot.
-  { id: 'salary-list', label: 'Payroll', icon: <Wallet size={18} />, path: 'payroll-main', roles: ['admin', 'hr_admin'] },
+  { id: 'salary-list', label: 'Payroll', icon: <Wallet size={18} />, path: 'payroll-main', roles: ['hr_admin'] },
   {
     id: 'leave-management', label: 'Leave Management', icon: <FileText size={18} />,
     submenu: [

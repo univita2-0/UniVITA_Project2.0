@@ -37,7 +37,8 @@ const RoleManagement = () => {
   const fetchUsers = async () => {
     try {
       const res = await axios.get(`${API_BASE}/employees`, getAuthHeaders());
-      setUsers(res.data);
+      const activeUsers = res.data.filter(user => user.status === 'active');
+      setUsers(activeUsers);
     } catch (err) {
       console.error('Failed to fetch users', err);
       toast.error('Failed to load users');

@@ -572,7 +572,7 @@ const Schedule = () => {
             setShowBulkModal(false);
             setManualBulkRows([]);
           }}
-          title="Bulk Assign Schedules"
+          title="Assign Schedules"
           wide
           footer={
             <>

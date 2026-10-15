@@ -142,7 +142,8 @@ export default function ProfileScreen({ navigation }) {
 
           if (freshUser.profile_picture) {
             const baseUrl = API_URL.replace('/api', '');
-            const fullImageUrl = `${baseUrl}${freshUser.profile_picture}`;
+            const cleanPath = freshUser.profile_picture.startsWith('/') ? freshUser.profile_picture : `/${freshUser.profile_picture}`;
+            const fullImageUrl = `${baseUrl}${cleanPath}?t=${Date.now()}`;
             setProfileImage(fullImageUrl);
             await AsyncStorage.setItem(`@profile_picture_${userId}`, fullImageUrl);
           }
@@ -190,32 +191,50 @@ export default function ProfileScreen({ navigation }) {
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const asset = result.assets[0];
-      setProfileImage(asset.uri); // Show local photo immediately
+      setProfileImage(asset.uri); 
       setIsUploadingImage(true);
 
       try {
-        const res = await updateProfile(userData.id, {
-          full_name: userData.name,
-          email: userData.email,
-          profile_picture: asset
+        const token = await AsyncStorage.getItem('auth_token');
+        
+        // EXPLICIT FORM DATA CONSTRUCTION FOR MULTIPART UPLOAD
+        const formData = new FormData();
+        formData.append('full_name', userData.name);
+        formData.append('email', userData.email);
+        
+        const filename = asset.uri.split('/').pop() || `profile_${Date.now()}.jpg`;
+        const match = /\.(\w+)$/.exec(filename);
+        const type = match ? `image/${match[1]}` : `image/jpeg`;
+
+        formData.append('profile_picture', {
+          uri: Platform.OS === 'ios' ? asset.uri.replace('file://', '') : asset.uri,
+          name: filename,
+          type: type
         });
 
-        if (res.success && res.profile_picture) {
+        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            Authorization: `Bearer ${token}`
+          }
+        });
+
+        if (res.data.success && res.data.profile_picture) {
           const baseUrl = API_URL.replace('/api', '');
-          const cleanPath = res.profile_picture.startsWith('/') ? res.profile_picture : `/${res.profile_picture}`;
-          // Cache-busting query parameter forces device to reload the image immediately
+          const cleanPath = res.data.profile_picture.startsWith('/') ? res.data.profile_picture : `/${res.data.profile_picture}`;
           const fullImageUrl = `${baseUrl}${cleanPath}?t=${Date.now()}`;
+          
           setProfileImage(fullImageUrl);
           await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
           Alert.alert("Success", "Profile picture updated successfully!");
         } else {
-          throw new Error(res.message || "Failed to update profile picture on server.");
+          throw new Error(res.data.message || "Failed to update profile picture on server.");
         }
       } catch (err) {
         console.error("Upload Error:", err);
         const savedImage = await AsyncStorage.getItem(`@profile_picture_${userData.id}`);
         setProfileImage(savedImage || null);
-        Alert.alert("Upload Error", err.message || "Could not save profile picture to server.");
+        Alert.alert("Upload Error", err.response?.data?.message || err.message || "Could not save profile picture to server.");
       } finally {
         setIsUploadingImage(false);
       }
@@ -307,7 +326,7 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.headerSection}>
             <View style={styles.avatarContainer}>
               <View style={styles.avatar}>
-                {profileImage ? (
+                {profileImage && profileImage !== '' ? (
                   <Image 
                     key={profileImage}
                     source={{ uri: profileImage }} 
