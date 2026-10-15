@@ -148,13 +148,24 @@ const BuildingVisitorTracking = () => {
   // Draw markers
   useEffect(() => {
     if (!mapRef.current) return;
-    visitors.forEach((visitor, index) => {
+    
+    
+    const roomCounts = {};
+
+    visitors.forEach((visitor) => {
       if (visitor.floor !== currentFloor) {
         if (markersRef.current[visitor.id]) markersRef.current[visitor.id].setOpacity(0);
         return;
       }
+      
+      const roomKey = `${visitor.floor}-${visitor.currentRoom}`;
+      if (!roomCounts[roomKey]) roomCounts[roomKey] = 0;
+      
       const lat = visitor.y;
-      const lng = visitor.x + (index * 15);
+      
+      const lng = visitor.x + (roomCounts[roomKey] * 6);
+      roomCounts[roomKey]++;
+
       if (lat == null || lng == null) return;
 
       if (markersRef.current[visitor.id]) {
@@ -176,6 +187,7 @@ const BuildingVisitorTracking = () => {
         markersRef.current[visitor.id] = marker;
       }
     });
+    
     Object.keys(markersRef.current).forEach(id => {
       if (!visitors.some(v => v.id === id)) {
         markersRef.current[id].remove();

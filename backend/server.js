@@ -3588,7 +3588,8 @@ setInterval(async () => {
     const [rows] = await db.promise().query(
       "SELECT config_value FROM system_settings WHERE config_key = 'loiter_threshold_minutes'"
     );
-    const thresholdMinutes = rows.length > 0 ? parseInt(rows[0].config_value, 10) : 30;
+    
+    const thresholdMinutes = rows.length > 0 ? parseInt(rows[0].config_value, 10) : 2;
     const LOITER_THRESHOLD_MS = thresholdMinutes * 60 * 1000;
 
     const now = Date.now();
@@ -3597,24 +3598,21 @@ setInterval(async () => {
       const visitor = liveVisitors[bleId];
       if (visitor && !visitor.isDisconnected && visitor.roomEnteredAt) {
         const stayDurationMs = now - visitor.roomEnteredAt;
-        const totalMinutes = Math.floor(stayDurationMs / 60000);
+        
+        
+        const inWrongRoom = visitor.destination && visitor.destination !== 'Unknown' && 
+                            visitor.currentRoom !== 'Unknown' && visitor.currentRoom !== visitor.destination;
 
-        if (stayDurationMs >= LOITER_THRESHOLD_MS && !visitor.loiterAlertSent) {
+        if (inWrongRoom && stayDurationMs >= LOITER_THRESHOLD_MS && !visitor.loiterAlertSent) {
           visitor.loiterAlertSent = true; 
 
-          const hours = Math.floor(totalMinutes / 60);
-          const mins = totalMinutes % 60;
-          const durationText = hours > 0 ? `${hours} hr ${mins} mins` : `${mins} mins`;
-
-          const actionLabel = `Loitering Alert (Stayed: ${durationText})`;
-
+          
           logVisitorHistory(
             visitor.id, visitor.name, visitor.bleId, 
-            visitor.floor, visitor.currentRoom, actionLabel, visitor.x, visitor.y
+            visitor.floor, visitor.currentRoom, 'loitering', visitor.x, visitor.y
           );
 
-          
-          console.log(`[SYSTEM ALERT] Loitering logged for ${visitor.name} (${durationText})`);
+          console.log(`[SYSTEM ALERT] Loitering logged for ${visitor.name}`);
         }
       }
     }
