@@ -262,7 +262,7 @@ const LocationsManagement = () => {
                             <Edit3 size={18} color="#475569" />
                           </button>
                           <button className="expert-btn-icon danger" onClick={() => handleDeleteClick(loc.id, loc.name)} title="Delete Location">
-                            <Trash2 size={18} />
+                            <Trash2 size={18} color="#EF4444"/>
                           </button>
                         </div>
                       </td>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Cpu, Tag, Search, X, ChevronLeft, ChevronRight, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, Cpu, Tag, Search, X, ChevronLeft, ChevronRight, ShieldAlert, Edit2 } from 'lucide-react';
 import { API_BASE } from '../api';
 import FormalModal from '../components/FormalModal';
 import './ManageBLETags.css';
@@ -29,6 +29,52 @@ const ManageBLETags = () => {
   // Delete Modal State
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [tagToDelete, setTagToDelete] = useState(null);
+
+  // Edit Modal State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editTagId, setEditTagId] = useState(null);
+  const [editBleId, setEditBleId] = useState('');
+  const [editBleLabel, setEditBleLabel] = useState('');
+  const [editBleMac, setEditBleMac] = useState('');
+
+  const triggerEdit = (tag) => {
+    setEditTagId(tag.id);
+    setEditBleId(tag.ble_id);
+    setEditBleLabel(tag.label || '');
+    setEditBleMac(tag.mac_address);
+    setShowEditModal(true);
+  };
+
+  const handleEdit = async (e) => {
+    e.preventDefault();
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    if (!macRegex.test(editBleMac.trim())) {
+      toast.warning('Invalid MAC Address format. Please use the format XX:XX:XX:XX:XX:XX');
+      return;
+    }
+    if (!editBleId.trim() || !editBleLabel.trim()) {
+      toast.warning('BLE ID and Label are required fields.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await axios.put(`${API_BASE}/ble-tags/${editTagId}`, {
+        ble_id: editBleId.trim(),
+        label: editBleLabel.trim(),
+        mac_address: editBleMac.trim().toUpperCase()
+      }, getAuthHeaders());
+      
+      toast.success('BLE Tag successfully updated.');
+      setShowEditModal(false);
+      fetchBleTags();
+    } catch (err) { 
+      const serverMessage = err.response?.data?.message || err.response?.data?.error;
+      toast.error(serverMessage ? `Failed to update BLE tag: ${serverMessage}` : 'Failed to update BLE tag.'); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
 
   // Reset page on search
   useEffect(() => { setCurrentPage(1); }, [searchQuery]);
@@ -79,7 +125,10 @@ const ManageBLETags = () => {
       setShowAddModal(false);
       fetchBleTags();
     } catch (err) { 
-      const errorMsg = err.response?.data?.error || 'Failed to register BLE tag.';
+      const serverMessage = err.response?.data?.message || err.response?.data?.error;
+      const errorMsg = serverMessage 
+        ? `Failed to register BLE tag: ${serverMessage}` 
+        : 'Failed to register BLE tag.';
       toast.error(errorMsg); 
     } finally { 
       setLoading(false); 
@@ -183,8 +232,11 @@ const ManageBLETags = () => {
                       <td><span className="bt-mac-badge">{tag.mac_address}</span></td>
                       <td>
                         <div className="expert-action-group right">
+                          <button className="expert-btn-icon" onClick={() => triggerEdit(tag)} title="Edit Tag">
+                            <Edit2 size={18} />
+                          </button>
                           <button className="expert-btn-icon danger" onClick={() => triggerDelete(tag)} title="Delete Tag">
-                            <Trash2 size={18} />
+                            <Trash2 size={18} color="#EF4444" />
                           </button>
                         </div>
                       </td>
@@ -274,6 +326,49 @@ const ManageBLETags = () => {
             <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0 }}>
               Removing this hardware tag will unassign it from any active visitors and prevent it from being tracked by the campus receivers.
             </p>
+          </div>
+        </div>
+      </FormalModal>
+
+      {/* Edit Tag Modal */}
+      <FormalModal show={showEditModal} onClose={() => setShowEditModal(false)} title="Edit BLE Hardware Tag" footer={
+        <>
+          <button className="expert-btn-secondary" onClick={() => setShowEditModal(false)} disabled={loading}>Cancel</button>
+          <button className="expert-btn-primary" onClick={handleEdit} disabled={loading}>
+            {loading ? 'Saving...' : 'Save Changes'}
+          </button>
+        </>
+      }>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="bt-form-group">
+            <label>Hardware BLE ID <span className="text-danger">*</span></label>
+            <input 
+              type="text" 
+              value={editBleId} 
+              onChange={e => setEditBleId(e.target.value)} 
+              disabled={loading}
+              className="expert-clean-input border"
+            />
+          </div>
+          <div className="bt-form-group">
+            <label>Assigned Label / Name <span className="text-danger">*</span></label>
+            <input 
+              type="text" 
+              value={editBleLabel} 
+              onChange={e => setEditBleLabel(e.target.value)} 
+              disabled={loading}
+              className="expert-clean-input border"
+            />
+          </div>
+          <div className="bt-form-group">
+            <label>MAC Address <span className="text-danger">*</span></label>
+            <input 
+              type="text" 
+              value={editBleMac} 
+              onChange={e => setEditBleMac(e.target.value)} 
+              disabled={loading}
+              className="expert-clean-input border font-mono"
+            />
           </div>
         </div>
       </FormalModal>

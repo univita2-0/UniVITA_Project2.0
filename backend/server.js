@@ -3149,7 +3149,7 @@ app.post('/api/ble-tags', authenticateToken, async (req, res) => {
     );
 
     if (existing.length > 0) {
-      return res.status(409).json({ success: false, message: "A tag with this BLE ID or MAC address already exists." });
+      return res.status(409).json({ success: false, message: "BLE ID or MAC address already exists." });
     }
 
     const [result] = await db.promise().query(
@@ -3159,6 +3159,46 @@ app.post('/api/ble-tags', authenticateToken, async (req, res) => {
 
     logAction(req.user.id, 'CREATE_BLE_TAG', 'ble_tag', result.insertId, req);
     res.status(201).json({ success: true, message: "BLE Tag added successfully.", id: result.insertId });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.put('/api/ble-tags/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+
+  const { id } = req.params;
+  const { ble_id, label, mac_address } = req.body;
+
+  if (!ble_id || !mac_address) {
+    return res.status(400).json({ success: false, message: "BLE ID and MAC address are required." });
+  }
+
+  const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+  if (!macRegex.test(mac_address.trim())) {
+    return res.status(400).json({ success: false, message: "Invalid MAC address format." });
+  }
+
+  try {
+    // Check if another tag already uses this BLE ID or MAC Address
+    const [existing] = await db.promise().query(
+      "SELECT id FROM ble_tags WHERE (ble_id = ? OR UPPER(mac_address) = UPPER(?)) AND id != ?", 
+      [ble_id.trim(), mac_address.trim(), id]
+    );
+
+    if (existing.length > 0) {
+      return res.status(409).json({ success: false, message: "A different tag with this BLE ID or MAC address already exists." });
+    }
+
+    await db.promise().query(
+      "UPDATE ble_tags SET ble_id = ?, label = ?, mac_address = ? WHERE id = ?",
+      [ble_id.trim(), label ? label.trim() : '', mac_address.trim().toUpperCase(), id]
+    );
+
+    logAction(req.user.id, 'UPDATE_BLE_TAG', 'ble_tag', id, req);
+    res.json({ success: true, message: "BLE Tag updated successfully." });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

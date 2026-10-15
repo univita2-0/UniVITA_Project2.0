@@ -197,7 +197,7 @@ const ManageReasons = () => {
                             <Edit3 size={18} color="#475569" />
                           </button>
                           <button className="expert-btn-icon danger" onClick={() => openDeleteModal(reason.id)} title="Delete">
-                            <Trash2 size={18} />
+                            <Trash2 size={18} color="#EF4444"/>
                           </button>
                         </div>
                       </td>

@@ -708,9 +708,9 @@ const EmployeeManagement = () => {
                   <td className="actions">
                     <button className="action-icon" onClick={() => openEditModal(emp)} title="Edit Profile"><Edit2 size={16} /></button>
                     {emp.status !== 'deleted' ? (
-                      <button className="action-icon danger" onClick={() => handleSoftDelete(emp)} title="Move to Deleted"><Trash2 size={16} /></button>
+                      <button className="action-icon danger" onClick={() => handleSoftDelete(emp)} title="Move to Deleted"><Trash2 size={16} color="#EF4444"/></button>
                     ) : (
-                      <button className="action-icon danger" onClick={() => handlePermanentDelete(emp)} title="Permanently Delete"><Trash2 size={16} /></button>
+                      <button className="action-icon danger" onClick={() => handlePermanentDelete(emp)} title="Permanently Delete"><Trash2 size={16} color="#EF4444"/></button>
                     )}
                   </td>
                 </tr>

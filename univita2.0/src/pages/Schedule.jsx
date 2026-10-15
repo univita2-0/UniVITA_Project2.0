@@ -472,7 +472,7 @@ const Schedule = () => {
                               {canEdit && (
                                 <div className="sch-session-actions">
                                   <Edit3 size={14} className="sch-action-icon edit" onClick={(e) => { e.stopPropagation(); handleEditClick(displaySession); }} />
-                                  <Trash2 size={14} className="sch-action-icon delete" onClick={(e) => { e.stopPropagation(); openDeleteConfirm(displaySession); }} />
+                                  <Trash2 size={14} color="#EF4444" className="sch-action-icon delete" onClick={(e) => { e.stopPropagation(); openDeleteConfirm(displaySession); }} />
                                 </div>
                               )}
                             </div>
@@ -636,7 +636,7 @@ const Schedule = () => {
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <button className="sch-remove-row-btn" onClick={() => removeManualBulkRow(row.id)} title="Remove row">
-                            <Trash2 size={16} />
+                            <Trash2 size={16} color="#EF4444"/>
                           </button>
                         </td>
                       </tr>

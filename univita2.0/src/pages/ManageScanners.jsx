@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Cpu, MapPin, Search, X, ChevronLeft, ChevronRight, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, Cpu, MapPin, Search, X, ChevronLeft, ChevronRight, ShieldAlert, Edit2 } from 'lucide-react';
 import { API_BASE } from '../api';
 import FormalModal from '../components/FormalModal';
 import './ManageScanners.css';
@@ -228,7 +228,7 @@ const ManageScanners = () => {
                         <div className="expert-action-group right">
                           <button 
                             className="expert-btn-icon" 
-                            title="Edit Assignment"
+                            title="Edit Scanner"
                             onClick={() => {
                               setNewScannerId(scanner.scanner_id);
                               setNewAssignedFloor(scanner.assigned_floor);
@@ -236,10 +236,10 @@ const ManageScanners = () => {
                               setShowAddModal(true);
                             }}
                           >
-                            <MapPin size={18} />
+                            <Edit2 size={18} />
                           </button>
                           <button className="expert-btn-icon danger" onClick={() => triggerDelete(scanner)} title="Remove Scanner">
-                            <Trash2 size={18} />
+                            <Trash2 size={18} color="#EF4444" />
                           </button>
                         </div>
                       </td>
