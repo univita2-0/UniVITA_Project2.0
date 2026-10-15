@@ -889,6 +889,69 @@ const AppointmentPage = ({ onAdminLogin }) => {
             </div>
           </section>
 
+          {/* EXCLUSIVE INSTRUCTOR MOBILE APP DOWNLOAD SECTION */}
+<section className="ap-section ap-bg-white" style={{ padding: '4rem 0' }}>
+  <div className="ap-container">
+    <div style={{
+      background: '#0F172A',
+      borderRadius: '20px',
+      padding: '3rem 2.5rem',
+      color: '#FFFFFF',
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: '2rem',
+      border: '1px solid #1E293B',
+      boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+    }}>
+      <div style={{ maxWidth: '600px' }}>
+        <span style={{ 
+          background: 'rgba(13, 148, 136, 0.2)', 
+          color: '#2DD4BF', 
+          padding: '0.4rem 1rem', 
+          borderRadius: '99px', 
+          fontSize: '0.8rem', 
+          fontWeight: 700, 
+          textTransform: 'uppercase', 
+          letterSpacing: '0.05em',
+          border: '1px solid rgba(45, 212, 191, 0.3)'
+        }}>
+          Authorized Faculty Only
+        </span>
+        <h2 style={{ fontSize: '1.85rem', fontWeight: 800, margin: '1rem 0 0.5rem 0', color: '#FFFFFF' }}>
+          Mobile Application
+        </h2>
+        <p style={{ color: '#94A3B8', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
+          This Android application is strictly for active HCT Academy instructors for geo-verified attendance tracking and scheduling. Please log in with your institutional credentials after installation.
+        </p>
+      </div>
+      <div>
+        <a 
+          href="https://github.com/univita2-0/UniVITA_Project2.0/releases/download/v1.0.0/application-110b2f0a-e666-40de-bfa2-d5e5bb3d6f77.apk" 
+          download="UniVITA_Instructor_App.apk"
+          style={{
+            background: '#0D9488',
+            color: '#FFFFFF',
+            padding: '1rem 2rem',
+            borderRadius: '12px',
+            fontWeight: 700,
+            fontSize: '0.95rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            textDecoration: 'none',
+            boxShadow: '0 8px 20px rgba(13, 148, 136, 0.3)',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <Download size={18} /> Download APK
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
           {/* CONTACT SECTION */}
           <section id="contact" className="ap-section ap-bg-gray">
             <div className="ap-container">

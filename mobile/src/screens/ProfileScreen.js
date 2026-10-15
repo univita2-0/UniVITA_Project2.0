@@ -182,11 +182,13 @@ export default function ProfileScreen({ navigation }) {
       return Alert.alert('Permission Denied', 'Camera roll access is required to update your profile picture.');
     }
 
+    
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.7,
+      quality: 0.6, 
+      base64: true, 
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -197,24 +199,14 @@ export default function ProfileScreen({ navigation }) {
       try {
         const token = await AsyncStorage.getItem('auth_token');
         
-        // EXPLICIT FORM DATA CONSTRUCTION FOR MULTIPART UPLOAD
-        const formData = new FormData();
-        formData.append('full_name', userData.name);
-        formData.append('email', userData.email);
         
-        const filename = asset.uri.split('/').pop() || `profile_${Date.now()}.jpg`;
-        const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : `image/jpeg`;
-
-        formData.append('profile_picture', {
-          uri: Platform.OS === 'ios' ? asset.uri.replace('file://', '') : asset.uri,
-          name: filename,
-          type: type
-        });
-
-        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, formData, {
+        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, {
+          full_name: userData.name,
+          email: userData.email,
+          base64_image: asset.base64
+        }, {
           headers: {
-            'Content-Type': 'multipart/form-data',
+            'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`
           }
         });
