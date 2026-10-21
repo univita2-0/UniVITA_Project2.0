@@ -8,6 +8,37 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { fetchMyLeaveRequests, API_URL } from './api';
 
+/* ---------------- Fix #8: shared validation + date helpers ---------------- */
+const CANCEL_REASON_MAX_LENGTH = 500;
+const CANCEL_REASON_MIN_LENGTH = 3;
+
+const validateCancelReason = (reason) => {
+  const trimmed = String(reason || '').trim();
+  if (!trimmed) return 'Please enter a reason for cancellation.';
+  if (trimmed.length < CANCEL_REASON_MIN_LENGTH) return `Reason must be at least ${CANCEL_REASON_MIN_LENGTH} characters.`;
+  if (trimmed.length > CANCEL_REASON_MAX_LENGTH) return `Reason must not exceed ${CANCEL_REASON_MAX_LENGTH} characters.`;
+  return '';
+};
+
+const parseLocalDate = (dateStr) => {
+  if (!dateStr) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+  return d;
+};
+
+const toLocalISODate = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 const formatDate = (dateStr) => {
   if (!dateStr) return '—';
   const cleanStr = String(dateStr).substring(0, 10);
@@ -24,7 +55,6 @@ const formatDate = (dateStr) => {
   return cleanStr;
 };
 
-// Formats PHT MySQL timestamps (YYYY-MM-DD HH:mm:ss) without UTC shifting
 const formatDateTime = (dateStr) => {
   if (!dateStr || dateStr === 'Not Recorded') return 'Not Recorded';
   const raw = String(dateStr).trim();
@@ -71,16 +101,18 @@ export default function LeaveHistoryScreen({ navigation }) {
   const [allHistory, setAllHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
+  const [loadError, setLoadError] = useState('');
+
   const [activeTab, setActiveTab] = useState('pending');
   const [filterDate, setFilterDate] = useState(new Date());
   const [page, setPage] = useState(1);
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
 
-  // Cancellation State
+  // Cancellation state
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [cancelError, setCancelError] = useState('');
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [cancelling, setCancelling] = useState(false);
 
@@ -88,7 +120,7 @@ export default function LeaveHistoryScreen({ navigation }) {
 
   const groupConsecutiveLeaves = (leaves) => {
     if (!leaves || leaves.length === 0) return [];
-    
+
     const sorted = [...leaves].sort((a, b) => {
       const dateA = new Date(String(a.request_date).substring(0, 10));
       const dateB = new Date(String(b.request_date).substring(0, 10));
@@ -103,12 +135,12 @@ export default function LeaveHistoryScreen({ navigation }) {
       if (!leaveDateStr) return;
 
       if (!currentGroup) {
-        currentGroup = { 
-          ...leave, 
-          start_date: leaveDateStr, 
-          end_date: leaveDateStr, 
-          days: 1, 
-          groupedIds: [leave.id] 
+        currentGroup = {
+          ...leave,
+          start_date: leaveDateStr,
+          end_date: leaveDateStr,
+          days: 1,
+          groupedIds: [leave.id]
         };
         grouped.push(currentGroup);
       } else {
@@ -125,12 +157,12 @@ export default function LeaveHistoryScreen({ navigation }) {
           currentGroup.days += 1;
           currentGroup.groupedIds.push(leave.id);
         } else {
-          currentGroup = { 
-            ...leave, 
-            start_date: leaveDateStr, 
-            end_date: leaveDateStr, 
-            days: 1, 
-            groupedIds: [leave.id] 
+          currentGroup = {
+            ...leave,
+            start_date: leaveDateStr,
+            end_date: leaveDateStr,
+            days: 1,
+            groupedIds: [leave.id]
           };
           grouped.push(currentGroup);
         }
@@ -141,56 +173,84 @@ export default function LeaveHistoryScreen({ navigation }) {
   };
 
   const loadHistory = async () => {
+    setLoadError('');
     try {
       const employeeId = await AsyncStorage.getItem('employee_id');
-      if (employeeId) {
-        const data = await fetchMyLeaveRequests(employeeId);
-        const grouped = groupConsecutiveLeaves(Array.isArray(data) ? data : []);
-        setAllHistory(grouped);
+      if (!employeeId) {
+        setLoadError('Employee session not found. Please sign in again.');
+        return;
       }
+      const data = await fetchMyLeaveRequests(employeeId);
+      const grouped = groupConsecutiveLeaves(Array.isArray(data) ? data : []);
+      setAllHistory(grouped);
     } catch (err) {
       console.error(err);
+      setLoadError('Unable to load leave history. Pull down to retry.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
+  const closeCancelModal = () => {
+    if (cancelling) return; // don't allow dismiss while in-flight
+    setShowCancelModal(false);
+    setCancelReason('');
+    setCancelError('');
+    setSelectedRequestId(null);
+  };
+
   const handleCancelRequest = async () => {
-    if (!cancelReason.trim()) {
-      Alert.alert("Reason Required", "Please enter a reason for cancellation.");
+    const validationError = validateCancelReason(cancelReason);
+    if (validationError) {
+      setCancelError(validationError);
       return;
     }
+    if (!selectedRequestId) {
+      setCancelError('No request selected. Please reopen the dialog.');
+      return;
+    }
+    setCancelError('');
     setCancelling(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      
+
       const idsToCancel = Array.isArray(selectedRequestId) ? selectedRequestId : [selectedRequestId];
       let successCount = 0;
-      
+
       for (const id of idsToCancel) {
-        const res = await fetch(`${API_URL}/leave-requests/${id}/cancel`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ reason: cancelReason })
-        });
-        const data = await res.json();
-        if (res.ok && data.success) successCount++;
+        try {
+          const res = await fetch(`${API_URL}/leave-requests/${id}/cancel`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ reason: cancelReason.trim() })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) successCount++;
+        } catch {
+          // swallow per-id error; count reflects overall failures
+        }
       }
-      
-      if (successCount > 0) {
-        Alert.alert("Success", "Request cancelled successfully.");
-        setShowCancelModal(false);
-        setCancelReason('');
-        loadHistory(); 
+
+      if (successCount === idsToCancel.length) {
+        Alert.alert('Success', 'Request cancelled successfully.');
+        closeCancelModal();
+        loadHistory();
+      } else if (successCount > 0) {
+        Alert.alert(
+          'Partial Success',
+          `${successCount} of ${idsToCancel.length} day(s) cancelled. Please try again for the rest.`
+        );
+        closeCancelModal();
+        loadHistory();
       } else {
-        Alert.alert("Error", "Failed to cancel request.");
+        setCancelError('Failed to cancel request. Please try again.');
       }
     } catch (err) {
-      Alert.alert("Error", "Server connection failed.");
+      setCancelError('Server connection failed. Please try again.');
     } finally {
       setCancelling(false);
     }
@@ -209,7 +269,7 @@ export default function LeaveHistoryScreen({ navigation }) {
     const newDate = new Date(filterDate);
     newDate.setMonth(newDate.getMonth() + offset);
     setFilterDate(newDate);
-    setPage(1); 
+    setPage(1);
     setExpandedId(null);
   };
 
@@ -249,14 +309,17 @@ export default function LeaveHistoryScreen({ navigation }) {
     );
   }
 
+  const confirmDisabled = cancelling || !!validateCancelReason(cancelReason);
+  const remainingChars = Math.max(0, CANCEL_REASON_MAX_LENGTH - cancelReason.length);
+
   return (
     <>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
-        
+
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
+            <ArrowLeft size={24} color={isLight ? '#0F172A' : colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Leave History</Text>
           <View style={{ width: 40 }} />
@@ -273,22 +336,26 @@ export default function LeaveHistoryScreen({ navigation }) {
 
         <View style={styles.filterNavigator}>
           <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.navButton} activeOpacity={0.7}>
-            <ChevronLeft size={20} color={isLight ? "#0F172A" : colors.textPrimary} />
+            <ChevronLeft size={20} color={isLight ? '#0F172A' : colors.textPrimary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.dateRangeContainer} onPress={() => setShowCalendarModal(true)} activeOpacity={0.7}>
             <CalendarIcon size={16} color={colors.primary} />
             <Text style={styles.dateRangeText}>{monthYearString}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => changeMonth(1)} style={styles.navButton} activeOpacity={0.7}>
-            <ChevronRight size={20} color={isLight ? "#0F172A" : colors.textPrimary} />
+            <ChevronRight size={20} color={isLight ? '#0F172A' : colors.textPrimary} />
           </TouchableOpacity>
         </View>
 
+        {loadError ? (
+          <Text style={styles.errorText}>{loadError}</Text>
+        ) : null}
+
         <FlatList
           data={paginatedHistory}
-          keyExtractor={(item) => String(item.id || item.start_date)}
+          keyExtractor={(item) => String(item.id || item.start_date || `row-${item.groupedIds?.[0] || ''}`)}
           contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? '#0F172A' : '#FFFFFF'} />}
           renderItem={({ item }) => {
             const statusTheme = getStatusTheme(item.status, isLight);
             const isRange = item.days > 1;
@@ -309,11 +376,11 @@ export default function LeaveHistoryScreen({ navigation }) {
                       <Text style={[styles.statusText, { color: statusTheme.text }]}>{item.status?.toUpperCase() || 'PENDING'}</Text>
                     </View>
                     <TouchableOpacity onPress={() => toggleExpand(item.id)} style={styles.eyeBtn}>
-                      {isExpanded ? <EyeOff size={20} color={colors.primary} /> : <Eye size={20} color={isLight ? "#94A3B8" : colors.textSecondary} />}
+                      {isExpanded ? <EyeOff size={20} color={colors.primary} /> : <Eye size={20} color={isLight ? '#94A3B8' : colors.textSecondary} />}
                     </TouchableOpacity>
                   </View>
                 </View>
-                
+
                 <View style={styles.cardBody}>
                   <View style={styles.tableRow}>
                     <Text style={styles.tableLabel}>Leave Type</Text>
@@ -343,10 +410,12 @@ export default function LeaveHistoryScreen({ navigation }) {
                 )}
 
                 {item.status?.toLowerCase() === 'pending' && (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 12, marginTop: 12, alignItems: 'center' }}
                     onPress={() => {
                       setSelectedRequestId(item.groupedIds || [item.id]);
+                      setCancelReason('');
+                      setCancelError('');
                       setShowCancelModal(true);
                     }}
                   >
@@ -360,7 +429,7 @@ export default function LeaveHistoryScreen({ navigation }) {
                       <Text style={styles.expandedLabel}>Submitted On</Text>
                       <Text style={styles.expandedValue}>{formatDateTime(item.submitted_at || item.created_at)}</Text>
                     </View>
-                    
+
                     {item.status?.toLowerCase() !== 'pending' && (
                       <View style={styles.expandedRow}>
                         <Text style={styles.expandedLabel}>
@@ -393,19 +462,20 @@ export default function LeaveHistoryScreen({ navigation }) {
           }
         />
 
-        <Modal visible={showCalendarModal} transparent animationType="fade">
+        <Modal visible={showCalendarModal} transparent animationType="fade" onRequestClose={() => setShowCalendarModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.calendarModalContent}>
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Select Month</Text>
                 <TouchableOpacity onPress={() => setShowCalendarModal(false)}>
-                  <X size={22} color={isLight ? "#64748B" : colors.textSecondary} />
+                  <X size={22} color={isLight ? '#64748B' : colors.textSecondary} />
                 </TouchableOpacity>
               </View>
               <RNCalendar
-                current={filterDate.toISOString().substring(0, 10)}
+                current={toLocalISODate(filterDate)}
                 onDayPress={(day) => {
-                  setFilterDate(new Date(day.dateString));
+                  const parsed = parseLocalDate(day.dateString);
+                  setFilterDate(parsed || new Date());
                   setPage(1);
                   setExpandedId(null);
                   setShowCalendarModal(false);
@@ -427,7 +497,12 @@ export default function LeaveHistoryScreen({ navigation }) {
           </View>
         </Modal>
 
-        <Modal visible={showCancelModal} transparent animationType="fade">
+        <Modal
+          visible={showCancelModal}
+          transparent
+          animationType="fade"
+          onRequestClose={closeCancelModal}
+        >
           <View style={styles.modalOverlay}>
             <View style={styles.calendarModalContent}>
               <Text style={[styles.modalTitle, { marginBottom: 10 }]}>Cancel Request</Text>
@@ -435,19 +510,52 @@ export default function LeaveHistoryScreen({ navigation }) {
                 Please provide a reason for cancelling this request:
               </Text>
               <TextInput
-                style={{ fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, height: 100, textAlignVertical: 'top' }}
+                style={{
+                  fontFamily: 'Inter_18pt-Medium',
+                  borderWidth: 1,
+                  borderColor: cancelError ? '#EF4444' : (isLight ? '#E2E8F0' : colors.border),
+                  borderRadius: 12,
+                  padding: 12,
+                  fontSize: 14,
+                  color: isLight ? '#0F172A' : colors.textPrimary,
+                  backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+                  height: 100,
+                  textAlignVertical: 'top',
+                }}
                 multiline
+                maxLength={CANCEL_REASON_MAX_LENGTH}
                 placeholder="Reason for cancellation..."
                 placeholderTextColor={colors.textSecondary}
                 value={cancelReason}
-                onChangeText={setCancelReason}
+                onChangeText={(t) => {
+                  setCancelReason(t);
+                  if (cancelError) setCancelError('');
+                }}
               />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                {cancelError ? (
+                  <Text style={styles.errorText}>{cancelError}</Text>
+                ) : (
+                  <View />
+                )}
+                <Text style={styles.charCounter}>{cancelReason.length} / {CANCEL_REASON_MAX_LENGTH}</Text>
+              </View>
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
-                <TouchableOpacity onPress={() => setShowCancelModal(false)} style={{ padding: 12 }}>
+                <TouchableOpacity onPress={closeCancelModal} style={{ padding: 12 }} disabled={cancelling}>
                   <Text style={{ color: colors.textSecondary, fontFamily: 'Inter_18pt-Medium' }}>Close</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleCancelRequest} disabled={cancelling} style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 8 }}>
-                  <Text style={{ color: '#FFF', fontFamily: 'Inter_18pt-Bold' }}>{cancelling ? 'Cancelling...' : 'Confirm Cancel'}</Text>
+                <TouchableOpacity
+                  onPress={handleCancelRequest}
+                  disabled={confirmDisabled}
+                  style={{
+                    backgroundColor: confirmDisabled ? '#FCA5A5' : '#EF4444',
+                    padding: 12,
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontFamily: 'Inter_18pt-Bold' }}>
+                    {cancelling ? 'Cancelling...' : 'Confirm Cancel'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -462,82 +570,82 @@ export default function LeaveHistoryScreen({ navigation }) {
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   container: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background },
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    paddingHorizontal: 20, 
-    paddingVertical: 16, 
-    borderBottomWidth: 1, 
-    borderBottomColor: isLight ? '#E2E8F0' : colors.border, 
-    backgroundColor: isLight ? '#FFFFFF' : colors.surface 
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: isLight ? '#E2E8F0' : colors.border,
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface
   },
   backButton: { padding: 4 },
   headerTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
-  tabContainer: { 
-    flexDirection: 'row', 
-    marginHorizontal: 20, 
-    marginTop: 16, 
-    backgroundColor: isLight ? '#F1F5F9' : colors.surface, 
-    borderRadius: 20, 
-    padding: 6, 
-    borderWidth: 1, 
-    borderColor: isLight ? '#E2E8F0' : colors.border 
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginTop: 16,
+    backgroundColor: isLight ? '#F1F5F9' : colors.surface,
+    borderRadius: 20,
+    padding: 6,
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border
   },
   tab: { flex: 1, paddingVertical: 12, borderRadius: 16, alignItems: 'center' },
-  activeTab: { 
-    backgroundColor: isLight ? '#FFFFFF' : colors.iconBg, 
-    shadowColor: '#000', 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: isLight ? 0.05 : 0.2, 
-    shadowRadius: 4, 
-    elevation: 2 
+  activeTab: {
+    backgroundColor: isLight ? '#FFFFFF' : colors.iconBg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: isLight ? 0.05 : 0.2,
+    shadowRadius: 4,
+    elevation: 2
   },
   tabText: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
   activeTabText: { color: isLight ? '#0F172A' : colors.textPrimary },
-  filterNavigator: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    backgroundColor: isLight ? '#FFFFFF' : colors.surface, 
-    paddingVertical: 14, 
-    paddingHorizontal: 20, 
-    borderRadius: 24, 
-    marginHorizontal: 20, 
-    marginTop: 14, 
+  filterNavigator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 24,
+    marginHorizontal: 20,
+    marginTop: 14,
     marginBottom: 6,
-    borderWidth: 1, 
-    borderColor: isLight ? '#E2E8F0' : colors.border, 
-    shadowColor: '#000', 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: isLight ? 0.05 : 0.15, 
-    shadowRadius: 10, 
-    elevation: 2 
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: isLight ? 0.05 : 0.15,
+    shadowRadius: 10,
+    elevation: 2
   },
   navButton: { padding: 4 },
   dateRangeContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dateRangeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
   list: { padding: 20, paddingBottom: 60 },
-  historyCard: { 
-    backgroundColor: isLight ? '#FFFFFF' : colors.surface, 
-    borderRadius: 24, 
-    padding: 20, 
-    marginBottom: 16, 
-    borderWidth: 1, 
-    borderColor: isLight ? '#E2E8F0' : colors.border, 
-    shadowColor: '#000', 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: isLight ? 0.05 : 0.15, 
-    shadowRadius: 10, 
-    elevation: 2 
+  historyCard: {
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: isLight ? 0.05 : 0.15,
+    shadowRadius: 10,
+    elevation: 2
   },
-  cardHeader: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    paddingBottom: 14, 
-    borderBottomWidth: 1, 
-    borderBottomColor: isLight ? '#F1F5F9' : colors.border 
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: isLight ? '#F1F5F9' : colors.border
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -546,79 +654,81 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   statusText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, letterSpacing: 0.5 },
   eyeBtn: { padding: 4 },
   cardBody: { paddingTop: 14, gap: 10 },
-  tableRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'flex-start', 
-    paddingBottom: 10, 
-    borderBottomWidth: 1, 
-    borderBottomColor: isLight ? '#F8FAFC' : colors.border 
+  tableRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: isLight ? '#F8FAFC' : colors.border
   },
   tableLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary, width: '35%' },
   tableValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary, width: '65%', textAlign: 'right' },
-  tableValueReason: { 
-    fontFamily: 'Inter_18pt-Medium', 
-    fontSize: 13, 
-    color: isLight ? '#334155' : colors.textPrimary, 
-    width: '65%', 
-    textAlign: 'right', 
-    lineHeight: 18 
+  tableValueReason: {
+    fontFamily: 'Inter_18pt-Medium',
+    fontSize: 13,
+    color: isLight ? '#334155' : colors.textPrimary,
+    width: '65%',
+    textAlign: 'right',
+    lineHeight: 18
   },
-  attachmentBadge: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 6, 
-    marginTop: 12, 
-    paddingTop: 12, 
-    borderTopWidth: 1, 
-    borderTopColor: isLight ? '#F1F5F9' : colors.border 
+  attachmentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: isLight ? '#F1F5F9' : colors.border
   },
   attachmentText: { fontFamily: 'Inter_18pt-Bold', fontSize: 12 },
-  expandedContainer: { 
-    marginTop: 12, 
-    paddingTop: 12, 
-    borderTopWidth: 1, 
-    borderTopColor: isLight ? '#F1F5F9' : colors.border, 
-    gap: 8 
+  expandedContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: isLight ? '#F1F5F9' : colors.border,
+    gap: 8
   },
-  expandedRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'flex-start', 
-    paddingBottom: 8, 
-    borderBottomWidth: 1, 
-    borderBottomColor: isLight ? '#F8FAFC' : colors.border 
+  expandedRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: isLight ? '#F8FAFC' : colors.border
   },
   expandedLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, width: '35%' },
   expandedValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#0F172A' : colors.textPrimary, width: '65%', textAlign: 'right' },
-  expandedValueRemarks: { 
-    fontFamily: 'Inter_18pt-Medium', 
-    fontSize: 12, 
-    color: isLight ? '#0F172A' : colors.textPrimary, 
-    width: '65%', 
-    textAlign: 'right', 
-    fontStyle: 'italic', 
-    lineHeight: 16 
+  expandedValueRemarks: {
+    fontFamily: 'Inter_18pt-Medium',
+    fontSize: 12,
+    color: isLight ? '#0F172A' : colors.textPrimary,
+    width: '65%',
+    textAlign: 'right',
+    fontStyle: 'italic',
+    lineHeight: 16
   },
   emptyText: { fontFamily: 'Inter_18pt-Medium', textAlign: 'center', color: isLight ? '#94A3B8' : colors.textSecondary, marginTop: 50, fontSize: 14 },
-  loadMoreBtn: { 
-    backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, 
-    padding: 14, 
-    borderRadius: 16, 
-    alignItems: 'center', 
-    marginTop: 10, 
-    marginBottom: 20 
+  errorText: { fontFamily: 'Inter_18pt-Medium', color: '#EF4444', fontSize: 12, marginTop: 6, marginHorizontal: 20 },
+  charCounter: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: isLight ? '#94A3B8' : colors.textSecondary },
+  loadMoreBtn: {
+    backgroundColor: isLight ? '#F1F5F9' : colors.iconBg,
+    padding: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20
   },
   loadMoreText: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: colors.primary },
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  calendarModalContent: { 
-    backgroundColor: isLight ? '#FFFFFF' : colors.surface, 
-    borderRadius: 24, 
-    padding: 20, 
-    width: '100%', 
-    maxWidth: 400, 
-    borderWidth: 1, 
-    borderColor: isLight ? '#E2E8F0' : colors.border 
+  calendarModalContent: {
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+    borderRadius: 24,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: isLight ? '#E2E8F0' : colors.border
   },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },

@@ -3,7 +3,7 @@ import axios from 'axios';
 import './Reports.css';
 import {
   Download, Users, Calendar, DollarSign, PieChart,
-  Clock, FileText, TrendingUp, AlertCircle, CheckCircle, XCircle, 
+  Clock, FileText, TrendingUp, AlertCircle, CheckCircle, XCircle,
   ClipboardList, ShieldCheck, Printer, Award, Info
 } from 'lucide-react';
 import {
@@ -25,7 +25,6 @@ const Reports = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Data states
   const [attendanceData, setAttendanceData] = useState([]);
   const [payrollData, setPayrollData] = useState([]);
   const [visitorStats, setVisitorStats] = useState({ approved: 0, rejected: 0, pending: 0 });
@@ -64,7 +63,8 @@ const Reports = () => {
         }
       } catch (err) {
         console.error(err);
-        setError(err.message || 'Failed to load report data');
+        const backendMsg = err.response?.data?.message || err.response?.data?.error;
+        setError(backendMsg || err.message || 'Failed to load report data');
       } finally {
         setLoading(false);
       }
@@ -73,13 +73,13 @@ const Reports = () => {
   }, [selectedReport, selectedMonth]);
 
   const fetchAttendanceData = async () => {
-    const [month, year] = selectedMonth.split('-');
+    const [year, month] = selectedMonth.split('-');
     const res = await axios.get(`${API_BASE}/attendance-monthly`, { params: { month, year }, ...getAuthHeaders() });
     const data = res.data || [];
     setAttendanceData(data.map(e => ({
-      ...e, 
-      regular_hours: Number(e.regular_hours) || 0, 
-      overtime_hours: Number(e.overtime_hours) || 0, 
+      ...e,
+      regular_hours: Number(e.regular_hours) || 0,
+      overtime_hours: Number(e.overtime_hours) || 0,
       leave_days: Number(e.leave_days) || 0,
       scheduled_shifts: Number(e.scheduled_shifts) || Number(e.scheduled_days) || 0,
       present_shifts: Number(e.present_shifts) || Number(e.present_days) || 0,
@@ -95,9 +95,11 @@ const Reports = () => {
   };
 
   const fetchVisitorData = async () => {
-    const [month, year] = selectedMonth.split('-');
+    const [year, month] = selectedMonth.split('-');
     const start = `${year}-${month}-01`;
-    const end = new Date(year, month, 0).toISOString().split('T')[0];
+    const lastDay = new Date(parseInt(year, 10), parseInt(month, 10), 0).getDate();
+    const end = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+
     const [histRes, pendRes] = await Promise.all([
       axios.get(`${API_BASE}/appointments/history`, getAuthHeaders()),
       axios.get(`${API_BASE}/appointments/pending`, getAuthHeaders())
@@ -106,6 +108,7 @@ const Reports = () => {
     const pending = pendRes.data || [];
     const monthHist = history.filter(v => v.visit_date >= start && v.visit_date <= end);
     const monthPend = pending.filter(v => v.visit_date >= start && v.visit_date <= end);
+
     setVisitorStats({
       approved: monthHist.filter(v => v.status === 'APPROVED').length,
       rejected: monthHist.filter(v => v.status === 'REJECTED').length,
@@ -141,23 +144,21 @@ const Reports = () => {
 
       const filterByMonth = (items, dateField) => items.filter(item => item[dateField] && item[dateField].startsWith(selectedMonth));
 
-      setRequestsData({ 
-        leaves: filterByMonth(leaves, 'start_date'), 
-        overtime: filterByMonth(allOt, 'date'), 
-        appeals: filterByMonth(allAppeals, 'date') 
+      setRequestsData({
+        leaves: filterByMonth(leaves, 'start_date'),
+        overtime: filterByMonth(allOt, 'date'),
+        appeals: filterByMonth(allAppeals, 'date')
       });
-    } catch (error) { 
-      console.error("Error fetching requests data", error); 
+    } catch (error) {
+      console.error("Error fetching requests data", error);
     }
   };
 
   const handleExport = () => window.print();
 
-  // ---------- CHART THEMES ----------
   const chartColors = ['#0F172A', '#0D9488', '#64748B', '#DC2626', '#F59E0B'];
   const tooltipStyle = { borderRadius: '8px', border: '1px solid #E2E8F0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '0.85rem', fontFamily: 'Inter' };
 
-  // ---------- SCREEN RENDERERS ----------
   const renderAttendanceReport = () => {
     const totalReg = attendanceData.reduce((s, e) => s + e.regular_hours, 0);
     const totalOT = attendanceData.reduce((s, e) => s + e.overtime_hours, 0);
@@ -166,10 +167,10 @@ const Reports = () => {
     const topEmployees = [...attendanceData]
       .sort((a, b) => (b.regular_hours + b.overtime_hours) - (a.regular_hours + a.overtime_hours))
       .slice(0, 10)
-      .map(e => ({ 
-        name: e.full_name?.split(' ')[0] || e.employee_id, 
-        'Regular': Number(e.regular_hours.toFixed(1)), 
-        'Overtime': Number(e.overtime_hours.toFixed(1)) 
+      .map(e => ({
+        name: e.full_name?.split(' ')[0] || e.employee_id,
+        'Regular': Number(e.regular_hours.toFixed(1)),
+        'Overtime': Number(e.overtime_hours.toFixed(1))
       }));
 
     return (
@@ -223,10 +224,10 @@ const Reports = () => {
   const renderPayrollReport = () => {
     const grossSum = payrollData.reduce((s, p) => s + (parseFloat(p.gross_pay) || 0), 0);
     const netSum = payrollData.reduce((s, p) => s + (parseFloat(p.net_pay) || 0), 0);
-    const chart = payrollData.slice(0, 10).map(p => ({ 
-      name: p.full_name?.split(' ')[0] || 'Emp', 
-      Gross: parseFloat(p.gross_pay) || 0, 
-      Net: parseFloat(p.net_pay) || 0 
+    const chart = payrollData.slice(0, 10).map(p => ({
+      name: p.full_name?.split(' ')[0] || 'Emp',
+      Gross: parseFloat(p.gross_pay) || 0,
+      Net: parseFloat(p.net_pay) || 0
     }));
 
     return (
@@ -406,9 +407,6 @@ const Reports = () => {
     );
   };
 
-  // =========================================================================
-  // PRINTABLE FORMAL INSTITUTIONAL EXPORT BLOCKS
-  // =========================================================================
   const PrintableHeader = ({ title, reportCode, methodologyText }) => (
     <div className="formal-print-header">
       <div className="print-top-meta">
@@ -468,14 +466,14 @@ const Reports = () => {
 
   return (
     <div className="formal-rep-container">
-      {/* Top Header */}
       <div className="formal-rep-header">
         <div className="formal-rep-title-block">
           <div>
+            
             <p>Comprehensive administrative intelligence, verified operational analytics, and printable institutional registers.</p>
           </div>
         </div>
-        
+
         <div className="formal-rep-controls">
           <div className="formal-rep-input-wrapper">
             <Calendar size={16} className="formal-rep-icon" />
@@ -489,7 +487,6 @@ const Reports = () => {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
       <div className="formal-rep-tabs">
         {[
           { id:'attendance', label:'Attendance & Timekeeping', icon: <Clock size={16} /> },
@@ -504,7 +501,6 @@ const Reports = () => {
         ))}
       </div>
 
-      {/* Screen Analytics View */}
       <div className="formal-rep-content screen-only">
         {loading ? <div className="formal-rep-loading"><span className="formal-rep-spinner"></span> Compiling Institutional Metrics...</div> :
          error ? <div className="formal-rep-error"><AlertCircle size={20} /> {error}</div> :
@@ -518,19 +514,14 @@ const Reports = () => {
         }
       </div>
 
-      {/* =========================================================================
-          PRINT-ONLY ENTERPRISE AUDIT REGISTERS
-          ========================================================================= */}
-      
-      {/* 1. ATTENDANCE & TIMEKEEPING REGISTER */}
       {selectedReport === 'attendance' && (
         <div className="print-only">
-          <PrintableHeader 
+          <PrintableHeader
             title="MONTHLY FACULTY TIMEKEEPING & ATTENDANCE REGISTER"
             reportCode="REP-DTR"
             methodologyText="Compiled from Daily Time Records (DTR), biometrics, and geofence verification pursuant to DOLE Omnibus Rules Implementing the Labor Code. Expected attendance excludes approved, authorized leaves."
           />
-          
+
           <div className="print-kpi-row">
             <div className="print-kpi-cell">Total Tracked: <strong>{attendanceData.length} Instructors</strong></div>
             <div className="print-kpi-cell">Total Rendered: <strong>{attendanceData.reduce((s, e) => s + e.regular_hours, 0).toFixed(1)} hrs</strong></div>
@@ -568,10 +559,9 @@ const Reports = () => {
         </div>
       )}
 
-      {/* 2. PAYROLL DISBURSEMENT REGISTER */}
       {selectedReport === 'payroll' && (
         <div className="print-only">
-          <PrintableHeader 
+          <PrintableHeader
             title="MONTHLY PAYROLL DISBURSEMENT REGISTER & COMPENSATION AUDIT"
             reportCode="REP-PAY"
             methodologyText="Authorized net compensation computations audited against verified rendered instruction hours, standard tax tables, and Philippine statutory benefit schedules (SSS, PhilHealth, Pag-IBIG)."
@@ -612,10 +602,9 @@ const Reports = () => {
         </div>
       )}
 
-      {/* 3. VISITOR TRACKING REGISTER */}
       {selectedReport === 'visitor' && (
         <div className="print-only">
-          <PrintableHeader 
+          <PrintableHeader
             title="CAMPUS VISITOR & GUEST CLEARANCE LOG"
             reportCode="REP-VIS"
             methodologyText="Physical security access logs maintained pursuant to campus safety standards. Guest passes reflect security checkpoint validation, purpose limitation, and reception desk sign-ins."
@@ -658,10 +647,9 @@ const Reports = () => {
         </div>
       )}
 
-      {/* 4. SCHEDULE ROSTER REGISTER */}
       {selectedReport === 'scheduling' && (
         <div className="print-only">
-          <PrintableHeader 
+          <PrintableHeader
             title="CLINICAL SIMULATION & INSTRUCTION SCHEDULE ROSTER"
             reportCode="REP-SCHED"
             methodologyText="Official faculty assignment matrix for clinical simulation rooms and lecture halls. Timings define shift expectations for attendance compliance and DTR validation."
@@ -701,10 +689,9 @@ const Reports = () => {
         </div>
       )}
 
-      {/* 5. HR REQUESTS & APPEALS REGISTER */}
       {selectedReport === 'requests' && (
         <div className="print-only">
-          <PrintableHeader 
+          <PrintableHeader
             title="HUMAN RESOURCES REQUESTS & ATTENDANCE APPEALS AUDIT"
             reportCode="REP-REQ"
             methodologyText="Formal record of employee exception requests, leave filings, overtime claim validations, and attendance correction appeals submitted through UniVITA portal workflows."
@@ -745,7 +732,6 @@ const Reports = () => {
           <PrintableFooter />
         </div>
       )}
-
     </div>
   );
 };

@@ -10,18 +10,28 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+const getPayrollAuthHeaders = () => ({
+  headers: { Authorization: `Bearer ${localStorage.getItem('payroll_token')}` }
+});
+
 const PayrollHistoryModal = ({ show, onClose }) => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!show) return;
     setLoading(true);
-    axios.get(`${API_BASE}/payroll/access-logs`, getAuthHeaders())
+    
+    
+    axios.get(`${API_BASE}/payroll/access-logs`, getPayrollAuthHeaders())
       .then(res => setLogs(res.data))
       .catch(err => {
         console.error(err);
-        toast.error('Failed to load access logs');
+        if (err.response?.status === 403) {
+          toast.error('Payroll session expired. Please reopen the module.');
+        } else {
+          toast.error('Failed to load access logs');
+        }
       })
       .finally(() => setLoading(false));
   }, [show]);

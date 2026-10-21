@@ -161,7 +161,7 @@ const JobPostings = () => {
       fetchJobs();
     } catch (err) {
       console.error(err);
-      toast.error('Failed to process request.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to process request.');
     } finally {
       setSaving(false);
     }
@@ -181,7 +181,7 @@ const JobPostings = () => {
       toast.success(`Job ${newStatus === 'open' ? 'opened' : 'closed'} successfully.`);
       fetchJobs();
     } catch (err) {
-      toast.error('Failed to update status.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to update status.');
     } finally {
       setSaving(false);
       setShowStatusConfirm(false);
@@ -196,7 +196,7 @@ const JobPostings = () => {
       toast.success('Job deleted permanently.');
       fetchJobs();
     } catch (err) {
-      toast.error('Failed to delete job.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to delete job.');
     } finally {
       setShowDeleteConfirm(false);
       setDeleteJobId(null);

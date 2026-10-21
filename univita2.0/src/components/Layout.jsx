@@ -1,4 +1,3 @@
-// src/components/Layout.js
 import React, { useState, useEffect } from 'react';
 import './Layout.css';
 import {
@@ -16,7 +15,7 @@ const menuConfig = [
   {
     id: 'attendance', label: 'Attendance', icon: <Clock size={18} />,
     submenu: [
-      { id: 'daily-attendance', label: 'Daily Attendance', path: 'attendance', roles: ['admin', 'hr_admin'] },
+      { id: 'daily-attendance', label: 'Attendance Log', path: 'attendance', roles: ['admin', 'hr_admin'] },
       { id: 'attendance-correction', label: 'Attendance Correction', path: 'attendance-correction', roles: ['admin', 'hr_admin'] },
       { id: 'attendance-appeals', label: 'Attendance Appeals', path: 'attendance-appeals', roles: ['admin', 'hr_admin'] },
       { id: 'overtime-requests', label: 'Overtime Requests', path: 'overtime-requests', roles: ['admin', 'hr_admin'] },
@@ -24,7 +23,6 @@ const menuConfig = [
     ],
     roles: ['admin', 'hr_admin']
   },
-  // FIXED: Added 'admin' role so the Administrator can see the menu, matching your screenshot.
   { id: 'salary-list', label: 'Payroll', icon: <Wallet size={18} />, path: 'payroll-main', roles: ['hr_admin'] },
   {
     id: 'leave-management', label: 'Leave Management', icon: <FileText size={18} />,
@@ -97,9 +95,8 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
     setExpandedMenus(prev => ({ ...prev, [menuId]: !prev[menuId] }));
   };
 
-  // FIXED: Keeps the "Payroll" sidebar item highlighted even when you are on the Security PIN page
   const isActive = (path) => {
-    if (path === 'payroll-main' && currentView.startsWith('payroll')) return true;
+    if (path === 'payroll-main' && currentView && currentView.startsWith('payroll')) return true;
     return currentView === path;
   };
 
@@ -169,8 +166,8 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
   return (
     <div className="lay-container">
       <aside className={`lay-sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <button className="lay-sidebar-close" onClick={() => setSidebarOpen(false)}>
-          <X size={20} />
+        <button className="lay-sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Close Sidebar">
+          <X size={18} />
         </button>
         
         <div className="lay-brand">
@@ -202,21 +199,24 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
       <main className="lay-main-content">
         <header className="lay-top-header">
           <div className="lay-header-left">
-            <button className="lay-hamburger" onClick={() => setSidebarOpen(true)}>
+            <button className="lay-hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open Navigation">
               <Menu size={20} />
             </button>
+
+            
             
             <div className="lay-header-info">
               <h2>{title}</h2>
               <p>{dateString}</p>
             </div>
           </div>
+
           <div className="lay-header-right">
             <div className="lay-profile-trigger" onClick={() => handleNavClick('profile')}>
               <div className="lay-avatar">
                 <User size={18} color="white" strokeWidth={2.5} />
               </div>
-              <span className="lay-profile-name">Administrator</span>
+              <span className="lay-profile-name">Profile</span>
             </div>
           </div>
         </header>
@@ -232,13 +232,13 @@ const Layout = ({ children, currentView, setView, title, showBack, onBack, onLog
         <div className="lay-logout-overlay" onClick={() => setShowLogoutModal(false)}>
           <div className="lay-logout-modal" onClick={(e) => e.stopPropagation()}>
             <div className="lay-logout-icon-wrapper">
-              <LogOut size={24} />
+              <LogOut size={22} />
             </div>
             <h3>Confirm Logout</h3>
-            <p>Are you sure you want to logout?</p>
+            <p>Are you sure you want to log out of your account?</p>
             <div className="lay-logout-actions">
-              <button className="btn-logout-no" onClick={() => setShowLogoutModal(false)}>No</button>
-              <button className="btn-logout-yes" onClick={confirmLogout}>Yes</button>
+              <button className="btn-logout-no" onClick={() => setShowLogoutModal(false)}>Cancel</button>
+              <button className="btn-logout-yes" onClick={confirmLogout}>Logout</button>
             </div>
           </div>
         </div>

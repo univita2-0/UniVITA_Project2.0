@@ -1,36 +1,38 @@
-// src/pages/EmergencyAlerts.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { 
-  Send, RefreshCw, Search, ShieldAlert, AlertTriangle, 
-  Info, AlertOctagon, History, Calendar 
+import {
+  Send, RefreshCw, Search, AlertTriangle,
+  Info, AlertOctagon, History, Calendar
 } from 'lucide-react';
 import './EmergencyAlerts.css';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 
+// ✅ E4 — convert any timestamp to PHT "YYYY-MM-DD" for correct date filtering
+const toPHTDateString = (input) => {
+  if (!input) return '';
+  const d = new Date(input);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+};
+
 const EmergencyAlerts = () => {
-  // Form state
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [severity, setSeverity] = useState('info');
   const [targetRoles, setTargetRoles] = useState(['instructor', 'admin', 'security', 'hr_admin']);
   const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState('');
 
-  // History state
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  
-  // Filters
+
   const [filterSeverity, setFilterSeverity] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Get auth token from localStorage
   const getAuthHeaders = () => {
     const token = localStorage.getItem('auth_token');
     return { Authorization: `Bearer ${token}` };
@@ -47,8 +49,10 @@ const EmergencyAlerts = () => {
       console.error('Failed to fetch alerts', err);
       if (err.response?.status === 401) {
         toast.error('Session expired. Please log in again.');
+      } else if (err.response?.status === 403) {
+        toast.error('You do not have permission to view alert history.');
       } else {
-        toast.error('Failed to load alert history');
+        toast.error(err.response?.data?.message || 'Failed to load alert history');
       }
     } finally {
       setLoading(false);
@@ -60,18 +64,41 @@ const EmergencyAlerts = () => {
   }, [fetchAlerts]);
 
   const handleSend = async () => {
-    if (!title.trim() || !message.trim()) {
+    const cleanTitle = title.trim();
+    const cleanMessage = message.trim();
+
+    if (!cleanTitle || !cleanMessage) {
       toast.warning('Title and message are required.');
       return;
     }
-    setSendError('');
+    if (cleanTitle.length < 3) {
+      toast.warning('Alert title must be at least 3 characters.');
+      return;
+    }
+    if (cleanTitle.length > 200) {
+      toast.warning('Alert title must be 200 characters or fewer.');
+      return;
+    }
+    if (cleanMessage.length < 10) {
+      toast.warning('Alert message must be at least 10 characters.');
+      return;
+    }
+    if (cleanMessage.length > 2000) {
+      toast.warning('Alert message must be 2,000 characters or fewer.');
+      return;
+    }
+    if (targetRoles.length === 0) {
+      toast.warning('Select at least one target role.');
+      return;
+    }
+
     setSending(true);
     try {
       await axios.post(
         `${API_BASE}/emergency-alerts`,
         {
-          title: title.trim(),
-          message: message.trim(),
+          title: cleanTitle,
+          message: cleanMessage,
           severity,
           target_roles: targetRoles,
         },
@@ -86,8 +113,10 @@ const EmergencyAlerts = () => {
     } catch (err) {
       if (err.response?.status === 401) {
         toast.error('Unauthorized – please log in as Admin or HR.');
+      } else if (err.response?.status === 403) {
+        toast.error('You do not have permission to broadcast alerts.');
       } else {
-        toast.error(err.response?.data?.error || 'Failed to send alert.');
+        toast.error(err.response?.data?.message || 'Failed to send alert.');
       }
     } finally {
       setSending(false);
@@ -104,7 +133,7 @@ const EmergencyAlerts = () => {
 
   const filteredAlerts = alerts.filter(alert => {
     if (filterSeverity !== 'all' && alert.severity !== filterSeverity) return false;
-    
+
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       if (!alert.title.toLowerCase().includes(q) && !alert.message.toLowerCase().includes(q)) {
@@ -113,7 +142,8 @@ const EmergencyAlerts = () => {
     }
 
     if (startDate || endDate) {
-      const alertDate = new Date(alert.sent_at).toISOString().split('T')[0];
+      const alertDate = toPHTDateString(alert.sent_at);
+      if (!alertDate) return false;
       if (startDate && alertDate < startDate) return false;
       if (endDate && alertDate > endDate) return false;
     }
@@ -152,42 +182,43 @@ const EmergencyAlerts = () => {
     setEndDate('');
   };
 
+  const noRolesSelected = targetRoles.length === 0;
+
   return (
     <div className="ea-container">
       <div className="ea-header">
         <div>
-         
+          
           <p className="ea-subtitle">Broadcast critical information across the organization.</p>
         </div>
         <button className="btn-view-history" onClick={openHistoryModal}>
-          <History size={16} /> 
+          <History size={16} />
           <span>View Alert History</span>
         </button>
       </div>
 
-      {/* New alert form */}
       <div className="ea-card">
         <div className="ea-card-header">
-          
           <h3>Create New Alert</h3>
         </div>
-        
+
         <div className="ea-form-grid">
           <div className="ea-form-group">
             <label>Alert Title</label>
-            <input 
-              type="text" 
-              value={title} 
-              onChange={e => setTitle(e.target.value)} 
-              placeholder="e.g., Campus Lockdown, Severe Weather Warning" 
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="e.g., Campus Lockdown, Severe Weather Warning"
               className="ea-input"
+              maxLength={200}
             />
           </div>
-          
+
           <div className="ea-form-group">
             <label>Severity Level</label>
-            <select 
-              value={severity} 
+            <select
+              value={severity}
               onChange={e => setSeverity(e.target.value)}
               className="ea-select"
             >
@@ -196,18 +227,29 @@ const EmergencyAlerts = () => {
               <option value="critical">Critical (Immediate Action Required)</option>
             </select>
           </div>
-          
+
           <div className="ea-form-group ea-full-width">
             <label>Detailed Message</label>
-            <textarea 
-              rows="3" 
-              value={message} 
-              onChange={e => setMessage(e.target.value)} 
-              placeholder="Provide detailed instructions or information for the recipients..." 
+            <textarea
+              rows="3"
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              placeholder="Provide detailed instructions or information for the recipients..."
               className="ea-textarea"
+              maxLength={2000}
             />
+            <div
+              style={{
+                fontSize: '0.75rem',
+                color: message.length > 2000 ? '#DC2626' : '#64748B',
+                textAlign: 'right',
+                marginTop: '0.25rem'
+              }}
+            >
+              {message.length} / 2000
+            </div>
           </div>
-          
+
           <div className="ea-form-group ea-full-width">
             <label>Target Roles</label>
             <div className="ea-role-toggles">
@@ -219,6 +261,7 @@ const EmergencyAlerts = () => {
               ].map(role => (
                 <button
                   key={role.value}
+                  type="button"
                   className={`ea-role-btn ${targetRoles.includes(role.value) ? 'active' : ''}`}
                   onClick={() => toggleRole(role.value)}
                 >
@@ -226,12 +269,27 @@ const EmergencyAlerts = () => {
                 </button>
               ))}
             </div>
+            {noRolesSelected && (
+              <div
+                style={{
+                  fontSize: '0.8125rem',
+                  color: '#DC2626',
+                  fontWeight: 500,
+                  marginTop: '0.35rem'
+                }}
+              >
+                Select at least one target role to broadcast.
+              </div>
+            )}
           </div>
-          
-          {sendError && <div className="ea-error-message">{sendError}</div>}
-          
+
           <div className="ea-form-actions">
-            <button className={`btn-send-alert ${severity}`} onClick={handleSend} disabled={sending}>
+            <button
+              className={`btn-send-alert ${severity}`}
+              onClick={handleSend}
+              disabled={sending || noRolesSelected}
+              title={noRolesSelected ? 'Select at least one target role' : ''}
+            >
               <Send size={16} />
               <span>{sending ? 'Broadcasting...' : 'Broadcast Alert'}</span>
             </button>
@@ -239,7 +297,6 @@ const EmergencyAlerts = () => {
         </div>
       </div>
 
-      {/* History Modal */}
       <FormalModal
         show={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
@@ -251,17 +308,17 @@ const EmergencyAlerts = () => {
           <div className="ea-history-filters">
             <div className="ea-search-wrapper">
               <Search size={16} className="ea-search-icon" />
-              <input 
-                type="text" 
-                placeholder="Search alerts..." 
-                value={searchQuery} 
-                onChange={e => setSearchQuery(e.target.value)} 
+              <input
+                type="text"
+                placeholder="Search alerts..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
                 className="ea-input-search"
               />
             </div>
-            
-            <select 
-              value={filterSeverity} 
+
+            <select
+              value={filterSeverity}
               onChange={e => setFilterSeverity(e.target.value)}
               className="ea-select-filter"
             >
@@ -271,23 +328,24 @@ const EmergencyAlerts = () => {
               <option value="info">Info</option>
             </select>
           </div>
-          
+
           <div className="ea-history-filters mt-3">
             <div className="ea-date-group">
               <label>Start Date</label>
-              <input 
-                type="date" 
-                value={startDate} 
-                onChange={e => setStartDate(e.target.value)} 
+              <input
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
                 className="ea-date-input"
               />
             </div>
             <div className="ea-date-group">
               <label>End Date</label>
-              <input 
-                type="date" 
-                value={endDate} 
-                onChange={e => setEndDate(e.target.value)} 
+              <input
+                type="date"
+                value={endDate}
+                min={startDate || undefined}
+                onChange={e => setEndDate(e.target.value)}
                 className="ea-date-input"
               />
             </div>

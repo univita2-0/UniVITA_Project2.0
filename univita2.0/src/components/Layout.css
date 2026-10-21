@@ -1,58 +1,122 @@
-/* src/components/Layout.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
+
+:root {
+  --sidebar-bg: #0B192C;
+  --sidebar-brand-bg: #0B192C;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-text: #94A3B8;
+  --sidebar-text-active: #FFFFFF;
+  --primary-teal: #0D9488;
+  --primary-teal-hover: #0F766E;
+  --primary-accent: #0EA5E9;
+  
+  --main-bg: #F8FAFC;
+  --card-bg: #FFFFFF;
+  --text-dark: #0F172A;
+  --text-muted: #64748B;
+  --border-light: #E2E8F0;
+  --border-subtle: #F1F5F9;
+}
 
 .lay-container {
   display: flex;
   min-height: 100vh;
   width: 100%;
-  background: #FFFFFF;
-  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--main-bg);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--text-dark);
+}
+
+.lay-container input,
+.lay-container button,
+.lay-container select,
+.lay-container textarea {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 /* ---------- Sidebar ---------- */
 .lay-sidebar {
   width: 260px;
-  background: #0B1F33;
+  background-color: var(--sidebar-bg);
   position: fixed;
   top: 0;
   left: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #E5E7EB;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
   z-index: 1000;
-  transition: transform 0.3s ease;
-  overflow-y: auto;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Brand area matching mobile login aesthetic */
+/* Sidebar Custom Dark Scrollbar */
+.lay-sidebar,
+.lay-nav-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.lay-sidebar::-webkit-scrollbar,
+.lay-nav-container::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.lay-sidebar::-webkit-scrollbar-track,
+.lay-nav-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.lay-sidebar::-webkit-scrollbar-thumb,
+.lay-nav-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  transition: background-color 0.2s ease;
+}
+
+.lay-sidebar::-webkit-scrollbar-thumb:hover,
+.lay-nav-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.35);
+}
+
+.lay-sidebar::-webkit-scrollbar-corner,
+.lay-nav-container::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Brand Section */
 .lay-brand {
-  padding: 1.5rem 1.5rem;
-  border-bottom: 1px solid #0B1F33;
+  padding: 1.5rem 1.5rem 1.25rem 1.5rem;
   position: sticky;
   top: 0;
-  background: #0B1F33;
+  background-color: var(--sidebar-brand-bg);
   z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .lay-brand h1 {
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
   color: #FFFFFF;
   font-size: 1.5rem;
   font-weight: 800;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.03em;
   margin: 0;
 }
 
 .lay-brand-vita {
-  color: #0EA5E9;
+  color: var(--primary-teal);
 }
 
-/* Navigation */
+/* Navigation Links */
 .lay-nav-container {
-  padding: 1rem 0.75rem;
+  padding: 0.75rem 0.85rem;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  overflow-y: auto;
 }
 
 .lay-nav-group {
@@ -63,44 +127,55 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0.65rem 1rem;
+  padding: 0.7rem 1rem;
   border-radius: 8px;
-  color: #FFFFFF;
+  color: var(--sidebar-text);
   cursor: pointer;
   transition: all 0.2s ease;
   font-weight: 500;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
+  user-select: none;
 }
 
 .lay-nav-parent:hover {
-  background: #F9FAFB;
-  color: #111827;
+  background-color: var(--sidebar-hover);
+  color: #FFFFFF;
 }
 
 .lay-nav-parent.active {
-  background: #0D9488;
-  color: #FFFFFF;
+  background-color: var(--primary-teal);
+  color: var(--sidebar-text-active);
   font-weight: 600;
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.25);
+}
+
+.lay-nav-parent.logout {
+  color: #F87171;
 }
 
 .lay-nav-parent.logout:hover {
-  background: #FEF2F2;
-  color: #DC2626;
+  background-color: rgba(220, 38, 38, 0.12);
+  color: #EF4444;
 }
 
 .lay-nav-icon {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .lay-nav-label {
   flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lay-nav-arrow {
   transition: transform 0.2s ease;
-  color: #9CA3AF;
+  color: #64748B;
+  flex-shrink: 0;
 }
 
 .lay-nav-parent.active .lay-nav-arrow {
@@ -113,65 +188,72 @@
 
 /* Submenu */
 .lay-nav-submenu {
-  margin-left: 2.25rem;
+  margin-left: 1.5rem;
   margin-top: 0.25rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
   padding-left: 0.75rem;
-  border-left: 1px solid #E5E7EB;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.2rem;
 }
 
 .lay-nav-child {
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.85rem;
   border-radius: 6px;
-  color: #6B7280;
+  color: #94A3B8;
   cursor: pointer;
-  font-size: 0.8rem;
-  transition: all 0.2s ease;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lay-nav-child:hover {
-  background: #0D9488;
-  color: #111827;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #FFFFFF;
 }
 
 .lay-nav-child.active {
-  color: #0D9488;
-  font-weight: 600;
-  background: transparent;
+  color: var(--primary-teal);
+  font-weight: 700;
+  background-color: rgba(13, 148, 136, 0.1);
 }
 
-/* Sidebar footer */
+/* Sidebar Footer */
 .lay-sidebar-footer {
-  padding: 1rem 0.75rem;
-  border-top: 1px solid #0B1F33;
-  background: #0B1F33;
+  padding: 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background-color: var(--sidebar-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
 
-/* ---------- Main Content ---------- */
+/* ---------- Main Content Layout ---------- */
 .lay-main-content {
   margin-left: 260px;
   width: calc(100% - 260px);
-  padding: 0; 
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background-color: var(--main-bg);
 }
 
-/* Header */
+/* Top Header */
 .lay-top-header {
   position: sticky;
-  top: 0; 
-  z-index: 100;
+  top: 0;
+  z-index: 90;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #FFFFFF;
-  padding: 1.25rem 2rem;
-  border-bottom: 1px solid #E5E7EB; /* Flat separating line */
-  transition: all 0.3s ease;
-  /* Removed border-radius and box-shadow */
+  background-color: #FFFFFF;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .lay-header-left {
@@ -181,121 +263,122 @@
 }
 
 .lay-header-info h2 {
-  font-size: 1.45rem;
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 1.5rem;
   font-weight: 800;
-  color: #0F172A;
-  margin: 0 0 0.25rem 0;
-  letter-spacing: -0.02em;
+  color: var(--text-dark);
+  margin: 0 0 0.15rem 0;
+  letter-spacing: -0.025em;
 }
 
 .lay-header-info p {
-  color: #6B7280;
+  color: var(--text-muted);
   font-size: 0.85rem;
   margin: 0;
   font-weight: 500;
 }
 
 .lay-back-btn {
-  background: #FFFFFF;
-  border: 1px solid #D1D5DB;
+  background-color: #FFFFFF;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
-  padding: 0.5rem 0.85rem;
+  padding: 0.5rem 0.9rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #4B5563;
-  transition: all 0.2s;
+  color: #334155;
+  transition: all 0.2s ease;
 }
 
 .lay-back-btn:hover {
-  background: #F8FAFC;
-  color: #0F172A;
+  background-color: #F8FAFC;
+  color: var(--text-dark);
   border-color: #CBD5E1;
 }
 
-/* Profile Trigger (Pill Shape) */
+/* Profile Trigger */
 .lay-profile-trigger {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   cursor: pointer;
-  padding: 0.35rem 1.25rem 0.35rem 0.35rem;
-  border-radius: 99px;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  padding: 0.35rem 1rem 0.35rem 0.35rem;
+  border-radius: 9999px;
+  background-color: #F8FAFC;
+  border: 1px solid var(--border-light);
   transition: all 0.2s ease;
 }
 
 .lay-profile-trigger:hover {
-  background: #F1F5F9;
+  background-color: #F1F5F9;
   border-color: #CBD5E1;
 }
 
 .lay-avatar {
-  width: 38px;
-  height: 38px;
-  background: #0D9488;
+  width: 36px;
+  height: 36px;
+  background-color: var(--primary-teal);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 2px 4px rgba(13, 148, 136, 0.2);
 }
 
 .lay-profile-name {
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: #0F172A;
+  color: var(--text-dark);
 }
 
 /* Page Wrapper */
 .lay-page-wrapper {
-  background: transparent;
   flex: 1;
-  padding: 1.5rem 2rem;
+  padding: 1.25rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.lay-page-wrapper > div {
-  border: none !important;
-  box-shadow: none !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-}
-
-/* ---------- Responsive Adjustments ---------- */
-
+/* ---------- Responsive Controls ---------- */
 .lay-hamburger {
   display: none;
-  background: #FFFFFF;
-  border: 1px solid #E5E7EB;
+  background-color: #FFFFFF;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
-  padding: 6px;
+  padding: 7px;
   cursor: pointer;
-  color: #4B5563;
+  color: #475569;
+  transition: background-color 0.2s;
+}
+
+.lay-hamburger:hover {
+  background-color: #F8FAFC;
 }
 
 .lay-sidebar-close {
   display: none;
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  background: #F3F4F6;
+  background: rgba(255, 255, 255, 0.1);
   border: none;
   border-radius: 6px;
-  padding: 4px;
+  padding: 6px;
   cursor: pointer;
-  color: #4B5563;
-  z-index: 1001;
+  color: #FFFFFF;
+  transition: background 0.2s;
+}
+
+.lay-sidebar-close:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .lay-sidebar-overlay {
   display: none;
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(17, 24, 39, 0.4);
-  backdrop-filter: blur(2px);
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(3px);
   z-index: 999;
 }
 
@@ -305,12 +388,11 @@
   }
   .lay-sidebar.open {
     transform: translateX(0);
-    box-shadow: 4px 0 15px rgba(0,0,0,0.1);
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.2);
   }
   .lay-main-content {
     margin-left: 0;
     width: 100%;
-    padding: 0;
   }
   .lay-hamburger { display: flex; }
   .lay-sidebar-close { display: block; }
@@ -319,45 +401,28 @@
 
 @media (max-width: 640px) {
   .lay-top-header {
-    flex-direction: row; 
-    align-items: center;
-    justify-content: space-between;
-    padding: 1rem 1.25rem;
-    gap: 0.5rem;
-    top: 0;
-  }
-  
-  .lay-header-left {
-    gap: 0.75rem;
+    padding: 0.85rem 0.85rem;
   }
 
   .lay-header-info h2 {
-    font-size: 1.25rem;
+    font-size: 1.2rem;
   }
 
   .lay-header-info p {
-    font-size: 0.8rem;
-  }
-
-  .hide-on-mobile {
-    display: none;
-  }
-
-  .lay-back-btn {
-    padding: 0.4rem;
+    font-size: 0.775rem;
   }
 
   .lay-profile-name {
-    display: none; 
+    display: none;
   }
-  
+
   .lay-profile-trigger {
-    padding: 0.4rem; 
+    padding: 0.25rem;
     border-radius: 50%;
   }
 
   .lay-page-wrapper {
-    padding: 1rem 0.5rem;
+    padding: 0.85rem;
   }
 }
 
@@ -365,93 +430,100 @@
 .lay-logout-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(17, 24, 39, 0.6);
-  backdrop-filter: blur(2px);
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
+  animation: fadeInOverlay 0.2s ease-out;
+}
+
+@keyframes fadeInOverlay {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .lay-logout-modal {
   background: #FFFFFF;
-  border-radius: 12px;
-  padding: 2rem;
+  border-radius: 16px;
+  padding: 1.75rem 2rem;
   width: 90%;
-  max-width: 360px;
+  max-width: 380px;
   text-align: center;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  animation: popModal 0.2s ease-out forwards;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  animation: popModal 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes popModal {
-  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  from { opacity: 0; transform: scale(0.94) translateY(12px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .lay-logout-icon-wrapper {
   width: 48px;
   height: 48px;
-  background: #FEF2F2;
+  background-color: #FEF2F2;
   color: #DC2626;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 1rem;
+  margin: 0 auto 1.15rem auto;
 }
 
 .lay-logout-modal h3 {
-  color: #111827;
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--text-dark);
   font-size: 1.25rem;
   font-weight: 700;
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.4rem 0;
 }
 
 .lay-logout-modal p {
-  color: #4B5563;
-  font-size: 0.95rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
   margin: 0 0 1.5rem 0;
+  line-height: 1.45;
 }
 
 .lay-logout-actions {
   display: flex;
-  gap: 1rem;
-  justify-content: center;
+  gap: 0.75rem;
 }
 
 .btn-logout-no {
-  padding: 0.65rem 1.5rem;
-  background: #FFFFFF;
-  border: 1px solid #D1D5DB;
-  color: #374151;
+  padding: 0.65rem 1.25rem;
+  background-color: #FFFFFF;
+  border: 1px solid var(--border-light);
+  color: #334155;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   cursor: pointer;
   flex: 1;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
 }
 
 .btn-logout-no:hover {
-  background: #F3F4F6;
-  color: #111827;
+  background-color: #F8FAFC;
+  border-color: #CBD5E1;
 }
 
 .btn-logout-yes {
-  padding: 0.65rem 1.5rem;
-  background: #DC2626;
+  padding: 0.65rem 1.25rem;
+  background-color: #DC2626;
   border: 1px solid #DC2626;
   color: #FFFFFF;
   border-radius: 8px;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   cursor: pointer;
   flex: 1;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
 }
 
 .btn-logout-yes:hover {
-  background: #B91C1C;
+  background-color: #B91C1C;
   border-color: #B91C1C;
 }

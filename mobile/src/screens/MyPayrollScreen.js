@@ -19,6 +19,7 @@ export default function MyPayrollScreen({ navigation }) {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(false);
   const [allPayslips, setAllPayslips] = useState([]);
 
   const [selectedPayslip, setSelectedPayslip] = useState(null);
@@ -27,6 +28,7 @@ export default function MyPayrollScreen({ navigation }) {
   const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
 
   const loadData = useCallback(async () => {
+    setError(false);
     try {
       const employeeId = await AsyncStorage.getItem('employee_id');
       if (employeeId) {
@@ -35,6 +37,7 @@ export default function MyPayrollScreen({ navigation }) {
       }
     } catch (err) {
       console.error('My Payroll load error:', err);
+      setError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -247,7 +250,19 @@ export default function MyPayrollScreen({ navigation }) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : colors.textPrimary} />}
         >
           <Text style={styles.sectionHeading}>Current Period</Text>
-          {currentMonthPayslip ? (
+          
+          {error ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconWrapper}>
+                <CalendarDays size={32} color="#EF4444" strokeWidth={1.5} />
+              </View>
+              <Text style={styles.emptyText}>Failed to load payslips</Text>
+              <Text style={styles.emptySubtext}>Please check your internet connection.</Text>
+              <TouchableOpacity style={styles.viewDetailsBtn} onPress={loadData} activeOpacity={0.85}>
+                <Text style={styles.viewDetailsBtnText}>Tap to Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : currentMonthPayslip ? (
             renderCurrentMonthCard(currentMonthPayslip)
           ) : (
             <View style={styles.emptyCard}>

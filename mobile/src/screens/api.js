@@ -19,6 +19,64 @@ export const API_URL = USE_REMOTE ? `${REMOTE_URL}/api` : `http://${LOCAL_IP}:50
 
 const OFFLINE_QUEUE_KEY = '@attendance_queue';
 
+// ==========================================
+// FIX B4: GLOBAL TIMEOUT & EXPONENTIAL BACKOFF
+// ==========================================
+const DEFAULT_TIMEOUT_MS = 15000;
+const UPLOAD_TIMEOUT_MS = 30000;
+
+const fetchWithTimeout = async (resource, options = {}) => {
+  const { timeout = DEFAULT_TIMEOUT_MS } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(resource, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+};
+
+const apiFetch = async (url, options = {}, retries = 3, backoff = 1000) => {
+  try {
+    const response = await fetchWithTimeout(url, options);
+
+    // Retry on Server Errors (5xx) or Rate Limiting (429)
+    if ((response.status >= 500 || response.status === 429) && retries > 0) {
+      let delay = backoff;
+      const retryAfter = response.headers.get('Retry-After');
+      if (retryAfter) {
+        delay = parseInt(retryAfter, 10) * 1000 || backoff;
+      }
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return apiFetch(url, options, retries - 1, backoff * 2);
+    }
+    return response;
+  } catch (error) {
+    // Retry on Network failures or Aborts (Timeouts)
+    const isNetworkError = error.name === 'AbortError' || error.message.includes('Network request failed');
+    if (retries > 0 && isNetworkError) {
+      await new Promise(resolve => setTimeout(resolve, backoff));
+      return apiFetch(url, options, retries - 1, backoff * 2);
+    }
+    throw error;
+  }
+};
+
+const uploadWithTimeout = async (url, fileUri, options = {}) => {
+  return Promise.race([
+    FileSystem.uploadAsync(url, fileUri, options),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Upload timeout exceeded')), UPLOAD_TIMEOUT_MS)
+    )
+  ]);
+};
+// ==========================================
+
 // Helper: get auth headers (for JSON requests)
 const getAuthHeaders = async () => {
   const token = await AsyncStorage.getItem('auth_token');
@@ -130,7 +188,7 @@ export const syncOfflineQueue = async () => {
         const selfieUri = data.selfie ? (typeof data.selfie === 'string' ? data.selfie : data.selfie.uri) : null;
 
         if (selfieUri) {
-          const uploadResult = await FileSystem.uploadAsync(`${API_URL}${endpoint}`, selfieUri, {
+          const uploadResult = await uploadWithTimeout(`${API_URL}${endpoint}`, selfieUri, {
             httpMethod: 'POST',
             uploadType: FileSystem.FileSystemUploadType.MULTIPART,
             fieldName: 'selfie',
@@ -169,7 +227,7 @@ export const fetchCorrectionHistory = async () => {
     const employeeId = await AsyncStorage.getItem('employee_id');
     if (!employeeId) return [];
 
-    const response = await fetch(`${API_URL}/attendance/corrections/user/${employeeId}`, { 
+    const response = await apiFetch(`${API_URL}/attendance/corrections/user/${employeeId}`, { 
       method: 'GET',
       headers 
     });
@@ -184,7 +242,7 @@ export const fetchCorrectionHistory = async () => {
 export const setTrackingEnabled = async (enabled) => {
   try {
     const token = await AsyncStorage.getItem('auth_token');
-    const response = await fetch(`${API_URL}/user/tracking-enabled`, {
+    const response = await apiFetch(`${API_URL}/user/tracking-enabled`, {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -210,7 +268,7 @@ export const updateProfile = async (userId, data) => {
 
     if (fileUri) {
       const mimeType = getMimeTypeFromUri(fileUri, typeof pic === 'object' ? pic.name : null);
-      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/users/${userId}/profile`, fileUri, {
+      const uploadResult = await uploadWithTimeout(`${API_URL}/users/${userId}/profile`, fileUri, {
         httpMethod: 'PUT',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'profile_picture',
@@ -228,7 +286,7 @@ export const updateProfile = async (userId, data) => {
       return parseUploadResult(uploadResult);
     } else {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_URL}/users/${userId}/profile`, {
+      const response = await apiFetch(`${API_URL}/users/${userId}/profile`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({
@@ -250,11 +308,11 @@ export const updateProfile = async (userId, data) => {
 // ==========================================
 export const loginUser = async (email, password) => {
   try {
-    const response = await fetch(`${API_URL}/login`, {
+    const response = await apiFetch(`${API_URL}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, isMobile: true })
-    });
+    }, 0); // 0 retries for login to prevent account lockout loops
     return await handleResponse(response);
   } catch (error) {
     return { success: false, message: `Network Error: Cannot reach ${API_URL}` };
@@ -263,11 +321,11 @@ export const loginUser = async (email, password) => {
 
 export const sendOtp = async (email) => {
   try {
-    const response = await fetch(`${API_URL}/auth/send-otp`, {
+    const response = await apiFetch(`${API_URL}/auth/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
-    });
+    }, 0); // 0 retries for OTP requests to avoid spamming
     return await handleResponse(response);
   } catch (error) {
     return { success: false, message: 'Network error' };
@@ -276,7 +334,7 @@ export const sendOtp = async (email) => {
 
 export const verifyOtp = async (email, otp) => {
   try {
-    const response = await fetch(`${API_URL}/auth/verify-otp`, {
+    const response = await apiFetch(`${API_URL}/auth/verify-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, otp })
@@ -289,11 +347,11 @@ export const verifyOtp = async (email, otp) => {
 
 export const forgotPassword = async (email) => {
   try {
-    const response = await fetch(`${API_URL}/auth/forgot-password`, {
+    const response = await apiFetch(`${API_URL}/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, isMobile: true })
-    });
+    }, 0);
     return await handleResponse(response);
   } catch (error) {
     return { success: false, message: 'Network error' };
@@ -302,7 +360,7 @@ export const forgotPassword = async (email) => {
 
 export const verifyResetOtp = async (email, otp) => {
   try {
-    const response = await fetch(`${API_URL}/auth/verify-reset-otp`, {
+    const response = await apiFetch(`${API_URL}/auth/verify-reset-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, otp })
@@ -315,7 +373,7 @@ export const verifyResetOtp = async (email, otp) => {
 
 export const resetPassword = async (email, otp, newPassword) => {
   try {
-    const response = await fetch(`${API_URL}/auth/reset-password`, {
+    const response = await apiFetch(`${API_URL}/auth/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, otp, newPassword })
@@ -337,7 +395,7 @@ export const submitOvertimeRequest = async (data) => {
 
     if (attUri) {
       const mimeType = getMimeTypeFromUri(attUri, typeof att === 'object' ? att.name : null);
-      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/overtime-requests`, attUri, {
+      const uploadResult = await uploadWithTimeout(`${API_URL}/overtime-requests`, attUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'attachment',
@@ -356,7 +414,7 @@ export const submitOvertimeRequest = async (data) => {
       return parseUploadResult(uploadResult);
     } else {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_URL}/overtime-requests`, {
+      const response = await apiFetch(`${API_URL}/overtime-requests`, {
         method: 'POST',
         headers,
         body: JSON.stringify(data),
@@ -371,7 +429,7 @@ export const submitOvertimeRequest = async (data) => {
 export const fetchOvertimeHistory = async () => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/overtime-requests`, { headers });
+    const response = await apiFetch(`${API_URL}/overtime-requests`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -387,7 +445,7 @@ export const requestAttendanceCorrection = async (data) => {
 
     if (selfieUri) {
       const mimeType = getMimeTypeFromUri(selfieUri, typeof selfie === 'object' ? selfie.name : null);
-      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/attendance/correction-request`, selfieUri, {
+      const uploadResult = await uploadWithTimeout(`${API_URL}/attendance/correction-request`, selfieUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'attachment',
@@ -405,7 +463,7 @@ export const requestAttendanceCorrection = async (data) => {
       return parseUploadResult(uploadResult);
     } else {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_URL}/attendance/correction-request`, {
+      const response = await apiFetch(`${API_URL}/attendance/correction-request`, {
         method: 'POST',
         headers,
         body: JSON.stringify(data),
@@ -423,11 +481,11 @@ export const requestAttendanceCorrection = async (data) => {
 export const sendLocationPing = async (latitude, longitude, location_enabled, location_name) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/instructor/location`, {
+    const response = await apiFetch(`${API_URL}/instructor/location`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ latitude, longitude, location_enabled, location_name })
-    });
+    }, 0); // 0 retries for location pings, they happen frequently anyway
     return await handleResponse(response);
   } catch (error) {
     return { success: false };
@@ -441,7 +499,7 @@ export const clockIn = async (data) => {
     const selfieUri = selfie ? (typeof selfie === 'string' ? selfie : selfie.uri) : null;
 
     if (selfieUri) {
-      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/attendance/clock-in`, selfieUri, {
+      const uploadResult = await uploadWithTimeout(`${API_URL}/attendance/clock-in`, selfieUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'selfie',
@@ -457,11 +515,11 @@ export const clockIn = async (data) => {
       return parseUploadResult(uploadResult);
     } else {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_URL}/attendance/clock-in`, {
+      const response = await apiFetch(`${API_URL}/attendance/clock-in`, {
         method: 'POST',
         headers,
         body: JSON.stringify(data)
-      });
+      }, 0); // 0 retries: if it times out, the catch block pushes to offline queue
       return await handleResponse(response);
     }
   } catch (error) {
@@ -477,7 +535,7 @@ export const clockOut = async (data) => {
     const selfieUri = selfie ? (typeof selfie === 'string' ? selfie : selfie.uri) : null;
 
     if (selfieUri) {
-      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/attendance/clock-out`, selfieUri, {
+      const uploadResult = await uploadWithTimeout(`${API_URL}/attendance/clock-out`, selfieUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'selfie',
@@ -493,11 +551,11 @@ export const clockOut = async (data) => {
       return parseUploadResult(uploadResult);
     } else {
       const headers = await getAuthHeaders();
-      const response = await fetch(`${API_URL}/attendance/clock-out`, {
+      const response = await apiFetch(`${API_URL}/attendance/clock-out`, {
         method: 'POST',
         headers,
         body: JSON.stringify(data)
-      });
+      }, 0); // 0 retries: fallback to offline queue
       return await handleResponse(response);
     }
   } catch (error) {
@@ -509,7 +567,7 @@ export const clockOut = async (data) => {
 export const fetchAttendanceHistory = async (employeeId) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/attendance/user/${employeeId}`, { headers });
+    const response = await apiFetch(`${API_URL}/attendance/user/${employeeId}`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -530,7 +588,7 @@ export const submitLeaveRequest = async (payload) => {
 
     if (imageUri) {
       const mimeType = getMimeTypeFromUri(imageUri, typeof imageObj === 'object' ? imageObj.name : null);
-      const uploadResult = await FileSystem.uploadAsync(`${API_URL}/leave-requests`, imageUri, {
+      const uploadResult = await uploadWithTimeout(`${API_URL}/leave-requests`, imageUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'image',
@@ -547,7 +605,7 @@ export const submitLeaveRequest = async (payload) => {
       return parseUploadResult(uploadResult);
     } else {
       let headers = await getAuthHeaders();
-      const response = await fetch(`${API_URL}/leave-requests`, {
+      const response = await apiFetch(`${API_URL}/leave-requests`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
@@ -562,7 +620,7 @@ export const submitLeaveRequest = async (payload) => {
 export const fetchMyLeaveRequests = async (employeeId) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/leave-requests/user/${employeeId}`, { headers });
+    const response = await apiFetch(`${API_URL}/leave-requests/user/${employeeId}`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -573,7 +631,7 @@ export const fetchMyLeaveRequests = async (employeeId) => {
 export const updateLeaveStatus = async (id, status) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/leave-requests/${id}/status`, {
+    const response = await apiFetch(`${API_URL}/leave-requests/${id}/status`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ status })
@@ -587,7 +645,7 @@ export const updateLeaveStatus = async (id, status) => {
 export const dismissLeaveRequest = async (id) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/leave-requests/${id}/dismiss`, {
+    const response = await apiFetch(`${API_URL}/leave-requests/${id}/dismiss`, {
       method: 'PUT',
       headers
     });
@@ -603,7 +661,7 @@ export const dismissLeaveRequest = async (id) => {
 export const fetchUserSchedule = async (employeeId) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/schedules/${employeeId}`, { headers });
+    const response = await apiFetch(`${API_URL}/schedules/${employeeId}`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -613,7 +671,8 @@ export const fetchUserSchedule = async (employeeId) => {
 
 export const fetchEvents = async () => {
   try {
-    const response = await fetch(`${API_URL}/events`);
+    const headers = await getAuthHeaders(); // 
+    const response = await apiFetch(`${API_URL}/events`, { headers }); 
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -627,7 +686,7 @@ export const fetchEvents = async () => {
 export const fetchEmployeePayrollHistory = async (employeeId) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/payroll/employee-history/${employeeId}`, { headers });
+    const response = await apiFetch(`${API_URL}/payroll/employee-history/${employeeId}`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -638,7 +697,7 @@ export const fetchEmployeePayrollHistory = async (employeeId) => {
 export const fetchLeaveBalances = async (userId, year = new Date().getFullYear()) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`, { headers });
+    const response = await apiFetch(`${API_URL}/leave-balances/${userId}?year=${year}`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -649,7 +708,7 @@ export const fetchLeaveBalances = async (userId, year = new Date().getFullYear()
 export const fetchLeaveTypes = async () => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/leave-types`, { headers });
+    const response = await apiFetch(`${API_URL}/leave-types`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -663,7 +722,7 @@ export const fetchLeaveTypes = async () => {
 export const fetchEmergencyAlerts = async (userId) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/emergency-alerts/active?userId=${userId}`, { headers });
+    const response = await apiFetch(`${API_URL}/emergency-alerts/active?userId=${userId}`, { headers });
     const data = await handleResponse(response);
     return Array.isArray(data) ? data : [];
   } catch (error) {
@@ -674,7 +733,7 @@ export const fetchEmergencyAlerts = async (userId) => {
 export const markAlertAsRead = async (alertId, userId) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/emergency-alerts/${alertId}/read`, {
+    const response = await apiFetch(`${API_URL}/emergency-alerts/${alertId}/read`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ userId })
@@ -691,10 +750,29 @@ export const markAlertAsRead = async (alertId, userId) => {
 export const updatePassword = async (identifier, data) => {
   try {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_URL}/users/${identifier}/update-password`, {
+    const response = await apiFetch(`${API_URL}/users/${identifier}/update-password`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(data)
+    });
+    return await handleResponse(response);
+  } catch (error) {
+    return { success: false, message: "Network error" };
+  }
+};
+
+export const addManualCtoCredit = async (employeeId, creditHours, reason, year = new Date().getFullYear()) => {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await apiFetch(`${API_URL}/leave-balances/manual-cto`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        employee_id: employeeId,
+        credit_hours: creditHours,
+        reason,
+        year
+      })
     });
     return await handleResponse(response);
   } catch (error) {

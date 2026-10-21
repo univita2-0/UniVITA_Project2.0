@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Cpu, MapPin, Search, X, ChevronLeft, ChevronRight, ShieldAlert, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Cpu, Search, X, ChevronLeft, ChevronRight, ShieldAlert, Edit2 } from 'lucide-react';
 import { API_BASE } from '../api';
 import FormalModal from '../components/FormalModal';
 import './ManageScanners.css';
@@ -78,8 +78,8 @@ const ManageScanners = () => {
       const res = await axios.get(`${API_BASE}/scanners`, getAuthHeaders());
       const sorted = (res.data || []).sort((a, b) => b.id - a.id);
       setScanners(sorted);
-    } catch (err) { 
-      toast.error('Failed to load room scanners data.'); 
+    } catch (err) {
+      toast.error('Failed to load room scanners data.');
     } finally {
       setInitialLoad(false);
     }
@@ -97,23 +97,23 @@ const ManageScanners = () => {
 
     setLoading(true);
     try {
-      await axios.post(`${API_BASE}/scanners`, { 
-        scanner_id: newScannerId.trim(), 
-        assigned_room: newAssignedRoom.trim(), 
-        assigned_floor: newAssignedFloor.trim() 
+      await axios.post(`${API_BASE}/scanners`, {
+        scanner_id: newScannerId.trim(),
+        assigned_room: newAssignedRoom.trim(),
+        assigned_floor: newAssignedFloor.trim()
       }, getAuthHeaders());
-      
+
       toast.success('Scanner successfully saved.');
-      setNewScannerId(''); 
-      setNewAssignedRoom(''); 
+      setNewScannerId('');
+      setNewAssignedRoom('');
       setNewAssignedFloor('5');
       setShowAddModal(false);
       fetchScanners();
-    } catch (err) { 
+    } catch (err) {
       const errorMsg = err.response?.data?.error || 'Failed to save scanner configuration.';
-      toast.error(errorMsg); 
-    } finally { 
-      setLoading(false); 
+      toast.error(errorMsg);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -124,8 +124,8 @@ const ManageScanners = () => {
       await axios.delete(`${API_BASE}/scanners/${scannerToDelete.id}`, getAuthHeaders());
       toast.success(`Scanner removed successfully.`);
       fetchScanners();
-    } catch (err) { 
-      toast.error('Failed to delete the scanner.'); 
+    } catch (err) {
+      toast.error('Failed to delete the scanner.');
     } finally {
       setLoading(false);
       setShowDeleteModal(false);
@@ -140,7 +140,6 @@ const ManageScanners = () => {
 
   const handleFloorChange = (floor) => {
     setNewAssignedFloor(floor);
-    // Auto-select first room in list for UX smoothness
     const rooms = floor === '3' ? FLOOR_3_ROOMS : FLOOR_5_ROOMS;
     setNewAssignedRoom(rooms[0]);
   };
@@ -167,26 +166,31 @@ const ManageScanners = () => {
             <p className="expert-subtitle">Dynamically configure physical ESP32 scanner boxes and room assignments.</p>
           </div>
         </div>
-        <button className="expert-btn-primary" onClick={() => { handleFloorChange('5'); setShowAddModal(true); }}>
+        <button
+          className="expert-btn-primary"
+          onClick={() => { handleFloorChange('5'); setShowAddModal(true); }}
+        >
           <Plus size={16} /> Assign Scanner
         </button>
       </div>
 
       {/* Search Bar */}
-      <div className="expert-search-card" style={{ padding: '12px 20px' }}>
+      <div className="expert-search-card">
         <div className="expert-search-row">
-          <div className="expert-search-input-group" style={{ maxWidth: '500px' }}>
+          <div className="expert-search-input-group">
             <Search size={18} className="text-muted" />
-            <input 
-              type="text" 
-              placeholder="Search by Scanner ID, Room, or Floor..." 
-              value={searchQuery} 
-              onChange={e => setSearchQuery(e.target.value)} 
-              className="expert-clean-input" 
+            <input
+              type="text"
+              placeholder="Search by Scanner ID, Room, or Floor..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="expert-clean-input"
             />
-            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+            {searchQuery && (
+              <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />
+            )}
           </div>
-          <div className="bt-stats-badge">
+          <div className="expert-stats-badge">
             Active Scanners: <strong>{scanners.length}</strong>
           </div>
         </div>
@@ -198,9 +202,11 @@ const ManageScanners = () => {
           <div className="expert-loading">Loading room scanners...</div>
         ) : filteredScanners.length === 0 ? (
           <div className="expert-empty">
-            <Cpu size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
+            <Cpu size={48} className="text-muted" />
             <p>No Room Scanners Found</p>
-            {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Register / Assign Scanner" to map hardware to a room.</span>}
+            {searchQuery
+              ? <span>Try adjusting your search criteria.</span>
+              : <span>Click "Assign Scanner" to map hardware to a room.</span>}
           </div>
         ) : (
           <>
@@ -226,8 +232,8 @@ const ManageScanners = () => {
                       </td>
                       <td>
                         <div className="expert-action-group right">
-                          <button 
-                            className="expert-btn-icon" 
+                          <button
+                            className="expert-btn-icon"
                             title="Edit Scanner"
                             onClick={() => {
                               setNewScannerId(scanner.scanner_id);
@@ -238,7 +244,11 @@ const ManageScanners = () => {
                           >
                             <Edit2 size={18} />
                           </button>
-                          <button className="expert-btn-icon danger" onClick={() => triggerDelete(scanner)} title="Remove Scanner">
+                          <button
+                            className="expert-btn-icon danger"
+                            onClick={() => triggerDelete(scanner)}
+                            title="Remove Scanner"
+                          >
                             <Trash2 size={18} color="#EF4444" />
                           </button>
                         </div>
@@ -249,14 +259,28 @@ const ManageScanners = () => {
               </table>
             </div>
 
-            {/* Pagination Controls */}
             {totalPages > 1 && (
               <div className="expert-pagination">
-                <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredScanners.length)} of {filteredScanners.length} entries</span>
+                <span className="expert-page-info">
+                  Showing {(currentPage - 1) * itemsPerPage + 1} to{' '}
+                  {Math.min(currentPage * itemsPerPage, filteredScanners.length)} of {filteredScanners.length} entries
+                </span>
                 <div className="expert-page-controls">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="expert-page-btn"
+                  >
+                    <ChevronLeft size={16} /> Prev
+                  </button>
                   <span className="expert-page-current">{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="expert-page-btn"
+                  >
+                    Next <ChevronRight size={16} />
+                  </button>
                 </div>
               </div>
             )}
@@ -265,59 +289,65 @@ const ManageScanners = () => {
       </div>
 
       {/* Add / Edit Scanner Modal */}
-      <FormalModal show={showAddModal} onClose={() => setShowAddModal(false)} title="Configure Room Scanner" footer={
-        <>
-          <button className="expert-btn-secondary" onClick={() => setShowAddModal(false)} disabled={loading}>Cancel</button>
-          <button className="expert-btn-primary" onClick={handleAdd} disabled={loading}>
-            {loading ? 'Saving...' : 'Save Configuration'}
-          </button>
-        </>
-      }>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div className="bt-form-group">
+      <FormalModal
+        show={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="Configure Room Scanner"
+        footer={
+          <>
+            <button className="expert-btn-secondary" onClick={() => setShowAddModal(false)} disabled={loading}>Cancel</button>
+            <button className="expert-btn-primary" onClick={handleAdd} disabled={loading}>
+              {loading ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </>
+        }
+      >
+        <div className="expert-form-stack">
+          <div className="expert-form-group">
             <label>Physical Scanner ID <span className="text-danger">*</span></label>
-            <input 
-              type="text" 
-              placeholder="e.g. Scanner_A, Scanner_B" 
-              value={newScannerId} 
-              onChange={e => setNewScannerId(e.target.value)} 
+            <input
+              type="text"
+              placeholder="e.g. Scanner_A, Scanner_B"
+              value={newScannerId}
+              onChange={e => setNewScannerId(e.target.value)}
               disabled={loading}
               className="expert-clean-input border"
               autoFocus
             />
-            <span style={{ fontSize: '0.75rem', color: '#64748B' }}>Must match the <code>scannerID</code> variable programmed into the ESP32 firmware.</span>
+            <span className="expert-form-hint">
+              Must match the <code>scannerID</code> variable programmed into the ESP32 firmware.
+            </span>
           </div>
 
-          <div className="bt-form-group">
+          <div className="expert-form-group">
             <label>Building Floor <span className="text-danger">*</span></label>
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '4px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500' }}>
-                <input 
-                  type="radio" 
-                  name="floorGroup" 
-                  checked={newAssignedFloor === '3'} 
-                  onChange={() => handleFloorChange('3')} 
+            <div className="expert-radio-row">
+              <label className="expert-radio-label">
+                <input
+                  type="radio"
+                  name="floorGroup"
+                  checked={newAssignedFloor === '3'}
+                  onChange={() => handleFloorChange('3')}
                 /> 3rd Floor
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: '500' }}>
-                <input 
-                  type="radio" 
-                  name="floorGroup" 
-                  checked={newAssignedFloor === '5'} 
-                  onChange={() => handleFloorChange('5')} 
+              <label className="expert-radio-label">
+                <input
+                  type="radio"
+                  name="floorGroup"
+                  checked={newAssignedFloor === '5'}
+                  onChange={() => handleFloorChange('5')}
                 /> 5th Floor
               </label>
             </div>
           </div>
 
-          <div className="bt-form-group">
+          <div className="expert-form-group">
             <label>Assigned Room / Area <span className="text-danger">*</span></label>
-            <select 
-              value={newAssignedRoom} 
-              onChange={e => setNewAssignedRoom(e.target.value)} 
+            <select
+              value={newAssignedRoom}
+              onChange={e => setNewAssignedRoom(e.target.value)}
               disabled={loading}
               className="expert-clean-input border"
-              style={{ cursor: 'pointer' }}
             >
               <option value="">Select Room</option>
               {availableRooms.map(room => (
@@ -329,27 +359,32 @@ const ManageScanners = () => {
       </FormalModal>
 
       {/* Delete Confirmation Modal */}
-      <FormalModal show={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Remove Scanner Mapping" footer={
-        <>
-          <button className="expert-btn-secondary" onClick={() => setShowDeleteModal(false)} disabled={loading}>Cancel</button>
-          <button className="expert-btn-primary bg-red" onClick={confirmDelete} disabled={loading}>
-            {loading ? 'Processing...' : 'Yes, Remove'}
-          </button>
-        </>
-      }>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '8px', padding: '16px 0' }}>
-          <ShieldAlert size={48} color="#DC2626" style={{ marginBottom: '8px' }} />
-          <p style={{ fontSize: '1.05rem', color: '#0F172A', margin: 0, fontWeight: '500' }}>
+      <FormalModal
+        show={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        title="Remove Scanner Mapping"
+        footer={
+          <>
+            <button className="expert-btn-secondary" onClick={() => setShowDeleteModal(false)} disabled={loading}>Cancel</button>
+            <button className="expert-btn-primary bg-red" onClick={confirmDelete} disabled={loading}>
+              {loading ? 'Processing...' : 'Yes, Remove'}
+            </button>
+          </>
+        }
+      >
+        <div className="expert-confirm-body">
+          <ShieldAlert size={48} color="#DC2626" />
+          <p className="expert-confirm-title">
             Are you sure you want to delete scanner <strong>{scannerToDelete?.scanner_id}</strong>?
           </p>
-          <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '8px', border: '1px solid #E2E8F0', marginTop: '8px' }}>
-            <p style={{ fontSize: '0.85rem', color: '#64748B', margin: 0 }}>
-              The physical box will stop reporting room tracking data until it is re-registered in the system.
+          <div className="expert-confirm-note">
+            <p>
+              The physical box will stop reporting room tracking data until it is
+              re-registered in the system.
             </p>
           </div>
         </div>
       </FormalModal>
-
     </div>
   );
 };

@@ -1,8 +1,7 @@
-// src/pages/LeaveManagement.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Check, X, Search, RefreshCw, ClipboardList, ChevronLeft, ChevronRight, CheckCircle, XCircle, Eye, ExternalLink } from 'lucide-react';
+import { Check, X, Search, RefreshCw, ClipboardList, ChevronLeft, ChevronRight, CheckCircle, XCircle, Eye, ExternalLink, Calendar, User, FileText, MessageSquare, Clock } from 'lucide-react';
 import { API_BASE } from '../api';
 import './LeaveManagement.css';
 
@@ -112,7 +111,6 @@ const LeaveManagement = () => {
     return `${startStr} – ${endStr}`;
   };
 
-  // Helper to format timestamps into 12-hour AM/PM format
   const formatDateTime12Hour = (dateString) => {
     if (!dateString) return '—';
     const date = new Date(dateString.replace(' ', 'T'));
@@ -152,36 +150,48 @@ const LeaveManagement = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            <p className="expert-subtitle">Review historical and resolved employee leave and absence logs (Current to Old).</p>
+           
+            <p className="expert-subtitle">Review historical and resolved employee leave logs across the organization.</p>
           </div>
         </div>
-        <button className="expert-btn-secondary" onClick={() => setShowPendingModal(true)}>
-          <ClipboardList size={16} /> Pending Requests
-          {pendingCount > 0 && <span className="lm-badge-count">{pendingCount}</span>}
-        </button>
+        <div className="expert-header-actions">
+          <button className="expert-btn-secondary" onClick={fetchData} title="Refresh Data">
+            <RefreshCw size={15} className={loading ? "spin-icon" : ""} /> Refresh
+          </button>
+          <button className="expert-btn-primary" onClick={() => setShowPendingModal(true)}>
+            <ClipboardList size={16} /> Pending Requests
+            {pendingCount > 0 && <span className="lm-badge-count">{pendingCount}</span>}
+          </button>
+        </div>
       </div>
 
-      <div className="expert-search-card" style={{ padding: '12px 20px' }}>
+      <div className="expert-search-card">
         <div className="expert-search-row">
-          <div className="expert-search-input-group" style={{ maxWidth: '400px' }}>
-            <Search size={18} className="text-muted" />
+          <div className="expert-search-input-group">
+            <Search size={18} className="search-icon" />
             <input
               type="text"
-              placeholder="Search Name or Employee ID..."
+              placeholder="Search by Employee Name, ID, or Leave Type..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               className="expert-clean-input"
             />
-            {searchTerm && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchTerm('')} />}
+            {searchTerm && <X size={16} className="clear-icon" onClick={() => setSearchTerm('')} />}
+          </div>
+          <div className="expert-meta-stats">
+            Total Records: <strong>{filteredHistory.length}</strong>
           </div>
         </div>
       </div>
 
       <div className="expert-card">
         {loading ? (
-          <div className="expert-loading">Loading leave records...</div>
+          <div className="expert-loading">
+            <RefreshCw size={24} className="spin-icon" />
+            <span>Loading leave records...</span>
+          </div>
         ) : filteredHistory.length === 0 ? (
-          <div className="expert-empty">No historical leave records match your criteria.</div>
+          <div className="expert-empty">No historical leave records match your search criteria.</div>
         ) : (
           <>
             <div className="expert-table-wrapper">
@@ -198,7 +208,7 @@ const LeaveManagement = () => {
                 <tbody>
                   {currentHistory.map(group => (
                     <tr key={group.ids?.[0] || Math.random()}>
-                      <td className="whitespace-nowrap font-mono text-xs text-muted">{group.employee_id || '—'}</td>
+                      <td className="whitespace-nowrap font-mono text-muted">{group.employee_id || '—'}</td>
                       <td className="whitespace-nowrap font-semibold text-dark">{group.full_name || 'Unknown'}</td>
                       <td className="whitespace-nowrap">
                         <span className="expert-chip default">{group.type || 'Leave'}</span>
@@ -210,7 +220,8 @@ const LeaveManagement = () => {
                       </td>
                       <td className="text-right whitespace-nowrap">
                         <button className="lm-btn-icon" onClick={() => openDetailsModal(group)} title="View Details">
-                          <Eye size={18} color="#475569" />
+                          <Eye size={15} />
+                          <span>View Details</span>
                         </button>
                       </td>
                     </tr>
@@ -223,9 +234,13 @@ const LeaveManagement = () => {
               <div className="expert-pagination">
                 <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredHistory.length)} of {filteredHistory.length} entries</span>
                 <div className="expert-page-controls">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn">
+                    <ChevronLeft size={16} /> Previous
+                  </button>
                   <span className="expert-page-current">{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">
+                    Next <ChevronRight size={16} />
+                  </button>
                 </div>
               </div>
             )}
@@ -233,65 +248,105 @@ const LeaveManagement = () => {
         )}
       </div>
 
-      {/* DETAILS MODAL (Now includes Date Range, Duration, and Filed On in 12hr AM/PM format) */}
+      {/* FORMAL & REDESIGNED DETAILS MODAL (Eye Icon Click) */}
       {showDetailsModal && selectedGroup && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowDetailsModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
             <div className="lm-custom-modal-header">
-              <h3>Leave Request Details</h3>
+              <div>
+                <h3>Leave Request Details</h3>
+                <p className="lm-modal-subtitle">Official record overview and approval status</p>
+              </div>
               <button className="lm-custom-close-btn" onClick={() => setShowDetailsModal(false)}>
                 <X size={18} />
               </button>
             </div>
             
             <div className="lm-custom-modal-body">
-              <div className="lm-custom-summary-card">
-                <div className="lm-custom-req-top">
-                  <div>
-                    <span className="lm-custom-name">{selectedGroup.full_name}</span>
-                    <span className="lm-custom-id-tag">{selectedGroup.employee_id || '—'}</span>
+              {/* Employee Banner */}
+              <div className="lm-detail-banner">
+                <div className="lm-detail-user">
+                  <div className="lm-detail-avatar">
+                    {selectedGroup.full_name ? selectedGroup.full_name.charAt(0).toUpperCase() : 'U'}
                   </div>
-                  <span className={`expert-chip ${selectedGroup.status?.toLowerCase() === 'approved' ? 'success' : selectedGroup.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
-                    {selectedGroup.status?.toUpperCase()}
-                  </span>
+                  <div>
+                    <h4 className="lm-detail-name">{selectedGroup.full_name}</h4>
+                    <span className="lm-detail-id">ID: {selectedGroup.employee_id || '—'}</span>
+                  </div>
+                </div>
+                <span className={`expert-chip ${selectedGroup.status?.toLowerCase() === 'approved' ? 'success' : selectedGroup.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
+                  {selectedGroup.status?.toUpperCase()}
+                </span>
+              </div>
+
+              {/* Structured Key Details Table / Grid */}
+              <div className="lm-detail-section">
+                <div className="lm-detail-grid-2col">
+                  <div className="lm-detail-card-item">
+                    <div className="lm-detail-label">
+                      <FileText size={14} /> Leave Type
+                    </div>
+                    <div className="lm-detail-value font-semibold">{selectedGroup.type || 'Leave'}</div>
+                  </div>
+
+                  <div className="lm-detail-card-item">
+                    <div className="lm-detail-label">
+                      <Clock size={14} /> Total Duration
+                    </div>
+                    <div className="lm-detail-value font-semibold">{selectedGroup.request_count || 1} Day(s)</div>
+                  </div>
+
+                  <div className="lm-detail-card-item">
+                    <div className="lm-detail-label">
+                      <Calendar size={14} /> Date Range
+                    </div>
+                    <div className="lm-detail-value font-medium">{formatDateRange(selectedGroup.start_date, selectedGroup.end_date)}</div>
+                  </div>
+
+                  <div className="lm-detail-card-item">
+                    <div className="lm-detail-label">
+                      <Clock size={14} /> Submitted On
+                    </div>
+                    <div className="lm-detail-value font-medium">{formatDateTime12Hour(selectedGroup.submitted_at || selectedGroup.created_at)}</div>
+                  </div>
                 </div>
 
-                <div className="lm-custom-details-grid">
-                  <div className="lm-custom-prop">
-                    <label>Leave Type</label>
-                    <span>{selectedGroup.type || 'Leave'}</span>
+                {/* Reason Box */}
+                <div className="lm-detail-block">
+                  <div className="lm-detail-label">
+                    <MessageSquare size={14} /> Reason for Leave
                   </div>
-                  <div className="lm-custom-prop">
-                    <label>Total Duration</label>
-                    <span className="nowrap">{selectedGroup.request_count || 1} day(s)</span>
+                  <div className="lm-detail-text-box">
+                    {selectedGroup.reason || 'No specific reason provided.'}
                   </div>
-                  <div className="lm-custom-prop full-width">
-                    <label>Date Range (Log)</label>
-                    <span className="nowrap">{formatDateRange(selectedGroup.start_date, selectedGroup.end_date)}</span>
-                  </div>
-                  <div className="lm-custom-prop full-width">
-                    <label>Filed On</label>
-                    <span className="nowrap">{formatDateTime12Hour(selectedGroup.submitted_at || selectedGroup.created_at)}</span>
-                  </div>
-                  <div className="lm-custom-prop full-width">
-                    <label>Reason</label>
-                    <span className="reason-text">{selectedGroup.reason || '—'}</span>
-                  </div>
-                  <div className="lm-custom-prop full-width">
-                    <label>Admin Remarks</label>
-                    <span className="reason-text">{selectedGroup.admin_remarks || '—'}</span>
-                  </div>
-                  {selectedGroup.image_url && (
-                    <div className="lm-custom-prop full-width">
-                      <label>Supporting Document</label>
-                      <span>
-                        <a href={`${API_BASE.replace(/\/api$/, '')}${selectedGroup.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-link" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                          <ExternalLink size={14} /> View Attached Document / Proof
-                        </a>
-                      </span>
-                    </div>
-                  )}
                 </div>
+
+                {/* Admin Remarks Box */}
+                <div className="lm-detail-block">
+                  <div className="lm-detail-label">
+                    <User size={14} /> Administrator Remarks
+                  </div>
+                  <div className="lm-detail-text-box admin-remarks">
+                    {selectedGroup.admin_remarks || 'No remarks recorded.'}
+                  </div>
+                </div>
+
+                {/* Attachment Proof */}
+                {selectedGroup.image_url && (
+                  <div className="lm-detail-block">
+                    <div className="lm-detail-label">
+                      <ExternalLink size={14} /> Attached Proof / Document
+                    </div>
+                    <a 
+                      href={`${API_BASE.replace(/\/api$/, '')}${selectedGroup.image_url}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="lm-attachment-link"
+                    >
+                      <ExternalLink size={14} /> View Supporting Document
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -317,28 +372,33 @@ const LeaveManagement = () => {
         <div className="lm-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
             <div className="lm-custom-modal-header">
-              <h3>Pending Leave Requests</h3>
+              <div>
+                <h3>Pending Leave Requests</h3>
+                <p className="lm-modal-subtitle">Review and process active leave submissions</p>
+              </div>
               <button className="lm-custom-close-btn" onClick={() => setShowPendingModal(false)}>
                 <X size={18} />
               </button>
             </div>
             
             <div className="lm-custom-modal-body">
-              <div className="expert-search-input-group border" style={{ marginBottom: '1.25rem', maxWidth: '100%', background: '#FFFFFF' }}>
-                <Search size={18} className="text-muted" />
+              <div className="expert-search-input-group modal-search">
+                <Search size={18} className="search-icon" />
                 <input type="text" placeholder="Search Name or Employee ID..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="expert-clean-input" />
-                {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+                {pendingSearch && <X size={16} className="clear-icon" onClick={() => setPendingSearch('')} />}
               </div>
 
               {loadingPending ? (
-                <div className="expert-loading">Loading pending requests...</div>
+                <div className="expert-loading">
+                  <RefreshCw size={20} className="spin-icon" />
+                  <span>Loading pending requests...</span>
+                </div>
               ) : filteredPending.length === 0 ? (
                 <div className="expert-empty">No pending leave requests match your criteria.</div>
               ) : (
                 <div className="lm-minimal-list">
                   {currentPending.map(group => (
                     <div key={group.ids?.[0] || Math.random()} className="lm-minimal-card">
-                      
                       <div className="lm-minimal-header">
                         <div className="lm-minimal-user">
                           <div className="lm-minimal-avatar">
@@ -364,7 +424,7 @@ const LeaveManagement = () => {
                           </div>
                         </div>
                         
-                        <div className="lm-minimal-field full-width" style={{ marginTop: '0.5rem' }}>
+                        <div className="lm-minimal-field full-width">
                           <label>Reason for Leave</label>
                           <p>{group.reason || '—'}</p>
                         </div>
@@ -382,7 +442,6 @@ const LeaveManagement = () => {
                         <button className="lm-btn-min-reject" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Rejected'); }}>Reject</button>
                         <button className="lm-btn-min-approve" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Approved'); }}>Approve</button>
                       </div>
-
                     </div>
                   ))}
                 </div>
@@ -410,26 +469,29 @@ const LeaveManagement = () => {
       {/* REMARKS MODAL */}
       {showRemarksModal && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowRemarksModal(false)}>
-          <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
+          <div className="lm-custom-modal small" onClick={e => e.stopPropagation()}>
             <div className="lm-custom-modal-header">
-              <h3>{actionType} Leave Request</h3>
+              <div>
+                <h3>{actionType} Leave Request</h3>
+                <p className="lm-modal-subtitle">Add official review notes for this action</p>
+              </div>
               <button className="lm-custom-close-btn" onClick={() => setShowRemarksModal(false)}>
                 <X size={18} />
               </button>
             </div>
             
             <div className="lm-custom-modal-body">
-              <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '8px', border: '1px solid #E2E8F0', marginBottom: '1.25rem' }}>
-                <p style={{ fontSize: '0.95rem', color: '#334155', margin: 0, lineHeight: '1.6' }}>
+              <div className="lm-action-notice-box">
+                <p>
                   You are about to <strong>{actionType.toLowerCase()}</strong> the leave request for <strong>{selectedGroup?.full_name}</strong>.
                 </p>
-                <p style={{ fontSize: '0.85rem', color: '#64748B', margin: '4px 0 0 0' }}>
+                <p className="lm-action-dates">
                   Dates: <strong>{formatDateOnly(selectedGroup?.start_date)}</strong> to <strong>{formatDateOnly(selectedGroup?.end_date)}</strong> ({selectedGroup?.request_count} days)
                 </p>
               </div>
 
               <div className="expert-form-group">
-                <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase', marginBottom: '0.4rem', display: 'block' }}>Administrator Remarks (Optional)</label>
+                <label>Administrator Remarks (Optional)</label>
                 <textarea
                   rows="3"
                   className="expert-clean-input border"
@@ -437,7 +499,6 @@ const LeaveManagement = () => {
                   value={remarks}
                   onChange={e => setRemarks(e.target.value)}
                   disabled={processing}
-                  style={{ resize: 'vertical' }}
                 />
               </div>
             </div>

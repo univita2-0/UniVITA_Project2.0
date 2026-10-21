@@ -1,12 +1,43 @@
 // src/screens/AppealHistoryScreen.js
 import React, { useState, useEffect, useContext, useMemo } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, StatusBar, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, StatusBar, Modal, TextInput, Alert, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar as RNCalendar } from 'react-native-calendars';
 import { ArrowLeft, Calendar as CalendarIcon, Clock, CheckCircle, ChevronLeft, ChevronRight, X, Eye, EyeOff } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { API_URL } from './api';
+
+/* ---------------- Fix #8 helpers ---------------- */
+const CANCEL_REASON_MAX_LENGTH = 500;
+const CANCEL_REASON_MIN_LENGTH = 3;
+
+const validateCancelReason = (reason) => {
+  const trimmed = String(reason || '').trim();
+  if (!trimmed) return 'Please enter a reason for cancellation.';
+  if (trimmed.length < CANCEL_REASON_MIN_LENGTH) return `Reason must be at least ${CANCEL_REASON_MIN_LENGTH} characters.`;
+  if (trimmed.length > CANCEL_REASON_MAX_LENGTH) return `Reason must not exceed ${CANCEL_REASON_MAX_LENGTH} characters.`;
+  return '';
+};
+
+const parseLocalDate = (dateStr) => {
+  if (!dateStr) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+  return d;
+};
+
+const toLocalISODate = (d = new Date()) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
 const formatTo12Hour = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || timeStr === '00:00:00') return '';
@@ -41,7 +72,6 @@ const formatDate = (dateStr) => {
   return cleanStr;
 };
 
-// Formats PHT MySQL timestamps (YYYY-MM-DD HH:mm:ss) without UTC shifting
 const formatDateTime = (dateStr) => {
   if (!dateStr || dateStr === 'Not Recorded') return 'Not Recorded';
   const raw = String(dateStr).trim();
@@ -87,41 +117,67 @@ export default function AppealHistoryScreen({ navigation }) {
 
   const [allHistory, setAllHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
+
   const [activeTab, setActiveTab] = useState('pending');
   const [filterDate, setFilterDate] = useState(new Date());
   const [page, setPage] = useState(1);
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
 
-  // Cancellation State
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [cancelError, setCancelError] = useState('');
   const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => { loadHistory(); }, []);
 
   const loadHistory = async () => {
-    const token = await AsyncStorage.getItem('auth_token');
-    const employeeId = await AsyncStorage.getItem('employee_id');
-    if (!employeeId) { setLoading(false); return; }
+    setLoadError('');
     try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const employeeId = await AsyncStorage.getItem('employee_id');
+      if (!employeeId) {
+        setLoadError('Employee session not found. Please sign in again.');
+        return;
+      }
       const res = await fetch(`${API_URL}/attendance-appeals/user/${employeeId}`, {
         headers: { Authorization: `Bearer ${token || ''}` }
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setAllHistory(Array.isArray(data) ? data : []);
     } catch (err) {
-      setAllHistory([]);
-    } finally { setLoading(false); }
+      setLoadError('Unable to load appeal history. Pull down to retry.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => { setRefreshing(true); loadHistory(); };
+
+  const closeCancelModal = () => {
+    if (cancelling) return;
+    setShowCancelModal(false);
+    setCancelReason('');
+    setCancelError('');
+    setSelectedRequestId(null);
   };
 
   const handleCancelRequest = async () => {
-    if (!cancelReason.trim()) {
-      Alert.alert("Reason Required", "Please enter a reason for cancellation.");
+    const validationError = validateCancelReason(cancelReason);
+    if (validationError) {
+      setCancelError(validationError);
       return;
     }
+    if (!selectedRequestId) {
+      setCancelError('No request selected. Please reopen the dialog.');
+      return;
+    }
+    setCancelError('');
     setCancelling(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -131,34 +187,31 @@ export default function AppealHistoryScreen({ navigation }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ reason: cancelReason })
+        body: JSON.stringify({ reason: cancelReason.trim() })
       });
-      
+
       const data = await res.json();
       if (res.ok && data.success) {
-        Alert.alert("Success", "Request cancelled successfully.");
-        setShowCancelModal(false);
-        setCancelReason('');
-        loadHistory(); 
+        Alert.alert('Success', 'Request cancelled successfully.');
+        closeCancelModal();
+        loadHistory();
       } else {
-        Alert.alert("Error", data.message || "Failed to cancel request.");
+        setCancelError(data.message || 'Failed to cancel request.');
       }
     } catch (err) {
-      Alert.alert("Error", "Server connection failed.");
+      setCancelError('Server connection failed. Please try again.');
     } finally {
       setCancelling(false);
     }
   };
 
-  const toggleExpand = (id) => {
-    setExpandedId(prev => prev === id ? null : id);
-  };
+  const toggleExpand = (id) => setExpandedId(prev => prev === id ? null : id);
 
   const changeMonth = (offset) => {
     const newDate = new Date(filterDate);
     newDate.setMonth(newDate.getMonth() + offset);
     setFilterDate(newDate);
-    setPage(1); 
+    setPage(1);
     setExpandedId(null);
   };
 
@@ -198,44 +251,49 @@ export default function AppealHistoryScreen({ navigation }) {
     );
   }
 
+  const confirmDisabled = cancelling || !!validateCancelReason(cancelReason);
+
   return (
     <>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
+            <ArrowLeft size={24} color={isLight ? '#0F172A' : colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Appeal History</Text>
           <View style={{ width: 40 }} />
         </View>
 
         <View style={styles.tabContainer}>
-          <TouchableOpacity style={[styles.tab, activeTab === 'pending' && styles.activeTab]} onPress={() => {setActiveTab('pending'); setPage(1); setExpandedId(null);}} activeOpacity={0.8}>
+          <TouchableOpacity style={[styles.tab, activeTab === 'pending' && styles.activeTab]} onPress={() => { setActiveTab('pending'); setPage(1); setExpandedId(null); }} activeOpacity={0.8}>
             <Text style={[styles.tabText, activeTab === 'pending' && styles.activeTabText]}>Pending</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.tab, activeTab === 'history' && styles.activeTab]} onPress={() => {setActiveTab('history'); setPage(1); setExpandedId(null);}} activeOpacity={0.8}>
+          <TouchableOpacity style={[styles.tab, activeTab === 'history' && styles.activeTab]} onPress={() => { setActiveTab('history'); setPage(1); setExpandedId(null); }} activeOpacity={0.8}>
             <Text style={[styles.tabText, activeTab === 'history' && styles.activeTabText]}>History</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.filterNavigator}>
           <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.navButton} activeOpacity={0.7}>
-            <ChevronLeft size={20} color={isLight ? "#0F172A" : colors.textPrimary} />
+            <ChevronLeft size={20} color={isLight ? '#0F172A' : colors.textPrimary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.dateRangeContainer} onPress={() => setShowCalendarModal(true)} activeOpacity={0.7}>
             <CalendarIcon size={16} color={colors.primary} />
             <Text style={styles.dateRangeText}>{monthYearString}</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => changeMonth(1)} style={styles.navButton} activeOpacity={0.7}>
-            <ChevronRight size={20} color={isLight ? "#0F172A" : colors.textPrimary} />
+            <ChevronRight size={20} color={isLight ? '#0F172A' : colors.textPrimary} />
           </TouchableOpacity>
         </View>
 
+        {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
+
         <FlatList
           data={paginatedHistory}
-          keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+          keyExtractor={(item) => String(item.id ?? `app-${item.date ?? ''}-${item.created_at ?? ''}`)}
           contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? '#0F172A' : '#FFFFFF'} />}
           renderItem={({ item }) => {
             const statusTheme = getStatusTheme(item.status, isLight);
             const isExpanded = expandedId === item.id;
@@ -249,13 +307,13 @@ export default function AppealHistoryScreen({ navigation }) {
                     <Text style={[styles.statusText, { color: statusTheme.text }]}>{item.status?.toUpperCase() || 'PENDING'}</Text>
                   </View>
                   <TouchableOpacity onPress={() => toggleExpand(item.id)} style={styles.eyeBtn}>
-                    {isExpanded ? <EyeOff size={20} color={colors.primary} /> : <Eye size={20} color={isLight ? "#94A3B8" : colors.textSecondary} />}
+                    {isExpanded ? <EyeOff size={20} color={colors.primary} /> : <Eye size={20} color={isLight ? '#94A3B8' : colors.textSecondary} />}
                   </TouchableOpacity>
                 </View>
 
                 {(item.time_in || item.time_out) && (
                   <View style={styles.cardBody}>
-                    <Clock size={16} color={isLight ? "#64748B" : colors.textSecondary} />
+                    <Clock size={16} color={isLight ? '#64748B' : colors.textSecondary} />
                     <Text style={styles.time}>
                       {item.time_in ? `In: ${formatTo12Hour(item.time_in)}` : ''} {item.time_out ? `Out: ${formatTo12Hour(item.time_out)}` : ''}
                     </Text>
@@ -272,10 +330,12 @@ export default function AppealHistoryScreen({ navigation }) {
                 )}
 
                 {item.status?.toLowerCase() === 'pending' && (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 12, marginTop: 12, alignItems: 'center' }}
                     onPress={() => {
                       setSelectedRequestId(item.id);
+                      setCancelReason('');
+                      setCancelError('');
                       setShowCancelModal(true);
                     }}
                   >
@@ -298,10 +358,10 @@ export default function AppealHistoryScreen({ navigation }) {
                       </View>
                     )}
                     {(item.admin_remarks || item.admin_notes) && (
-                       <View style={styles.expandedRow}>
-                         <Text style={styles.expandedLabel}>Remarks:</Text>
-                         <Text style={styles.expandedValue}>{item.admin_remarks || item.admin_notes}</Text>
-                       </View>
+                      <View style={styles.expandedRow}>
+                        <Text style={styles.expandedLabel}>Remarks:</Text>
+                        <Text style={styles.expandedValue}>{item.admin_remarks || item.admin_notes}</Text>
+                      </View>
                     )}
                   </View>
                 )}
@@ -318,19 +378,20 @@ export default function AppealHistoryScreen({ navigation }) {
           }
         />
 
-        <Modal visible={showCalendarModal} transparent animationType="fade">
+        <Modal visible={showCalendarModal} transparent animationType="fade" onRequestClose={() => setShowCalendarModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.calendarModalContent}>
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Select Month</Text>
                 <TouchableOpacity onPress={() => setShowCalendarModal(false)}>
-                  <X size={22} color={isLight ? "#64748B" : colors.textSecondary} />
+                  <X size={22} color={isLight ? '#64748B' : colors.textSecondary} />
                 </TouchableOpacity>
               </View>
               <RNCalendar
-                current={filterDate.toISOString().substring(0, 10)}
+                current={toLocalISODate(filterDate)}
                 onDayPress={(day) => {
-                  setFilterDate(new Date(day.dateString));
+                  const parsed = parseLocalDate(day.dateString);
+                  setFilterDate(parsed || new Date());
                   setPage(1);
                   setExpandedId(null);
                   setShowCalendarModal(false);
@@ -352,7 +413,7 @@ export default function AppealHistoryScreen({ navigation }) {
           </View>
         </Modal>
 
-        <Modal visible={showCancelModal} transparent animationType="fade">
+        <Modal visible={showCancelModal} transparent animationType="fade" onRequestClose={closeCancelModal}>
           <View style={styles.modalOverlay}>
             <View style={styles.calendarModalContent}>
               <Text style={[styles.modalTitle, { marginBottom: 10 }]}>Cancel Request</Text>
@@ -360,18 +421,38 @@ export default function AppealHistoryScreen({ navigation }) {
                 Please provide a reason for cancelling this request:
               </Text>
               <TextInput
-                style={{ fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 12, padding: 12, fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, height: 100, textAlignVertical: 'top' }}
+                style={{
+                  fontFamily: 'Inter_18pt-Medium',
+                  borderWidth: 1,
+                  borderColor: cancelError ? '#EF4444' : (isLight ? '#E2E8F0' : colors.border),
+                  borderRadius: 12,
+                  padding: 12,
+                  fontSize: 14,
+                  color: isLight ? '#0F172A' : colors.textPrimary,
+                  backgroundColor: isLight ? '#FFFFFF' : colors.surface,
+                  height: 100,
+                  textAlignVertical: 'top'
+                }}
                 multiline
+                maxLength={CANCEL_REASON_MAX_LENGTH}
                 placeholder="Reason for cancellation..."
                 placeholderTextColor={colors.textSecondary}
                 value={cancelReason}
-                onChangeText={setCancelReason}
+                onChangeText={(t) => { setCancelReason(t); if (cancelError) setCancelError(''); }}
               />
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                {cancelError ? <Text style={styles.inlineError}>{cancelError}</Text> : <View />}
+                <Text style={styles.charCounter}>{cancelReason.length} / {CANCEL_REASON_MAX_LENGTH}</Text>
+              </View>
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
-                <TouchableOpacity onPress={() => setShowCancelModal(false)} style={{ padding: 12 }}>
+                <TouchableOpacity onPress={closeCancelModal} style={{ padding: 12 }} disabled={cancelling}>
                   <Text style={{ color: colors.textSecondary, fontFamily: 'Inter_18pt-Medium' }}>Close</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleCancelRequest} disabled={cancelling} style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 8 }}>
+                <TouchableOpacity
+                  onPress={handleCancelRequest}
+                  disabled={confirmDisabled}
+                  style={{ backgroundColor: confirmDisabled ? '#FCA5A5' : '#EF4444', padding: 12, borderRadius: 8 }}
+                >
                   <Text style={{ color: '#FFF', fontFamily: 'Inter_18pt-Bold' }}>{cancelling ? 'Cancelling...' : 'Confirm Cancel'}</Text>
                 </TouchableOpacity>
               </View>
@@ -416,6 +497,9 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   expandedLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary },
   expandedValue: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#0F172A' : colors.textPrimary, textAlign: 'right', flex: 1, marginLeft: 10 },
   emptyText: { fontFamily: 'Inter_18pt-Medium', textAlign: 'center', color: isLight ? '#94A3B8' : colors.textSecondary, marginTop: 50, fontSize: 15 },
+  errorText: { fontFamily: 'Inter_18pt-Medium', color: '#EF4444', fontSize: 12, marginTop: 10, marginHorizontal: 22 },
+  inlineError: { fontFamily: 'Inter_18pt-Medium', color: '#EF4444', fontSize: 12, flex: 1, marginRight: 8 },
+  charCounter: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: isLight ? '#94A3B8' : colors.textSecondary },
   loadMoreBtn: { backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, padding: 16, borderRadius: 16, alignItems: 'center', marginTop: 10, marginBottom: 20 },
   loadMoreText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: colors.primary },
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },

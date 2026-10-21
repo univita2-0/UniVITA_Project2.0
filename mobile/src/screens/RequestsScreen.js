@@ -1,3 +1,4 @@
+// src/screens/RequestsScreen.js
 import React, { useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity,
@@ -82,12 +83,12 @@ const formatTo12Hour = (timeStr) => {
   const clean = cleanStr.split('.')[0].replace(',', ':');
   const parts = clean.split(':');
   if (parts.length < 2) return timeStr;
-  
+
   let hours = parseInt(parts[0], 10);
   let minutes = parseInt(parts[1], 10);
   if (isNaN(hours)) return timeStr;
   if (isNaN(minutes)) minutes = 0;
-  
+
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12;
   hours = hours ? hours : 12;
@@ -102,7 +103,7 @@ const formatTimeForDB = (timeStr) => {
     cleanStr = tParts.length > 1 ? tParts[1] : tParts[0];
     cleanStr = cleanStr.split('Z')[0].split('+')[0];
   }
-  const cleaned = cleanStr.replace(',', ':').split('.')[0];
+  const cleaned = cleanStr.split('.')[0];
   const parts = cleaned.split(':');
   if (parts.length >= 2) {
     const h = parts[0].padStart(2, '0');
@@ -114,6 +115,14 @@ const formatTimeForDB = (timeStr) => {
 
 const getPHNowString = () => {
   const now = new Date();
+  const options = { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' };
+  return now.toLocaleDateString('en-CA', options);
+};
+
+// ✅ FIX M1 — Helper for computing a date offset (in days) in PH timezone
+const getPHDateOffset = (daysOffset) => {
+  const now = new Date();
+  now.setDate(now.getDate() + daysOffset);
   const options = { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' };
   return now.toLocaleDateString('en-CA', options);
 };
@@ -204,17 +213,19 @@ export default function RequestsScreen({ navigation, route }) {
   const [showOvertimeCalendar, setShowOvertimeCalendar] = useState(false);
   const [overtimeType, setOvertimeType] = useState('Regular Overtime');
   const [overtimeTiming, setOvertimeTiming] = useState('Normal OT');
+  const [myOvertimeRequests, setMyOvertimeRequests] = useState([]);
 
   const todayStr = getPHNowString();
+  // ✅ FIX M1 (cont.) — 30 days ago in PH timezone
+  const thirtyDaysAgoStr = getPHDateOffset(-30);
 
-  // AUTOMATIC INITIAL LOAD: Fetch active leave types AND live employee balances on mount
+  // AUTOMATIC INITIAL LOAD
   const loadInitialLeaveData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('auth_token');
       const userId = await AsyncStorage.getItem('user_id');
       const year = new Date().getFullYear();
 
-      // 1. Fetch active leave types from DB
       const resTypes = await fetch(`${API_URL}/leave-types`, {
         headers: { Authorization: `Bearer ${token || ''}` }
       });
@@ -226,7 +237,6 @@ export default function RequestsScreen({ navigation, route }) {
         }
       }
 
-      // 2. Fetch live employee balances so validations have immediate access to quota numbers
       if (userId) {
         const resBal = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`, {
           headers: { Authorization: `Bearer ${token || ''}` }
@@ -245,13 +255,25 @@ export default function RequestsScreen({ navigation, route }) {
     loadInitialLeaveData();
   }, [loadInitialLeaveData]);
 
-  // Compute remaining days for currently selected leave type
   const currentSelectedBalance = useMemo(() => {
-    const record = leaveBalances.find(b => 
+    const record = leaveBalances.find(b =>
       b.leave_type?.trim().toLowerCase() === leaveType?.trim().toLowerCase()
     );
     return record ? parseFloat(record.remaining_days) : 0;
   }, [leaveBalances, leaveType]);
+
+  const loadMyOvertimeRequests = async () => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${API_URL}/overtime-requests`, {
+        headers: { Authorization: `Bearer ${token || ''}` }
+      });
+      const data = await res.json();
+      setMyOvertimeRequests(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setMyOvertimeRequests([]);
+    }
+  };
 
   const handleTabSwitch = (tab) => {
     setActiveTab(tab);
@@ -260,6 +282,14 @@ export default function RequestsScreen({ navigation, route }) {
     setCorrectionStep(1);
     setOvertimeStep(1);
     if (tab === 'leave') loadInitialLeaveData();
+    if (tab === 'overtime') loadMyOvertimeRequests();
+  };
+
+  const toMinutes = (hhmm) => {
+    if (!hhmm || hhmm.length < 5) return null;
+    const [h, m] = hhmm.substring(0, 5).split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return null;
+    return h * 60 + m;
   };
 
   const handleBackPress = () => {
@@ -324,18 +354,33 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- STRICT LEAVE VALIDATION (BLOCKS 0 BALANCE & INSUFFICIENT QUOTAS) ---
-  const handleNextLeave = () => {
+  // ============================================================
+  // LEAVE
+  // ============================================================
+    const handleNextLeave = () => {
     if (!leaveDateFrom) { Alert.alert('Validation Error', 'Please select a start date.'); return; }
     if (isRange && !leaveDateTo) { Alert.alert('Validation Error', 'Please select an end date.'); return; }
-    if (!leaveReason.trim() || leaveReason.trim().length < 10) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); return; }
-    if (!leaveImage) { Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.'); return; }
-    if (isRange && leaveDateTo < leaveDateFrom) { Alert.alert('Invalid Date Range', 'End date cannot be earlier than start date.'); return; }
 
-    // 1. STRICT 0-BALANCE CHECK
+    const trimmed = leaveReason.trim();
+    if (!trimmed || trimmed.length < 10) {
+      Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).');
+      return;
+    }
+    // ✅ FIX M2 — Reason max length (matches backend 500-char cap)
+    if (trimmed.length > 500) {
+      Alert.alert('Validation Error', 'Reason is too long (maximum 500 characters).');
+      return;
+    }
+
+    if (!leaveImage) { Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.'); return; }
+    if (isRange && leaveDateTo < leaveDateFrom) {
+      Alert.alert('Invalid Date Range', 'End date cannot be earlier than start date.');
+      return;
+    }
+
     if (currentSelectedBalance <= 0) {
       Alert.alert(
-        'Insufficient Balance', 
+        'Insufficient Balance',
         `You currently have 0.00 days remaining for "${leaveType}". You cannot submit a leave application without available balance.`
       );
       return;
@@ -344,25 +389,39 @@ export default function RequestsScreen({ navigation, route }) {
     const start = new Date(leaveDateFrom);
     const end = isRange ? new Date(leaveDateTo) : start;
     const dates = [];
-    let currentBalance = currentSelectedBalance;
 
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      // 🚨 FIX: Prevent timezone shift by using local 'en-CA' format (YYYY-MM-DD)
       dates.push({
-        date: d.toISOString().split('T')[0],
+        date: d.toLocaleDateString('en-CA'), 
         duration: 'Whole Day',
-        isPaid: currentBalance >= 1
+        isPaid: true 
       });
-      currentBalance -= 1;
     }
 
-    // 2. STRICT QUOTA EXCEEDED CHECK
-    if (dates.length > currentSelectedBalance) {
-      Alert.alert(
-        'Insufficient Balance',
-        `You are requesting ${dates.length} day(s), but only have ${currentSelectedBalance.toFixed(2)} day(s) remaining for "${leaveType}".`
-      );
-      return;
+    // 🚨 FIX: Smart balance check (Allows 1.5 days to cover a 2-day range)
+    let totalCost = dates.length;
+    if (totalCost > currentSelectedBalance) {
+      if ((totalCost - 0.5) <= currentSelectedBalance) {
+        // They are short exactly 0.5 days, so auto-convert the last day to Half Day
+        dates[dates.length - 1].duration = '1st Half';
+        totalCost -= 0.5;
+      } else {
+        Alert.alert(
+          'Insufficient Balance',
+          `You are requesting ${dates.length} day(s), but only have ${currentSelectedBalance.toFixed(2)} day(s) remaining for "${leaveType}".`
+        );
+        return;
+      }
     }
+
+    // Recalculate the "isPaid" flag based on the corrected durations
+    let runningBalance = currentSelectedBalance;
+    dates.forEach(item => {
+      const cost = item.duration === 'Whole Day' ? 1.0 : 0.5;
+      item.isPaid = runningBalance >= cost;
+      runningBalance -= cost;
+    });
 
     setLeaveBreakdown(dates);
     setLeaveStep(2);
@@ -371,7 +430,7 @@ export default function RequestsScreen({ navigation, route }) {
   const updateBreakdownDuration = (index, value) => {
     const newBreakdown = [...leaveBreakdown];
     newBreakdown[index].duration = value;
-    
+
     let totalCost = 0;
     newBreakdown.forEach(item => {
       totalCost += item.duration === 'Whole Day' ? 1.0 : 0.5;
@@ -379,7 +438,7 @@ export default function RequestsScreen({ navigation, route }) {
 
     if (totalCost > currentSelectedBalance) {
       Alert.alert(
-        'Quota Exceeded', 
+        'Quota Exceeded',
         `The selected durations require ${totalCost} day(s), which exceeds your remaining balance of ${currentSelectedBalance} day(s) for "${leaveType}".`
       );
       return;
@@ -391,12 +450,11 @@ export default function RequestsScreen({ navigation, route }) {
       item.isPaid = runningBalance >= cost;
       runningBalance -= cost;
     });
-    
+
     setLeaveBreakdown(newBreakdown);
   };
 
   const handleSubmitLeave = async () => {
-    // Final balance safeguard before network request
     let totalRequired = 0;
     leaveBreakdown.forEach(item => {
       totalRequired += item.duration === 'Whole Day' ? 1.0 : 0.5;
@@ -436,7 +494,7 @@ export default function RequestsScreen({ navigation, route }) {
         setLeaveImage(null);
         setIsRange(false);
         setLeaveStep(1);
-        loadInitialLeaveData(); // Refresh remaining balances immediately
+        loadInitialLeaveData();
       } else {
         Alert.alert('Submission Notice', `${successCount}/${leaveBreakdown.length} submitted. ${lastMessage}`);
       }
@@ -448,11 +506,46 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- APPEAL VALIDATION & SUBMISSION ---
+  // ============================================================
+  // APPEAL
+  // ============================================================
   const handleNextAppeal = () => {
     if (!appealDate) { Alert.alert('Validation Error', 'Please select a date for your appeal.'); return; }
-    if (!appealReason.trim() || appealReason.trim().length < 10) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).'); return; }
+
+    // ✅ FIX M3 — No future dates
+    if (appealDate > todayStr) {
+      Alert.alert('Validation Error', 'Appeals cannot be filed for future dates.');
+      return;
+    }
+    // ✅ FIX M4 — 30-day backdate window (matches backend)
+    if (appealDate < thirtyDaysAgoStr) {
+      Alert.alert('Validation Error', 'Appeals can only be filed for the last 30 days.');
+      return;
+    }
+
+    const trimmed = appealReason.trim();
+    if (!trimmed || trimmed.length < 10) {
+      Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).');
+      return;
+    }
+    // ✅ FIX M5 — Reason max length
+    if (trimmed.length > 500) {
+      Alert.alert('Validation Error', 'Reason is too long (maximum 500 characters).');
+      return;
+    }
+
     if (!appealImage) { Alert.alert('Validation Error', 'An attachment or proof is strictly required.'); return; }
+
+    // ✅ FIX M6 — Time order check (only if both provided)
+    if (appealTimeIn && appealTimeOut) {
+      const inMin = toMinutes(appealTimeIn);
+      const outMin = toMinutes(appealTimeOut);
+      if (inMin !== null && outMin !== null && outMin <= inMin) {
+        Alert.alert('Validation Error', 'Time Out must be later than Time In.');
+        return;
+      }
+    }
+
     setAppealStep(2);
   };
 
@@ -470,11 +563,11 @@ export default function RequestsScreen({ navigation, route }) {
       });
       if (result.ok && (result.success || result.success === undefined)) {
         Alert.alert('Success', 'Attendance appeal submitted successfully.');
-        setAppealDate(''); 
-        setAppealTimeIn(''); 
-        setAppealTimeOut(''); 
-        setAppealReason(''); 
-        setAppealImage(null); 
+        setAppealDate('');
+        setAppealTimeIn('');
+        setAppealTimeOut('');
+        setAppealReason('');
+        setAppealImage(null);
         setAppealStep(1);
       } else {
         Alert.alert('Submission Error', result.message || result.error || 'Failed to submit appeal.');
@@ -486,11 +579,36 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  // --- CORRECTION VALIDATION & SUBMISSION ---
+  // ============================================================
+  // CORRECTION
+  // ============================================================
   const handleNextCorrection = () => {
     if (!correctionDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
+
+    // ✅ FIX M7 — No future dates
+    if (correctionDate > todayStr) {
+      Alert.alert('Validation Error', 'Corrections cannot be filed for future dates.');
+      return;
+    }
+    // ✅ FIX M8 — 30-day backdate window
+    if (correctionDate < thirtyDaysAgoStr) {
+      Alert.alert('Validation Error', 'Corrections can only be filed for the last 30 days.');
+      return;
+    }
+
     if (!correctionTime) { Alert.alert('Validation Error', 'Please select a correction time.'); return; }
-    if (!correctionReason.trim() || correctionReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a valid reason (minimum 5 characters).'); return; }
+
+    const trimmed = correctionReason.trim();
+    if (!trimmed || trimmed.length < 5) {
+      Alert.alert('Validation Error', 'Please provide a valid reason (minimum 5 characters).');
+      return;
+    }
+    // ✅ FIX M9 — Reason max length
+    if (trimmed.length > 500) {
+      Alert.alert('Validation Error', 'Reason is too long (maximum 500 characters).');
+      return;
+    }
+
     if (!correctionAttachment) { Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.'); return; }
     setCorrectionStep(2);
   };
@@ -506,10 +624,16 @@ export default function RequestsScreen({ navigation, route }) {
           try { employeeId = JSON.parse(userStr).employee_id; } catch (e) {}
         }
       }
-      if (!employeeId) { Alert.alert('Authentication Error', 'Employee ID not found.'); setSubmittingCorrection(false); return; }
+      if (!employeeId) {
+        Alert.alert('Authentication Error', 'Employee ID not found.');
+        setSubmittingCorrection(false);
+        return;
+      }
 
       const dbType = correctionType === 'early_out' ? 'clock_out' : correctionType;
-      const finalReason = correctionType === 'early_out' ? `[Early Departure] ${correctionReason.trim()}` : correctionReason.trim();
+      const finalReason = correctionType === 'early_out'
+        ? `[Early Departure] ${correctionReason.trim()}`
+        : correctionReason.trim();
       const formattedTime = formatTimeForDB(correctionTime);
 
       const res = await uploadRequestWithFile(`${API_URL}/attendance/correction-request`, token, 'attachment', correctionAttachment, {
@@ -520,13 +644,16 @@ export default function RequestsScreen({ navigation, route }) {
         reason: finalReason,
         schedule_id: correctionScheduleId || '',
       });
-      
+
       if (res.ok && (res.success || res.success === undefined)) {
         Alert.alert('Success', res.message || 'Correction request submitted.');
-        setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionAttachment(null); 
+        setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionAttachment(null);
         setCorrectionType('clock_in'); setCorrectionScheduleId(null); setCorrectionStep(1);
         if (navigation.setParams) {
-          navigation.setParams({ prefillTab: undefined, prefillDate: undefined, prefillType: undefined, prefillTime: undefined, prefillReason: undefined, prefillScheduleId: undefined });
+          navigation.setParams({
+            prefillTab: undefined, prefillDate: undefined, prefillType: undefined,
+            prefillTime: undefined, prefillReason: undefined, prefillScheduleId: undefined
+          });
         }
         setActiveTab('leave');
       } else {
@@ -534,21 +661,94 @@ export default function RequestsScreen({ navigation, route }) {
       }
     } catch (err) {
       Alert.alert('Submission Error', err?.message || 'Connection failed.');
-    } finally { 
-      setSubmittingCorrection(false); 
+    } finally {
+      setSubmittingCorrection(false);
     }
   };
 
-  // --- OVERTIME VALIDATION & SUBMISSION ---
+  // ============================================================
+  // OVERTIME
+  // ============================================================
   const handleNextOvertime = () => {
-    if (!overtimeDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
-    if (!overtimeStart || !overtimeEnd) { Alert.alert('Validation Error', 'Start and end times are required.'); return; }
-    if (overtimeStart >= overtimeEnd) { Alert.alert('Validation Error', 'Overtime end time must be strictly after the start time.'); return; }
-    if (!overtimeReason.trim() || overtimeReason.trim().length < 5) { Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 5 characters).'); return; }
+    if (!overtimeDate) {
+      Alert.alert('Validation Error', 'Please select a date.');
+      return;
+    }
+    if (!overtimeStart || !overtimeEnd) {
+      Alert.alert('Validation Error', 'Start and end times are required.');
+      return;
+    }
+
+    const startMin = toMinutes(overtimeStart);
+    const endMin = toMinutes(overtimeEnd);
+    if (startMin === null || endMin === null) {
+      Alert.alert('Validation Error', 'Invalid time format. Please re-select the times.');
+      return;
+    }
+    if (startMin >= endMin) {
+      Alert.alert('Validation Error', 'Overtime end time must be strictly after the start time.');
+      return;
+    }
+
+    const duration = endMin - startMin;
+    if (duration < 30) {
+      Alert.alert('Validation Error', 'Minimum overtime duration is 30 minutes.');
+      return;
+    }
+    if (duration > 12 * 60) {
+      Alert.alert('Validation Error', 'Maximum overtime duration is 12 hours per request.');
+      return;
+    }
+
+    const trimmed = overtimeReason.trim();
+    if (!trimmed || trimmed.length < 5) {
+      Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 5 characters).');
+      return;
+    }
+    if (trimmed.length > 500) {
+      Alert.alert('Validation Error', 'Reason is too long (maximum 500 characters).');
+      return;
+    }
+
+    const start5 = overtimeStart.substring(0, 5);
+    const end5 = overtimeEnd.substring(0, 5);
+    const conflict = myOvertimeRequests.find(r => {
+      const st = String(r.status || '').toLowerCase();
+      if (st !== 'pending' && st !== 'approved') return false;
+      const rDate = String(r.date || '').substring(0, 10);
+      if (rDate !== overtimeDate) return false;
+      const rStart = String(r.start_time || '').substring(0, 5);
+      const rEnd = String(r.end_time || '').substring(0, 5);
+      return !(end5 <= rStart || start5 >= rEnd);
+    });
+
+    if (conflict) {
+      Alert.alert(
+        'Overlapping Request',
+        `You already have a ${conflict.status} overtime request on ${overtimeDate} from ${formatTo12Hour(conflict.start_time)} to ${formatTo12Hour(conflict.end_time)}.\n\nPlease adjust the time range or cancel the existing request first.`
+      );
+      return;
+    }
+
     setOvertimeStep(2);
   };
 
   const handleSubmitOvertime = async () => {
+    const start5 = overtimeStart.substring(0, 5);
+    const end5 = overtimeEnd.substring(0, 5);
+    const conflict = myOvertimeRequests.find(r => {
+      const st = String(r.status || '').toLowerCase();
+      if (st !== 'pending' && st !== 'approved') return false;
+      if (String(r.date || '').substring(0, 10) !== overtimeDate) return false;
+      const rStart = String(r.start_time || '').substring(0, 5);
+      const rEnd = String(r.end_time || '').substring(0, 5);
+      return !(end5 <= rStart || start5 >= rEnd);
+    });
+    if (conflict) {
+      Alert.alert('Overlapping Request', 'A conflicting overtime request already exists for this time slot.');
+      return;
+    }
+
     setSubmittingOvertime(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -577,7 +777,7 @@ export default function RequestsScreen({ navigation, route }) {
             date: overtimeDate,
             start_time: formatTimeForDB(overtimeStart),
             end_time: formatTimeForDB(overtimeEnd),
-            reason: overtimeReason ? overtimeReason.trim() : '',
+            reason: overtimeReason.trim(),
             scenario_type: dbScenarioType,
             overtime_type: overtimeType,
             schedule_id: scheduleId,
@@ -594,6 +794,7 @@ export default function RequestsScreen({ navigation, route }) {
         setOvertimeReason('');
         setOvertimeImage(null);
         setOvertimeStep(1);
+        loadMyOvertimeRequests();
       } else {
         Alert.alert('Submission Error', result.message || result.error || 'Failed to submit overtime request.');
       }
@@ -605,19 +806,33 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  const renderCalendar = (show, setShow, date, setDate, minDate = todayStr) => {
+  // ✅ FIX M10 — renderCalendar now accepts maxDate so appeal/correction can
+  //              block future dates while still allowing past up to 30 days.
+  const renderCalendar = (show, setShow, date, setDate, minDate = todayStr, maxDate = null) => {
     if (!show) return null;
     return (
       <View style={styles.calendarModal}>
         <View style={styles.calendarHeader}>
           <Text style={styles.calendarTitle}>Select Date (PH)</Text>
-          <TouchableOpacity onPress={() => setShow(false)}><X size={20} color={colors.textSecondary} /></TouchableOpacity>
+          <TouchableOpacity onPress={() => setShow(false)}>
+            <X size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
         <Calendar
           onDayPress={(day) => { setDate(day.dateString); setShow(false); }}
           markedDates={{ [date]: { selected: true, selectedColor: '#00897B' } }}
           minDate={minDate}
-          theme={{ calendarBackground: 'transparent', textDayFontFamily: 'Inter_18pt-Medium', textMonthFontFamily: 'Inter_18pt-Bold', selectedDayBackgroundColor: '#00897B', todayTextColor: '#00897B', arrowColor: '#00897B', monthTextColor: colors.textPrimary, dayTextColor: colors.textPrimary }}
+          maxDate={maxDate || undefined}
+          theme={{
+            calendarBackground: 'transparent',
+            textDayFontFamily: 'Inter_18pt-Medium',
+            textMonthFontFamily: 'Inter_18pt-Bold',
+            selectedDayBackgroundColor: '#00897B',
+            todayTextColor: '#00897B',
+            arrowColor: '#00897B',
+            monthTextColor: colors.textPrimary,
+            dayTextColor: colors.textPrimary
+          }}
         />
       </View>
     );
@@ -625,12 +840,12 @@ export default function RequestsScreen({ navigation, route }) {
 
   return (
     <>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={styles.safeArea.backgroundColor} />
       <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
-        
+
         <View style={styles.header}>
           <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-            <ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} />
+            <ArrowLeft size={24} color={isLight ? '#0F172A' : colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Requests</Text>
           <View style={{ width: 40 }} />
@@ -653,7 +868,7 @@ export default function RequestsScreen({ navigation, route }) {
         </View>
 
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          
+
           {/* ======================================= */}
           {/* LEAVE TAB */}
           {/* ======================================= */}
@@ -695,11 +910,10 @@ export default function RequestsScreen({ navigation, route }) {
                     </>
                   )}
 
-                  {/* Header showing Selected Leave Type and Real-Time Remaining Quota */}
                   <View style={styles.leaveTypeHeaderRow}>
                     <Text style={[styles.label, { marginVertical: 0 }]}>Leave Type</Text>
                     <Text style={[
-                      styles.balanceIndicatorText, 
+                      styles.balanceIndicatorText,
                       { color: currentSelectedBalance > 0 ? '#00897B' : '#EF4444' }
                     ]}>
                       Available: {currentSelectedBalance.toFixed(2)} day(s) left
@@ -708,9 +922,9 @@ export default function RequestsScreen({ navigation, route }) {
 
                   <View style={styles.typeGroup}>
                     {availableLeaveTypes.map(t => (
-                      <TouchableOpacity 
-                        key={t.id || t.name} 
-                        style={[styles.typeChip, leaveType === t.name && styles.typeChipActive]} 
+                      <TouchableOpacity
+                        key={t.id || t.name}
+                        style={[styles.typeChip, leaveType === t.name && styles.typeChipActive]}
                         onPress={() => setLeaveType(t.name)}
                       >
                         <Text style={[styles.typeChipText, leaveType === t.name && styles.typeChipTextActive]}>{t.name}</Text>
@@ -718,8 +932,16 @@ export default function RequestsScreen({ navigation, route }) {
                     ))}
                   </View>
 
-                  <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
-                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain reason..." placeholderTextColor={colors.textSecondary} value={leaveReason} onChangeText={setLeaveReason} />
+                  <Text style={styles.label}>Reason (10–500 characters)</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    maxLength={500}
+                    placeholder="Explain reason..."
+                    placeholderTextColor={colors.textSecondary}
+                    value={leaveReason}
+                    onChangeText={setLeaveReason}
+                  />
 
                   <Text style={styles.label}>Attachment (Required - PDF, DOC, JPG up to 5MB)</Text>
                   <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setLeaveImage)}>
@@ -739,7 +961,7 @@ export default function RequestsScreen({ navigation, route }) {
                   <Text style={[styles.subLabel, { marginBottom: 16 }]}>
                     Specify duration for each day. Available '{leaveType}' balance: {currentSelectedBalance.toFixed(2)} day(s).
                   </Text>
-                  
+
                   {leaveBreakdown.map((item, index) => (
                     <View key={item.date} style={styles.reviewBox}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -750,8 +972,8 @@ export default function RequestsScreen({ navigation, route }) {
                       </View>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         {['Whole Day', '1st Half', '2nd Half'].map(dur => (
-                          <TouchableOpacity 
-                            key={dur} 
+                          <TouchableOpacity
+                            key={dur}
                             style={[styles.typeChip, { flex: 1, paddingHorizontal: 0, alignItems: 'center' }, item.duration === dur && styles.typeChipActive]}
                             onPress={() => updateBreakdownDuration(index, dur)}
                           >
@@ -776,7 +998,7 @@ export default function RequestsScreen({ navigation, route }) {
               {leaveStep === 3 && (
                 <View>
                   <Text style={[styles.headerTitle, { marginBottom: 20 }]}>Leave Application Review</Text>
-                  
+
                   <View style={styles.reviewBox}>
                     <View style={styles.reviewRow}>
                       <Text style={styles.reviewLabel}>Type</Text>
@@ -801,7 +1023,7 @@ export default function RequestsScreen({ navigation, route }) {
                       <Text style={styles.reviewValue}>{leaveImage?.name || (leaveImage ? 'File Attached' : 'None')}</Text>
                     </View>
                     <View style={styles.reviewDivider} />
-                    
+
                     <View style={{ paddingTop: 8 }}>
                       <Text style={[styles.reviewLabel, { marginBottom: 8 }]}>Requested Dates ({leaveBreakdown.length} day{leaveBreakdown.length > 1 ? 's' : ''}):</Text>
                       {leaveBreakdown.map((item) => (
@@ -837,12 +1059,12 @@ export default function RequestsScreen({ navigation, route }) {
                     <Text style={styles.historyButtonText}>View Appeal History</Text>
                   </TouchableOpacity>
 
-                  <Text style={styles.label}>Date</Text>
+                  <Text style={styles.label}>Date (last 30 days only)</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => setShowAppealCalendar(true)}>
                     <CalendarIcon size={20} color="#00897B" />
                     <Text style={styles.dateText}>{appealDate || 'Select date'}</Text>
                   </TouchableOpacity>
-                  {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, null)}
+                  {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, thirtyDaysAgoStr, todayStr)}
 
                   <Text style={styles.label}>Time In (optional)</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealIn'); setShowTimePicker(true); }}>
@@ -856,8 +1078,16 @@ export default function RequestsScreen({ navigation, route }) {
                     <Text style={styles.dateText}>{appealTimeOut ? formatTo12Hour(appealTimeOut) : 'Select time out'}</Text>
                   </TouchableOpacity>
 
-                  <Text style={styles.label}>Reason (Minimum 10 characters)</Text>
-                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Explain why you couldn't clock in/out..." placeholderTextColor={colors.textSecondary} value={appealReason} onChangeText={setAppealReason} />
+                  <Text style={styles.label}>Reason (10–500 characters)</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    maxLength={500}
+                    placeholder="Explain why you couldn't clock in/out..."
+                    placeholderTextColor={colors.textSecondary}
+                    value={appealReason}
+                    onChangeText={setAppealReason}
+                  />
 
                   <Text style={styles.label}>Proof (Required - PDF, DOC, JPG up to 5MB)</Text>
                   <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setAppealImage)}>
@@ -929,12 +1159,12 @@ export default function RequestsScreen({ navigation, route }) {
                     <Text style={styles.historyButtonText}>View Correction History</Text>
                   </TouchableOpacity>
 
-                  <Text style={styles.label}>Date</Text>
+                  <Text style={styles.label}>Date (last 30 days only)</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => setShowCorrectionCalendar(true)}>
                     <CalendarIcon size={20} color="#00897B" />
                     <Text style={styles.dateText}>{correctionDate || 'Select date'}</Text>
                   </TouchableOpacity>
-                  {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, null)}
+                  {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, thirtyDaysAgoStr, todayStr)}
 
                   <Text style={styles.label}>What to correct?</Text>
                   <View style={styles.typeGroup}>
@@ -955,8 +1185,16 @@ export default function RequestsScreen({ navigation, route }) {
                     <Text style={styles.dateText}>{correctionTime ? formatTo12Hour(correctionTime) : 'Select time'}</Text>
                   </TouchableOpacity>
 
-                  <Text style={styles.label}>Reason</Text>
-                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why did you forget to clock or need to leave early?" placeholderTextColor={colors.textSecondary} value={correctionReason} onChangeText={setCorrectionReason} />
+                  <Text style={styles.label}>Reason (5–500 characters)</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    maxLength={500}
+                    placeholder="Why did you forget to clock or need to leave early?"
+                    placeholderTextColor={colors.textSecondary}
+                    value={correctionReason}
+                    onChangeText={setCorrectionReason}
+                  />
 
                   <Text style={styles.label}>Attachment (Required - PDF, DOC, JPG up to 5MB)</Text>
                   <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setCorrectionAttachment)}>
@@ -1075,8 +1313,27 @@ export default function RequestsScreen({ navigation, route }) {
                     <Text style={styles.dateText}>{overtimeEnd ? formatTo12Hour(overtimeEnd) : 'Select end time'}</Text>
                   </TouchableOpacity>
 
-                  <Text style={styles.label}>Reason / Task (Minimum 5 characters)</Text>
-                  <TextInput style={[styles.input, styles.textArea]} multiline placeholder="Why is overtime needed?" placeholderTextColor={colors.textSecondary} value={overtimeReason} onChangeText={setOvertimeReason} />
+                  {overtimeStart && overtimeEnd && toMinutes(overtimeStart) !== null && toMinutes(overtimeEnd) !== null && (
+                    (() => {
+                      const d = toMinutes(overtimeEnd) - toMinutes(overtimeStart);
+                      if (d <= 0) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>End time must be after start time.</Text>;
+                      if (d < 30) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Minimum 30 minutes required ({d} min).</Text>;
+                      if (d > 720) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Maximum 12 hours per request.</Text>;
+                      const h = Math.floor(d / 60), m = d % 60;
+                      return <Text style={{ color: '#059669', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Duration: {h}h {m}m</Text>;
+                    })()
+                  )}
+
+                  <Text style={styles.label}>Reason / Task (5–500 characters)</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    multiline
+                    maxLength={500}
+                    placeholder="Why is overtime needed?"
+                    placeholderTextColor={colors.textSecondary}
+                    value={overtimeReason}
+                    onChangeText={setOvertimeReason}
+                  />
 
                   <Text style={styles.label}>Attachment (Optional - PDF, DOC, JPG up to 5MB)</Text>
                   <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setOvertimeImage)}>
@@ -1192,17 +1449,17 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border, backgroundColor: isLight ? '#FFFFFF' : colors.surface },
   backButton: { padding: 4 },
   headerTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: isLight ? '#0F172A' : colors.textPrimary },
-  
+
   tabBar: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border },
   tab: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 24 },
   activeTab: { backgroundColor: isLight ? '#E0F2F1' : 'rgba(0, 137, 123, 0.2)' },
   tabText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary },
   activeTabText: { color: '#00897B' },
-  
+
   container: { padding: 22, paddingBottom: 60 },
   label: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#334155' : colors.textPrimary, marginBottom: 8, marginTop: 16 },
   subLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
-  
+
   leaveTypeHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1217,35 +1474,35 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
 
   input: { fontFamily: 'Inter_18pt-Medium', borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, padding: 16, fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, backgroundColor: isLight ? '#FFFFFF' : colors.surface, marginBottom: 16 },
   textArea: { height: 110, textAlignVertical: 'top' },
-  
+
   datePicker: { flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, padding: 16, backgroundColor: isLight ? '#FFFFFF' : colors.surface, marginBottom: 16 },
   dateText: { fontFamily: 'Inter_18pt-Medium', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary, flex: 1 },
-  
+
   typeGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
   typeChip: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 30, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, backgroundColor: isLight ? '#FFFFFF' : colors.surface },
   typeChipActive: { backgroundColor: '#00897B', borderColor: '#00897B' },
   typeChipText: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary },
   typeChipTextActive: { fontFamily: 'Inter_18pt-Bold', color: '#FFFFFF' },
-  
+
   uploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, padding: 16, borderRadius: 16, marginTop: 4, marginBottom: 16 },
   uploadText: { fontFamily: 'Inter_18pt-Bold', color: '#00897B', fontSize: 14 },
   previewImage: { width: '100%', height: 180, borderRadius: 16, marginTop: 12, marginBottom: 20 },
-  
+
   submitBtn: { backgroundColor: '#00897B', padding: 16, borderRadius: 16, alignItems: 'center', marginTop: 24, shadowColor: '#00897B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   submitBtnText: { fontFamily: 'Inter_18pt-Black', color: '#FFFFFF', fontSize: 15, letterSpacing: 0.5 },
-  
+
   historyButton: { backgroundColor: isLight ? '#E0F2F1' : 'rgba(0, 137, 123, 0.15)', padding: 16, borderRadius: 16, alignItems: 'center', marginBottom: 12 },
   historyButtonText: { fontFamily: 'Inter_18pt-Bold', color: '#00897B', fontSize: 14 },
-  
+
   balancesButton: { backgroundColor: isLight ? '#F1F5F9' : colors.surface, padding: 16, borderRadius: 16, alignItems: 'center', marginBottom: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   balancesButtonText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#475569' : colors.textSecondary, fontSize: 14 },
-  
+
   rangeToggle: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   rangeButton: { flex: 1, paddingVertical: 12, borderRadius: 30, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, alignItems: 'center', backgroundColor: isLight ? '#FFFFFF' : colors.surface },
   rangeButtonActive: { backgroundColor: '#00897B', borderColor: '#00897B' },
   rangeButtonText: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary },
   rangeButtonTextActive: { color: '#FFFFFF' },
-  
+
   calendarModal: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 20, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   calendarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   calendarTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary },

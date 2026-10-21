@@ -1,8 +1,8 @@
 /* src/pages/PayrollMain.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap');
 
 .pm-container {
   background: transparent;
-  
   font-family: 'Inter', system-ui, sans-serif;
   box-sizing: border-box;
   color: #0F172A;
@@ -14,10 +14,12 @@
 .text-success { color: #059669 !important; }
 .text-danger { color: #DC2626 !important; }
 .text-right { text-align: right !important; }
+.text-center { text-align: center !important; }
 .bg-slate { background: #F1F5F9; color: #475569; }
 .bg-teal { background: #F0FDFA; color: #0D9488; }
 .bg-rose { background: #FFF1F2; color: #E11D48; }
 .bg-emerald { background: #ECFDF5; color: #059669; }
+.mt-4 { margin-top: 1.5rem; }
 
 /* Top Header Bar */
 .pm-top-bar {
@@ -57,6 +59,7 @@
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  font-family: 'Plus Jakarta Sans', sans-serif;
   font-size: 1.15rem;
   font-weight: 800;
   color: #0F172A;
@@ -84,7 +87,7 @@
   background: #FEE2E2;
 }
 
-/* Metrics Row (Strict Horizontal Grid) */
+/* Metrics Row */
 .pm-metrics-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -133,6 +136,7 @@
 }
 
 .pm-metric-value {
+  font-family: 'Plus Jakarta Sans', sans-serif;
   font-size: 1.4rem;
   font-weight: 800;
   color: #0F172A;
@@ -270,12 +274,10 @@
 .pm-table tr:last-child td { border-bottom: none; }
 
 /* Employee Cell */
-.pm-emp-info { display: flex; flex-direction: column; gap: 4px; }
-.pm-emp-name { color: #0F172A; font-weight: 600; font-size: 0.95rem; line-height: 1.1; display: block; }
-.pm-emp-id { font-family: 'SF Mono', monospace; color: #64748B; font-size: 0.75rem; display: block; }
-
+.pm-emp-name { color: #0F172A; font-weight: 600; font-size: 0.95rem; }
+.pm-emp-id { font-family: 'SF Mono', monospace; color: #475569; font-size: 0.85rem; font-weight: 600; }
+.pm-text-regular { color: #475569; font-size: 0.875rem; font-weight: 500; }
 .pm-badge-neutral { display: inline-flex; background: #F1F5F9; color: #475569; padding: 0.25rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-weight: 700; border: 1px solid #E2E8F0; }
-.pm-amount { font-weight: 700; color: #0F172A; font-size: 0.95rem; }
 .pm-action-group { display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center; }
 
 /* Empty / Loading States */
@@ -291,16 +293,16 @@
 .pm-modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 1rem; }
 .pm-modal-card { background: #FFFFFF; border-radius: 12px; width: 100%; display: flex; flex-direction: column; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); border: 1px solid #E2E8F0; max-height: 90vh; }
 .pm-modal-card.small { max-width: 450px; }
-.pm-modal-card.wide { max-width: 850px; }
+.pm-modal-card.wide { max-width: 700px; } /* Made slightly narrower for formal look */
 
 .pm-modal-header { padding: 1.25rem 1.5rem; background: #FFFFFF; border-bottom: 1px solid #F1F5F9; display: flex; align-items: flex-start; justify-content: space-between; border-radius: 12px 12px 0 0; }
-.pm-modal-header h3 { margin: 0; font-size: 1.1rem; font-weight: 800; color: #0F172A; }
+.pm-modal-header h3 { margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.1rem; font-weight: 800; color: #0F172A; }
 .pm-modal-subtitle { font-size: 0.85rem; color: #64748B; font-weight: 500; margin-top: 0.2rem; display: block; }
 .pm-modal-close { background: transparent; border: none; color: #94A3B8; cursor: pointer; padding: 4px; border-radius: 6px; display: flex; align-items: center; transition: all 0.2s; }
 .pm-modal-close:hover { background: #F1F5F9; color: #0F172A; }
 
 .pm-modal-body { padding: 1.5rem; overflow-y: auto; flex: 1; }
-.pm-modal-body.bg-gray { background: #FAFAFA; padding: 1.5rem; }
+.pm-modal-body.bg-gray { background: #F8FAFC; padding: 1.5rem; }
 .pm-modal-desc { font-size: 0.9rem; color: #475569; margin: 0 0 1.25rem 0; line-height: 1.5; }
 
 .pm-form-row { display: flex; gap: 1rem; }
@@ -311,37 +313,141 @@
 
 .pm-modal-footer { padding: 1rem 1.5rem; background: #FFFFFF; border-top: 1px solid #F1F5F9; display: flex; justify-content: flex-end; gap: 0.5rem; border-radius: 0 0 12px 12px; }
 
-/* Split-Pane Payslip Specifics */
-.pm-payslip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
-.pm-payslip-pane { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; display: flex; flex-direction: column; box-shadow: 0 1px 2px rgba(0,0,0,0.02); overflow: hidden; }
+/* =========================================
+   FORMAL PAYSLIP LAYOUT
+   ========================================= */
+.pm-formal-payslip {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
 
-.pm-pane-title { margin: 0; padding: 1rem 1.25rem; font-size: 0.85rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; background: #F8FAFC; border-bottom: 1px solid #F1F5F9; }
-.pm-payslip-list { padding: 1.25rem; display: flex; flex-direction: column; gap: 0.85rem; flex: 1; }
+.pm-formal-section {
+  display: flex;
+  flex-direction: column;
+}
 
-.pm-list-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; }
-.pm-list-item span { color: #64748B; font-weight: 500; }
-.pm-list-item strong { color: #0F172A; font-weight: 700; }
+.pm-formal-section-header {
+  background: #F8FAFC;
+  padding: 0.85rem 1.5rem;
+  border-bottom: 1px solid #E2E8F0;
+}
 
-.pm-divider { height: 1px; background: #E2E8F0; margin: 0.25rem 0; width: 100%; }
-.pm-section-label { font-size: 0.7rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+.pm-formal-section-header.danger {
+  border-bottom-color: #FECACA;
+  background: #FEF2F2;
+}
 
-.pm-list-item.input-row { align-items: center; }
-.pm-amount-input { width: 80px; padding: 0.35rem 0.5rem; border: 1px solid #CBD5E1; border-radius: 6px; text-align: right; font-size: 0.85rem; font-weight: 600; color: #0F172A; outline: none; }
-.pm-amount-input:focus { border-color: #0D9488; }
+.pm-formal-section-header h4 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #0F172A;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
-.pm-pane-footer { padding: 1rem 1.25rem; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; font-weight: 700; color: #0F172A; }
+.pm-formal-section-header.danger h4 { color: #DC2626; }
 
-.pm-net-banner { display: flex; justify-content: space-between; align-items: center; padding: 1.5rem 2rem; background: #0F172A; border-radius: 10px; color: #FFFFFF; }
-.pm-net-label { font-size: 1rem; font-weight: 600; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em; }
-.pm-net-amount { font-size: 1.8rem; font-weight: 800; color: #10B981; }
+.pm-formal-list {
+  padding: 0;
+  margin: 0;
+}
+
+.pm-formal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.pm-formal-row:last-child { border-bottom: none; }
+
+.pm-formal-label {
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.pm-formal-value {
+  color: #0F172A;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.pm-formal-divider {
+  height: 1px;
+  background: #E2E8F0;
+  margin: 0.25rem 0;
+}
+
+/* Inputs inside formal rows */
+.pm-formal-row.input-row { padding-top: 0.5rem; padding-bottom: 0.5rem; background: #FAFAFA; }
+.pm-formal-input {
+  width: 100px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #CBD5E1;
+  border-radius: 4px;
+  text-align: right;
+  font-family: 'SF Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0F172A;
+  outline: none;
+  background: #FFFFFF;
+  transition: all 0.2s;
+}
+.pm-formal-input:focus { border-color: #0D9488; box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.1); }
+
+.pm-formal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: #F8FAFC;
+  border-top: 1px solid #E2E8F0;
+  font-size: 0.95rem;
+  color: #0F172A;
+}
+
+.pm-formal-footer strong { font-size: 1.1rem; }
+.pm-formal-footer.danger { background: #FEF2F2; border-top-color: #FECACA; color: #DC2626; }
+
+
+.pm-net-banner { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  padding: 1.5rem; 
+  background: #FFFFFF; 
+  border: 1px solid #E2E8F0; 
+  border-top: 2px solid #0F172A; 
+  border-radius: 0 0 8px 8px; 
+  margin-top: 1.5rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+
+.pm-net-label { 
+  font-size: 1rem; 
+  font-weight: 800; 
+  color: #0F172A; 
+  text-transform: uppercase; 
+  letter-spacing: 0.05em; 
+}
+
+.pm-net-amount { 
+  font-family: 'Plus Jakarta Sans', sans-serif; 
+  font-size: 1.8rem; 
+  font-weight: 800; 
+  color: #0F172A; 
+}
 
 /* Responsive Adjustments */
 @media (max-width: 1024px) {
   .pm-metrics-grid { grid-template-columns: repeat(2, 1fr); }
-}
-
-@media (max-width: 850px) {
-  .pm-payslip-grid { grid-template-columns: 1fr; gap: 1rem; }
 }
 
 @media (max-width: 768px) {
@@ -352,7 +458,11 @@
   .pm-toolbar { flex-direction: column; align-items: stretch; }
   .pm-search-box { width: 100%; max-width: 100%; }
   .pm-toolbar-actions { width: 100%; justify-content: space-between; }
+  .pm-formal-row { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .pm-formal-input { width: 100%; }
+  .pm-net-banner { flex-direction: column; gap: 0.5rem; text-align: center; }
 }
+
 @media (max-width: 480px) {
   .pm-toolbar-actions { flex-direction: column; }
   .pm-toolbar-actions button { width: 100%; }

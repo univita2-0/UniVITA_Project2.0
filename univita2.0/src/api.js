@@ -1,11 +1,38 @@
 /* univita2.0/src/api.js */
+import axios from 'axios';
 
-const USE_REMOTE = true; 
+const USE_REMOTE = false; 
 
 const REMOTE_URL = "https://api.univitahct.tech";
 const LOCAL_URL = "http://localhost:5000";
 
 export const API_BASE = USE_REMOTE ? `${REMOTE_URL}/api` : `${LOCAL_URL}/api`;
+
+
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      const url = error.config?.url || '';
+      const token = localStorage.getItem('auth_token');
+
+    
+      if (!url.includes('/login') && !url.includes('/payroll/unlock')) {
+        
+        if (token) {
+          localStorage.clear();
+          if (window.location.pathname !== '/') {
+            window.location.href = '/'; 
+          } else {
+            
+            window.location.reload(); 
+          }
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Helper to handle JSON parsing safely and prevent dashboard crashes
 const handleWebResponse = async (res) => {
@@ -181,18 +208,19 @@ export const fetchGroupedLeaveRequests = async () => {
     }
 };
 
+// src/api.js  (univita2.0)
 export const updateLeaveStatus = async (id, status, remarks = "") => {
-    try {
-        const res = await fetch(`${API_BASE}/leave-requests/${id}`, {
-            method: 'PUT',
-            headers: getWebAuthHeaders(),
-            body: JSON.stringify({ status, admin_remarks: remarks })
-        });
-        return await handleWebResponse(res);
-    } catch (error) {
-        console.error("Update Leave Error:", error);
-        return { success: false };
-    }
+  try {
+    const res = await fetch(`${API_BASE}/leave-requests/${id}/status`, {  
+      method: 'PUT',
+      headers: getWebAuthHeaders(),
+      body: JSON.stringify({ status, admin_remarks: remarks })
+    });
+    return await handleWebResponse(res);
+  } catch (error) {
+    console.error("Update Leave Error:", error);
+    return { success: false };
+  }
 };
 
 export const batchUpdateLeaveStatus = async (ids, status, remarks = "") => {
@@ -458,5 +486,85 @@ export const reviewCorrection = async (id, status) => {
   } catch (error) {
     console.error("Review Correction Error:", error);
     return { success: false };
+  }
+};
+
+export const fetchRecentActivity = async (limit = 10) => {
+    try {
+        const res = await fetch(
+            `${API_BASE}/activity/recent?limit=${limit}`,
+            {
+                method: 'GET',
+                headers: getWebAuthHeaders()
+            }
+        );
+
+        const result = await handleWebResponse(res);
+
+        if (!res.ok) {
+            console.error(
+                "Fetch Recent Activity Error:",
+                result.message || `HTTP ${res.status}`
+            );
+
+            return {
+                success: false,
+                message: result.message || "Failed to load recent activity.",
+                data: []
+            };
+        }
+
+        const activities = Array.isArray(result)
+            ? result
+            : Array.isArray(result?.data)
+                ? result.data
+                : Array.isArray(result?.activities)
+                    ? result.activities
+                    : Array.isArray(result?.data?.activities)
+                        ? result.data.activities
+                        : [];
+
+        if (
+            !Array.isArray(result) &&
+            result?.success === false
+        ) {
+            return {
+                success: false,
+                message: result.message || "Failed to load recent activity.",
+                data: []
+            };
+        }
+
+        return {
+            success: true,
+            data: activities
+        };
+    } catch (error) {
+        console.error("Fetch Recent Activity Error:", error);
+
+        return {
+            success: false,
+            message: "Unable to connect to the server.",
+            data: []
+        };
+    }
+};
+
+export const addManualCtoCredit = async (employeeId, creditHours, reason, year = new Date().getFullYear()) => {
+  try {
+    const res = await fetch(`${API_BASE}/leave-balances/manual-cto`, {
+      method: 'POST',
+      headers: getWebAuthHeaders(),
+      body: JSON.stringify({
+        employee_id: employeeId,
+        credit_hours: creditHours,
+        reason,
+        year
+      })
+    });
+    return await handleWebResponse(res);
+  } catch (error) {
+    console.error("Add Manual CTO Credit Error:", error);
+    return { success: false, message: "Network error" };
   }
 };

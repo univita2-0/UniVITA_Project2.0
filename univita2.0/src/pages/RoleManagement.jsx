@@ -19,14 +19,19 @@ const RoleManagement = () => {
   const currentUserId = useMemo(() => {
     try {
       const userStr = localStorage.getItem('user');
-      if (userStr) return JSON.parse(userStr).id;
-      return parseInt(localStorage.getItem('user_id') || '0');
+      if (userStr) {
+        const parsed = JSON.parse(userStr);
+        if (parsed && parsed.id) return parsed.id;
+      }
+      const idStr = localStorage.getItem('user_id');
+      if (idStr) return parseInt(idStr, 10);
+      return 0;
     } catch (e) {
+      console.warn("Failed to parse user ID from localStorage", e);
       return 0;
     }
   }, []);
 
-  // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
 
@@ -41,7 +46,7 @@ const RoleManagement = () => {
       setUsers(activeUsers);
     } catch (err) {
       console.error('Failed to fetch users', err);
-      toast.error('Failed to load users');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to load users');
     } finally {
       setLoading(false);
     }
@@ -52,12 +57,12 @@ const RoleManagement = () => {
       toast.error('You cannot change your own role.');
       return;
     }
-    
+
     setUpdating(userId);
-    
+
     try {
       const res = await axios.put(`${API_BASE}/users/${userId}/role`, { role: newRole }, getAuthHeaders());
-      
+
       if (res.data.success || res.status === 200) {
         setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
         toast.success(`Role updated for ${users.find(u => u.id === userId)?.full_name}`);
@@ -65,8 +70,7 @@ const RoleManagement = () => {
     } catch (err) {
       const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Role update failed.';
       toast.error(errorMsg);
-      
-      setUsers([...users]); 
+      setUsers([...users]);
     } finally {
       setUpdating(null);
     }
@@ -82,21 +86,19 @@ const RoleManagement = () => {
     return classes[role] || 'rm-badge-default';
   };
 
-  // Filter users based on search term and role filter
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
-      const matchesSearch = 
+      const matchesSearch =
         (user.full_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (user.employee_id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (user.email || '').toLowerCase().includes(searchTerm.toLowerCase());
-      
+
       const matchesRole = roleFilter ? user.role === roleFilter : true;
 
       return matchesSearch && matchesRole;
     });
   }, [users, searchTerm, roleFilter]);
 
-  // Pagination Calculations
   const totalUsers = filteredUsers.length;
   const totalPages = Math.ceil(totalUsers / rowsPerPage);
   const paginatedUsers = useMemo(() => {
@@ -118,10 +120,8 @@ const RoleManagement = () => {
 
   return (
     <div className="expert-container">
-      {/* Header Section */}
       <div className="expert-header">
         <div className="expert-title-group">
-          
           <div>
             
             <p className="expert-subtitle">Assign and manage access control levels across system modules.</p>
@@ -129,7 +129,6 @@ const RoleManagement = () => {
         </div>
       </div>
 
-      {/* Stats Summary Row */}
       <div className="rep-stats-row">
         <div className="rep-stat-box">
           <div className="rep-stat-icon"><Users size={20} /></div>
@@ -154,18 +153,16 @@ const RoleManagement = () => {
         </div>
       </div>
 
-      {/* Main Card */}
       <div className="expert-card">
-        {/* Toolbar & Search */}
-        <div className="expert-search-card" style={{ margin: 0, border: 'none', borderBottom: '1px solid #E2E8F0', borderRadius: 0 }}>
+        <div className="expert-search-card">
           <div className="al-filters-wrapper">
             <div className="al-filter-group search">
               <label>Search Users</label>
-              <div className="expert-search-input-group" style={{ height: '42px', margin: 0 }}>
+              <div className="expert-search-input-group">
                 <Search size={16} className="text-muted" />
-                <input 
-                  type="text" 
-                  placeholder="Search by name, ID, or email..." 
+                <input
+                  type="text"
+                  placeholder="Search by name, ID, or email..."
                   value={searchTerm}
                   onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                   className="expert-clean-input"
@@ -175,10 +172,9 @@ const RoleManagement = () => {
 
             <div className="al-filter-group action">
               <label>Filter by Role</label>
-              <select 
-                className="expert-clean-input border" 
-                style={{ padding: '0.5rem 2.5rem 0.5rem 0.75rem', height: '42px' }} 
-                value={roleFilter} 
+              <select
+                className="expert-clean-input border"
+                value={roleFilter}
                 onChange={e => { setRoleFilter(e.target.value); setCurrentPage(1); }}
               >
                 <option value="">All Roles</option>
@@ -205,7 +201,7 @@ const RoleManagement = () => {
               {paginatedUsers.length === 0 ? (
                 <tr>
                   <td colSpan="4" className="expert-empty">
-                    <Users size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
+                    <Users size={48} className="text-muted" />
                     <p>No users found matching your criteria.</p>
                     <span>Try broadening your search or filter settings.</span>
                   </td>
@@ -215,8 +211,8 @@ const RoleManagement = () => {
                   <tr key={user.id}>
                     <td className="font-mono text-muted">{user.employee_id}</td>
                     <td>
-                      <div className="rm-emp-name text-dark font-semibold">{user.full_name}</div>
-                      <div className="rm-emp-email text-muted">{user.email}</div>
+                      <div className="rm-emp-name">{user.full_name}</div>
+                      <div className="rm-emp-email">{user.email}</div>
                     </td>
                     <td>
                       <span className={`rm-badge ${getRoleBadgeClass(user.role)}`}>
@@ -245,14 +241,13 @@ const RoleManagement = () => {
           </table>
         </div>
 
-        {/* Pagination Bar */}
         {totalUsers > 0 && (
           <div className="expert-pagination">
             <div className="al-rows-selector">
               <span className="expert-page-info">Rows per page:</span>
-              <select 
-                className="al-select-small" 
-                value={rowsPerPage} 
+              <select
+                className="al-select-small"
+                value={rowsPerPage}
                 onChange={e => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
               >
                 <option value={10}>10</option>
@@ -263,17 +258,17 @@ const RoleManagement = () => {
             </div>
 
             <div className="expert-page-controls">
-              <button 
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
-                disabled={currentPage === 1} 
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
                 className="expert-page-btn"
               >
                 <ChevronLeft size={16} /> Prev
               </button>
               <span className="expert-page-current">{currentPage} / {totalPages || 1}</span>
-              <button 
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
-                disabled={currentPage === totalPages} 
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
                 className="expert-page-btn"
               >
                 Next <ChevronRight size={16} />

@@ -56,9 +56,20 @@ import OvertimeRequests from './pages/OvertimeRequests';
 import './App.css'; 
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // 🟢 FIX: Check localStorage synchronously on initial render to prevent landing page flicker
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const token = localStorage.getItem('auth_token');
+    const role = localStorage.getItem('user_role');
+    return !!(token && role && role !== 'instructor');
+  });
+
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [currentView, setCurrentView] = useState('appointment');
+  
+  const [currentView, setCurrentView] = useState(() => {
+    const token = localStorage.getItem('auth_token');
+    return token ? 'dashboard' : 'appointment';
+  });
+
   const [showHistoryDetail, setShowHistoryDetail] = useState(false);
 
   const [payrollToken, setPayrollToken] = useState(null);
@@ -77,12 +88,14 @@ function App() {
     if (token && role) {
       if (role === 'instructor') {
         localStorage.clear();
-        return;
+        setIsAuthenticated(false);
+      } else {
+        setIsAuthenticated(true);
+        setCurrentView('dashboard');
       }
-      setIsAuthenticated(true);
-      setCurrentView('dashboard');
     } else {
       localStorage.clear();
+      setIsAuthenticated(false);
     }
 
     const savedPayrollToken = localStorage.getItem('payroll_token');
@@ -132,7 +145,6 @@ function App() {
     setCurrentView('payroll-main');
   };
 
-  // NEW: Forcefully clears the token from App state to ensure prompt on next visit
   const handlePayrollLock = () => {
     setPayrollToken(null);
     setPayrollLocked(true);
@@ -183,7 +195,7 @@ function App() {
       case 'today-visitors': return { title: 'Today\'s Visitors' };
       case 'location-tracking': return { title: 'Location Tracking' };
       case 'manage-reasons': return { title: 'Manage Visit Reasons' };
-      case 'manage-ble': return { title: 'Manage BLE Tags' };
+      case 'manage-ble': return { title: 'BLE Tags Management' };
       case 'manage-scanners': return { title: 'Room Scanners Management' };
       case 'completed-visits': return { title: 'Completed Visits' };
       case 'overtime-requests': return { title: 'Overtime Requests' };
@@ -230,7 +242,7 @@ function App() {
         return (
           <PayrollMain
             setView={handleSetView}
-            onLock={handlePayrollLock} /* Passed lock function down */
+            onLock={handlePayrollLock} 
             onChangePin={() => openPinModalForAdmin(adminEmail)}
             onShowHistory={openPayrollHistory}
           />
@@ -315,9 +327,9 @@ function App() {
         newestOnTop
         closeOnClick
         rtl={false}
-        pauseOnFocusLoss
+        pauseOnFocusLoss={false}
         draggable
-        pauseOnHover
+        pauseOnHover={false}  
       />
     </NotificationProvider>
   );

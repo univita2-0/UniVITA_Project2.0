@@ -8,114 +8,136 @@ const getAuthHeaders = () => {
   return { headers: { Authorization: `Bearer ${token}` } };
 };
 
-const thirdFloorRooms = [
-  { name: 'Classroom', xMin: 2.1, xMax: 72.2, yMin: 93.2, yMax: 243.8 },
-  { name: 'AHA Room', xMin: 72.2, xMax: 142.9, yMin: 155.4, yMax: 243.8 },
-  { name: 'Private Room', xMin: 142.9, xMax: 188.2, yMin: 155.4, yMax: 243.8 },
-  { name: 'Operating Room', xMin: 188.2, xMax: 233.5, yMin: 155.4, yMax: 243.8 },
-  { name: 'Delivery Room', xMin: 233.5, xMax: 275.9, yMin: 156.8, yMax: 237.4 },
-  { name: 'NICU', xMin: 275.9, xMax: 320.5, yMin: 156.8, yMax: 237.4 },
-  { name: 'ICU', xMin: 320.5, xMax: 365.8, yMin: 156.1, yMax: 237.4 },
-  { name: 'Library', xMin: 84.9, xMax: 142.9, yMin: 42.3, yMax: 155.4 },
-  { name: 'Breakout Room 1', xMin: 142.9, xMax: 189.6, yMin: 40.9, yMax: 130.7 },
-  { name: 'Breakout Room 2', xMin: 189.6, xMax: 232.8, yMin: 40.9, yMax: 130.7 },
-  { name: 'Breakout Room 3', xMin: 232.8, xMax: 278.8, yMin: 40.9, yMax: 130.7 },
-  { name: 'Faculty Room', xMin: 278.8, xMax: 323.3, yMin: 6.9, yMax: 94.6 },
-  { name: 'Faculty Office', xMin: 278.8, xMax: 323.3, yMin: 6.9, yMax: 94.6 },
-  { name: 'Main Entrance', xMin: 323.3, xMax: 397.6, yMin: 6.9, yMax: 94.6 },
-];
-
-const fifthFloorRooms = [
-  { name: 'Lounge / IV Drip', xMin: 43.2, xMax: 88.4, yMin: 166.5, yMax: 234.3 },
-  { name: 'Operating Room', xMin: 88.4, xMax: 135.8, yMin: 163.6, yMax: 233.6 },
-  { name: 'Delivery Room', xMin: 137.3, xMax: 184.7, yMin: 165.0, yMax: 234.3 },
-  { name: 'ICU', xMin: 184.7, xMax: 232.8, yMin: 160.8, yMax: 232.9 },
-  { name: 'Educ Head', xMin: 232.8, xMax: 268.9, yMin: 197.6, yMax: 231.5 },
-  { name: 'Educ. Head', xMin: 232.8, xMax: 268.9, yMin: 197.6, yMax: 231.5 },
-  { name: 'Executive', xMin: 268.9, xMax: 341.7, yMin: 162.9, yMax: 231.5 },
-  { name: 'Executive 1', xMin: 268.9, xMax: 303.5, yMin: 162.9, yMax: 231.5 },
-  { name: 'Executive 2', xMin: 304.2, xMax: 341.7, yMin: 164.3, yMax: 232.9 },
-  { name: 'Conference', xMin: 348.0, xMax: 385.0, yMin: 90.0, yMax: 162.9 },
-  { name: 'Creatives', xMin: 229.9, xMax: 290.1, yMin: 97.2, yMax: 162.9 },
-  { name: 'Debrief Room', xMin: 98.3, xMax: 229.2, yMin: 97.2, yMax: 149.5 },
-  { name: 'Lobby', xMin: 5.7, xMax: 99.8, yMin: 97.2, yMax: 162.9 },
-  { name: 'Entrance', xMin: 5.7, xMax: 80.0, yMin: 30.0, yMax: 97.2 },
-  { name: 'AHA Room', xMin: 77.1, xMax: 139.4, yMin: 5.9, yMax: 75.9 },
-  { name: 'ArriA Room', xMin: 77.1, xMax: 139.4, yMin: 5.9, yMax: 75.9 },
-  { name: 'Classroom 1', xMin: 139.4, xMax: 208.0, yMin: 8.8, yMax: 77.4 },
-  { name: 'Classroom 2', xMin: 210.1, xMax: 283.7, yMin: 4.5, yMax: 75.9 },
-  { name: 'HR / Admin', xMin: 285.8, xMax: 329.0, yMin: 6.6, yMax: 75.9 },
-  { name: 'HR / Admin Finance', xMin: 285.8, xMax: 329.0, yMin: 6.6, yMax: 75.9 },
-  { name: 'Pantry', xMin: 329.0, xMax: 368.6, yMin: 29.3, yMax: 75.9 },
-  { name: 'Toilet', xMin: 329.0, xMax: 374.3, yMin: 7.4, yMax: 30.0 },
-];
-
 export default function useBLEPositions() {
   const [positions, setPositions] = useState({});
   const [visitorMeta, setVisitorMeta] = useState({});
-  const httpIntervalRef = useRef(null);
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
 
-  const fetchPositions = useCallback(async () => {
+  const processVisitorData = useCallback((data) => {
+    if (!Array.isArray(data)) return;
+
+    const nextPositions = {};
+    const nextMeta = {};
+
+    data.forEach(v => {
+      const id = String(v.id || v.bleId);
+      
+      const posX = typeof v.x === 'number' && v.x > 0 ? v.x : null;
+      const posY = typeof v.y === 'number' && v.y > 0 ? v.y : null;
+
+      if (posX !== null && posY !== null) {
+        nextPositions[id] = { x: posX, y: posY };
+      }
+
+      let formattedTime = 'Just now';
+      if (typeof v.lastSeen === 'number') {
+        formattedTime = new Date(v.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      } else if (typeof v.lastSeen === 'string') {
+        formattedTime = v.lastSeen;
+      }
+
+      nextMeta[id] = {
+        id,
+        name: v.name || 'Visitor',
+        floor: String(v.floor || '5'),
+        bleId: v.bleId || id,
+        currentRoom: v.currentRoom || 'Waiting for Scanner...',
+        destination: v.destination || 'Unknown',
+        lastSeen: formattedTime,
+        isDisconnected: v.isDisconnected || false,
+        disconnectedAt: v.disconnectedAt || null,
+        isPendingDetection: v.isPendingDetection || false
+      };
+    });
+
+    setPositions(nextPositions);
+    setVisitorMeta(nextMeta);
+  }, []);
+
+  // Initial Load via HTTP
+  const fetchInitialPositions = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/positions`, getAuthHeaders());
       const data = await res.json();
-      
-      if (!Array.isArray(data) || data.length === 0) {
-        setPositions({});
-        setVisitorMeta({});
-        return;
-      }
-
-      const nextPositions = {};
-      const nextMeta = {};
-
-      data.forEach(v => {
-        const id = String(v.id || v.bleId);
-        
-        // Strict real-time rule: If x or y is missing/null, do not plot a pin on the map
-        const posX = typeof v.x === 'number' && v.x > 0 ? v.x : null;
-        const posY = typeof v.y === 'number' && v.y > 0 ? v.y : null;
-
-        if (posX !== null && posY !== null) {
-          nextPositions[id] = { x: posX, y: posY };
-        }
-
-        // Format lastSeen timestamp safely
-        let formattedTime = 'Just now';
-        if (typeof v.lastSeen === 'number') {
-          formattedTime = new Date(v.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        } else if (typeof v.lastSeen === 'string') {
-          formattedTime = v.lastSeen;
-        }
-
-        nextMeta[id] = {
-          id,
-          name: v.name || 'Visitor',
-          floor: String(v.floor || '5'),
-          bleId: v.bleId || id,
-          currentRoom: v.currentRoom || 'Waiting for Scanner...',
-          destination: v.destination || 'Unknown',
-          lastSeen: formattedTime,
-          isDisconnected: v.isDisconnected || false,
-          disconnectedAt: v.disconnectedAt || null
-        };
-      });
-
-      setPositions(nextPositions);
-      setVisitorMeta(nextMeta);
-
+      processVisitorData(data);
     } catch (err) {
-      console.error('BLE polling error:', err);
+      console.error('Initial BLE fetch error:', err);
     }
-  }, []);
+  }, [processVisitorData]);
 
   useEffect(() => {
-    fetchPositions();
-    httpIntervalRef.current = setInterval(fetchPositions, 2000);
-    return () => clearInterval(httpIntervalRef.current);
-  }, [fetchPositions]);
+    fetchInitialPositions();
 
-  // Synchronize destination edits to backend API
+    const connectWebSocket = () => {
+      const token = localStorage.getItem('auth_token');
+      if (!token) return;
+
+      // Determine WS/WSS based on current protocol
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsHost = API_BASE.replace(/^https?:\/\//, '').replace('/api', '');
+      const wsUrl = `${wsProtocol}//${wsHost}/ws?token=${token}`;
+
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('🟢 Live Tracking WebSocket connected.');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'location_update') {
+            // Merge the single updated visitor into current state
+            setVisitorMeta(prev => {
+              const updated = { ...prev };
+              const v = message.visitor;
+              const id = String(v.id || v.bleId);
+              
+              if (v.x && v.y) {
+                setPositions(p => ({ ...p, [id]: { x: v.x, y: v.y } }));
+              }
+
+              updated[id] = {
+                id,
+                name: v.name,
+                floor: String(v.floor),
+                bleId: v.bleId,
+                currentRoom: v.currentRoom,
+                destination: v.destination,
+                lastSeen: new Date(v.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                isDisconnected: v.isDisconnected,
+                disconnectedAt: v.disconnectedAt,
+                isPendingDetection: v.isPendingDetection
+              };
+              return updated;
+            });
+          }
+        } catch (err) {
+          console.error('WebSocket message parse error:', err);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('🔴 Live Tracking WebSocket disconnected. Reconnecting...');
+        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+        ws.close();
+      };
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    };
+  }, [fetchInitialPositions]);
+
   const setVisitorDestination = useCallback(async (visitorId, newDest) => {
     try {
       setVisitorMeta(prev => {

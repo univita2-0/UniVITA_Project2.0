@@ -14,10 +14,9 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
 
 const Settings = () => {
-  // activeTab now supports 'profile', 'password', and 'pin'
   const [activeTab, setActiveTab] = useState('profile');
   const [user, setUser] = useState(null);
-  
+
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [loadingPassword, setLoadingPassword] = useState(false);
   const [loadingPin, setLoadingPin] = useState(false);
@@ -37,7 +36,6 @@ const Settings = () => {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // Password Complexity Validation Helpers
   const hasLength = passwordData.newPassword.length >= 8;
   const hasUppercase = /[A-Z]/.test(passwordData.newPassword);
   const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(passwordData.newPassword);
@@ -119,10 +117,10 @@ const Settings = () => {
         email: profileData.email.trim().toLowerCase(),
         phone_number: profileData.phone.trim() || null,
       }, getAuthHeaders());
-      
+
       localStorage.setItem('user_name', profileData.full_name.trim());
       localStorage.setItem('user_email', profileData.email.trim().toLowerCase());
-      
+
       setUser(prev => ({
         ...prev,
         full_name: profileData.full_name.trim(),
@@ -158,7 +156,7 @@ const Settings = () => {
         currentPassword: passwordData.currentPassword,
         newPassword: passwordData.newPassword,
       }, getAuthHeaders());
-      
+
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       toast.success(res.data.message || 'Password changed successfully.');
     } catch (err) {
@@ -190,7 +188,7 @@ const Settings = () => {
         currentPin: pinData.currentPin,
         newPin: pinData.newPin,
       }, getAuthHeaders());
-      
+
       setPinData({ currentPin: '', newPin: '', confirmPin: '' });
       setShowPinChange(false);
       toast.success(res.data.message || 'Security PIN changed successfully.');
@@ -205,32 +203,32 @@ const Settings = () => {
 
   return (
     <div className="stx-container">
-      
       <div className="stx-header">
-        
-        <p>Manage your preferences, profile details, and security configurations.</p>
+        <div>
+          
+          <p>Manage your preferences, profile details, and security configurations.</p>
+        </div>
       </div>
 
       <div className="stx-layout">
-        
         {/* Left Sidebar Navigation */}
         <aside className="stx-sidebar">
           <nav className="stx-nav">
-            <button 
-              className={`stx-nav-item ${activeTab === 'profile' ? 'active' : ''}`} 
+            <button
+              className={`stx-nav-item ${activeTab === 'profile' ? 'active' : ''}`}
               onClick={() => setActiveTab('profile')}
             >
               <User size={18} /> Profile Information
             </button>
-            <button 
-              className={`stx-nav-item ${activeTab === 'password' ? 'active' : ''}`} 
+            <button
+              className={`stx-nav-item ${activeTab === 'password' ? 'active' : ''}`}
               onClick={() => setActiveTab('password')}
             >
               <Lock size={18} /> Account Password
             </button>
             {canChangePin && (
-              <button 
-                className={`stx-nav-item ${activeTab === 'pin' ? 'active' : ''}`} 
+              <button
+                className={`stx-nav-item ${activeTab === 'pin' ? 'active' : ''}`}
                 onClick={() => setActiveTab('pin')}
               >
                 <ShieldCheck size={18} /> Payroll Security PIN
@@ -241,12 +239,11 @@ const Settings = () => {
 
         {/* Right Main Content Area */}
         <main className="stx-main">
-          
           {/* PROFILE TAB */}
           {activeTab === 'profile' && (
             <section className="stx-section">
               <div className="stx-section-header">
-                
+                <h3>Profile Information</h3>
                 <p>Update your basic profile details and contact information.</p>
               </div>
 
@@ -262,7 +259,7 @@ const Settings = () => {
                     required
                   />
                 </div>
-                
+
                 <div className="stx-form-row">
                   <div className="stx-form-group">
                     <label>Email Address <span className="stx-required">*</span></label>
@@ -300,7 +297,7 @@ const Settings = () => {
           {activeTab === 'password' && (
             <section className="stx-section">
               <div className="stx-section-header">
-                
+                <h3>Account Password</h3>
                 <p>Ensure your account is using a long, random password to stay secure.</p>
               </div>
 
@@ -339,7 +336,6 @@ const Settings = () => {
                       </button>
                     </div>
 
-                    {/* Password Checklist inline */}
                     <div className="stx-checklist">
                       <div className={`stx-check-item ${hasLength ? 'pass' : ''}`}>
                         {hasLength ? <Check size={14} /> : <span className="dot" />} At least 8 characters
@@ -376,7 +372,11 @@ const Settings = () => {
                 </div>
 
                 <div className="stx-actions">
-                  <button type="submit" className="stx-btn-primary" disabled={loadingPassword || !hasLength || !hasUppercase || !hasSpecial || !passwordsMatch}>
+                  <button
+                    type="submit"
+                    className="stx-btn-primary"
+                    disabled={loadingPassword || !hasLength || !hasUppercase || !hasSpecial || !passwordsMatch}
+                  >
                     {loadingPassword ? 'Updating...' : 'Update Password'}
                   </button>
                 </div>
@@ -389,12 +389,12 @@ const Settings = () => {
             <section className="stx-section">
               <div className="stx-section-header">
                 <div className="stx-header-title-row">
-                  
-                  
+                  <ShieldCheck size={20} className="stx-accent-icon" />
+                  <h3>Payroll Security PIN</h3>
                 </div>
                 <p>Your 4 to 6 digit numerical PIN is required to access sensitive payroll modules and records.</p>
               </div>
-              
+
               {!showPinChange ? (
                 <div className="stx-actions" style={{ marginTop: '0' }}>
                   <button className="stx-btn-secondary" onClick={() => setShowPinChange(true)}>
@@ -419,7 +419,7 @@ const Settings = () => {
                       </button>
                     </div>
                   </div>
-                  
+
                   <div className="stx-divider"></div>
 
                   <div className="stx-form-row">
@@ -453,12 +453,16 @@ const Settings = () => {
                       />
                     </div>
                   </div>
-                  
+
                   <div className="stx-actions split">
-                    <button type="button" className="stx-btn-secondary" onClick={() => { 
-                      setShowPinChange(false); 
-                      setPinData({ currentPin: '', newPin: '', confirmPin: '' }); 
-                    }}>
+                    <button
+                      type="button"
+                      className="stx-btn-secondary"
+                      onClick={() => {
+                        setShowPinChange(false);
+                        setPinData({ currentPin: '', newPin: '', confirmPin: '' });
+                      }}
+                    >
                       Cancel
                     </button>
                     <button type="submit" className="stx-btn-primary" disabled={loadingPin}>
@@ -469,7 +473,6 @@ const Settings = () => {
               )}
             </section>
           )}
-
         </main>
       </div>
     </div>

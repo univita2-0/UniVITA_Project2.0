@@ -10,7 +10,6 @@ import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 import './LocationsManagement.css';
 
-// Fix for Leaflet marker icons in React
 const customMarker = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -23,7 +22,6 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Component to handle map clicks and automatically set coordinates
 const MapInteraction = ({ setLocationForm }) => {
   useMapEvents({
     click(e) {
@@ -37,7 +35,6 @@ const MapInteraction = ({ setLocationForm }) => {
   return null;
 };
 
-// Component to dynamically pan the map when search coordinates change
 const MapUpdater = ({ center }) => {
   const map = useMap();
   useEffect(() => {
@@ -54,25 +51,21 @@ const LocationsManagement = () => {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
-  // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Modal States
   const [showModal, setShowModal] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [editingLocation, setEditingLocation] = useState(null);
   const [locationForm, setLocationForm] = useState({ name: '', latitude: 0, longitude: 0, radius: 200 });
-  
+
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteTargetName, setDeleteTargetName] = useState('');
 
-  // Map Search States
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [searchingMap, setSearchingMap] = useState(false);
 
-  // Default Map Center (Pasay City / Manila Area)
-  const defaultCenter = [14.5378, 121.0014]; 
+  const defaultCenter = [14.5378, 121.0014];
 
   useEffect(() => { setCurrentPage(1); }, [searchQuery]);
 
@@ -118,7 +111,8 @@ const LocationsManagement = () => {
       toast.success("Location deleted successfully");
       loadLocations();
     } catch (err) {
-      toast.error(err.response?.data?.error || "Failed to delete location");
+      // ✅ KEY SWAP: error → message
+      toast.error(err.response?.data?.message || "Failed to delete location");
     } finally {
       setProcessing(false);
       setShowConfirm(false);
@@ -130,7 +124,7 @@ const LocationsManagement = () => {
   const handleSave = async () => {
     if (!locationForm.name.trim()) return toast.warning("Location name required");
     if (locationForm.latitude === 0 || locationForm.longitude === 0) return toast.warning("Please pin a valid location on the map.");
-    
+
     setProcessing(true);
     try {
       if (editingLocation) {
@@ -144,19 +138,19 @@ const LocationsManagement = () => {
       resetForm();
       loadLocations();
     } catch (err) {
-      toast.error(err.response?.data?.error || "Error saving location");
+      // ✅ KEY SWAP: error → message
+      toast.error(err.response?.data?.message || "Error saving location");
     } finally {
       setProcessing(false);
     }
   };
 
-  // OpenStreetMap Nominatim Geocoding Search
   const searchMapLocation = async (e) => {
     e.preventDefault();
     if (!mapSearchQuery.trim()) return;
     setSearchingMap(true);
     try {
-      const res = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(mapSearchQuery)}`);
+      const res = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(mapSearchQuery)}`, { timeout: 10000 });
       if (res.data && res.data.length > 0) {
         const { lat, lon } = res.data[0];
         setLocationForm(prev => ({
@@ -175,23 +169,21 @@ const LocationsManagement = () => {
     }
   };
 
-  const filteredLocations = locations.filter(loc => 
+  const filteredLocations = locations.filter(loc =>
     !searchQuery || loc.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const totalPages = Math.ceil(filteredLocations.length / itemsPerPage);
   const currentLocations = filteredLocations.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  const mapCenter = locationForm.latitude && locationForm.longitude 
-    ? [locationForm.latitude, locationForm.longitude] 
+  const mapCenter = locationForm.latitude && locationForm.longitude
+    ? [locationForm.latitude, locationForm.longitude]
     : defaultCenter;
 
   return (
     <div className="expert-container">
-      {/* Header Section */}
       <div className="expert-header">
         <div className="expert-title-group">
-          
           <div>
             
             <p className="expert-subtitle">Manage approved campus boundaries for location tracking and attendance.</p>
@@ -202,17 +194,16 @@ const LocationsManagement = () => {
         </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="expert-search-card" style={{ padding: '12px 20px' }}>
+      <div className="expert-search-card">
         <div className="expert-search-row">
-          <div className="expert-search-input-group" style={{ maxWidth: '500px' }}>
+          <div className="expert-search-input-group">
             <Search size={18} className="text-muted" />
-            <input 
-              type="text" 
-              placeholder="Search locations..." 
-              value={searchQuery} 
-              onChange={e => setSearchQuery(e.target.value)} 
-              className="expert-clean-input" 
+            <input
+              type="text"
+              placeholder="Search locations..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="expert-clean-input"
             />
             {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
           </div>
@@ -222,13 +213,12 @@ const LocationsManagement = () => {
         </div>
       </div>
 
-      {/* Main Table Card */}
       <div className="expert-card">
         {loading ? (
           <div className="expert-loading">Loading locations...</div>
         ) : filteredLocations.length === 0 ? (
           <div className="expert-empty">
-            <AlertCircle size={48} className="text-muted" style={{ marginBottom: '1rem' }} />
+            <AlertCircle size={48} className="text-muted" />
             <p>No locations found.</p>
             {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Register New Location" to configure options.</span>}
           </div>
@@ -262,7 +252,7 @@ const LocationsManagement = () => {
                             <Edit3 size={18} color="#475569" />
                           </button>
                           <button className="expert-btn-icon danger" onClick={() => handleDeleteClick(loc.id, loc.name)} title="Delete Location">
-                            <Trash2 size={18} color="#EF4444"/>
+                            <Trash2 size={18} color="#EF4444" />
                           </button>
                         </div>
                       </td>
@@ -272,7 +262,6 @@ const LocationsManagement = () => {
               </table>
             </div>
 
-            {/* Pagination Controls */}
             {totalPages > 1 && (
               <div className="expert-pagination">
                 <span className="expert-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredLocations.length)} of {filteredLocations.length} entries</span>
@@ -287,7 +276,6 @@ const LocationsManagement = () => {
         )}
       </div>
 
-      {/* Add/Edit Location Map Modal */}
       <FormalModal
         show={showModal}
         onClose={() => { setShowModal(false); resetForm(); }}
@@ -303,29 +291,29 @@ const LocationsManagement = () => {
         }
       >
         <div className="loc-modal-split">
-          
-          {/* Left Panel: Form Fields */}
           <div className="loc-form-panel">
             <div className="loc-form-group">
               <label>Location Name <span className="text-danger">*</span></label>
-              <input 
-                type="text" 
-                className="expert-clean-input border" 
-                value={locationForm.name} 
-                onChange={e => setLocationForm(prev => ({ ...prev, name: e.target.value }))} 
-                placeholder="e.g. Main Campus Building" 
+              <input
+                type="text"
+                className="expert-clean-input border"
+                value={locationForm.name}
+                onChange={e => setLocationForm(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g. Main Campus Building"
                 disabled={processing}
+                maxLength={150}
               />
             </div>
-            
+
             <div className="loc-form-group">
               <label>Geofence Radius (Meters) <span className="text-danger">*</span></label>
-              <input 
-                type="number" 
-                className="expert-clean-input border" 
-                value={locationForm.radius} 
-                onChange={e => setLocationForm(prev => ({ ...prev, radius: parseInt(e.target.value) || 50 }))} 
+              <input
+                type="number"
+                className="expert-clean-input border"
+                value={locationForm.radius}
+                onChange={e => setLocationForm(prev => ({ ...prev, radius: parseInt(e.target.value) || 50 }))}
                 min="50"
+                max={5000}
                 disabled={processing}
               />
               <span className="loc-hint-text">Adjust this to cover the entire campus boundary.</span>
@@ -334,46 +322,45 @@ const LocationsManagement = () => {
             <div className="loc-coordinates-box">
               <div className="loc-form-group">
                 <label>Latitude</label>
-                <input 
-                  type="number" 
-                  className="expert-clean-input border font-mono text-muted" 
-                  value={Number(locationForm.latitude).toString()} 
-                  onChange={e => setLocationForm(prev => ({ ...prev, latitude: parseFloat(e.target.value) || 0 }))} 
-                  step="any" 
+                <input
+                  type="number"
+                  className="expert-clean-input border font-mono text-muted"
+                  value={Number(locationForm.latitude).toString()}
+                  onChange={e => setLocationForm(prev => ({ ...prev, latitude: parseFloat(e.target.value) || 0 }))}
+                  step="any"
                   disabled={processing}
                 />
               </div>
               <div className="loc-form-group">
                 <label>Longitude</label>
-                <input 
-                  type="number" 
-                  className="expert-clean-input border font-mono text-muted" 
-                  value={Number(locationForm.longitude).toString()} 
-                  onChange={e => setLocationForm(prev => ({ ...prev, longitude: parseFloat(e.target.value) || 0 }))} 
-                  step="any" 
+                <input
+                  type="number"
+                  className="expert-clean-input border font-mono text-muted"
+                  value={Number(locationForm.longitude).toString()}
+                  onChange={e => setLocationForm(prev => ({ ...prev, longitude: parseFloat(e.target.value) || 0 }))}
+                  step="any"
                   disabled={processing}
                 />
               </div>
             </div>
-            
+
             <div className="loc-info-alert">
               <Crosshair size={18} />
               <span>You can manually edit the coordinates above or simply <strong>click anywhere on the map</strong> to drop a pin.</span>
             </div>
           </div>
 
-          {/* Right Panel: Interactive Map */}
           <div className="loc-map-panel">
             <form onSubmit={searchMapLocation} className="loc-map-search">
               <div className="expert-search-input-group" style={{ height: '40px' }}>
                 <Search size={16} className="text-muted" />
-                <input 
-                  type="text" 
-                  placeholder="Search map for address or landmark..." 
+                <input
+                  type="text"
+                  placeholder="Search map for address or landmark..."
                   value={mapSearchQuery}
                   onChange={e => setMapSearchQuery(e.target.value)}
                   className="expert-clean-input"
-                  style={{ fontSize: '0.85rem' }}
+                  style={{ fontSize: '0.875rem' }}
                 />
                 <button type="submit" className="loc-map-search-btn" disabled={searchingMap}>
                   {searchingMap ? 'Searching...' : 'Find'}
@@ -382,10 +369,10 @@ const LocationsManagement = () => {
             </form>
 
             <div className="loc-map-container">
-              <MapContainer 
-                center={mapCenter} 
-                zoom={15} 
-                scrollWheelZoom={true} 
+              <MapContainer
+                center={mapCenter}
+                zoom={15}
+                scrollWheelZoom={true}
                 style={{ height: '100%', width: '100%', zIndex: 0 }}
               >
                 <TileLayer
@@ -394,12 +381,12 @@ const LocationsManagement = () => {
                 />
                 <MapInteraction setLocationForm={setLocationForm} />
                 <MapUpdater center={mapCenter} />
-                
+
                 {locationForm.latitude !== 0 && locationForm.longitude !== 0 && (
                   <>
                     <Marker position={[locationForm.latitude, locationForm.longitude]} icon={customMarker} />
-                    <Circle 
-                      center={[locationForm.latitude, locationForm.longitude]} 
+                    <Circle
+                      center={[locationForm.latitude, locationForm.longitude]}
                       radius={locationForm.radius || 200}
                       pathOptions={{ color: '#0D9488', fillColor: '#0D9488', fillOpacity: 0.2 }}
                     />
@@ -408,11 +395,9 @@ const LocationsManagement = () => {
               </MapContainer>
             </div>
           </div>
-
         </div>
       </FormalModal>
 
-      {/* Delete Confirmation Modal */}
       <FormalModal
         show={showConfirm}
         onClose={() => setShowConfirm(false)}
@@ -426,12 +411,12 @@ const LocationsManagement = () => {
           </>
         }
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <p style={{ fontSize: '0.95rem', color: '#334155', margin: 0 }}>
+        <div className="expert-confirm-body">
+          <p className="expert-confirm-title">
             Are you sure you want to permanently delete <strong>"{deleteTargetName}"</strong>?
           </p>
-          <div style={{ background: '#FEF2F2', padding: '12px', borderRadius: '8px', border: '1px solid #FECACA', marginTop: '8px' }}>
-            <p style={{ fontSize: '0.85rem', color: '#DC2626', margin: 0, fontWeight: '500' }}>
+          <div className="expert-confirm-note danger">
+            <p>
               Warning: This may affect existing instructor schedules and attendance routing logic.
             </p>
           </div>

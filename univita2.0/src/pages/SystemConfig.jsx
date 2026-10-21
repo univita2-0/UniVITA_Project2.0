@@ -29,16 +29,19 @@ const SystemConfig = () => {
   const fetchConfig = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE}/system-config`, getAuthHeaders());
+      const [configRes, settingsRes] = await Promise.all([
+        axios.get(`${API_BASE}/system-config`, getAuthHeaders()),
+        axios.get(`${API_BASE}/settings`, getAuthHeaders())
+      ]);
+
       setConfig({
-        password_expiry_days: res.data.password_expiry_days ?? 365,
-        otp_expiry_minutes: res.data.otp_expiry_minutes ?? 5,
-        geofence_default_radius: res.data.geofence_default_radius ?? 200,
-        max_login_attempts: res.data.max_login_attempts ?? 5,
-        loiter_threshold_minutes: res.data.loiter_threshold_minutes ?? 30
+        password_expiry_days: configRes.data.password_expiry_days ?? 365,
+        otp_expiry_minutes: configRes.data.otp_expiry_minutes ?? 5,
+        geofence_default_radius: configRes.data.geofence_default_radius ?? 200,
+        max_login_attempts: configRes.data.max_login_attempts ?? 5,
+        loiter_threshold_minutes: settingsRes.data.loiter_threshold_minutes ? parseInt(settingsRes.data.loiter_threshold_minutes, 10) : 30
       });
     } catch (err) {
-      console.error('Failed to fetch config', err);
       toast.error('Failed to load system configuration.');
     } finally {
       setLoading(false);
@@ -52,36 +55,28 @@ const SystemConfig = () => {
     const maxAttempts = parseInt(config.max_login_attempts, 10);
     const loiterThreshold = parseInt(config.loiter_threshold_minutes, 10);
 
-    if (isNaN(pwdExpiry) || pwdExpiry < 0 || pwdExpiry > 1095) {
-      return toast.error('Password expiry must be between 0 (disabled) and 1095 days.');
-    }
-    if (isNaN(otpExpiry) || otpExpiry < 1 || otpExpiry > 60) {
-      return toast.error('OTP expiry must be between 1 and 60 minutes.');
-    }
-    if (isNaN(radius) || radius < 50 || radius > 2000) {
-      return toast.error('Geofence radius must be between 50 and 2000 meters.');
-    }
-    if (isNaN(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) {
-      return toast.error('Max login attempts must be between 1 and 10.');
-    }
-    if (isNaN(loiterThreshold) || loiterThreshold < 1 || loiterThreshold > 180) {
-      return toast.error('Loitering threshold must be between 1 and 180 minutes.');
-    }
+    if (isNaN(pwdExpiry) || pwdExpiry < 0 || pwdExpiry > 1095) return toast.error('Password expiry must be between 0 and 1095 days.');
+    if (isNaN(otpExpiry) || otpExpiry < 1 || otpExpiry > 60) return toast.error('OTP expiry must be between 1 and 60 minutes.');
+    if (isNaN(radius) || radius < 50 || radius > 2000) return toast.error('Geofence radius must be between 50 and 2000 meters.');
+    if (isNaN(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) return toast.error('Max login attempts must be between 1 and 10.');
+    if (isNaN(loiterThreshold) || loiterThreshold < 1 || loiterThreshold > 180) return toast.error('Loitering threshold must be between 1 and 180 minutes.');
 
     setSaving(true);
     try {
-      const payload = {
-        password_expiry_days: pwdExpiry,
-        otp_expiry_minutes: otpExpiry,
-        geofence_default_radius: radius,
-        max_login_attempts: maxAttempts,
-        loiter_threshold_minutes: loiterThreshold
-      };
-      const res = await axios.put(`${API_BASE}/system-config`, payload, getAuthHeaders());
-      toast.success(res.data.message || 'System configuration actively applied.');
+      await Promise.all([
+        axios.put(`${API_BASE}/system-config`, {
+          password_expiry_days: pwdExpiry,
+          otp_expiry_minutes: otpExpiry,
+          geofence_default_radius: radius,
+          max_login_attempts: maxAttempts,
+        }, getAuthHeaders()),
+        axios.put(`${API_BASE}/settings`, {
+          loiter_threshold_minutes: loiterThreshold
+        }, getAuthHeaders())
+      ]);
+      toast.success('System configuration actively applied.');
     } catch (err) {
-      const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Failed to save configuration.';
-      toast.error(errorMsg);
+      toast.error(err.response?.data?.message || 'Failed to save configuration.');
     } finally {
       setSaving(false);
     }
@@ -99,12 +94,13 @@ const SystemConfig = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
+           
             <p className="expert-subtitle">Manage global security policies, authentication timeouts, geofences, and visitor tracking rules.</p>
           </div>
         </div>
       </div>
 
-      <div className="expert-card" style={{ padding: '2rem' }}>
+      <div className="expert-card">
         <div className="sc-form-grid">
           <div className="set-form-group">
             <label>Password Expiry (Days)</label>

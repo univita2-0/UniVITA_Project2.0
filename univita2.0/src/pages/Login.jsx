@@ -117,6 +117,7 @@ const Login = ({ onBack }) => {
           return;
         }
 
+        
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('user_id', data.user.id);
         localStorage.setItem('user_name', data.user.full_name);

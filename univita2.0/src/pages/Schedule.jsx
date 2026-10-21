@@ -1,4 +1,3 @@
-// src/pages/Schedule.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import './Schedule.css';
 import axios from 'axios';
@@ -47,7 +46,6 @@ const Schedule = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState(null);
 
-  // --- Bulk Upload States (Grid Only) ---
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [manualBulkRows, setManualBulkRows] = useState([]);
   const [isUploadingBulk, setIsUploadingBulk] = useState(false);
@@ -349,7 +347,8 @@ const Schedule = () => {
     <div className="sch-container">
       <div className="sch-header">
         <div className="sch-title-area">
-          <p className="sch-subtitle">Manage instructor schedules, locations, and course assignments.</p>
+          
+          <p className="sch-subtitle">Manage instructor class schedules, physical locations, and course assignments.</p>
         </div>
         
         <div className="sch-actions">
@@ -376,8 +375,8 @@ const Schedule = () => {
               const prev = new Date(currentDate);
               prev.setDate(prev.getDate() - 7);
               setCurrentDate(prev);
-            }}>
-              <ChevronLeft size={20} />
+            }} title="Previous Week">
+              <ChevronLeft size={18} />
             </button>
             <div className="sch-current-date">
               <Calendar size={18} className="sch-date-icon" />
@@ -387,8 +386,8 @@ const Schedule = () => {
               const next = new Date(currentDate);
               next.setDate(next.getDate() + 7);
               setCurrentDate(next);
-            }}>
-              <ChevronRight size={20} />
+            }} title="Next Week">
+              <ChevronRight size={18} />
             </button>
           </div>
         </div>
@@ -434,7 +433,7 @@ const Schedule = () => {
                           <td key={colDateStr} className="sch-cell">
                             <div className="sch-session-block on-leave-block">
                               <div className="sch-session-course">ON LEAVE</div>
-                              <div className="sch-session-place">Not available to schedule</div>
+                              <div className="sch-session-place">Not available</div>
                             </div>
                           </td>
                         );
@@ -471,8 +470,8 @@ const Schedule = () => {
                               </span>
                               {canEdit && (
                                 <div className="sch-session-actions">
-                                  <Edit3 size={14} className="sch-action-icon edit" onClick={(e) => { e.stopPropagation(); handleEditClick(displaySession); }} />
-                                  <Trash2 size={14} color="#EF4444" className="sch-action-icon delete" onClick={(e) => { e.stopPropagation(); openDeleteConfirm(displaySession); }} />
+                                  <Edit3 size={13} className="sch-action-icon edit" onClick={(e) => { e.stopPropagation(); handleEditClick(displaySession); }} />
+                                  <Trash2 size={13} className="sch-action-icon delete" onClick={(e) => { e.stopPropagation(); openDeleteConfirm(displaySession); }} />
                                 </div>
                               )}
                             </div>
@@ -572,7 +571,7 @@ const Schedule = () => {
             setShowBulkModal(false);
             setManualBulkRows([]);
           }}
-          title="Assign Schedules"
+          title="Bulk Assign Schedules"
           wide
           footer={
             <>
@@ -589,7 +588,7 @@ const Schedule = () => {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="sch-interactive-grid-container">
-              <p className="sch-bulk-desc">Add multiple schedules using the dropdowns below. This is faster and prevents typing errors.</p>
+              <p className="sch-bulk-desc">Add multiple schedules using the interactive rows below. Ensure all dropdown fields are filled before submitting.</p>
               
               <div className="sch-interactive-table-wrapper">
                 <table className="sch-interactive-table">
@@ -636,7 +635,7 @@ const Schedule = () => {
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <button className="sch-remove-row-btn" onClick={() => removeManualBulkRow(row.id)} title="Remove row">
-                            <Trash2 size={16} color="#EF4444"/>
+                            <Trash2 size={15} />
                           </button>
                         </td>
                       </tr>
@@ -645,8 +644,8 @@ const Schedule = () => {
                 </table>
               </div>
 
-              <button className="btn-sch-outline" style={{ alignSelf: 'flex-start', marginTop: '10px' }} onClick={addManualBulkRow}>
-                <Plus size={16} /> Add Another Row
+              <button className="btn-sch-outline" style={{ alignSelf: 'flex-start', marginTop: '12px' }} onClick={addManualBulkRow}>
+                <Plus size={15} /> Add Another Row
               </button>
             </div>
           </div>

@@ -47,7 +47,7 @@ const ManageRequest = () => {
   const [showPendingDetailsModal, setShowPendingDetailsModal] = useState(false);
   const [showHistoryDetailsModal, setShowHistoryDetailsModal] = useState(false);
   const [showEditScheduleModal, setShowEditScheduleModal] = useState(false);
-  
+
   const [rejectionReason, setRejectionReason] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
@@ -123,14 +123,12 @@ const ManageRequest = () => {
   const handleApprove = async (req) => {
     const currentAdminId = localStorage.getItem('user_id');
     if (!currentAdminId) return toast.error("Session Error: Please logout and login again.");
-    
-    // 1. Optimistic UI Update: Instantly remove from pending list and close modal
+
     setPendingData(prev => prev.filter(item => item.id !== req.id));
     setShowPendingDetailsModal(false);
     toast.info('Processing approval and notifying visitor...', { autoClose: 2500 });
 
     try {
-      // 2. Background API Call
       await axios.put(`${API_BASE}/appointments/${req.id}/status`, {
         status: 'APPROVED',
         adminNotes: '',
@@ -138,14 +136,13 @@ const ManageRequest = () => {
         visitorName: `${req.first_name || ''} ${req.last_name || ''}`,
         adminId: currentAdminId
       }, getAuthHeaders());
-      
-      // 3. Success Notification & Sync
+
       toast.success('Visit request approved successfully!');
-      fetchHistory(); // Refresh history tab in the background
+      fetchHistory();
     } catch (err) {
       console.error(err);
       toast.error('Failed to approve request.');
-      fetchPending(); // Restore pending data if it failed
+      fetchPending();
     }
   };
 
@@ -153,11 +150,10 @@ const ManageRequest = () => {
     if (!rejectionReason.trim()) return toast.warning('Please provide a reason for rejection.');
     const currentAdminId = localStorage.getItem('user_id');
     if (!currentAdminId) return toast.error("Session Error: Please logout and login again.");
-    
+
     const targetReq = selectedRequest;
     const currentReason = rejectionReason;
 
-    // 1. Optimistic UI Update: Instantly remove and close all modals
     setPendingData(prev => prev.filter(item => item.id !== targetReq.id));
     setShowRejectModal(false);
     setShowPendingDetailsModal(false);
@@ -166,7 +162,6 @@ const ManageRequest = () => {
     toast.info('Processing rejection and notifying visitor...', { autoClose: 2500 });
 
     try {
-      // 2. Background API Call
       await axios.put(`${API_BASE}/appointments/${targetReq.id}/status`, {
         status: 'REJECTED',
         adminNotes: currentReason,
@@ -174,14 +169,13 @@ const ManageRequest = () => {
         visitorName: `${targetReq.first_name || ''} ${targetReq.last_name || ''}`,
         adminId: currentAdminId
       }, getAuthHeaders());
-      
-      // 3. Success Notification & Sync
+
       toast.success('Visit request rejected successfully.');
       fetchHistory();
     } catch (err) {
       console.error(err);
       toast.error('Failed to reject request.');
-      fetchPending(); // Restore pending data if it failed
+      fetchPending();
     }
   };
 
@@ -198,7 +192,7 @@ const ManageRequest = () => {
     setEditDate(visitDate);
     setEditTime(appointment.visit_time?.substring(0, 5) || '');
     setRescheduleReason('');
-    
+
     const today = new Date().toISOString().split('T')[0];
     setIsPastAppointment(visitDate < today);
 
@@ -209,10 +203,9 @@ const ManageRequest = () => {
 
   const handleHistoryUpdate = async () => {
     if (!editDate || !editTime) return toast.warning('Please provide both date and time.');
-    
+
     const targetReq = selectedRequest;
-    
-    // Instant modal close for better UX
+
     setShowEditScheduleModal(false);
     toast.info('Updating schedule and notifying visitor...', { autoClose: 2500 });
 
@@ -222,7 +215,7 @@ const ManageRequest = () => {
         visit_time: editTime,
         admin_notes: rescheduleReason
       }, getAuthHeaders());
-      
+
       toast.success('Appointment schedule updated!');
       fetchHistory();
     } catch (err) {
@@ -252,6 +245,7 @@ const ManageRequest = () => {
       <div className="vm-header">
         <div className="vm-title-group">
           <div>
+            
             <p className="vm-subtitle">Review, inspect, and manage visitor appointments and campus schedules.</p>
           </div>
         </div>
@@ -261,15 +255,15 @@ const ManageRequest = () => {
         </button>
       </div>
 
-      <div className="vm-search-card" style={{ padding: '12px 20px' }}>
-        <div className="vm-search-input-group" style={{ maxWidth: '400px' }}>
+      <div className="vm-search-card">
+        <div className="vm-search-input-group">
           <Search size={18} className="text-muted" />
-          <input 
-            type="text" 
-            placeholder="Search visitor name, email, or purpose..." 
-            value={historySearch} 
-            onChange={e => setHistorySearch(e.target.value)} 
-            className="vm-clean-input" 
+          <input
+            type="text"
+            placeholder="Search visitor name, email, or purpose..."
+            value={historySearch}
+            onChange={e => setHistorySearch(e.target.value)}
+            className="vm-clean-input"
           />
           {historySearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setHistorySearch('')} />}
         </div>
@@ -328,11 +322,18 @@ const ManageRequest = () => {
 
             {historyTotalPages > 1 && (
               <div className="vm-pagination">
-                <span className="vm-page-info">Showing {(historyPage - 1) * itemsPerPage + 1} to {Math.min(historyPage * itemsPerPage, filteredHistory.length)} of {filteredHistory.length} entries</span>
+                <span className="vm-page-info">
+                  Showing {(historyPage - 1) * itemsPerPage + 1} to{' '}
+                  {Math.min(historyPage * itemsPerPage, filteredHistory.length)} of {filteredHistory.length} entries
+                </span>
                 <div className="vm-page-controls">
-                  <button onClick={() => setHistoryPage(p => Math.max(1, p - 1))} disabled={historyPage === 1} className="vm-page-btn"><ChevronLeft size={16} /> Prev</button>
+                  <button onClick={() => setHistoryPage(p => Math.max(1, p - 1))} disabled={historyPage === 1} className="vm-page-btn">
+                    <ChevronLeft size={16} /> Prev
+                  </button>
                   <span className="vm-page-current">{historyPage} / {historyTotalPages}</span>
-                  <button onClick={() => setHistoryPage(p => Math.min(historyTotalPages, p + 1))} disabled={historyPage === historyTotalPages} className="vm-page-btn">Next <ChevronRight size={16} /></button>
+                  <button onClick={() => setHistoryPage(p => Math.min(historyTotalPages, p + 1))} disabled={historyPage === historyTotalPages} className="vm-page-btn">
+                    Next <ChevronRight size={16} />
+                  </button>
                 </div>
               </div>
             )}
@@ -340,7 +341,7 @@ const ManageRequest = () => {
         )}
       </div>
 
-      {/* CUSTOMIZED PENDING VISITOR REQUESTS MODAL (No FormalModal, Strict Unbroken Layout) */}
+      {/* CUSTOMIZED PENDING VISITOR REQUESTS MODAL */}
       {showPendingModal && (
         <div className="vm-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="vm-custom-modal" onClick={e => e.stopPropagation()}>
@@ -351,9 +352,15 @@ const ManageRequest = () => {
               </button>
             </div>
             <div className="vm-custom-modal-body">
-              <div className="vm-search-input-group border" style={{ marginBottom: '1.25rem', maxWidth: '100%' }}>
+              <div className="vm-search-input-group border" style={{ marginBottom: '1.25rem' }}>
                 <Search size={18} className="text-muted" />
-                <input type="text" placeholder="Search visitor name or email..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="vm-clean-input" />
+                <input
+                  type="text"
+                  placeholder="Search visitor name or email..."
+                  value={pendingSearch}
+                  onChange={e => setPendingSearch(e.target.value)}
+                  className="vm-clean-input"
+                />
                 {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
               </div>
 
@@ -365,7 +372,6 @@ const ManageRequest = () => {
                 <div className="vm-minimal-list">
                   {currentPending.map(req => (
                     <div key={req.id} className="vm-minimal-card">
-                      
                       <div className="vm-minimal-header">
                         <div className="vm-minimal-user">
                           <div className="vm-minimal-avatar">
@@ -401,7 +407,6 @@ const ManageRequest = () => {
                         <button className="vm-btn-min-reject" onClick={() => openRejectModal(req)}>Reject</button>
                         <button className="vm-btn-min-approve" onClick={() => handleApprove(req)}>Approve</button>
                       </div>
-
                     </div>
                   ))}
                 </div>
@@ -410,11 +415,18 @@ const ManageRequest = () => {
 
             {pendingTotalPages > 1 && (
               <div className="vm-custom-modal-pagination">
-                <span className="vm-page-info">Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}</span>
+                <span className="vm-page-info">
+                  Showing {(pendingPage - 1) * itemsPerPage + 1} to{' '}
+                  {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}
+                </span>
                 <div className="vm-page-controls">
-                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="vm-page-btn"><ChevronLeft size={16} /></button>
+                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="vm-page-btn">
+                    <ChevronLeft size={16} />
+                  </button>
                   <span className="vm-page-current">{pendingPage} / {pendingTotalPages}</span>
-                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="vm-page-btn"><ChevronRight size={16} /></button>
+                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="vm-page-btn">
+                    <ChevronRight size={16} />
+                  </button>
                 </div>
               </div>
             )}
@@ -427,15 +439,19 @@ const ManageRequest = () => {
       )}
 
       {/* PENDING DETAILS MODAL */}
-      <FormalModal show={showPendingDetailsModal} onClose={() => setShowPendingDetailsModal(false)} title="Visit Request Details" wide footer={
-        <>
-          <button className="vm-btn-secondary" onClick={() => setShowPendingDetailsModal(false)}>Close</button>
-          <button className="vm-btn-primary bg-red" onClick={() => { setShowPendingDetailsModal(false); openRejectModal(selectedRequest); }}>Reject</button>
-          <button className="vm-btn-primary" onClick={() => handleApprove(selectedRequest)}>
-            Approve Request
-          </button>
-        </>
-      }>
+      <FormalModal
+        show={showPendingDetailsModal}
+        onClose={() => setShowPendingDetailsModal(false)}
+        title="Visit Request Details"
+        wide
+        footer={
+          <>
+            <button className="vm-btn-secondary" onClick={() => setShowPendingDetailsModal(false)}>Close</button>
+            <button className="vm-btn-primary bg-red" onClick={() => { setShowPendingDetailsModal(false); openRejectModal(selectedRequest); }}>Reject</button>
+            <button className="vm-btn-primary" onClick={() => handleApprove(selectedRequest)}>Approve Request</button>
+          </>
+        }
+      >
         {selectedRequest && (
           <div className="vm-details-container">
             <div className="vm-details-grid-clean">
@@ -488,10 +504,14 @@ const ManageRequest = () => {
         )}
       </FormalModal>
 
-      {/* HISTORY FINAL DETAILS MODAL (Read-Only) */}
-      <FormalModal show={showHistoryDetailsModal} onClose={() => setShowHistoryDetailsModal(false)} title="Appointment Final Details" wide footer={
-        <button className="vm-btn-secondary" onClick={() => setShowHistoryDetailsModal(false)}>Close Window</button>
-      }>
+      {/* HISTORY FINAL DETAILS MODAL */}
+      <FormalModal
+        show={showHistoryDetailsModal}
+        onClose={() => setShowHistoryDetailsModal(false)}
+        title="Appointment Final Details"
+        wide
+        footer={<button className="vm-btn-secondary" onClick={() => setShowHistoryDetailsModal(false)}>Close Window</button>}
+      >
         {selectedRequest && (
           <div className="vm-details-container">
             <div className="vm-details-grid-clean">
@@ -551,20 +571,25 @@ const ManageRequest = () => {
         )}
       </FormalModal>
 
-      {/* EDIT SCHEDULE MODAL (Reschedule with Reason) */}
-      <FormalModal show={showEditScheduleModal} onClose={() => setShowEditScheduleModal(false)} title="Update Appointment Schedule" footer={
-        <>
-          <button className="vm-btn-secondary" onClick={() => setShowEditScheduleModal(false)}>Cancel</button>
-          {!isPastAppointment && (
-            <button className="vm-btn-primary" onClick={handleHistoryUpdate}>
-              Save & Notify Visitor
-            </button>
-          )}
-        </>
-      }>
+      {/* EDIT SCHEDULE MODAL */}
+      <FormalModal
+        show={showEditScheduleModal}
+        onClose={() => setShowEditScheduleModal(false)}
+        title="Update Appointment Schedule"
+        footer={
+          <>
+            <button className="vm-btn-secondary" onClick={() => setShowEditScheduleModal(false)}>Cancel</button>
+            {!isPastAppointment && (
+              <button className="vm-btn-primary" onClick={handleHistoryUpdate}>
+                Save & Notify Visitor
+              </button>
+            )}
+          </>
+        }
+      >
         {selectedRequest && (
           <div className="vm-details-container">
-            <div style={{ fontSize: '0.9rem', color: '#475569' }}>
+            <div style={{ fontSize: '0.9375rem', color: '#475569' }}>
               Rescheduling appointment for: <strong>{selectedRequest.first_name} {selectedRequest.last_name}</strong>
             </div>
 
@@ -580,21 +605,21 @@ const ManageRequest = () => {
                   <div className="vm-form-row">
                     <div className="vm-form-group">
                       <span className="vm-form-label"><Calendar size={14} /> Date</span>
-                      <input 
-                        type="date" 
-                        className="vm-clean-input border" 
-                        value={editDate} 
-                        onChange={(e) => setEditDate(e.target.value)} 
-                        min={new Date().toISOString().split('T')[0]} 
+                      <input
+                        type="date"
+                        className="vm-clean-input border"
+                        value={editDate}
+                        onChange={(e) => setEditDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
                       />
                     </div>
                     <div className="vm-form-group">
                       <span className="vm-form-label"><Clock size={14} /> Time</span>
-                      <input 
-                        type="time" 
-                        className="vm-clean-input border" 
-                        value={editTime} 
-                        onChange={(e) => setEditTime(e.target.value)} 
+                      <input
+                        type="time"
+                        className="vm-clean-input border"
+                        value={editTime}
+                        onChange={(e) => setEditTime(e.target.value)}
                       />
                     </div>
                   </div>
@@ -618,19 +643,26 @@ const ManageRequest = () => {
       </FormalModal>
 
       {/* REJECT CONFIRMATION MODAL */}
-      <FormalModal show={showRejectModal} onClose={() => setShowRejectModal(false)} title="Reject Visit Request" footer={
-        <>
-          <button className="vm-btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
-          <button className="vm-btn-primary bg-red" onClick={handleRejectConfirm}>
-            Confirm Rejection
-          </button>
-        </>
-      }>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <p style={{ fontSize: '0.95rem', color: '#334155', marginBottom: '8px' }}>
+      <FormalModal
+        show={showRejectModal}
+        onClose={() => setShowRejectModal(false)}
+        title="Reject Visit Request"
+        footer={
+          <>
+            <button className="vm-btn-secondary" onClick={() => setShowRejectModal(false)}>Cancel</button>
+            <button className="vm-btn-primary bg-red" onClick={handleRejectConfirm}>
+              Confirm Rejection
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <p style={{ fontSize: '0.9375rem', color: '#334155', marginBottom: '0.5rem', marginTop: 0 }}>
             Are you sure you want to reject <strong>{selectedRequest?.first_name} {selectedRequest?.last_name}</strong>'s request?
           </p>
-          <label style={{ fontSize: '0.85rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase' }}>Reason for Rejection *</label>
+          <label style={{ fontSize: '0.75rem', fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Reason for Rejection *
+          </label>
           <textarea
             rows="3"
             placeholder="Provide a clear explanation..."

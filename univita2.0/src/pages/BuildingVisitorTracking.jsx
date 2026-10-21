@@ -1,9 +1,10 @@
 // src/pages/BuildingVisitorTracking.jsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { toast } from 'react-toastify';
 import './BuildingVisitorTracking.css';
 import useBLEPositions from '../hooks/useBLEPositions';
 import { API_BASE } from '../api';
@@ -13,6 +14,7 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+// 🟢 FIXED: Added the missing room arrays
 const thirdFloorRooms = [
   { name: 'Classroom', xMin: 2.1, xMax: 72.2, yMin: 93.2, yMax: 243.8 },
   { name: 'AHA Room', xMin: 164.9, xMax: 164.9, yMin: 291.9, yMax: 291.9 },
@@ -47,7 +49,6 @@ const fifthFloorRooms = [
   { name: 'Toilet', xMin: 329.0, xMax: 374.3, yMin: 7.4, yMax: 30.0 },
 ];
 
-const USE_MOCK_DATA = false;
 const IMAGE_WIDTH = 250;
 const IMAGE_HEIGHT = 400;
 
@@ -62,7 +63,6 @@ const BuildingVisitorTracking = () => {
   const [newDestination, setNewDestination] = useState('');
   const [isMapExpanded, setIsMapExpanded] = useState(false);
 
-  // History Modal States
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [historyDateFilter, setHistoryDateFilter] = useState('');
   const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
@@ -74,26 +74,19 @@ const BuildingVisitorTracking = () => {
   const mapInitializedRef = useRef(false);
   const mapBoundsRef = useRef(null);
   const prevVisitorsRef = useRef([]);
-  const [toastMessage, setToastMessage] = useState(null);
   const [disconnectedVisitors, setDisconnectedVisitors] = useState([]);
   const visitorRoomStatsRef = useRef({});
 
   const { visitors, setVisitorDestination } = useBLEPositions();
 
-  const toggleMapExpand = () => {
-    setIsMapExpanded(!isMapExpanded);
-  };
+  const toggleMapExpand = () => setIsMapExpanded(!isMapExpanded);
 
-  // Resize map when expanded state changes
   useEffect(() => {
     if (mapRef.current) {
-      setTimeout(() => {
-        mapRef.current.invalidateSize();
-      }, 200);
+      setTimeout(() => mapRef.current.invalidateSize(), 200);
     }
   }, [isMapExpanded]);
 
-  // Map initialization
   useEffect(() => {
     if (mapInitializedRef.current) return;
     const container = document.getElementById('floorMapContainer');
@@ -133,7 +126,6 @@ const BuildingVisitorTracking = () => {
     };
   }, []);
 
-  // Swap floor overlay
   useEffect(() => {
     if (!mapRef.current || !mapBoundsRef.current) return;
     const map = mapRef.current;
@@ -145,10 +137,8 @@ const BuildingVisitorTracking = () => {
     Object.values(markersRef.current).forEach(marker => marker.setOpacity(0));
   }, [currentFloor]);
 
-  // Draw markers
   useEffect(() => {
     if (!mapRef.current) return;
-    
     
     const roomCounts = {};
 
@@ -162,7 +152,6 @@ const BuildingVisitorTracking = () => {
       if (!roomCounts[roomKey]) roomCounts[roomKey] = 0;
       
       const lat = visitor.y;
-      
       const lng = visitor.x + (roomCounts[roomKey] * 6);
       roomCounts[roomKey]++;
 
@@ -225,9 +214,7 @@ const BuildingVisitorTracking = () => {
     let interval;
     if (showHistoryModal) {
       fetchVisitorHistory(); 
-      interval = setInterval(() => {
-        fetchVisitorHistory();
-      }, 5000); 
+      interval = setInterval(fetchVisitorHistory, 5000); 
     }
     return () => clearInterval(interval);
   }, [showHistoryModal]);
@@ -239,9 +226,6 @@ const BuildingVisitorTracking = () => {
     setShowHistoryModal(true);
   };
 
- 
-
-  // History Filtering Logic
   const filteredHistory = visitorHistory.filter(item => {
     const matchesSearch =
       (item.visitor_name && item.visitor_name.toLowerCase().includes(historySearchTerm.toLowerCase())) ||
@@ -269,10 +253,8 @@ const BuildingVisitorTracking = () => {
   const historyStartIndex = (historyCurrentPage - 1) * historyRowsPerPage;
   const currentHistoryData = filteredHistory.slice(historyStartIndex, historyStartIndex + historyRowsPerPage);
 
+  const [loiterThresholdMs, setLoiterThresholdMs] = useState(2 * 60 * 1000);
 
-  const [loiterThresholdMs, setLoiterThresholdMs] = useState(2 * 60 * 1000); // Default to 2 minutes
-
- 
   useEffect(() => {
     const fetchSettings = async () => {
       try {
@@ -294,8 +276,13 @@ const BuildingVisitorTracking = () => {
 
     prevVisitorsRef.current.forEach(prevVisitor => {
       if (!currentVisitorIds.includes(prevVisitor.id)) {
-        setToastMessage({ type: 'disconnect', name: prevVisitor.name, bleId: prevVisitor.bleId, room: prevVisitor.currentRoom });
-        setTimeout(() => setToastMessage(null), 6000);
+        toast.warning(
+          <div>
+            <strong>{prevVisitor.name}</strong> ({prevVisitor.bleId})<br/>
+            <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Signal lost in {prevVisitor.currentRoom}. Removed from map.</span>
+          </div>,
+          { toastId: `disconnect-${prevVisitor.id}`, autoClose: 6000 }
+        );
         
         setDisconnectedVisitors(prev => {
           if (prev.some(v => v.id === prevVisitor.id)) return prev;
@@ -319,11 +306,15 @@ const BuildingVisitorTracking = () => {
           visitor.currentRoom !== 'Unknown' && visitor.currentRoom !== visitor.destination &&
           timeInRoom >= IDLE_LIMIT_MS && !stats.alertTriggered
         ) {
-          setToastMessage({
-            type: 'security', name: visitor.name, bleId: visitor.bleId,
-            room: visitor.currentRoom, destination: visitor.destination
-          });
-          setTimeout(() => setToastMessage(null), 8000);
+          toast.error(
+            <div>
+              <strong>Security Alert: Loitering</strong><br/>
+              {visitor.name} ({visitor.bleId}) is in <b>{visitor.currentRoom}</b> for over 2 mins.<br/>
+              <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Expected: {visitor.destination}</span>
+            </div>,
+            { toastId: `loiter-${visitor.id}-${stats.entryTime}`, autoClose: 8000 }
+          );
+          
           visitorRoomStatsRef.current[visitor.id].alertTriggered = true;
         }
       }
@@ -336,7 +327,7 @@ const BuildingVisitorTracking = () => {
     });
 
     prevVisitorsRef.current = visitors;
-  }, [visitors, , loiterThresholdMs]);
+  }, [visitors, loiterThresholdMs]);
 
   const currentVisitors = visitors.filter(v => 
     v.floor === currentFloor && 
@@ -354,9 +345,11 @@ const BuildingVisitorTracking = () => {
 
   return (
     <div className="visitor-tracking-container">
-      <div className="tracking-header"></div>
+      <div className="tracking-header">
+        
+        <p className="subtitle">Real-time blueprint tracking and security monitoring.</p>
+      </div>
 
-      {/* Stats cards */}
       <div className="stats-row">
         <div className="stat-card">
           <div className="stat-number">{totalVisitors}</div>
@@ -390,7 +383,6 @@ const BuildingVisitorTracking = () => {
       </div>
 
       <div className="tracking-main">
-        {/* Map Panel with expand/collapse wrapper */}
         <div className={`map-panel-wrapper ${isMapExpanded ? 'expanded' : ''}`}>
           <div id="floorMapContainer" className="map-panel"></div>
           <button className="fullscreen-btn" onClick={toggleMapExpand}>
@@ -398,7 +390,6 @@ const BuildingVisitorTracking = () => {
           </button>
         </div>
 
-        {/* Visitors Panel – hidden when map is expanded */}
         {!isMapExpanded && (
           <div className="visitors-panel">
             <div className="visitors-header">
@@ -425,37 +416,33 @@ const BuildingVisitorTracking = () => {
                       <div className="visitor-status live"></div>
                     </div>
                     <div className="visitor-details">
-  <div className="detail-row"><span>BLE: {visitor.bleId}</span></div>
-  
-  <div className="detail-row">
-    {visitor.isDisconnected ? (
-      <span style={{ color: '#DC2626' }}>Last Known: <strong>{visitor.currentRoom}</strong></span>
-    ) : (
-      <span>Current: <strong>{visitor.currentRoom}</strong></span>
-    )}
-  </div>
-  
-  <div className="detail-row"><span>Destination: <strong>{visitor.destination}</strong></span></div>
-  
-  <div className="detail-row last-seen">
-    <span style={{ color: visitor.isDisconnected ? '#DC2626' : 'inherit', fontWeight: visitor.isDisconnected ? '500' : 'normal' }}>
-      {visitor.isPendingDetection 
-        ? 'Awaiting scanner...' 
-        : visitor.isDisconnected
-          ? `Signal Lost at: ${visitor.disconnectedAt || (typeof visitor.lastSeen === 'number' ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unknown')}`
-          : typeof visitor.lastSeen === 'number' 
-            ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
-            : (visitor.lastSeen || 'Just now')}
-    </span>
-  </div>
-</div>
-<div className="edit-destination-hint">Click to edit destination</div>
-</div>
-))
-)}
-</div>
+                      <div className="detail-row"><span>BLE: {visitor.bleId}</span></div>
+                      <div className="detail-row">
+                        {visitor.isDisconnected ? (
+                          <span style={{ color: '#DC2626' }}>Last Known: <strong>{visitor.currentRoom}</strong></span>
+                        ) : (
+                          <span>Current: <strong>{visitor.currentRoom}</strong></span>
+                        )}
+                      </div>
+                      <div className="detail-row"><span>Destination: <strong>{visitor.destination}</strong></span></div>
+                      <div className="detail-row last-seen">
+                        <span style={{ color: visitor.isDisconnected ? '#DC2626' : 'inherit', fontWeight: visitor.isDisconnected ? '500' : 'normal' }}>
+                          {visitor.isPendingDetection 
+                            ? 'Awaiting scanner...' 
+                            : visitor.isDisconnected
+                              ? `Signal Lost at: ${visitor.disconnectedAt || (typeof visitor.lastSeen === 'number' ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unknown')}`
+                              : typeof visitor.lastSeen === 'number' 
+                                ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
+                                : (visitor.lastSeen || 'Just now')}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="edit-destination-hint">Click to edit destination</div>
+                  </div>
+                ))
+              )}
+            </div>
 
-            {/* Disconnected panel */}
             {disconnectedVisitors.length > 0 && (
               <div className="disconnected-panel">
                 <div className="visitors-header disconnected-header">
@@ -490,7 +477,6 @@ const BuildingVisitorTracking = () => {
         )}
       </div>
 
-      {/* Destination Modal */}
       <FormalModal
         show={showDestinationModal}
         onClose={() => setShowDestinationModal(false)}
@@ -521,167 +507,135 @@ const BuildingVisitorTracking = () => {
         )}
       </FormalModal>
 
-      {/* History Modal */}
-<FormalModal
-  show={showHistoryModal}
-  onClose={() => setShowHistoryModal(false)}
-  title="Visitor Movement & Alert History"
-  wide
-  footer={
-    <button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>Close Window</button>
-  }
->
-  <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-    <div style={{ flex: 1, minWidth: '250px', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#F8FAFC', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0.5rem 1rem' }}>
-      <Search size={18} color="#64748B" />
-      <input
-        type="text"
-        placeholder="Search visitor name, BLE tag, or room..."
-        value={historySearchTerm}
-        onChange={(e) => { setHistorySearchTerm(e.target.value); setHistoryCurrentPage(1); }}
-        style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '0.95rem', color: '#0F172A' }}
-      />
-    </div>
-    
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-      <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>Filter Date:</label>
-      <input
-        type="date"
-        value={historyDateFilter}
-        onChange={(e) => { setHistoryDateFilter(e.target.value); setHistoryCurrentPage(1); }}
-        style={{ padding: '0.5rem', border: '1px solid #CBD5E1', borderRadius: '6px', outline: 'none', color: '#0F172A' }}
-      />
-      {historyDateFilter && (
-        <button 
-          onClick={() => { setHistoryDateFilter(''); setHistoryCurrentPage(1); }}
-          style={{ background: '#FEE2E2', border: 'none', padding: '0.5rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          title="Clear Date Filter"
-        >
-          <X size={16} color="#DC2626" />
-        </button>
-      )}
-    </div>
-  </div>
-
-  {historyLoading ? (
-    <div style={{ textAlign: 'center', padding: '3rem', color: '#64748B' }}>
-      <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
-      <p>Loading history logs...</p>
-    </div>
-  ) : currentHistoryData.length === 0 ? (
-    <div style={{ textAlign: 'center', padding: '3rem', background: '#F8FAFC', borderRadius: '8px', border: '1px dashed #CBD5E1', color: '#64748B' }}>
-      <p>No visitor history records found matching your filters.</p>
-    </div>
-  ) : (
-    <>
-      <div style={{ maxHeight: '60vh', overflowY: 'auto', border: '1px solid #E2E8F0', borderRadius: '8px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
-          <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: '#F1F5F9', borderBottom: '2px solid #E2E8F0' }}>
-            <tr>
-              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Timestamp</th>
-              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Visitor Details</th>
-              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Event Action</th>
-              <th style={{ padding: '12px 16px', color: '#475569', fontWeight: 600 }}>Location / Room</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentHistoryData.map((record, index) => {
-              // Dynamic Badge Styling
-              let badgeStyle = { backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1' };
-              let eventLabel = record.event_type;
-              
-              if (record.event_type === 'connect' || record.event_type === 'enter') {
-                badgeStyle = { backgroundColor: '#DEF7EC', color: '#03543F', border: '1px solid #84E1BC' };
-                eventLabel = record.event_type === 'connect' ? 'Connected / Detected' : 'Entered Campus';
-              } else if (record.event_type === 'disconnect' || record.event_type === 'Exit / Returned') {
-                badgeStyle = { backgroundColor: '#FDE8E8', color: '#9B1C1C', border: '1px solid #F8B4B4' };
-                eventLabel = 'Signal Lost / Exited';
-              } else if (record.event_type === 'move') {
-                badgeStyle = { backgroundColor: '#E1EFFE', color: '#1E429F', border: '1px solid #A4CAFE' };
-                eventLabel = 'Moved Location';
-              } else if (record.event_type && record.event_type.toLowerCase().includes('loitering')) {
-                
-                badgeStyle = { backgroundColor: '#FEECDC', color: '#8A2C0D', border: '1px solid #FDBA8C' };
-                eventLabel = 'Loitering Warning';
-              }
-
-              return (
-                <tr key={record.id} style={{ borderBottom: '1px solid #E2E8F0', background: index % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                  <td style={{ padding: '12px 16px', whiteSpace: 'nowrap', color: '#334155', fontFamily: 'monospace' }}>
-                    {new Date(record.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' })}
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ fontWeight: 600, color: '#0F172A' }}>{record.visitor_name}</div>
-                    <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '2px' }}>TAG: {record.ble_id}</div>
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600, ...badgeStyle }}>
-                      {eventLabel}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ fontWeight: 600, color: '#334155' }}>
-                      {record.current_room ? `${record.current_room}` : 'Unknown Location'}
-                    </div>
-                    {record.floor && (
-                      <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: '2px' }}>
-                        Floor {record.floor}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      
-      {historyTotalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #E2E8F0' }}>
-          <span style={{ fontSize: '0.875rem', color: '#64748B' }}>
-            Showing {historyStartIndex + 1} to {Math.min(historyStartIndex + historyRowsPerPage, filteredHistory.length)} of {filteredHistory.length} logs
-          </span>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <button
-              style={{ padding: '0.4rem 0.8rem', border: '1px solid #CBD5E1', borderRadius: '6px', background: historyCurrentPage === 1 ? '#F8FAFC' : '#FFF', cursor: historyCurrentPage === 1 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}
-              disabled={historyCurrentPage === 1}
-              onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
-            >
-              <ChevronLeft size={16} color={historyCurrentPage === 1 ? '#94A3B8' : '#0F172A'} />
-            </button>
-            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#0F172A' }}>
-              Page {historyCurrentPage} of {historyTotalPages}
-            </span>
-            <button
-              style={{ padding: '0.4rem 0.8rem', border: '1px solid #CBD5E1', borderRadius: '6px', background: historyCurrentPage === historyTotalPages ? '#F8FAFC' : '#FFF', cursor: historyCurrentPage === historyTotalPages ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}
-              disabled={historyCurrentPage === historyTotalPages}
-              onClick={() => setHistoryCurrentPage(p => Math.min(historyTotalPages, p + 1))}
-            >
-              <ChevronRight size={16} color={historyCurrentPage === historyTotalPages ? '#94A3B8' : '#0F172A'} />
-            </button>
+      <FormalModal
+        show={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        title="Visitor Movement & Alert History"
+        wide
+        footer={<button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>Close Window</button>}
+      >
+        <div className="history-modal-toolbar">
+          <div className="history-search-box">
+            <Search size={18} className="history-search-icon" />
+            <input
+              type="text"
+              placeholder="Search visitor name, BLE tag, or room..."
+              value={historySearchTerm}
+              onChange={(e) => { setHistorySearchTerm(e.target.value); setHistoryCurrentPage(1); }}
+            />
           </div>
-        </div>
-      )}
-    </>
-  )}
-</FormalModal>
-
-      {/* Toast messages */}
-      {toastMessage && (
-        <div className={`custom-toast ${toastMessage.type === 'security' ? 'security-toast' : 'disconnected-toast'}`}>
-          <div className="toast-icon">{toastMessage.type === 'security' ? '🚨' : '⚠️'}</div>
-          <div className="toast-content">
-            <h4>{toastMessage.type === 'security' ? 'Security Alert: Loitering' : 'Beacon Disconnected'}</h4>
-            <p><strong>{toastMessage.name}</strong> ({toastMessage.bleId})</p>
-            {toastMessage.type === 'security' ? (
-              <p className="toast-subtext">Has been in <strong>{toastMessage.room}</strong> for over 2 mins.<br/>Expected destination: <strong>{toastMessage.destination}</strong></p>
-            ) : (
-              <p className="toast-subtext">Signal lost in {toastMessage.room}. Removed from map.</p>
+          
+          <div className="history-date-filter">
+            <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginRight: '0.5rem' }}>Filter Date:</label>
+            <input
+              type="date"
+              value={historyDateFilter}
+              onChange={(e) => { setHistoryDateFilter(e.target.value); setHistoryCurrentPage(1); }}
+            />
+            {historyDateFilter && (
+              <button 
+                onClick={() => { setHistoryDateFilter(''); setHistoryCurrentPage(1); }}
+                style={{ background: '#FEE2E2', border: 'none', padding: '0.5rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: '0.5rem' }}
+                title="Clear Date Filter"
+              >
+                <X size={16} color="#DC2626" />
+              </button>
             )}
           </div>
-          <button className="toast-close" onClick={() => setToastMessage(null)}>&times;</button>
         </div>
-      )}
+
+        {historyLoading ? (
+          <div className="loading-state">
+            <div className="spinner"></div>
+            <p>Loading history logs...</p>
+          </div>
+        ) : currentHistoryData.length === 0 ? (
+          <div className="empty-state">
+            <p>No visitor history records found matching your filters.</p>
+          </div>
+        ) : (
+          <>
+            <div className="history-table-wrapper">
+              <table className="history-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Visitor Details</th>
+                    <th>Event Action</th>
+                    <th>Location / Room</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentHistoryData.map((record, index) => {
+                    let badgeStyle = { backgroundColor: '#F1F5F9', color: '#475569', border: '1px solid #CBD5E1' };
+                    let eventLabel = record.event_type;
+                    
+                    if (record.event_type === 'connect' || record.event_type === 'enter') {
+                      badgeStyle = { backgroundColor: '#DEF7EC', color: '#03543F', border: '1px solid #84E1BC' };
+                      eventLabel = record.event_type === 'connect' ? 'Connected / Detected' : 'Entered Campus';
+                    } else if (record.event_type === 'disconnect' || record.event_type === 'Exit / Returned') {
+                      badgeStyle = { backgroundColor: '#FDE8E8', color: '#9B1C1C', border: '1px solid #F8B4B4' };
+                      eventLabel = 'Signal Lost / Exited';
+                    } else if (record.event_type === 'move') {
+                      badgeStyle = { backgroundColor: '#E1EFFE', color: '#1E429F', border: '1px solid #A4CAFE' };
+                      eventLabel = 'Moved Location';
+                    } else if (record.event_type && record.event_type.toLowerCase().includes('loitering')) {
+                      badgeStyle = { backgroundColor: '#FEECDC', color: '#8A2C0D', border: '1px solid #FDBA8C' };
+                      eventLabel = 'Loitering Warning';
+                    }
+
+                    return (
+                      <tr key={record.id}>
+                        <td className="history-timestamp">
+                          {new Date(record.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' })}
+                        </td>
+                        <td>
+                          <div className="history-visitor-name">{record.visitor_name}</div>
+                          <div className="history-visitor-tag">TAG: {record.ble_id}</div>
+                        </td>
+                        <td>
+                          <span className="history-event-badge" style={badgeStyle}>{eventLabel}</span>
+                        </td>
+                        <td>
+                          <div className="history-room">{record.current_room ? record.current_room : 'Unknown Location'}</div>
+                          {record.floor && <div className="history-floor">Floor {record.floor}</div>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            
+            {historyTotalPages > 1 && (
+              <div className="history-pagination">
+                <span className="history-page-info">
+                  Showing {historyStartIndex + 1} to {Math.min(historyStartIndex + historyRowsPerPage, filteredHistory.length)} of {filteredHistory.length} logs
+                </span>
+                <div className="history-page-controls">
+                  <button
+                    className="history-page-btn"
+                    disabled={historyCurrentPage === 1}
+                    onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span className="history-page-current">
+                    Page {historyCurrentPage} of {historyTotalPages}
+                  </span>
+                  <button
+                    className="history-page-btn"
+                    disabled={historyCurrentPage === historyTotalPages}
+                    onClick={() => setHistoryCurrentPage(p => Math.min(historyTotalPages, p + 1))}
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </FormalModal>
     </div>
   );
 };

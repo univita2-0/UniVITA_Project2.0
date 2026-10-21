@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Calendar, Search, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_BASE } from '../api';
 import './CompletedVisits.css';
 
@@ -10,19 +10,14 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// Helper to strictly format raw timestamps to Philippine Time (12-hour AM/PM)
 const formatToManilaTime = (timestamp) => {
   if (!timestamp) return '—';
-  
-  // Ensure cross-browser parsing support for MySQL datetime strings
   let safeStamp = timestamp;
   if (typeof timestamp === 'string' && timestamp.includes(' ') && !timestamp.includes('T')) {
     safeStamp = timestamp.replace(' ', 'T') + 'Z';
   }
-
   const date = new Date(safeStamp);
   if (isNaN(date.getTime())) return '—';
-
   return date.toLocaleTimeString('en-US', {
     timeZone: 'Asia/Manila',
     hour: '2-digit',
@@ -31,7 +26,6 @@ const formatToManilaTime = (timestamp) => {
   });
 };
 
-// Helper to format "14:30:00" to "2:30 PM"
 const formatVisitTime = (timeStr) => {
   if (!timeStr) return '—';
   const [hour, minute] = timeStr.split(':');
@@ -44,8 +38,7 @@ const formatVisitTime = (timeStr) => {
 const CompletedVisits = () => {
   const [visitors, setVisitors] = useState([]);
   const [loading, setLoading] = useState(false);
-  
-  // Date Filters
+
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
@@ -53,7 +46,6 @@ const CompletedVisits = () => {
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
-  // Pagination State
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -69,7 +61,7 @@ const CompletedVisits = () => {
         ...getAuthHeaders()
       });
       setVisitors(res.data);
-      setCurrentPage(1); // Reset to first page after a new search
+      setCurrentPage(1);
     } catch (err) {
       console.error('Failed to fetch visitor history', err);
       toast.error(err.response?.data?.error || 'Failed to load history');
@@ -78,9 +70,7 @@ const CompletedVisits = () => {
     }
   }, [startDate, endDate]);
 
-  useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
+  useEffect(() => { fetchHistory(); }, [fetchHistory]);
 
   const exportToCSV = () => {
     const headers = ['Name', 'Visit Date', 'Checked In', 'Checked Out', 'Duration', 'Destination', 'BLE Tag'];
@@ -104,18 +94,24 @@ const CompletedVisits = () => {
     toast.success('CSV exported successfully');
   };
 
-  // Pagination Logic
   const totalPages = Math.ceil(visitors.length / rowsPerPage) || 1;
   const startIndex = (currentPage - 1) * rowsPerPage;
   const currentVisitors = visitors.slice(startIndex, startIndex + rowsPerPage);
 
   const handleRowsChange = (e) => {
     setRowsPerPage(Number(e.target.value));
-    setCurrentPage(1); // Reset to first page when changing row count
+    setCurrentPage(1);
   };
 
   return (
     <div className="cv-container">
+      <div className="cv-header">
+        <div>
+          
+          <p className="cv-subtitle">Browse historical visitor records and export for reporting.</p>
+        </div>
+      </div>
+
       <div className="cv-filters-card">
         <div className="cv-filters-wrapper">
           <div className="cv-date-group">
@@ -127,9 +123,9 @@ const CompletedVisits = () => {
               className="cv-modern-input"
             />
           </div>
-          
+
           <div className="cv-date-separator">to</div>
-          
+
           <div className="cv-date-group">
             <label>End Date</label>
             <input
@@ -141,9 +137,12 @@ const CompletedVisits = () => {
           </div>
 
           <div className="cv-action-group">
-            
-            <button className="btn-export-modern" onClick={exportToCSV} disabled={visitors.length === 0}>
-              <Download size={16} /> 
+            <button
+              className="btn-export-modern"
+              onClick={exportToCSV}
+              disabled={visitors.length === 0}
+            >
+              <Download size={16} />
               <span>Export CSV</span>
             </button>
           </div>
@@ -196,13 +195,12 @@ const CompletedVisits = () => {
             </table>
           </div>
 
-          {/* Pagination Footer */}
           <div className="cv-pagination-footer">
             <div className="cv-rows-selector">
               <span>Rows per page:</span>
-              <select 
+              <select
                 className="cv-select"
-                value={rowsPerPage} 
+                value={rowsPerPage}
                 onChange={handleRowsChange}
               >
                 <option value={10}>10</option>
@@ -213,20 +211,20 @@ const CompletedVisits = () => {
             </div>
 
             <div className="cv-page-controls">
-              <button 
-                className="cv-page-btn" 
+              <button
+                className="cv-page-btn"
                 disabled={currentPage === 1}
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               >
                 <ChevronLeft size={18} />
               </button>
-              
+
               <span className="cv-page-info">
                 Page {currentPage} of {totalPages}
               </span>
-              
-              <button 
-                className="cv-page-btn" 
+
+              <button
+                className="cv-page-btn"
                 disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               >

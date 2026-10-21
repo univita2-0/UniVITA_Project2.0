@@ -4,14 +4,13 @@ import './ChatPanel.css';
 import {
   X, Send, Plus, ArrowLeft, MessageSquare, Search, Trash2, LogOut, Users
 } from 'lucide-react';
+import { API_BASE } from '../api'; 
 
-const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:5000'
-  : 'https://api.univitahct.tech';
 
-const WS_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'ws://localhost:5000'
-  : 'wss://api.univitahct.tech';
+const SERVER_BASE = API_BASE.replace(/\/api\/?$/, '');
+
+
+const WS_URL = SERVER_BASE.replace(/^http/, 'ws');
 
 const ChatPanel = ({ token }) => {
   const [open, setOpen] = useState(false);
@@ -55,7 +54,7 @@ const ChatPanel = ({ token }) => {
   const fetchUnreadCounts = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/api/chat/unread-counts`, {
+      const res = await fetch(`${API_BASE}/chat/unread-counts`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -129,7 +128,7 @@ const ChatPanel = ({ token }) => {
   useEffect(() => {
     if (open) {
       rooms.forEach(room => {
-        fetch(`${API_BASE}/api/chat/read/${room.id}`, {
+        fetch(`${API_BASE}/chat/read/${room.id}`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` }
         }).catch(() => {});
@@ -141,7 +140,7 @@ const ChatPanel = ({ token }) => {
 
   const fetchRooms = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/chat/rooms`, {
+      const res = await fetch(`${API_BASE}/chat/rooms`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -155,7 +154,7 @@ const ChatPanel = ({ token }) => {
 
   useEffect(() => {
     if (!token) return;
-    fetch(`${API_BASE}/api/employees`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/employees`, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.json())
       .then(data => setAllUsers(Array.isArray(data) ? data : []))
       .catch(console.error);
@@ -177,7 +176,7 @@ const ChatPanel = ({ token }) => {
 
   useEffect(() => {
     if (!activeRoom) return;
-    fetch(`${API_BASE}/api/chat/read/${activeRoom.id}`, {
+    fetch(`${API_BASE}/chat/read/${activeRoom.id}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` }
     }).catch(console.error);
@@ -186,7 +185,7 @@ const ChatPanel = ({ token }) => {
 
   useEffect(() => {
     if (!activeRoom) return;
-    fetch(`${API_BASE}/api/chat/history/${activeRoom.id}`, {
+    fetch(`${API_BASE}/chat/history/${activeRoom.id}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(res => res.json())
@@ -247,7 +246,7 @@ const ChatPanel = ({ token }) => {
         setChatError('Choose a valid colleague to start a conversation.');
         return;
       }
-      const dmRes = await fetch(`${API_BASE}/api/chat/dm-room`, {
+      const dmRes = await fetch(`${API_BASE}/chat/dm-room`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -292,7 +291,7 @@ const ChatPanel = ({ token }) => {
     setIsCreatingGroup(true);
     setGroupError('');
     try {
-      const res = await fetch(`${API_BASE}/api/chat/group-room`, {
+      const res = await fetch(`${API_BASE}/chat/group-room`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -320,7 +319,7 @@ const ChatPanel = ({ token }) => {
 
   const deleteRoom = async (roomId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/chat/rooms/${roomId}`, {
+      const res = await fetch(`${API_BASE}/chat/rooms/${roomId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -336,7 +335,7 @@ const ChatPanel = ({ token }) => {
 
   const leaveRoom = async (roomId) => {
     try {
-      const res = await fetch(`${API_BASE}/api/chat/rooms/${roomId}/leave`, {
+      const res = await fetch(`${API_BASE}/chat/rooms/${roomId}/leave`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });

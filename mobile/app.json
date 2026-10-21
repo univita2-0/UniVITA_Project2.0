@@ -2,7 +2,7 @@
   "expo": {
     "name": "UniVITA",
     "slug": "mobile",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
@@ -86,7 +86,9 @@
         "projectId": "318655a3-1b90-4c2d-9774-4e34ac583b70"
       }
     },
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "updates": {
       "url": "https://u.expo.dev/318655a3-1b90-4c2d-9774-4e34ac583b70"
     }

@@ -9,6 +9,22 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+// ✅ C3 — read the backend's JSON message out of a Blob response body
+const readBlobError = async (err) => {
+  const data = err?.response?.data;
+  if (!data) return null;
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text();
+      const parsed = JSON.parse(text);
+      return parsed.message || parsed.error || null;
+    } catch {
+      return null;
+    }
+  }
+  return data.message || data.error || null;
+};
+
 const ComplianceReports = () => {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
@@ -21,6 +37,21 @@ const ComplianceReports = () => {
   }, []);
 
   const generateReport = async () => {
+    // ✅ C1 (client mirror) — validate month/year before firing the request.
+    // Backend also validates, but the pickers give us free client-side guards.
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      toast.warning('Please select a valid month (1–12).');
+      return;
+    }
+    const now = new Date();
+    if (
+      year > now.getFullYear() ||
+      (year === now.getFullYear() && month > now.getMonth() + 1)
+    ) {
+      toast.warning('Cannot generate reports for future periods.');
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/reports/compliance/attendance-compliance`, {
@@ -38,16 +69,31 @@ const ComplianceReports = () => {
       link.remove();
       window.URL.revokeObjectURL(url);
 
-      const now = Date.now();
-      localStorage.setItem('last_compliance_report', now.toString());
-      setLastGenerated(new Date(now));
+      const nowMs = Date.now();
+      localStorage.setItem('last_compliance_report', nowMs.toString());
+      setLastGenerated(new Date(nowMs));
 
       toast.success('Attendance & Timekeeping Report downloaded.');
     } catch (err) {
       console.error(err);
+
       let errorMsg = 'Failed to generate attendance report.';
-      if (err.response?.status === 401) errorMsg = 'Session expired. Please log in again.';
-      else if (err.response?.status === 404) errorMsg = 'No active instructor records found for this period.';
+      const status = err.response?.status;
+
+      if (status === 401) {
+        errorMsg = 'Session expired. Please log in again.';
+      } else if (status === 403) {
+        errorMsg = 'You do not have permission to generate compliance reports.';
+      } else if (status === 404) {
+        errorMsg = 'No active instructor records found for this period.';
+      } else if (status === 400) {
+        // ✅ C3 — extract the backend's validation message from the blob
+        const backendMsg = await readBlobError(err);
+        errorMsg = backendMsg || 'Invalid report parameters.';
+      } else if (!err.response) {
+        errorMsg = 'Network error. Please check your connection and try again.';
+      }
+
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -65,6 +111,7 @@ const ComplianceReports = () => {
       <div className="formal-cr-header">
         <div className="formal-cr-title-block">
           <div>
+            
             <p>Generate monthly attendance summaries and DTR timekeeping reports for faculty review and institutional compliance.</p>
           </div>
         </div>
@@ -86,9 +133,9 @@ const ComplianceReports = () => {
                 <label>Target Month</label>
                 <div className="formal-cr-input-wrapper">
                   <Calendar size={16} className="formal-cr-icon" />
-                  <select 
-                    value={month} 
-                    onChange={e => setMonth(parseInt(e.target.value, 10))} 
+                  <select
+                    value={month}
+                    onChange={e => setMonth(parseInt(e.target.value, 10))}
                     disabled={loading}
                   >
                     {monthNames.map((name, idx) => (
@@ -97,14 +144,14 @@ const ComplianceReports = () => {
                   </select>
                 </div>
               </div>
-              
+
               <div className="formal-cr-form-group">
                 <label>Fiscal Year</label>
                 <div className="formal-cr-input-wrapper">
                   <Calendar size={16} className="formal-cr-icon" />
-                  <select 
-                    value={year} 
-                    onChange={e => setYear(parseInt(e.target.value, 10))} 
+                  <select
+                    value={year}
+                    onChange={e => setYear(parseInt(e.target.value, 10))}
                     disabled={loading}
                   >
                     {years.map(y => (

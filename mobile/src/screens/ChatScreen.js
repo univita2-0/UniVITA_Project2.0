@@ -1,5 +1,5 @@
 // src/screens/ChatScreen.js
-import React, { useState, useEffect, useRef, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, Modal, Alert, ActivityIndicator, ScrollView,
@@ -41,7 +41,6 @@ export default function ChatScreen({ onClose }) {
   const isLight = !isDark;
   const styles = useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
 
-  // Universal Safe Padding Calculation for Modals
   const safeTopPadding = Platform.OS === 'android' ? (StatusBar.currentHeight || 20) : Math.max(insets.top, 20);
 
   const [rooms, setRooms] = useState([]);
@@ -107,9 +106,27 @@ export default function ChatScreen({ onClose }) {
     } catch (err) {}
   };
 
+  // 🟢 Extracted fetch history into useCallback for Retry
+  const fetchHistory = useCallback(async () => {
+    if (!activeRoom || !token) return;
+    setChatError('');
+    try {
+      const res = await fetch(`${API_URL}/chat/history/${activeRoom.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setMessages(data);
+      } else {
+        setMessages([]);
+        setChatError(data?.message || 'Could not load this conversation. Please try again.');
+      }
+    } catch (err) {
+      setMessages([]);
+      setChatError(err.message || 'Could not load this conversation. Check your connection and try again.');
+    }
+  }, [activeRoom, token]);
+
   useEffect(() => {
     if (!token || !activeRoom) return;
-    setChatError('');
     const WS_URL = getWsUrl(API_URL);
     if (!WS_URL) return;
 
@@ -156,21 +173,8 @@ export default function ChatScreen({ onClose }) {
   }, [activeRoom, token]);
 
   useEffect(() => {
-    if (!activeRoom || !token) return;
-    fetch(`${API_URL}/chat/history/${activeRoom.id}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) setMessages(data);
-        else {
-          setMessages([]);
-          setChatError(data?.message || 'Could not load this conversation. Please try again.');
-        }
-      })
-      .catch(err => {
-        setMessages([]);
-        setChatError(err.message || 'Could not load this conversation. Check your connection and try again.');
-      });
-  }, [activeRoom, token]);
+    fetchHistory();
+  }, [fetchHistory]);
 
   const handleSend = () => {
     const content = newMsg.trim();
@@ -427,7 +431,19 @@ export default function ChatScreen({ onClose }) {
                 <Send size={18} color={newMsg.trim() ? "#FFFFFF" : "rgba(255,255,255,0.5)"} />
               </TouchableOpacity>
             </View>
-            {!!chatError && <Text accessibilityLiveRegion="polite" style={styles.chatError}>{chatError}</Text>}
+            
+            {/* 🟢 Error Banner with Retry Button */}
+            {!!chatError && (
+              <View style={{ paddingHorizontal: 16, paddingVertical: 8, backgroundColor: isLight ? '#FEF2F2' : 'rgba(239, 68, 68, 0.1)' }}>
+                <Text accessibilityLiveRegion="polite" style={styles.chatError}>{chatError}</Text>
+                {messages.length === 0 && (
+                  <TouchableOpacity onPress={fetchHistory} style={{ marginTop: 4 }}>
+                    <Text style={{ color: colors.primary, fontFamily: 'Inter_18pt-Bold', fontSize: 12 }}>Tap to Retry</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+            
             <Text style={styles.messageCounter}>{newMsg.length}/2000 characters</Text>
           </View>
         )}
@@ -536,7 +552,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   inputArea: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
   chatInput: { flex: 1, minHeight: 40, maxHeight: 90, backgroundColor: colors.background, borderRadius: 20, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, fontSize: 14, fontFamily: 'Inter_18pt-Medium', color: colors.textPrimary, borderWidth: 1, borderColor: colors.border },
   sendBtnDisabled: { backgroundColor: colors.border },
-  chatError: { color: colors.danger || '#DC2626', fontFamily: 'Inter_18pt-Medium', fontSize: 12, paddingHorizontal: 16, paddingTop: 4 },
+  chatError: { color: colors.danger || '#DC2626', fontFamily: 'Inter_18pt-Medium', fontSize: 12 },
   messageCounter: { color: colors.textSecondary, fontFamily: 'Inter_18pt-Regular', fontSize: 10, textAlign: 'right', paddingHorizontal: 18, paddingBottom: 4 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#0D9488', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },

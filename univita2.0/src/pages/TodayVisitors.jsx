@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { User, Info, RefreshCw, Users, UserCheck, XCircle, ArrowLeftRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { User, Info, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_BASE } from '../api';
 import FormalModal from '../components/FormalModal';
 import './TodayVisitors.css';
@@ -23,13 +23,11 @@ const formatTo12Hour = (timeStr) => {
   return `${h}:${minute} ${ampm}`;
 };
 
-// --- STRICT BATTERY VALIDATION & UI RENDERER ---
 const renderBatteryValidation = (mV) => {
   if (!mV || isNaN(mV) || mV <= 0) {
     return <span className="tv-mono-text" style={{ color: '#94A3B8' }}>Awaiting Telemetry...</span>;
   }
 
-  // Filter out ESP32 packet shift anomalies (CR2032 physical limits are 2000mV to 3600mV)
   if (mV > 3600 || mV < 2000) {
     return (
       <div className="tv-batt-alert">
@@ -39,7 +37,6 @@ const renderBatteryValidation = (mV) => {
     );
   }
 
-  // Corrected CR2032 percentage calculation (2000mV is 0%, 3000mV is 100%)
   const minVoltage = 2000;
   const maxVoltage = 3000;
   const percentage = Math.min(100, Math.max(0, Math.round(((mV - minVoltage) / (maxVoltage - minVoltage)) * 100)));
@@ -187,7 +184,10 @@ const TodayVisitors = () => {
   return (
     <div className="tv-container">
       <div className="tv-header-section">
-        <div><p className="tv-subtitle">Manage arrivals, assign BLE tags, and track scheduled visitors.</p></div>
+        <div>
+          
+          <p className="tv-subtitle">Manage arrivals, assign BLE tags, and track scheduled visitors.</p>
+        </div>
         <div className="tv-actions">
           <div className="tv-date-picker-box">
             <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="tv-date-input" />
@@ -317,10 +317,7 @@ const TodayVisitors = () => {
                   <tr key={tag.id}>
                     <td>{tag.label || '—'}</td>
                     <td><span className="tv-mono-text">{tag.mac_address || '—'}</span></td>
-                    
-                    {/* IMPLEMENTED BATTERY VALIDATION */}
                     <td>{renderBatteryValidation(tag.battery_level)}</td>
-
                     <td>
                       {tag.inUse ? (
                         <span className="text-red-600 font-medium" style={{ fontSize: '0.85rem' }}>

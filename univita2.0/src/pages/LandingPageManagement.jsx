@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { 
-  Phone, Mail, MapPin, Clock, BookOpen, Plus, Trash2, 
+import {
+  Phone, Mail, MapPin, Clock, BookOpen, Plus, Trash2,
   Upload, Save, Image as ImageIcon, RotateCcw
 } from 'lucide-react';
 import { API_BASE } from '../api';
@@ -34,12 +34,11 @@ const resolveImageSrc = (imgUrl) => {
   return `${getBackendBaseUrl()}${clean}`;
 };
 
-// Helper to sort course categories and sub-modules alphabetically
 const sortCourseModules = (cats) => {
   return (cats || []).map(cat => ({
     ...cat,
-    courses: Array.isArray(cat.courses) 
-      ? [...cat.courses].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'accent', numeric: true })) 
+    courses: Array.isArray(cat.courses)
+      ? [...cat.courses].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'accent', numeric: true }))
       : []
   }));
 };
@@ -142,6 +141,15 @@ const LandingPageManagement = () => {
   };
 
   const saveSection = async (key, data, silent = false) => {
+    if (key === 'contact_details') {
+      if (data.email_admissions && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email_admissions)) {
+        return toast.error('Please provide a valid admissions email address.');
+      }
+      if (data.address && data.address.length > 500) {
+        return toast.error('Campus address is too long (maximum 500 characters).');
+      }
+    }
+
     setSaving(true);
     try {
       await axios.put(`${API_BASE}/admin/landing-content/${key}`, { data }, getAuthHeaders());
@@ -217,18 +225,17 @@ const LandingPageManagement = () => {
 
   const addCourseCategory = () => {
     setCourses([
-      ...courses, 
-      { 
-        title: 'New Program Track', 
+      ...courses,
+      {
+        title: 'New Program Track',
         badge: 'Accredited Curriculum',
-        subtitle: 'Specialized healthcare certification.', 
-        description: 'Comprehensive clinical modules and training seminars.', 
-        courses: ['Module 1: Foundations'] 
+        subtitle: 'Specialized healthcare certification.',
+        description: 'Comprehensive clinical modules and training seminars.',
+        courses: ['Module 1: Foundations']
       }
     ]);
   };
 
-  // Automatically sorts sub-modules alphabetically when adding a new one
   const addSubCourse = (catIndex, name) => {
     if (!name.trim()) return;
     const updated = [...courses];
@@ -253,8 +260,8 @@ const LandingPageManagement = () => {
           
           <p>Manage the public appointment page, course directory, facility photos, and campus details.</p>
         </div>
-        <button 
-          className="lpm-btn-secondary" 
+        <button
+          className="lpm-btn-secondary"
           onClick={() => {
             setContact(DEFAULT_CONTACT);
             setCourses(DEFAULT_COURSES);
@@ -272,10 +279,10 @@ const LandingPageManagement = () => {
           Contact Details & Hours
         </button>
         <button className={`lpm-tab-btn ${activeTab === 'courses' ? 'active' : ''}`} onClick={() => setActiveTab('courses')}>
-           Course Management ({courses.length})
+          Course Management ({courses.length})
         </button>
         <button className={`lpm-tab-btn ${activeTab === 'facilities' ? 'active' : ''}`} onClick={() => setActiveTab('facilities')}>
-           Facility Galleries ({facilities.length})
+          Facility Galleries ({facilities.length})
         </button>
       </div>
 
@@ -290,56 +297,57 @@ const LandingPageManagement = () => {
           <div className="lpm-form-grid">
             <div className="lpm-form-group full-width">
               <label>Campus Physical Address</label>
-              <textarea 
-                rows="2" 
-                value={contact.address || ''} 
-                onChange={e => setContact({ ...contact, address: e.target.value })} 
+              <textarea
+                rows="2"
+                value={contact.address || ''}
+                onChange={e => setContact({ ...contact, address: e.target.value })}
                 placeholder="Building, street, and city..."
+                maxLength={500}
               />
               <span className="lpm-hint">Displayed on public landing page and embedded Google Maps link.</span>
             </div>
 
             <div className="lpm-form-group">
               <label>Admissions Email</label>
-              <input 
-                value={contact.email_admissions || ''} 
-                onChange={e => setContact({ ...contact, email_admissions: e.target.value })} 
+              <input
+                value={contact.email_admissions || ''}
+                onChange={e => setContact({ ...contact, email_admissions: e.target.value })}
                 placeholder="admissions@hct.ph"
               />
             </div>
 
             <div className="lpm-form-group">
               <label>Mobile Contact Number</label>
-              <input 
-                value={contact.phone_secondary || ''} 
-                onChange={e => setContact({ ...contact, phone_secondary: e.target.value })} 
+              <input
+                value={contact.phone_secondary || ''}
+                onChange={e => setContact({ ...contact, phone_secondary: e.target.value })}
                 placeholder="+63 912 345 6789"
               />
             </div>
 
             <div className="lpm-form-group">
               <label>Weekday Hours (Mon – Fri)</label>
-              <input 
-                value={contact.hours_weekday || ''} 
-                onChange={e => setContact({ ...contact, hours_weekday: e.target.value })} 
+              <input
+                value={contact.hours_weekday || ''}
+                onChange={e => setContact({ ...contact, hours_weekday: e.target.value })}
                 placeholder="Mon - Fri: 8:00 AM – 5:00 PM"
               />
             </div>
 
             <div className="lpm-form-group">
               <label>Saturday Hours</label>
-              <input 
-                value={contact.hours_weekend || ''} 
-                onChange={e => setContact({ ...contact, hours_weekend: e.target.value })} 
+              <input
+                value={contact.hours_weekend || ''}
+                onChange={e => setContact({ ...contact, hours_weekend: e.target.value })}
                 placeholder="Saturday: 8:00 AM – 12:00 PM"
               />
             </div>
 
             <div className="lpm-form-group full-width">
               <label>Sunday Schedule</label>
-              <input 
-                value={contact.hours_sunday || ''} 
-                onChange={e => setContact({ ...contact, hours_sunday: e.target.value })} 
+              <input
+                value={contact.hours_sunday || ''}
+                onChange={e => setContact({ ...contact, hours_sunday: e.target.value })}
                 placeholder="Sunday: CLOSED"
               />
             </div>
@@ -353,22 +361,20 @@ const LandingPageManagement = () => {
         </div>
       )}
 
-      {/* TAB 2: COURSE MANAGEMENT (ALPHABETICAL ORDER GUARANTEED) */}
+      {/* TAB 2: COURSE MANAGEMENT */}
       {activeTab === 'courses' && (
         <div className="lpm-courses-stack">
           {courses.map((cat, idx) => (
             <div key={idx} className="lpm-card">
               <div className="lpm-card-header">
                 <div>
-                  <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#0F172A' }}>
-                    Track #{idx + 1}: {cat.title}
-                  </h4>
-                  <span style={{ fontSize: '0.8rem', color: '#64748B' }}>
+                  <h4 className="lpm-track-title">Track #{idx + 1}: {cat.title}</h4>
+                  <span className="lpm-track-subtitle">
                     {(cat.courses || []).length} modules configured (Alphabetically Sorted)
                   </span>
                 </div>
-                <button 
-                  className="lpm-btn-danger-icon" 
+                <button
+                  className="lpm-btn-danger-icon"
                   onClick={() => setCourses(courses.filter((_, i) => i !== idx))}
                   title="Delete category"
                 >
@@ -379,51 +385,51 @@ const LandingPageManagement = () => {
               <div className="lpm-form-grid" style={{ marginTop: '1rem' }}>
                 <div className="lpm-form-group">
                   <label>Track Title</label>
-                  <input 
-                    value={cat.title} 
+                  <input
+                    value={cat.title}
                     onChange={e => {
                       const updated = [...courses];
                       updated[idx].title = e.target.value;
                       setCourses(updated);
-                    }} 
+                    }}
                   />
                 </div>
 
                 <div className="lpm-form-group">
                   <label>Curriculum Badge / Accreditation</label>
-                  <input 
-                    value={cat.badge || ''} 
+                  <input
+                    value={cat.badge || ''}
                     placeholder="e.g. Official AHA Certified"
                     onChange={e => {
                       const updated = [...courses];
                       updated[idx].badge = e.target.value;
                       setCourses(updated);
-                    }} 
+                    }}
                   />
                 </div>
 
                 <div className="lpm-form-group full-width">
                   <label>Short Subtitle</label>
-                  <input 
-                    value={cat.subtitle} 
+                  <input
+                    value={cat.subtitle}
                     onChange={e => {
                       const updated = [...courses];
                       updated[idx].subtitle = e.target.value;
                       setCourses(updated);
-                    }} 
+                    }}
                   />
                 </div>
 
                 <div className="lpm-form-group full-width">
                   <label>Description & Learning Scope</label>
-                  <textarea 
-                    rows="2" 
-                    value={cat.description} 
+                  <textarea
+                    rows="2"
+                    value={cat.description}
                     onChange={e => {
                       const updated = [...courses];
                       updated[idx].description = e.target.value;
                       setCourses(updated);
-                    }} 
+                    }}
                   />
                 </div>
               </div>
@@ -434,9 +440,9 @@ const LandingPageManagement = () => {
                   {(cat.courses || []).map((cName, cIdx) => (
                     <span key={cIdx} className="lpm-course-chip">
                       <span>{cName}</span>
-                      <button 
-                        type="button" 
-                        onClick={() => removeSubCourse(idx, cIdx)} 
+                      <button
+                        type="button"
+                        onClick={() => removeSubCourse(idx, cIdx)}
                         title="Remove course"
                       >
                         ×
@@ -446,8 +452,8 @@ const LandingPageManagement = () => {
                 </div>
 
                 <div className="lpm-add-chip-row">
-                  <input 
-                    id={`new-sub-${idx}`} 
+                  <input
+                    id={`new-sub-${idx}`}
                     placeholder="Add module (automatically placed alphabetically)..."
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -457,8 +463,8 @@ const LandingPageManagement = () => {
                       }
                     }}
                   />
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     className="lpm-btn-secondary"
                     onClick={() => {
                       const el = document.getElementById(`new-sub-${idx}`);
@@ -491,24 +497,24 @@ const LandingPageManagement = () => {
             <div key={idx} className="lpm-card">
               <div className="lpm-card-header">
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.15rem' }}>{fac.name}</h3>
-                  <span style={{ fontSize: '0.85rem', color: '#64748B' }}>
+                  <h3 className="lpm-facility-title">{fac.name}</h3>
+                  <span className="lpm-facility-subtitle">
                     {(fac.images || []).length} photos in gallery
                   </span>
                 </div>
                 <label className="lpm-btn-secondary" style={{ cursor: 'pointer' }}>
                   <Upload size={16} /> Upload Photos
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    multiple 
-                    style={{ display: 'none' }} 
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
                     onChange={e => {
                       if (e.target.files && e.target.files.length > 0) {
                         handleUploadFacilityImages(idx, Array.from(e.target.files));
                         e.target.value = '';
                       }
-                    }} 
+                    }}
                   />
                 </label>
               </div>
@@ -516,21 +522,22 @@ const LandingPageManagement = () => {
               <div className="lpm-facility-photos-grid">
                 {(fac.images || []).length === 0 ? (
                   <div className="lpm-no-photos">
+                    <ImageIcon size={40} className="text-muted" />
                     <p>No photos uploaded yet for {fac.name}. Click "Upload Photos" above to add images.</p>
                   </div>
                 ) : (
                   (fac.images || []).map((imgUrl, imgIdx) => (
                     <div key={imgIdx} className="lpm-photo-box">
-                      <img 
-                        src={resolveImageSrc(imgUrl)} 
-                        alt={`${fac.name} ${imgIdx + 1}`} 
+                      <img
+                        src={resolveImageSrc(imgUrl)}
+                        alt={`${fac.name} ${imgIdx + 1}`}
                         onError={(e) => {
                           e.currentTarget.style.opacity = '0.3';
                         }}
                       />
-                      <button 
-                        type="button" 
-                        className="lpm-photo-del-btn" 
+                      <button
+                        type="button"
+                        className="lpm-photo-del-btn"
                         onClick={() => removeFacilityImage(idx, imgIdx)}
                         title="Remove Photo"
                       >

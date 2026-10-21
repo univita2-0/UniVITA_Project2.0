@@ -15,6 +15,10 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+const getPayrollAuthHeaders = () => ({
+  headers: { Authorization: `Bearer ${localStorage.getItem('payroll_token')}` }
+});
+
 // Philippine TRAIN Law Monthly Tax Brackets
 const taxTable = [
   { min: 0, max: 20833, rate: 0, base: 0 },
@@ -36,7 +40,7 @@ const computeMonthlyTax = (taxableIncome) => {
 
 const OT_MULTIPLIER = 1.25;
 
-const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
+const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
   const [employees, setEmployees] = useState([]);
   const [attendanceSummary, setAttendanceSummary] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -56,6 +60,10 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
   const now = new Date();
   const isFutureMonth = selectedYear > now.getFullYear() || (selectedYear === now.getFullYear() && selectedMonth > now.getMonth() + 1);
 
+  useEffect(() => {
+    toast.success('Access granted.', { toastId: 'payroll-main-success' });
+  }, []);
+  
   const loadData = useCallback(async () => {
     if (isFutureMonth) return;
     setLoading(true);
@@ -97,7 +105,6 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Securely locks module utilizing SPA routing
   const handleLockModule = () => {
     localStorage.removeItem('payroll_token'); 
     if (onLock) {
@@ -178,22 +185,32 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
     };
     
     try {
-      const res = await axios.post(`${API_BASE}/payroll/finalize`, payload, getAuthHeaders());
+      const res = await axios.post(`${API_BASE}/payroll/finalize`, payload, getPayrollAuthHeaders());
       if (res.data.success) {
         toast.success(`Payroll finalized for ${emp.full_name}`);
         loadData();
       } else {
-        toast.error(res.data.error || 'Failed to finalize.');
+        toast.error(res.data.message || res.data.error || 'Failed to finalize.');
       }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Server error during finalization.');
+      if (err.response?.status === 403) {
+        toast.error('Payroll session expired. Please re-enter your PIN.');
+        handleLockModule(); 
+      } else {
+        toast.error(err.response?.data?.message || err.response?.data?.error || 'Server error during finalization.');
+      }
     }
   };
 
   const handleMonthlyPayroll = async () => {
     setIsProcessing(true);
     try {
-      const response = await axios.post(`${API_BASE}/payroll/run-monthly`, { month: selectedMonth, year: selectedYear }, getAuthHeaders());
+      const response = await axios.post(
+        `${API_BASE}/payroll/run-monthly`, 
+        { month: selectedMonth, year: selectedYear }, 
+        getPayrollAuthHeaders()
+      );
+      
       if (response.data.success) {
         toast.success(`Processed: ${response.data.processed} finalized. ${response.data.skipped > 0 ? `(${response.data.skipped} skipped).` : ''}`);
         setShowMonthlyModal(false);
@@ -202,7 +219,13 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
         toast.error('Failed to process monthly payroll.');
       }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Server error');
+      if (err.response?.status === 403) {
+        toast.error('Payroll session expired. Please re-enter your PIN.');
+        setShowMonthlyModal(false); 
+        handleLockModule();         
+      } else {
+        toast.error(err.response?.data?.message || err.response?.data?.error || 'Server error');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -345,7 +368,6 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
     toast.info('CSV export downloaded.');
   };
 
-  // --- NEW: Statutory Remittance Export Logic ---
   const exportRemittance = () => {
     if (filteredEmployees.length === 0) return toast.warning("No data to export.");
     
@@ -361,7 +383,6 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
       const calc = computePayroll(emp);
       let sssNo = 'Not Provided', phicNo = 'Not Provided', hdmfNo = 'Not Provided', tinNo = 'Not Provided';
       
-      // Safely parse the additional_info JSON object to extract Government IDs
       if (emp.additional_info) {
         try {
           const info = typeof emp.additional_info === 'string' ? JSON.parse(emp.additional_info) : emp.additional_info;
@@ -374,8 +395,6 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
         }
       }
 
-      // The ="value" format forces Excel to treat the IDs as text strings, 
-      // completely preventing it from stripping zeros or doing math on the dashes!
       return [
         `"${emp.employee_id}"`,
         `"${emp.full_name}"`,
@@ -495,7 +514,6 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
                 <button className="pm-btn-outline" onClick={exportToCSV}>
                   <Download size={15} /> Payroll CSV
                 </button>
-                {/* NEW Govt Remittance Button */}
                 <button className="pm-btn-outline" onClick={exportRemittance} title="Export SSS, PhilHealth, Pag-IBIG spreadsheet">
                   <FileText size={15} /> Govt Remittance
                 </button>
@@ -515,31 +533,34 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
                 <table className="pm-table">
                   <thead>
                     <tr>
-                      <th>Employee Details</th>
-                      <th>Hours Rendered</th>
-                      <th className="text-right">Est. Net Pay</th>
+                      <th>Employee ID</th>
+                      <th>Employee Name</th>
+                      <th>Position</th>
+                      <th>Type</th>
                       <th className="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredEmployees.length === 0 ? (
-                      <tr><td colSpan="4"><div className="pm-empty-state"><p>No matching employees found.</p></div></td></tr>
+                      <tr><td colSpan="5"><div className="pm-empty-state"><p>No matching employees found.</p></div></td></tr>
                     ) : (
                       filteredEmployees.map(emp => {
                         const calc = computePayroll(emp);
                         return (
                           <tr key={emp.employee_id}>
                             <td>
-                              <div className="pm-emp-info">
-                                <span className="pm-emp-name">{emp.full_name}</span>
-                                <span className="pm-emp-id">{emp.employee_id}</span>
-                              </div>
+                              <span className="pm-emp-id">{emp.employee_id}</span>
                             </td>
                             <td>
-                              <span className="pm-badge-neutral">{calc.regularHours + calc.paidLeaveHours} hrs</span>
+                              <span className="pm-emp-name">{emp.full_name}</span>
                             </td>
-                            <td className="text-right">
-                              <span className="pm-amount">₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                            <td>
+                              <span className="pm-text-regular">{emp.position_level || emp.position || 'N/A'}</span>
+                            </td>
+                            <td>
+                              <span className="pm-badge-neutral">
+                                {emp.employment_type || emp.contract_type || 'Full-time'}
+                              </span>
                             </td>
                             <td className="text-right">
                               <div className="pm-action-group">
@@ -602,7 +623,7 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
         </div>
       )}
 
-      {/* Modern Split-Pane Payslip Modal */}
+      {/* Modern Formal Payslip Modal */}
       {showPayslipModal && payslipEmployee && (() => {
         const emp = payslipEmployee;
         const calc = computePayroll(emp);
@@ -622,94 +643,95 @@ const PayrollMain = ({ onLock, setView, onChangePin, onShowHistory }) => {
               </div>
               
               <div className="pm-modal-body bg-gray">
-                <div className="pm-payslip-grid">
+                
+                {/* Formal Document Layout */}
+                <div className="pm-formal-payslip">
                   
-                  {/* Left Column: Earnings */}
-                  <div className="pm-payslip-pane">
-                    <h4 className="pm-pane-title text-success">Earnings & Additions</h4>
-                    <div className="pm-payslip-list">
-                      <div className="pm-list-item">
-                        <span>Hourly Rate</span>
-                        <strong>₱{calc.hourlyRate.toLocaleString('en-PH', { minimumFractionDigits: 2 })}/hr</strong>
+                  {/* Earnings Section */}
+                  <div className="pm-formal-section">
+                    <div className="pm-formal-section-header">
+                      <h4>Earnings & Allowances</h4>
+                    </div>
+                    <div className="pm-formal-list">
+                      <div className="pm-formal-row">
+                        <span className="pm-formal-label">Hourly Rate</span>
+                        <span className="pm-formal-value">₱{calc.hourlyRate.toLocaleString('en-PH', { minimumFractionDigits: 2 })}/hr</span>
                       </div>
-                      <div className="pm-list-item">
-                        <span>Base Pay ({calc.regularHours}h logged + {calc.paidLeaveHours}h leave)</span>
-                        <strong>₱{calc.baseEarnings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      <div className="pm-formal-row">
+                        <span className="pm-formal-label">Base Pay ({calc.regularHours}h logged + {calc.paidLeaveHours}h leave)</span>
+                        <span className="pm-formal-value">₱{calc.baseEarnings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                       </div>
-                      <div className="pm-list-item">
-                        <span>Overtime Pay ({calc.overtimeHours} hrs)</span>
-                        <strong>₱{calc.overtimePay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      <div className="pm-formal-row">
+                        <span className="pm-formal-label">Overtime Pay ({calc.overtimeHours} hrs)</span>
+                        <span className="pm-formal-value">₱{calc.overtimePay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                       </div>
                       
-                      <div className="pm-divider"></div>
-                      <span className="pm-section-label">Allowances & Bonuses {!eligible && <span className="text-danger">(Ineligible)</span>}</span>
+                      <div className="pm-formal-divider"></div>
                       
-                      <div className="pm-list-item input-row">
-                        <span>13th Month / Bonus</span>
-                        <input type="text" value={extras.bonus || ''} onChange={e => updateExtras(emp.employee_id, 'bonus', e.target.value)} className="pm-amount-input" placeholder="0.00" />
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">13th Month / Bonus</span>
+                        <input type="text" value={extras.bonus || ''} onChange={e => updateExtras(emp.employee_id, 'bonus', e.target.value)} className="pm-formal-input" placeholder="0.00" />
                       </div>
-                      <div className="pm-list-item input-row">
-                        <span>Transport</span>
-                        {eligible ? <input type="text" value={extras.transport || ''} onChange={e => updateExtras(emp.employee_id, 'transport', e.target.value)} className="pm-amount-input" placeholder="0.00" /> : <strong>₱0.00</strong>}
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">Transport Allowance {!eligible && <span className="text-danger">(Ineligible)</span>}</span>
+                        {eligible ? <input type="text" value={extras.transport || ''} onChange={e => updateExtras(emp.employee_id, 'transport', e.target.value)} className="pm-formal-input" placeholder="0.00" /> : <span className="pm-formal-value">₱0.00</span>}
                       </div>
-                      <div className="pm-list-item input-row">
-                        <span>Meal</span>
-                        {eligible ? <input type="text" value={extras.meal || ''} onChange={e => updateExtras(emp.employee_id, 'meal', e.target.value)} className="pm-amount-input" placeholder="0.00" /> : <strong>₱0.00</strong>}
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">Meal Allowance</span>
+                        {eligible ? <input type="text" value={extras.meal || ''} onChange={e => updateExtras(emp.employee_id, 'meal', e.target.value)} className="pm-formal-input" placeholder="0.00" /> : <span className="pm-formal-value">₱0.00</span>}
                       </div>
-                      <div className="pm-list-item input-row">
-                        <span>Housing</span>
-                        {eligible ? <input type="text" value={extras.housing || ''} onChange={e => updateExtras(emp.employee_id, 'housing', e.target.value)} className="pm-amount-input" placeholder="0.00" /> : <strong>₱0.00</strong>}
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">Housing Allowance</span>
+                        {eligible ? <input type="text" value={extras.housing || ''} onChange={e => updateExtras(emp.employee_id, 'housing', e.target.value)} className="pm-formal-input" placeholder="0.00" /> : <span className="pm-formal-value">₱0.00</span>}
                       </div>
                     </div>
-                    
-                    <div className="pm-pane-footer">
+                    <div className="pm-formal-footer">
                       <span>Gross Earnings</span>
-                      <strong className="text-success">₱{calc.grossPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      <strong>₱{calc.grossPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
                     </div>
                   </div>
 
-                  {/* Right Column: Deductions */}
-                  <div className="pm-payslip-pane">
-                    <h4 className="pm-pane-title text-danger">Taxes & Deductions</h4>
-                    <div className="pm-payslip-list">
-                      <div className="pm-list-item">
-                        <span>Withholding Tax</span>
-                        <strong>₱{calc.tax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                  {/* Deductions Section */}
+                  <div className="pm-formal-section mt-4">
+                    <div className="pm-formal-section-header danger">
+                      <h4>Taxes & Deductions</h4>
+                    </div>
+                    <div className="pm-formal-list">
+                      <div className="pm-formal-row">
+                        <span className="pm-formal-label">Withholding Tax</span>
+                        <span className="pm-formal-value">₱{calc.tax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                       </div>
-                      <div className="pm-list-item">
-                        <span>Late Deductions ({calc.lateMinutes} mins)</span>
-                        <strong className="text-danger">-₱{calc.lateDeduction.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-                      </div>
-                      
-                      <div className="pm-divider"></div>
-                      <span className="pm-section-label">Statutory & Custom</span>
-
-                      <div className="pm-list-item input-row">
-                        <span>SSS Contribution</span>
-                        <input type="text" value={extras.sssOverride != null ? extras.sssOverride : calc.sss.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'sssOverride', e.target.value)} className="pm-amount-input" />
-                      </div>
-                      <div className="pm-list-item input-row">
-                        <span>PhilHealth</span>
-                        <input type="text" value={extras.philHealthOverride != null ? extras.philHealthOverride : calc.philHealth.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'philHealthOverride', e.target.value)} className="pm-amount-input" />
-                      </div>
-                      <div className="pm-list-item input-row">
-                        <span>Pag-IBIG</span>
-                        <input type="text" value={extras.pagIbigOverride != null ? extras.pagIbigOverride : calc.pagIbig.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'pagIbigOverride', e.target.value)} className="pm-amount-input" />
+                      <div className="pm-formal-row">
+                        <span className="pm-formal-label">Late Deductions ({calc.lateMinutes} mins)</span>
+                        <span className="pm-formal-value text-danger">-₱{calc.lateDeduction.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                       </div>
                       
-                      <div className="pm-list-item input-row">
-                        <span>Loans / Advances</span>
-                        <input type="text" value={extras.loans || ''} onChange={e => updateExtras(emp.employee_id, 'loans', e.target.value)} className="pm-amount-input" placeholder="0.00" />
+                      <div className="pm-formal-divider"></div>
+                      
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">SSS Contribution</span>
+                        <input type="text" value={extras.sssOverride != null ? extras.sssOverride : calc.sss.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'sssOverride', e.target.value)} className="pm-formal-input" />
                       </div>
-                      <div className="pm-list-item input-row">
-                        <span>Other Deductions</span>
-                        <input type="text" value={extras.other || ''} onChange={e => updateExtras(emp.employee_id, 'other', e.target.value)} className="pm-amount-input" placeholder="0.00" />
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">PhilHealth</span>
+                        <input type="text" value={extras.philHealthOverride != null ? extras.philHealthOverride : calc.philHealth.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'philHealthOverride', e.target.value)} className="pm-formal-input" />
+                      </div>
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">Pag-IBIG</span>
+                        <input type="text" value={extras.pagIbigOverride != null ? extras.pagIbigOverride : calc.pagIbig.toFixed(2)} onChange={e => updateExtras(emp.employee_id, 'pagIbigOverride', e.target.value)} className="pm-formal-input" />
+                      </div>
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">Loans / Advances</span>
+                        <input type="text" value={extras.loans || ''} onChange={e => updateExtras(emp.employee_id, 'loans', e.target.value)} className="pm-formal-input" placeholder="0.00" />
+                      </div>
+                      <div className="pm-formal-row input-row">
+                        <span className="pm-formal-label">Other Deductions</span>
+                        <input type="text" value={extras.other || ''} onChange={e => updateExtras(emp.employee_id, 'other', e.target.value)} className="pm-formal-input" placeholder="0.00" />
                       </div>
                     </div>
-
-                    <div className="pm-pane-footer">
+                    <div className="pm-formal-footer danger">
                       <span>Total Deductions</span>
-                      <strong className="text-danger">-₱{calc.totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+                      <strong>-₱{calc.totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
                     </div>
                   </div>
 

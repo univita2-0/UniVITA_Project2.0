@@ -31,7 +31,8 @@ export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedDateEvents, setSelectedDateEvents] = useState([]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+const getPHDateString = (date = new Date()) => date.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+const todayStr = getPHDateString();
   const leaveCategories = ['Sick Leave', 'Vacation', 'Emergency', 'Other', 'Leave'];
 
   const getPHHolidays = (year) => [

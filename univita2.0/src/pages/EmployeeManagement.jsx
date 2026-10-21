@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 import {
   Search, Edit2, Trash2, UserCheck, AlertCircle, ChevronLeft, ChevronRight, 
   Users, Eye, EyeOff, Plus, Copy, CheckCircle, FileText, Calendar, UploadCloud,
-  CreditCard, MapPin
+  CreditCard, RefreshCw
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
@@ -432,7 +432,6 @@ const EmployeeManagement = () => {
       appendSafe('emergency_contact_name', (formData.emergency_contact_name || '').trim());
       appendSafe('emergency_contact_phone', (formData.emergency_contact_phone || '').trim());
 
-      // Send both field variations so server.js matches either key
       appendSafe('street', (formData.street || '').trim());
       appendSafe('street_address', (formData.street || '').trim());
       appendSafe('state', (formData.state || '').trim());
@@ -617,12 +616,17 @@ const EmployeeManagement = () => {
   return (
     <div className="em-container">
       <div className="em-header">
-        <div>
+        <div className="em-title-block">
           <p>Oversee directory, manage system roles, and configure employee profiles.</p>
         </div>
-        <button className="btn-add" onClick={() => { generateNewEmployeeId(); setShowAddModal(true); }}>
-          <Plus size={18} /> Add Employee
-        </button>
+        <div className="em-header-actions">
+          <button className={`btn-refresh ${isRefreshing ? 'spinning' : ''}`} onClick={loadEmployees} title="Sync Employees">
+            <RefreshCw size={16} />
+          </button>
+          <button className="btn-add" onClick={() => { generateNewEmployeeId(); setShowAddModal(true); }}>
+            <Plus size={18} /> Add Employee
+          </button>
+        </div>
       </div>
 
       <div className="stats-cards">
@@ -649,24 +653,26 @@ const EmployeeManagement = () => {
         </div>
       </div>
 
-      <div className="filter-tabs">
-        <button className={`filter-tab ${activeTab === 'instructors' ? 'active' : ''}`} onClick={() => setActiveTab('instructors')}>
-          Instructors <span className="tab-count">{instructorsCount}</span>
-        </button>
-        <button className={`filter-tab ${activeTab === 'staff' ? 'active' : ''}`} onClick={() => setActiveTab('staff')}>
-          Staff <span className="tab-count">{staffCount}</span>
-        </button>
-        <button className={`filter-tab ${activeTab === 'deactivated' ? 'active' : ''}`} onClick={() => setActiveTab('deactivated')}>
-          Deactivated <span className="tab-count">{employees.filter(e => e.status === 'deactivated').length}</span>
-        </button>
-        <button className={`filter-tab ${activeTab === 'deleted' ? 'active' : ''}`} onClick={() => setActiveTab('deleted')}>
-          Deleted <span className="tab-count">{employees.filter(e => e.status === 'deleted').length}</span>
-        </button>
-      </div>
+      <div className="em-toolbar">
+        <div className="filter-tabs">
+          <button className={`filter-tab ${activeTab === 'instructors' ? 'active' : ''}`} onClick={() => setActiveTab('instructors')}>
+            Instructors <span className="tab-count">{instructorsCount}</span>
+          </button>
+          <button className={`filter-tab ${activeTab === 'staff' ? 'active' : ''}`} onClick={() => setActiveTab('staff')}>
+            Staff <span className="tab-count">{staffCount}</span>
+          </button>
+          <button className={`filter-tab ${activeTab === 'deactivated' ? 'active' : ''}`} onClick={() => setActiveTab('deactivated')}>
+            Deactivated <span className="tab-count">{employees.filter(e => e.status === 'deactivated').length}</span>
+          </button>
+          <button className={`filter-tab ${activeTab === 'deleted' ? 'active' : ''}`} onClick={() => setActiveTab('deleted')}>
+            Deleted <span className="tab-count">{employees.filter(e => e.status === 'deleted').length}</span>
+          </button>
+        </div>
 
-      <div className="search-wrapper">
-        <Search size={18} className="search-icon" />
-        <input type="text" placeholder="Search by name, ID, or email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        <div className="search-wrapper">
+          <Search size={18} className="search-icon" />
+          <input type="text" placeholder="Search by name, ID, or email..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        </div>
       </div>
 
       <div className="table-wrapper">
@@ -679,7 +685,7 @@ const EmployeeManagement = () => {
               <th>Position</th>
               <th>Contract</th>
               <th>Status</th>
-              <th>Actions</th>
+              <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -692,7 +698,7 @@ const EmployeeManagement = () => {
                   <td className="emp-name">
                     <div className="table-user-cell">
                       <div className="table-avatar">{getInitials(emp.full_name)}</div>
-                      <span>{emp.full_name}</span>
+                      <span className="table-user-name">{emp.full_name}</span>
                     </div>
                   </td>
                   <td className="emp-email">{emp.email}</td>
@@ -705,7 +711,7 @@ const EmployeeManagement = () => {
                       {emp.status === 'active' ? 'Active' : emp.status === 'deactivated' ? 'Deactivated' : 'Deleted'}
                     </span>
                   </td>
-                  <td className="actions">
+                  <td className="actions" style={{ justifyContent: 'flex-end' }}>
                     <button className="action-icon" onClick={() => openEditModal(emp)} title="Edit Profile"><Edit2 size={16} /></button>
                     {emp.status !== 'deleted' ? (
                       <button className="action-icon danger" onClick={() => handleSoftDelete(emp)} title="Move to Deleted"><Trash2 size={16} color="#EF4444"/></button>
@@ -723,7 +729,7 @@ const EmployeeManagement = () => {
       {totalPages > 1 && (
         <div className="pagination">
           <button className="page-arrow" onClick={() => setCurrentPage(p => Math.max(1, p-1))} disabled={currentPage === 1}><ChevronLeft size={16} /></button>
-          <span style={{ fontSize: '0.85rem', color: '#64748B', alignSelf: 'center', margin: '0 0.5rem' }}>Page {currentPage} of {totalPages}</span>
+          <span className="pagination-info">Page {currentPage} of {totalPages}</span>
           <button className="page-arrow" onClick={() => setCurrentPage(p => Math.min(totalPages, p+1))} disabled={currentPage === totalPages}><ChevronRight size={16} /></button>
         </div>
       )}
@@ -889,298 +895,298 @@ const EmployeeManagement = () => {
           </div>
 
           <div className="edit-content">
-            {activeTabModal === 'general' && (
-              <>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>First Name <span className="req-star">*</span></label>
-                    <input name="first_name" value={formData.first_name} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label>Last Name <span className="req-star">*</span></label>
-                    <input name="last_name" value={formData.last_name} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label>Middle Initial</label>
-                    <input name="middle_initial" value={formData.middle_initial} onChange={handleEditInputChange} maxLength={1} />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Contract Type</label>
-                    <select name="employment_type" value={formData.employment_type} onChange={handleEditInputChange}>
-                      <option value="Full-time">Full-time</option>
-                      <option value="Part-time">Part-time</option>
-                      <option value="Provisionary">Provisionary</option>
-                      <option value="Project-based">Project-based</option>
-                      <option value="Consultant">Consultant</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>Status</label>
-                    <select name="status" value={formData.status} onChange={handleEditInputChange}>
-                      <option value="active">Active</option>
-                      <option value="deactivated">Deactivated</option>
-                    </select>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {activeTabModal === 'account' && (
-              <div className="account-tab-content">
-                <div className="form-group">
-                  <label>System Role</label>
-                  <select name="role" value={formData.role} onChange={handleEditInputChange}>
-                    <option value="instructor">Instructor</option>
-                    <option value="admin">System Admin</option>
-                    <option value="hr_admin">HR</option>
-                    <option value="security">Security</option>
-                  </select>
-                </div>
-                {formData.role === 'instructor' && (
-                  <div className="form-group">
-                    <label>Instructor Position</label>
-                    <select name="position" value={formData.position} onChange={handleEditInputChange}>
-                      <option value="Entry Level Simulationist">Entry Level Simulationist</option>
-                      <option value="Senior Simulationist">Senior Simulationist</option>
-                    </select>
-                  </div>
-                )}
-                <div className="form-group">
-                  <label>Email Address <span className="req-star">*</span></label>
-                  <input name="email" value={formData.email} onChange={handleEditInputChange} />
-                </div>
-                
-                {!showChangePassword ? (
-                  <button className="btn-change-password" onClick={() => setShowChangePassword(true)}>Change Password</button>
-                ) : (
-                  <div className="change-password-section">
+            <div className="edit-tab-body">
+              {activeTabModal === 'general' && (
+                <>
+                  <div className="form-row">
                     <div className="form-group">
-                      <label>New Password</label>
-                      <div className="password-wrapper">
-                        <input type={showPassword ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)} />
-                        <button type="button" onClick={() => setShowPassword(!showPassword)}>
-                          {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
-                        </button>
-                      </div>
+                      <label>First Name <span className="req-star">*</span></label>
+                      <input name="first_name" value={formData.first_name} onChange={handleEditInputChange} />
                     </div>
                     <div className="form-group">
-                      <label>Confirm Password</label>
-                      <div className="password-wrapper">
-                        <input type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
-                        <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)}>
-                          {showConfirmPassword ? <Eye size={16} /> : <EyeOff size={16} />}
-                        </button>
-                      </div>
+                      <label>Last Name <span className="req-star">*</span></label>
+                      <input name="last_name" value={formData.last_name} onChange={handleEditInputChange} />
                     </div>
-                    {passwordError && <p className="error-text">{passwordError}</p>}
-                    <div className="password-actions">
-                      <button className="btn-save-password" onClick={handleChangePassword}>Save Password</button>
-                      <button className="btn-cancel-password" onClick={() => { setShowChangePassword(false); setNewPassword(''); setConfirmPassword(''); setPasswordError(''); }}>Cancel</button>
+                    <div className="form-group">
+                      <label>Middle Initial</label>
+                      <input name="middle_initial" value={formData.middle_initial} onChange={handleEditInputChange} maxLength={1} />
                     </div>
                   </div>
-                )}
-              </div>
-            )}
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Contract Type</label>
+                      <select name="employment_type" value={formData.employment_type} onChange={handleEditInputChange}>
+                        <option value="Full-time">Full-time</option>
+                        <option value="Part-time">Part-time</option>
+                        <option value="Provisionary">Provisionary</option>
+                        <option value="Project-based">Project-based</option>
+                        <option value="Consultant">Consultant</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Status</label>
+                      <select name="status" value={formData.status} onChange={handleEditInputChange}>
+                        <option value="active">Active</option>
+                        <option value="deactivated">Deactivated</option>
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
 
-            {activeTabModal === 'profile' && (
-              <>
-                <div className="form-row">
+              {activeTabModal === 'account' && (
+                <div className="account-tab-content">
                   <div className="form-group">
-                    <label>Date of Birth</label>
-                    <input type="date" name="date_of_birth" value={formData.date_of_birth} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label>Gender</label>
-                    <select name="gender" value={formData.gender} onChange={handleEditInputChange}>
-                      <option>Male</option><option>Female</option><option>Prefer not to say</option>
+                    <label>System Role</label>
+                    <select name="role" value={formData.role} onChange={handleEditInputChange}>
+                      <option value="instructor">Instructor</option>
+                      <option value="admin">System Admin</option>
+                      <option value="hr_admin">HR</option>
+                      <option value="security">Security</option>
                     </select>
                   </div>
-                </div>
-                <div className="form-row">
+                  {formData.role === 'instructor' && (
+                    <div className="form-group">
+                      <label>Instructor Position</label>
+                      <select name="position" value={formData.position} onChange={handleEditInputChange}>
+                        <option value="Entry Level Simulationist">Entry Level Simulationist</option>
+                        <option value="Senior Simulationist">Senior Simulationist</option>
+                      </select>
+                    </div>
+                  )}
                   <div className="form-group">
-                    <label>Phone Number</label>
-                    <input name="phone" value={formData.phone} onChange={handleEditInputChange} />
+                    <label>Email Address <span className="req-star">*</span></label>
+                    <input name="email" value={formData.email} onChange={handleEditInputChange} />
                   </div>
-                  <div className="form-group">
-                    <label>Monthly Salary (₱)</label>
-                    <input type="number" min="0" name="salary" value={formData.salary} onChange={handleEditInputChange} />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Emergency Contact Name</label>
-                    <input name="emergency_contact_name" value={formData.emergency_contact_name} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label>Emergency Contact Phone</label>
-                    <input name="emergency_contact_phone" value={formData.emergency_contact_phone} onChange={handleEditInputChange} />
-                  </div>
-                </div>
-              </>
-            )}
-
-            {activeTabModal === 'statutory' && (
-              <div className="statutory-tab-content">
-                <div className="form-section-notice" style={{ borderLeftColor: '#059669', backgroundColor: '#ECFDF5' }}>
-                  Philippine Mandatory Benefits & Government Contribution Identifiers.
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Social Security System (SSS) No.</label>
-                    <input name="sss_number" placeholder="e.g. 34-1234567-8" value={formData.sss_number} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label>Pag-IBIG / HDMF MID No.</label>
-                    <input name="pagibig_number" placeholder="e.g. 1210-1234-5678" value={formData.pagibig_number} onChange={handleEditInputChange} />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>PhilHealth Identification No. (PIN)</label>
-                    <input name="philhealth_number" placeholder="e.g. 12-345678901-2" value={formData.philhealth_number} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label>Taxpayer Identification No. (TIN)</label>
-                    <input name="tin_number" placeholder="e.g. 123-456-789-000" value={formData.tin_number} onChange={handleEditInputChange} />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTabModal === 'onboarding' && (
-              <>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label><Calendar size={14} style={{display:'inline', marginBottom:'-2px'}}/> Date Applied</label>
-                    <input type="date" name="application_date" value={formData.application_date} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label><Calendar size={14} style={{display:'inline', marginBottom:'-2px'}}/> Date Interviewed</label>
-                    <input type="date" name="interview_date" value={formData.interview_date} onChange={handleEditInputChange} />
-                  </div>
-                </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label><CheckCircle size={14} style={{display:'inline', marginBottom:'-2px'}}/> Hire Date / Date Joined</label>
-                    <input type="date" name="date_of_joining" value={formData.date_of_joining} onChange={handleEditInputChange} />
-                  </div>
-                  <div className="form-group">
-                    <label><FileText size={14} style={{display:'inline', marginBottom:'-2px'}}/> Document Link</label>
-                    <input type="url" name="resume_link" placeholder="https://..." value={formData.resume_link} onChange={handleEditInputChange} />
-                    {formData.resume_link && (
-                      <a href={formData.resume_link} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#0284C7', marginTop: '0.2rem', display: 'inline-block' }}>Visit Link</a>
-                    )}
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label><UploadCloud size={14} style={{display:'inline', marginBottom:'-2px'}}/> Upload PDF Resume</label>
-                  <input type="file" accept=".pdf" onChange={(e) => setEditResumeFile(e.target.files[0])} style={{ padding: '0.4rem 0' }} />
-                  {formData.resume_file && !editResumeFile && (
-                    <a href={`${API_BASE.replace('/api', '')}${formData.resume_file}`} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#059669', marginTop: '0.2rem', display: 'inline-block' }}>View Current Resume File</a>
+                  
+                  {!showChangePassword ? (
+                    <button className="btn-change-password" onClick={() => setShowChangePassword(true)}>Change Password</button>
+                  ) : (
+                    <div className="change-password-section">
+                      <div className="form-group">
+                        <label>New Password</label>
+                        <div className="password-wrapper">
+                          <input type={showPassword ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                          <button type="button" onClick={() => setShowPassword(!showPassword)}>
+                            {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="form-group">
+                        <label>Confirm Password</label>
+                        <div className="password-wrapper">
+                          <input type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+                          <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)}>
+                            {showConfirmPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                      {passwordError && <p className="error-text">{passwordError}</p>}
+                      <div className="password-actions">
+                        <button className="btn-save-password" onClick={handleChangePassword}>Save Password</button>
+                        <button className="btn-cancel-password" onClick={() => { setShowChangePassword(false); setNewPassword(''); setConfirmPassword(''); setPasswordError(''); }}>Cancel</button>
+                      </div>
+                    </div>
                   )}
                 </div>
-                <div className="form-group">
-                  <label>HR Onboarding Notes</label>
-                  <textarea name="notes" rows="3" value={formData.notes} onChange={handleEditInputChange} placeholder="Additional details from interview or hiring process..." />
+              )}
+
+              {activeTabModal === 'profile' && (
+                <>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Date of Birth</label>
+                      <input type="date" name="date_of_birth" value={formData.date_of_birth} onChange={handleEditInputChange} />
+                    </div>
+                    <div className="form-group">
+                      <label>Gender</label>
+                      <select name="gender" value={formData.gender} onChange={handleEditInputChange}>
+                        <option>Male</option><option>Female</option><option>Prefer not to say</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Phone Number</label>
+                      <input name="phone" value={formData.phone} onChange={handleEditInputChange} />
+                    </div>
+                    <div className="form-group">
+                      <label>Monthly Salary (₱)</label>
+                      <input type="number" min="0" name="salary" value={formData.salary} onChange={handleEditInputChange} />
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Emergency Contact Name</label>
+                      <input name="emergency_contact_name" value={formData.emergency_contact_name} onChange={handleEditInputChange} />
+                    </div>
+                    <div className="form-group">
+                      <label>Emergency Contact Phone</label>
+                      <input name="emergency_contact_phone" value={formData.emergency_contact_phone} onChange={handleEditInputChange} />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {activeTabModal === 'statutory' && (
+                <div className="statutory-tab-content">
+                  <div className="form-section-notice" style={{ borderLeftColor: '#059669', backgroundColor: '#ECFDF5' }}>
+                    Philippine Mandatory Benefits & Government Contribution Identifiers.
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Social Security System (SSS) No.</label>
+                      <input name="sss_number" placeholder="e.g. 34-1234567-8" value={formData.sss_number} onChange={handleEditInputChange} />
+                    </div>
+                    <div className="form-group">
+                      <label>Pag-IBIG / HDMF MID No.</label>
+                      <input name="pagibig_number" placeholder="e.g. 1210-1234-5678" value={formData.pagibig_number} onChange={handleEditInputChange} />
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>PhilHealth Identification No. (PIN)</label>
+                      <input name="philhealth_number" placeholder="e.g. 12-345678901-2" value={formData.philhealth_number} onChange={handleEditInputChange} />
+                    </div>
+                    <div className="form-group">
+                      <label>Taxpayer Identification No. (TIN)</label>
+                      <input name="tin_number" placeholder="e.g. 123-456-789-000" value={formData.tin_number} onChange={handleEditInputChange} />
+                    </div>
+                  </div>
                 </div>
-              </>
-            )}
+              )}
 
-            {/* ========================================================= */}
-            {/* ADDRESS TAB (WITH REGION & INTELLIGENT AUTOCOMPLETE)      */}
-            {/* ========================================================= */}
-            {activeTabModal === 'address' && (
-              <div className="address-tab-content">
-                <div className="form-row">
-                  {/* REGION FIELD WITH AUTOCOMPLETE */}
-                  <AutocompleteInput
-                    label="Region"
-                    name="region"
-                    value={formData.region}
-                    placeholder="e.g. NCR - National Capital Region"
-                    suggestions={PH_REGIONS}
-                    onChange={handleEditInputChange}
-                    onSelect={(selectedRegion) => {
-                      setFormData(prev => ({
-                        ...prev,
-                        region: selectedRegion,
-                        state: selectedRegion.startsWith('NCR') ? 'Metro Manila' : prev.state
-                      }));
-                    }}
-                  />
-
-                  {/* PROVINCE / STATE FIELD WITH AUTOCOMPLETE */}
-                  <AutocompleteInput
-                    label="State / Province"
-                    name="state"
-                    value={formData.state}
-                    placeholder="e.g. Metro Manila or Cavite"
-                    suggestions={PH_PROVINCES}
-                    onChange={handleEditInputChange}
-                    onSelect={(selectedProvince) => {
-                      setFormData(prev => ({
-                        ...prev,
-                        state: selectedProvince
-                      }));
-                    }}
-                  />
-                </div>
-
-                <div className="form-row">
-                  {/* CITY FIELD WITH AUTOCOMPLETE (Auto-fills Region, Province, and Postal Code) */}
-                  <AutocompleteInput
-                    label="City / Municipality"
-                    name="city"
-                    value={formData.city}
-                    placeholder="e.g. Pasay City"
-                    suggestions={PH_CITIES}
-                    onChange={handleEditInputChange}
-                    onSelect={(selectedCity) => {
-                      setFormData(prev => ({
-                        ...prev,
-                        city: selectedCity.name,
-                        state: selectedCity.province || prev.state,
-                        region: selectedCity.region || prev.region,
-                        postal_code: selectedCity.zip || prev.postal_code
-                      }));
-                    }}
-                  />
-
-                  {/* POSTAL CODE */}
+              {activeTabModal === 'onboarding' && (
+                <>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label><Calendar size={14} style={{display:'inline', marginBottom:'-2px'}}/> Date Applied</label>
+                      <input type="date" name="application_date" value={formData.application_date} onChange={handleEditInputChange} />
+                    </div>
+                    <div className="form-group">
+                      <label><Calendar size={14} style={{display:'inline', marginBottom:'-2px'}}/> Date Interviewed</label>
+                      <input type="date" name="interview_date" value={formData.interview_date} onChange={handleEditInputChange} />
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label><CheckCircle size={14} style={{display:'inline', marginBottom:'-2px'}}/> Hire Date / Date Joined</label>
+                      <input type="date" name="date_of_joining" value={formData.date_of_joining} onChange={handleEditInputChange} />
+                    </div>
+                    <div className="form-group">
+                      <label><FileText size={14} style={{display:'inline', marginBottom:'-2px'}}/> Document Link</label>
+                      <input type="url" name="resume_link" placeholder="https://..." value={formData.resume_link} onChange={handleEditInputChange} />
+                      {formData.resume_link && (
+                        <a href={formData.resume_link} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#0284C7', marginTop: '0.2rem', display: 'inline-block' }}>Visit Link</a>
+                      )}
+                    </div>
+                  </div>
                   <div className="form-group">
-                    <label>Postal Code</label>
-                    <input
-                      name="postal_code"
-                      placeholder="e.g. 1300"
-                      value={formData.postal_code}
+                    <label><UploadCloud size={14} style={{display:'inline', marginBottom:'-2px'}}/> Upload PDF Resume</label>
+                    <input type="file" accept=".pdf" onChange={(e) => setEditResumeFile(e.target.files[0])} style={{ padding: '0.4rem 0' }} />
+                    {formData.resume_file && !editResumeFile && (
+                      <a href={`${API_BASE.replace('/api', '')}${formData.resume_file}`} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#059669', marginTop: '0.2rem', display: 'inline-block' }}>View Current Resume File</a>
+                    )}
+                  </div>
+                  <div className="form-group">
+                    <label>HR Onboarding Notes</label>
+                    <textarea name="notes" rows="3" value={formData.notes} onChange={handleEditInputChange} placeholder="Additional details from interview or hiring process..." />
+                  </div>
+                </>
+              )}
+
+              {/* ADDRESS TAB (WITH REGION & INTELLIGENT AUTOCOMPLETE) */}
+              {activeTabModal === 'address' && (
+                <div className="address-tab-content">
+                  <div className="form-row">
+                    {/* REGION FIELD WITH AUTOCOMPLETE */}
+                    <AutocompleteInput
+                      label="Region"
+                      name="region"
+                      value={formData.region}
+                      placeholder="e.g. NCR - National Capital Region"
+                      suggestions={PH_REGIONS}
                       onChange={handleEditInputChange}
+                      onSelect={(selectedRegion) => {
+                        setFormData(prev => ({
+                          ...prev,
+                          region: selectedRegion,
+                          state: selectedRegion.startsWith('NCR') ? 'Metro Manila' : prev.state
+                        }));
+                      }}
                     />
-                  </div>
-                </div>
 
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Street Address</label>
-                    <input 
-                      name="street" 
-                      placeholder="e.g. 123 Taft Avenue, Unit 4B" 
-                      value={formData.street} 
-                      onChange={handleEditInputChange} 
+                    {/* PROVINCE / STATE FIELD WITH AUTOCOMPLETE */}
+                    <AutocompleteInput
+                      label="State / Province"
+                      name="state"
+                      value={formData.state}
+                      placeholder="e.g. Metro Manila or Cavite"
+                      suggestions={PH_PROVINCES}
+                      onChange={handleEditInputChange}
+                      onSelect={(selectedProvince) => {
+                        setFormData(prev => ({
+                          ...prev,
+                          state: selectedProvince
+                        }));
+                      }}
                     />
                   </div>
-                  <div className="form-group">
-                    <label>Country</label>
-                    <input 
-                      name="country" 
-                      value={formData.country || 'Philippines'} 
-                      onChange={handleEditInputChange} 
+
+                  <div className="form-row">
+                    {/* CITY FIELD WITH AUTOCOMPLETE */}
+                    <AutocompleteInput
+                      label="City / Municipality"
+                      name="city"
+                      value={formData.city}
+                      placeholder="e.g. Pasay City"
+                      suggestions={PH_CITIES}
+                      onChange={handleEditInputChange}
+                      onSelect={(selectedCity) => {
+                        setFormData(prev => ({
+                          ...prev,
+                          city: selectedCity.name,
+                          state: selectedCity.province || prev.state,
+                          region: selectedCity.region || prev.region,
+                          postal_code: selectedCity.zip || prev.postal_code
+                        }));
+                      }}
                     />
+
+                    {/* POSTAL CODE */}
+                    <div className="form-group">
+                      <label>Postal Code</label>
+                      <input
+                        name="postal_code"
+                        placeholder="e.g. 1300"
+                        value={formData.postal_code}
+                        onChange={handleEditInputChange}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Street Address</label>
+                      <input 
+                        name="street" 
+                        placeholder="e.g. 123 Taft Avenue, Unit 4B" 
+                        value={formData.street} 
+                        onChange={handleEditInputChange} 
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Country</label>
+                      <input 
+                        name="country" 
+                        value={formData.country || 'Philippines'} 
+                        onChange={handleEditInputChange} 
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setShowEditModal(false)}>Cancel</button>

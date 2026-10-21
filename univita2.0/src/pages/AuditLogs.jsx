@@ -175,7 +175,8 @@ const AuditLogs = () => {
       } else if (err.response?.status === 403) {
         toast.error('Access denied. Admin privileges required.');
       } else {
-        toast.error('Failed to load audit logs.');
+        
+        toast.error(err.response?.data?.error || err.response?.data?.message || 'Failed to load audit logs.');
       }
     } finally {
       setLoading(false);

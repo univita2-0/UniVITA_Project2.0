@@ -1,4 +1,3 @@
-// src/pages/CoursesManagement.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Plus, Edit3, Trash2, Search, X, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
@@ -17,27 +16,23 @@ const CoursesManagement = () => {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
-  // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Modal States
   const [showModal, setShowModal] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
   const [courseName, setCourseName] = useState('');
-  
+
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [deleteTargetName, setDeleteTargetName] = useState('');
 
-  // Reset page on search
   useEffect(() => { setCurrentPage(1); }, [searchQuery]);
 
   const loadCourses = useCallback(async () => {
     setLoading(true);
     try {
       const res = await axios.get(`${API_BASE}/courses`, getAuthHeaders());
-      // Sort newest to oldest
       const sorted = (res.data || []).sort((a, b) => b.id - a.id);
       setCourses(sorted);
     } catch (err) {
@@ -75,7 +70,7 @@ const CoursesManagement = () => {
       toast.success("Course deleted successfully");
       loadCourses();
     } catch (err) {
-      const errorMsg = err.response?.data?.error || "Failed to delete course";
+      const errorMsg = err.response?.data?.message || "Failed to delete course";
       toast.error(errorMsg);
     } finally {
       setProcessing(false);
@@ -86,45 +81,49 @@ const CoursesManagement = () => {
   };
 
   const handleSave = async () => {
-    if (!courseName.trim()) {
+    const trimmed = courseName.trim();
+    if (!trimmed) {
       toast.warning("Course name required");
+      return;
+    }
+
+    if (trimmed.length > 100) {
+      toast.warning("Course name must be 100 characters or fewer");
       return;
     }
     setProcessing(true);
     try {
       if (editingCourse) {
-        await axios.put(`${API_BASE}/courses/${editingCourse.id}`, { name: courseName.trim() }, getAuthHeaders());
+        await axios.put(`${API_BASE}/courses/${editingCourse.id}`, { name: trimmed }, getAuthHeaders());
         toast.success("Course updated successfully");
       } else {
-        await axios.post(`${API_BASE}/courses`, { name: courseName.trim() }, getAuthHeaders());
+        await axios.post(`${API_BASE}/courses`, { name: trimmed }, getAuthHeaders());
         toast.success("Course added successfully");
       }
       setShowModal(false);
       resetForm();
       loadCourses();
     } catch (err) {
-      const errorMsg = err.response?.data?.error || "Error saving course";
+      const errorMsg = err.response?.data?.message || "Error saving course";
       toast.error(errorMsg);
     } finally {
       setProcessing(false);
     }
   };
 
-  // Instant Client-Side Filtering
-  const filteredCourses = courses.filter(c => 
+  const filteredCourses = courses.filter(c =>
     !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Pagination Logic
   const totalPages = Math.ceil(filteredCourses.length / itemsPerPage);
   const currentCourses = filteredCourses.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
     <div className="cm-container">
-      {/* Header Section */}
       <div className="cm-header">
         <div className="cm-title-group">
           <div>
+            
             <p className="cm-subtitle">Manage academic courses and subjects for instructor assignment.</p>
           </div>
         </div>
@@ -134,16 +133,15 @@ const CoursesManagement = () => {
       </div>
 
       <div className="cm-content-card">
-        {/* Search & Toolbar */}
         <div className="cm-toolbar border-bottom">
           <div className="cm-search-input-group">
             <Search size={16} className="text-muted" />
-            <input 
-              type="text" 
-              placeholder="Search courses by name..." 
-              value={searchQuery} 
-              onChange={e => setSearchQuery(e.target.value)} 
-              className="cm-clean-input" 
+            <input
+              type="text"
+              placeholder="Search courses by name..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="cm-clean-input"
             />
             {searchQuery && <X size={14} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
           </div>
@@ -152,12 +150,11 @@ const CoursesManagement = () => {
           </div>
         </div>
 
-        {/* Main Table Area */}
         {loading ? (
           <div className="cm-loading">Loading courses...</div>
         ) : filteredCourses.length === 0 ? (
           <div className="cm-empty">
-            <AlertCircle size={36} className="text-muted" style={{ marginBottom: '1rem' }} />
+            <AlertCircle size={40} className="text-muted" />
             <p>No courses found.</p>
             {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Add New Course" to create your first subject.</span>}
           </div>
@@ -193,7 +190,6 @@ const CoursesManagement = () => {
               </table>
             </div>
 
-            {/* Pagination Controls */}
             {totalPages > 1 && (
               <div className="cm-pagination">
                 <span className="cm-page-info">Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredCourses.length)} of {filteredCourses.length}</span>
@@ -208,7 +204,6 @@ const CoursesManagement = () => {
         )}
       </div>
 
-      {/* ADD/EDIT COURSE MODAL */}
       {showModal && (
         <div className="cm-custom-modal-backdrop" onClick={() => { setShowModal(false); resetForm(); }}>
           <div className="cm-custom-modal small" onClick={e => e.stopPropagation()}>
@@ -218,18 +213,19 @@ const CoursesManagement = () => {
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="cm-custom-modal-body">
               <div className="cm-form-group">
                 <label>Course Name <span className="text-danger">*</span></label>
-                <input 
-                  type="text" 
-                  className="cm-clean-input border" 
-                  value={courseName} 
-                  onChange={e => setCourseName(e.target.value)} 
-                  placeholder="e.g. Web Development 101" 
+                <input
+                  type="text"
+                  className="cm-clean-input border"
+                  value={courseName}
+                  onChange={e => setCourseName(e.target.value)}
+                  placeholder="e.g. Web Development 101"
                   disabled={processing}
                   autoFocus
+                  maxLength={100}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
                 />
               </div>
@@ -245,7 +241,6 @@ const CoursesManagement = () => {
         </div>
       )}
 
-      {/* DELETE CONFIRMATION MODAL */}
       {showConfirm && (
         <div className="cm-custom-modal-backdrop" onClick={() => setShowConfirm(false)}>
           <div className="cm-custom-modal small" onClick={e => e.stopPropagation()}>
@@ -255,13 +250,13 @@ const CoursesManagement = () => {
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="cm-custom-modal-body">
-              <p style={{ fontSize: '0.95rem', color: '#334155', margin: '0 0 1rem 0' }}>
+              <p style={{ fontSize: '0.9375rem', color: '#334155', margin: '0 0 1rem 0', lineHeight: 1.5 }}>
                 Are you sure you want to permanently delete <strong>"{deleteTargetName}"</strong>?
               </p>
               <div className="cm-alert-box danger">
-                <AlertCircle size={16} /> 
+                <AlertCircle size={16} />
                 <span>Warning: This action cannot be undone and may affect instructors currently assigned to this course.</span>
               </div>
             </div>
