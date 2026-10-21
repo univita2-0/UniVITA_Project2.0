@@ -550,6 +550,14 @@ export default function HomeScreen({ navigation }) {
   const finalCanClockIn = todaySchedule !== null && attendanceStatus.canClockIn;
   const finalCanClockOut = todaySchedule !== null && attendanceStatus.canClockOut;
 
+  const isPendingCorrection = 
+  currentSchedule?.attendance_status === 'PENDING' || 
+  currentSchedule?.attendance_record_status === 'Pending' ||
+  attendance?.correction_status === 'pending';
+
+
+const canClockOutNow = finalCanClockOut && !isPendingCorrection;
+
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
@@ -650,10 +658,21 @@ export default function HomeScreen({ navigation }) {
               <Text style={[styles.btnPillPrimaryText, !finalCanClockIn && styles.btnDisabledText]}>CLOCK-IN</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.btnPillOutline, !finalCanClockOut && styles.btnDisabledOutline]} onPress={handleClockOut} disabled={!finalCanClockOut} activeOpacity={0.85}>
-              <Clock size={18} color={!finalCanClockOut ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#0F172A" : colors.textPrimary)} strokeWidth={2} />
-              <Text style={[styles.btnPillOutlineText, !finalCanClockOut && styles.btnDisabledText]}>CLOCK-OUT</Text>
-            </TouchableOpacity>
+            <TouchableOpacity 
+  style={[styles.btnPillOutline, !canClockOutNow && styles.btnDisabledOutline]} 
+  onPress={handleClockOut} 
+  disabled={!canClockOutNow} 
+  activeOpacity={0.85}
+>
+  <Clock 
+    size={18} 
+    color={!canClockOutNow ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#0F172A" : colors.textPrimary)} 
+    strokeWidth={2} 
+  />
+  <Text style={[styles.btnPillOutlineText, !canClockOutNow && styles.btnDisabledText]}>
+    {isPendingCorrection ? 'PENDING REVIEW' : 'CLOCK-OUT'}
+  </Text>
+</TouchableOpacity>
           </View>
 
           <View style={styles.sectionHeader}>

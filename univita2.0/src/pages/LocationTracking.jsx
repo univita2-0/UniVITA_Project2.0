@@ -38,16 +38,40 @@ const formatPHT = (dateStr) => {
 
 const formatTimePHT = (val) => {
   if (!val) return '—';
+  
+  
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '—';
+    return val.toLocaleTimeString('en-US', { 
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' 
+    });
+  }
+
   const s = String(val).trim();
   
   
-  if (s.includes('-') && s.includes(':')) {
+  if (/^\d{2}:\d{2}(:\d{2})?$/.test(s)) {
+    const parts = s.split(':');
+    const h = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const sec = parts[2] ? parseInt(parts[2], 10) : 0;
+    
+    
+    const date = new Date(Date.UTC(1970, 0, 1, h, m, sec));
+    return date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' 
+    });
+  }
+  
+ 
+  if (s.includes('T') || s.includes('-')) {
     let dateStr = s;
     if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
-      dateStr = s.replace(' ', 'T') + '+08:00';
+      dateStr = s.replace(' ', 'T') + 'Z'; // Force UTC
     } else if (s.includes('T') && !s.includes('Z') && !s.includes('+')) {
-      dateStr = s + '+08:00';
+      dateStr = s + 'Z'; // Force UTC
     }
+    
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return '—';
     return d.toLocaleTimeString('en-US', { 
@@ -55,16 +79,7 @@ const formatTimePHT = (val) => {
     });
   }
   
-  const match = s.match(/(\d{2}):(\d{2})/);
-  if (!match) return '—';
-  
-  let h = parseInt(match[1], 10);
-  const m = match[2];
-  
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  
-  return `${h}:${m} ${ampm}`;
+  return '—';
 };
 
 
