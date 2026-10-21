@@ -359,6 +359,13 @@ function authenticateToken(req, res, next) {
   });
 }
 
+const getPHTimeFromDate = (dateObj) => {
+  const options = { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' };
+  const date = dateObj.toLocaleDateString('en-CA', options);
+  const time = dateObj.toLocaleTimeString('en-GB', { timeZone: 'Asia/Manila', hour12: false });
+  return `${date} ${time}`;
+};
+
 
 const verifyOwnership = (req, res, next) => {
   if (req.user.role === 'admin' || req.user.role === 'hr_admin') {
@@ -1075,6 +1082,25 @@ function parseReportPeriod(month, year, { allowFuture = false } = {}) {
   }
   return { month: m, year: y };
 }
+
+const GEO_EXIT_SUBQUERY = `
+  (
+    SELECT DATE_FORMAT(MIN(t1.ping_time), '%H:%i:%s')
+    FROM instructor_location_tracking t1
+    WHERE t1.employee_id = u.employee_id
+      AND t1.schedule_id = s.id
+      AND t1.is_inside_campus = 0
+      AND t1.location_enabled = 1
+      AND DATE(t1.ping_time) = s.date -- ✅ Prevents picking up next-day pings
+      AND t1.ping_time > (
+        SELECT MAX(t2.ping_time)      -- ✅ Uses MAX to ignore lunch break exits
+        FROM instructor_location_tracking t2
+        WHERE t2.employee_id = u.employee_id
+          AND t2.schedule_id = s.id
+          AND t2.is_inside_campus = 1
+      )
+  )
+`;
 
 app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
   let { latitude, longitude, schedule_id } = req.body;
@@ -3084,13 +3110,24 @@ app.get('/api/attendance/all-recent', authenticateToken, (req, res) => {
 
 app.get('/api/attendance/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   const employeeId = req.params.employeeId;
-  const phNow = getPHDateTime(); // Explicit Philippine Standard Time
+  const phNow = getPHDateTime(); 
 
-  const sql = `
+    const sql = `
     SELECT 
       a.*, 
       DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
-      ROUND(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60, 2) as total_hours,
+      ROUND(
+        TIMESTAMPDIFF(
+          MINUTE,
+          a.time_in,
+          COALESCE(
+            NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'),
+            ${GEO_EXIT_SUBQUERY},
+            s.end_time
+          )
+        ) / 60,
+        2
+      ) as total_hours,
       CASE 
         WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN
           CASE 
@@ -3101,6 +3138,7 @@ app.get('/api/attendance/user/:employeeId', authenticateToken, verifyOwnership, 
       END AS status
     FROM attendance a
     LEFT JOIN schedules s ON a.schedule_id = s.id
+    LEFT JOIN users u ON u.employee_id = a.user_id
     WHERE a.user_id = ? 
     ORDER BY a.date DESC
   `;
@@ -3464,6 +3502,7 @@ app.put('/api/employees/:employeeId/toggle-status', authenticateToken, (req, res
   });
 });
 
+
 app.get('/api/attendance-report', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
@@ -3480,32 +3519,55 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
     return res.status(400).json({ success: false, message: "A valid date or month parameter is required." });
   }
 
-  const sql = `
+    const sql = `
       SELECT 
           u.id AS user_db_id, u.full_name, u.employee_id, 
+          
+          -- ✅ Effective end time: time_out → geofence exit → scheduled end
+          COALESCE(
+            NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'),
+            ${GEO_EXIT_SUBQUERY},
+            s.end_time
+          ) AS effective_end_time,
+
           CASE 
               WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 'Pending'
               WHEN ap.id IS NOT NULL AND ap.status = 'pending' THEN 'Pending'
-              WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
-              WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
+              WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
+              -- ✅ Auto-completed via geofence exit (no clock-out)
+              WHEN a.time_in IS NOT NULL AND ${GEO_EXIT_SUBQUERY} IS NOT NULL THEN 'Auto Clock-Out (Geofence)'
+              -- ✅ Fallback: scheduled end passed, no exit, no clock-out
+              WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
               WHEN a.time_in IS NOT NULL THEN 'In Progress'
               WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Absent'
               ELSE COALESCE(a.status, 'Scheduled')
           END AS status,
+
           COALESCE(a.time_in, '--:--') AS time_in, 
-          CASE 
-              WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN '--:--'
-              ELSE COALESCE(a.time_out, '--:--')
-          END AS time_out, 
+          COALESCE(
+            NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'),
+            ${GEO_EXIT_SUBQUERY},
+            s.end_time
+          ) AS time_out, -- ✅ display the effective end
+          
           a.location, a.clock_in_latitude, a.clock_in_longitude,
           a.clock_out_latitude, a.clock_out_longitude,
           a.clock_in_selfie, a.clock_out_selfie,
           s.id AS schedule_id, s.start_time AS scheduled_start, s.end_time AS scheduled_end, s.course,
           DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
+
+          -- ✅ total_hours computed from effective end, guarded to avoid negatives
           CASE 
-              WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
-              ELSE COALESCE(ROUND(TIME_TO_SEC(TIMEDIFF(a.time_out, a.time_in)) / 3600, 2), 0)
+            WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
+            WHEN a.time_in IS NULL THEN 0
+            ELSE GREATEST(0, ROUND(
+              TIME_TO_SEC(TIMEDIFF(
+                COALESCE(NULLIF(NULLIF(a.time_out,'--:--'),'00:00:00'), ${GEO_EXIT_SUBQUERY}, s.end_time),
+                a.time_in
+              )) / 3600, 2
+            ))
           END AS total_hours
+
       FROM users u
       INNER JOIN schedules s ON u.employee_id = s.user_id 
       LEFT JOIN attendance a ON s.id = a.schedule_id
@@ -6742,22 +6804,20 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       [phNow, isLocEnabled ? 1 : 0, employeeId, userId]
     );
 
-    // ============================================
-    // DEBOUNCED ALERT LOGIC (Prevents flapping)
-    // ============================================
+    
     if (isOnDuty) {
       const nowMs = Date.now();
       const currentGps = isLocEnabled ? 1 : 0;
       const currentInside = isInside ? 1 : 0;
 
-      // --- 1. GPS STATE MACHINE ---
+   
       let gpsObj = gpsStates.get(employeeId);
       if (!gpsObj) {
          gpsObj = { stable: lastGpsState !== null ? lastGpsState : currentGps, pending: null, pendingSince: 0 };
       }
       
       if (lastGpsState !== null && lastGpsState !== currentGps) {
-         // State changed on this ping
+         
          if (gpsObj.stable === currentGps) {
              gpsObj.pending = null;
              gpsObj.pendingSince = 0;
@@ -6766,32 +6826,48 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
                  gpsObj.pending = currentGps;
                  gpsObj.pendingSince = nowMs;
              } else if (nowMs - gpsObj.pendingSince > GPS_GRACE_MS) {
+                 
+                 const transitionAt = new Date(gpsObj.pendingSince);
                  gpsObj.stable = currentGps;
                  gpsObj.pending = null;
                  gpsObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(currentGps === 1 ? 'GPS turned ON' : 'GPS turned OFF', {
-                   employeeId, fullName, scheduleId: currentSchedule.id,
-                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
-                 });
+                 await insertAndBroadcastAlert(
+                   currentGps === 1 ? 'GPS turned ON' : 'GPS turned OFF',
+                   {
+                     employeeId, fullName,
+                     scheduleId: currentSchedule.id,
+                     locationName: resolvedLocationName,
+                     latitude: parsedLat, longitude: parsedLon
+                   },
+                   transitionAt
+                 );
              }
          }
       } else {
-         // No transition on this ping, check if pending timer expired
+         
          if (gpsObj.pending !== null) {
              if (nowMs - gpsObj.pendingSince > GPS_GRACE_MS) {
+                 
+                 const transitionAt = new Date(gpsObj.pendingSince);
                  gpsObj.stable = gpsObj.pending;
                  gpsObj.pending = null;
                  gpsObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(gpsObj.stable === 1 ? 'GPS turned ON' : 'GPS turned OFF', {
-                   employeeId, fullName, scheduleId: currentSchedule.id,
-                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
-                 });
+                 await insertAndBroadcastAlert(
+                   gpsObj.stable === 1 ? 'GPS turned ON' : 'GPS turned OFF',
+                   {
+                     employeeId, fullName,
+                     scheduleId: currentSchedule.id,
+                     locationName: resolvedLocationName,
+                     latitude: parsedLat, longitude: parsedLon
+                   },
+                   transitionAt
+                 );
              }
          }
       }
       gpsStates.set(employeeId, gpsObj);
 
-      // --- 2. CAMPUS STATE MACHINE ---
+      
       let campusObj = campusStates.get(employeeId);
       if (!campusObj) {
          campusObj = { stable: lastInsideState !== null ? lastInsideState : currentInside, pending: null, pendingSince: 0 };
@@ -6806,25 +6882,41 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
                  campusObj.pending = currentInside;
                  campusObj.pendingSince = nowMs;
              } else if (nowMs - campusObj.pendingSince > GPS_GRACE_MS) {
+                 
+                 const transitionAt = new Date(campusObj.pendingSince);
                  campusObj.stable = currentInside;
                  campusObj.pending = null;
                  campusObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(currentInside === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter', {
-                   employeeId, fullName, scheduleId: currentSchedule.id,
-                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
-                 });
+                 await insertAndBroadcastAlert(
+                   currentInside === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter',
+                   {
+                     employeeId, fullName,
+                     scheduleId: currentSchedule.id,
+                     locationName: resolvedLocationName,
+                     latitude: parsedLat, longitude: parsedLon
+                   },
+                   transitionAt
+                 );
              }
          }
       } else if (isLocEnabled) {
          if (campusObj.pending !== null) {
              if (nowMs - campusObj.pendingSince > GPS_GRACE_MS) {
+                 
+                 const transitionAt = new Date(campusObj.pendingSince);
                  campusObj.stable = campusObj.pending;
                  campusObj.pending = null;
                  campusObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(campusObj.stable === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter', {
-                   employeeId, fullName, scheduleId: currentSchedule.id,
-                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
-                 });
+                 await insertAndBroadcastAlert(
+                   campusObj.stable === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter',
+                   {
+                     employeeId, fullName,
+                     scheduleId: currentSchedule.id,
+                     locationName: resolvedLocationName,
+                     latitude: parsedLat, longitude: parsedLon
+                   },
+                   transitionAt
+                 );
              }
          }
       }
@@ -7055,10 +7147,12 @@ const broadcastToTrackingClients = (data) => {
   });
 };
 
-async function insertAndBroadcastAlert(alertMsg, context) {
+async function insertAndBroadcastAlert(alertMsg, context, eventDate = null) {
   try {
-    const phNow = getPHDateTime();
-        const [result] = await db.promise().query(
+  
+    const alertTime = eventDate ? getPHTimeFromDate(eventDate) : getPHDateTime();
+
+    const [result] = await db.promise().query(
       `INSERT INTO location_alerts (employee_id, alert_message, latitude, longitude, created_at)
        SELECT ?, ?, ?, ?, ?
        FROM DUAL
@@ -7067,8 +7161,8 @@ async function insertAndBroadcastAlert(alertMsg, context) {
          WHERE employee_id = ? AND alert_message = ? 
          AND created_at > DATE_SUB(STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s'), INTERVAL ? SECOND)
        )`,
-      [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0, phNow, 
-        context.employeeId, alertMsg, phNow, GPS_ALERT_COOLDOWN_SECONDS]
+      [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0, alertTime, 
+        context.employeeId, alertMsg, alertTime, GPS_ALERT_COOLDOWN_SECONDS]
     );
 
     if (result.affectedRows === 0) return;
@@ -7078,12 +7172,12 @@ async function insertAndBroadcastAlert(alertMsg, context) {
       full_name: context.fullName,
       alert_message: alertMsg,
       location_name: context.locationName || 'Unavailable',
-      created_at: phNow
+      created_at: alertTime
     };
 
     broadcastToAdminAndHR({ type: 'new_alert', alert });
   } catch (err) {
-    console.error("Failed to insert/broadcast alert:", err);
+    console.error("Failed to broadcast alert:", err);
   }
 }
 

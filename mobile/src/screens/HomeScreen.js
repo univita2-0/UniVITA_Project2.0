@@ -19,6 +19,34 @@ import {
   Clock, MapPin, X, CheckCircle, XCircle, AlertCircle, TrendingUp, FileText, Calendar, ArrowUpRight, Eye, Filter, Bell, Inbox
 } from 'lucide-react-native';
 
+
+const startBackgroundTracking = async (primaryColor) => {
+  try {
+    const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+    const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+    if (fgStatus !== 'granted' || bgStatus !== 'granted') return false;
+
+    const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+    if (isRegistered) return true;
+
+    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+      accuracy: Location.Accuracy.High,
+      timeInterval: 15000,
+      distanceInterval: 0,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: "Tracking Active",
+        notificationBody: "Monitoring location for active shift",
+        notificationColor: primaryColor, 
+      },
+    });
+    return true;
+  } catch (e) {
+    console.warn('startBackgroundTracking failed:', e);
+    return false;
+  }
+};
+
 const LOCATION_TASK_NAME = 'background-location-task';
 
 const getTodayString = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
@@ -440,22 +468,42 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => { computeMonthlyStats(rawHistory, rawSchedule, selectedMonth); }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
 
-  // MANDATORY GPS CHECK BEFORE CLOCK-IN
   const handleClockIn = async () => {
-    if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
-    
-    const isGpsReady = await checkLocationServicesEnabled();
-    if (!isGpsReady) return;
+  if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
 
-    const selfieUri = await captureSelfie();
-    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for clock-in.');
-    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-    
-    try {
-      const result = await clockIn({ employee_id: String(user.employeeId || ''), latitude: String(location.coords.latitude), longitude: String(location.coords.longitude), location_enabled: 'true', schedule_id: String(todaySchedule.id), selfie: selfieUri });
-      if (result.success) { Alert.alert('Success', result.message); await loadData(); } else { Alert.alert('Clock-In Error', result.message); }
-    } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
-  };
+  const isGpsReady = await checkLocationServicesEnabled();
+  if (!isGpsReady) return;
+
+  const selfieUri = await captureSelfie();
+  if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for clock-in.');
+
+  const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+
+  try {
+    const result = await clockIn({
+      employee_id: String(user.employeeId || ''),
+      latitude: String(location.coords.latitude),
+      longitude: String(location.coords.longitude),
+      location_enabled: 'true',
+      schedule_id: String(todaySchedule.id),
+      selfie: selfieUri
+    });
+
+    if (result.success) {
+      Alert.alert('Success', result.message);
+
+      
+      try { await setTrackingEnabled(true); } catch (e) {}
+       await startBackgroundTracking(colors.primary);
+
+      await loadData();
+    } else {
+      Alert.alert('Clock-In Error', result.message);
+    }
+  } catch (error) {
+    Alert.alert('Network Error', 'Connection failed.');
+  }
+};
 
   const handleClockOut = async () => {
     if (!todaySchedule) return;
