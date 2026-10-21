@@ -22,6 +22,9 @@ const url = require('url');
 const bcrypt = require('bcrypt');
 
 const app = express();
+const GPS_GRACE_MS = 120000; 
+const gpsStates = new Map(); 
+const campusStates = new Map();
 const helmet = require('helmet');
 app.set('trust proxy', 1);
 
@@ -6684,7 +6687,6 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       return res.json({ success: false, message: "No active shift today" });
     }
 
-       
     if (currentTime > currentSchedule.end_time) {
       await db.promise().query(
         "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ? OR id = ?",
@@ -6693,7 +6695,6 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       return res.json({ success: false, message: "Shift has ended. Location tracking closed." });
     }
 
-    
     const isOnDuty = !!(currentSchedule && currentSchedule.time_in);
 
     const [lastRec] = await db.promise().query(
@@ -6741,39 +6742,93 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       [phNow, isLocEnabled ? 1 : 0, employeeId, userId]
     );
 
-        if (isOnDuty) {
-      if (lastGpsState !== null && lastGpsState !== (isLocEnabled ? 1 : 0)) {
-        const alertMsg = isLocEnabled ? 'GPS turned ON' : 'GPS turned OFF';
-        await insertAndBroadcastAlert(alertMsg, {
-          employeeId,
-          fullName,
-          scheduleId: currentSchedule.id,
-          locationName: resolvedLocationName,
-          latitude: parsedLat,
-          longitude: parsedLon
-        });
-      } else if (lastGpsState === null && !isLocEnabled) {
-        await insertAndBroadcastAlert('GPS turned OFF', {
-          employeeId,
-          fullName,
-          scheduleId: currentSchedule.id,
-          locationName: resolvedLocationName,
-          latitude: parsedLat,
-          longitude: parsedLon
-        });
-      }
+    // ============================================
+    // DEBOUNCED ALERT LOGIC (Prevents flapping)
+    // ============================================
+    if (isOnDuty) {
+      const nowMs = Date.now();
+      const currentGps = isLocEnabled ? 1 : 0;
+      const currentInside = isInside ? 1 : 0;
 
-      if (isLocEnabled && lastInsideState !== null && lastInsideState !== (isInside ? 1 : 0)) {
-        const alertMsg = isInside ? 'Entered campus perimeter' : 'Went outside campus perimeter';
-        await insertAndBroadcastAlert(alertMsg, {
-          employeeId,
-          fullName,
-          scheduleId: currentSchedule.id,
-          locationName: resolvedLocationName,
-          latitude: parsedLat,
-          longitude: parsedLon
-        });
+      // --- 1. GPS STATE MACHINE ---
+      let gpsObj = gpsStates.get(employeeId);
+      if (!gpsObj) {
+         gpsObj = { stable: lastGpsState !== null ? lastGpsState : currentGps, pending: null, pendingSince: 0 };
       }
+      
+      if (lastGpsState !== null && lastGpsState !== currentGps) {
+         // State changed on this ping
+         if (gpsObj.stable === currentGps) {
+             gpsObj.pending = null;
+             gpsObj.pendingSince = 0;
+         } else {
+             if (gpsObj.pending !== currentGps) {
+                 gpsObj.pending = currentGps;
+                 gpsObj.pendingSince = nowMs;
+             } else if (nowMs - gpsObj.pendingSince > GPS_GRACE_MS) {
+                 gpsObj.stable = currentGps;
+                 gpsObj.pending = null;
+                 gpsObj.pendingSince = 0;
+                 await insertAndBroadcastAlert(currentGps === 1 ? 'GPS turned ON' : 'GPS turned OFF', {
+                   employeeId, fullName, scheduleId: currentSchedule.id,
+                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
+                 });
+             }
+         }
+      } else {
+         // No transition on this ping, check if pending timer expired
+         if (gpsObj.pending !== null) {
+             if (nowMs - gpsObj.pendingSince > GPS_GRACE_MS) {
+                 gpsObj.stable = gpsObj.pending;
+                 gpsObj.pending = null;
+                 gpsObj.pendingSince = 0;
+                 await insertAndBroadcastAlert(gpsObj.stable === 1 ? 'GPS turned ON' : 'GPS turned OFF', {
+                   employeeId, fullName, scheduleId: currentSchedule.id,
+                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
+                 });
+             }
+         }
+      }
+      gpsStates.set(employeeId, gpsObj);
+
+      // --- 2. CAMPUS STATE MACHINE ---
+      let campusObj = campusStates.get(employeeId);
+      if (!campusObj) {
+         campusObj = { stable: lastInsideState !== null ? lastInsideState : currentInside, pending: null, pendingSince: 0 };
+      }
+      
+      if (isLocEnabled && lastInsideState !== null && lastInsideState !== currentInside) {
+         if (campusObj.stable === currentInside) {
+             campusObj.pending = null;
+             campusObj.pendingSince = 0;
+         } else {
+             if (campusObj.pending !== currentInside) {
+                 campusObj.pending = currentInside;
+                 campusObj.pendingSince = nowMs;
+             } else if (nowMs - campusObj.pendingSince > GPS_GRACE_MS) {
+                 campusObj.stable = currentInside;
+                 campusObj.pending = null;
+                 campusObj.pendingSince = 0;
+                 await insertAndBroadcastAlert(currentInside === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter', {
+                   employeeId, fullName, scheduleId: currentSchedule.id,
+                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
+                 });
+             }
+         }
+      } else if (isLocEnabled) {
+         if (campusObj.pending !== null) {
+             if (nowMs - campusObj.pendingSince > GPS_GRACE_MS) {
+                 campusObj.stable = campusObj.pending;
+                 campusObj.pending = null;
+                 campusObj.pendingSince = 0;
+                 await insertAndBroadcastAlert(campusObj.stable === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter', {
+                   employeeId, fullName, scheduleId: currentSchedule.id,
+                   locationName: resolvedLocationName, latitude: parsedLat, longitude: parsedLon
+                 });
+             }
+         }
+      }
+      campusStates.set(employeeId, campusObj);
     }
 
     await broadcastInstructorStatus(employeeId);
@@ -6877,8 +6932,27 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           ELSE 'GPS ON'
         END AS gps_status,
         
-        (SELECT MIN(ping_time) FROM instructor_location_tracking WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1) AS campus_entry_time,
-        (SELECT MAX(ping_time) FROM instructor_location_tracking WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 0 AND location_enabled = 1 AND ping_time > (SELECT MIN(ping_time) FROM instructor_location_tracking WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1)) AS campus_exit_time
+         -- CAMPUS ENTRY TIME
+        COALESCE(
+          a.time_in, 
+          (SELECT DATE_FORMAT(MIN(ping_time), '%H:%i:%s') FROM instructor_location_tracking 
+           WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1 
+           AND ping_time >= CONCAT(s.date, ' ', s.start_time) - INTERVAL 1 HOUR)
+        ) AS campus_entry_time,
+        
+        -- CAMPUS EXIT TIME
+        COALESCE(
+          a.time_out, 
+          (
+            SELECT DATE_FORMAT(MIN(ping_time), '%H:%i:%s') FROM instructor_location_tracking 
+            WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 0 AND location_enabled = 1
+            AND ping_time > (
+              SELECT MIN(ping_time) FROM instructor_location_tracking 
+              WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1
+            )
+          ),
+          s.end_time
+        ) AS campus_exit_time
 
       FROM users u
       INNER JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id)
@@ -6891,10 +6965,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
       ORDER BY s.start_time ASC
     `, [GPS_STALE_SECONDS, GPS_STALE_SECONDS, GPS_STALE_SECONDS,selectedDate]);
 
-    rows.forEach(row => {
-      if (row.campus_entry_time) row.campus_entry_time = new Date(row.campus_entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      if (row.campus_exit_time) row.campus_exit_time = new Date(row.campus_exit_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    });
+            
 
     res.json(rows);
   } catch (err) {

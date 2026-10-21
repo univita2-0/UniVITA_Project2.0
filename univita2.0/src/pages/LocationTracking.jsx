@@ -26,6 +26,48 @@ const toLocalISODate = (d = new Date()) => {
   return `${y}-${m}-${day}`;
 };
 
+const formatPHT = (dateStr) => {
+  if (!dateStr) return '—';
+  let s = String(dateStr);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    s = s.replace(' ', 'T') + '+08:00';
+  }
+  return new Date(s).toLocaleString('en-US', { timeZone: 'Asia/Manila' });
+};
+
+
+const formatTimePHT = (val) => {
+  if (!val) return '—';
+  const s = String(val).trim();
+  
+  
+  if (s.includes('-') && s.includes(':')) {
+    let dateStr = s;
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+      dateStr = s.replace(' ', 'T') + '+08:00';
+    } else if (s.includes('T') && !s.includes('Z') && !s.includes('+')) {
+      dateStr = s + '+08:00';
+    }
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleTimeString('en-US', { 
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' 
+    });
+  }
+  
+  const match = s.match(/(\d{2}):(\d{2})/);
+  if (!match) return '—';
+  
+  let h = parseInt(match[1], 10);
+  const m = match[2];
+  
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  
+  return `${h}:${m} ${ampm}`;
+};
+
+
 const parseDateInput = (value) => {
   if (!value) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -306,21 +348,19 @@ const LocationTracking = () => {
   const todayStr = toLocalISODate();
   const isToday = selectedDate === todayStr;
 
-  /* ---------------- unified timeline ---------------- */
-  const toTimestamp = useCallback((timeStr) => {
+    const toTimestamp = useCallback((timeStr) => {
     if (!timeStr) return NaN;
-    const s = String(timeStr);
-    if (s.includes('T') || s.includes('-')) {
-      const d = new Date(s);
-      return d.getTime();
+    let s = String(timeStr);
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+      s = s.replace(' ', 'T') + '+08:00';
+    } else if (s.includes('T') && !s.includes('Z') && !s.includes('+')) {
+      s += '+08:00';
     }
-    const base = parseDateInput(selectedDate) || new Date();
-    const parts = s.split(':').map(Number);
-    base.setHours(parts[0] || 0, parts[1] || 0, parts[2] || 0, 0);
-    return base.getTime();
+    const d = new Date(s);
+    return d.getTime();
   }, [selectedDate]);
 
-  const unifiedEvents = useMemo(() => {
+    const unifiedEvents = useMemo(() => {
     const events = [];
     const timeline = timelineData.timeline || [];
     const shiftStart = timelineData.start_time;
@@ -334,58 +374,79 @@ const LocationTracking = () => {
           : String(timeStr).split(' ')[1] || String(timeStr);
         const [h, m] = safeStr.split(':').map(Number);
         const totalMinutes = (h || 0) * 60 + (m || 0);
-
         const [sh, sm] = shiftStart.split(':').map(Number);
         const [eh, em] = shiftEnd.split(':').map(Number);
-
         const startTotal = (sh || 0) * 60 + (sm || 0) - 30;
         const endTotal = (eh || 0) * 60 + (em || 0) + 30;
-
         return totalMinutes >= startTotal && totalMinutes <= endTotal;
       } catch {
         return true;
       }
     };
 
-    for (let i = 0; i < timeline.length; i++) {
-      const curr = timeline[i];
-      if (!isWithinShiftTime(curr.ping_time)) continue;
-      const prev = i > 0 ? timeline[i - 1] : null;
+    const validTimeline = timeline.filter(t => isWithinShiftTime(t.ping_time));
 
-      if (i === 0) {
-        events.push({
-          time: curr.ping_time,
-          type: 'GPS',
-          detail: curr.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)',
-        });
-        if (curr.location_enabled) {
-          events.push({
-            time: curr.ping_time,
-            type: 'Campus',
-            detail: curr.is_inside_campus
-              ? `Position inside perimeter — Zone: ${curr.location_name || 'Designated Area'}`
-              : `Position outside perimeter — Zone: ${curr.location_name || 'Outside Campus'}`,
-          });
-        }
-      } else {
-        if (prev && prev.location_enabled !== curr.location_enabled) {
-          events.push({
-            time: curr.ping_time,
-            type: 'GPS',
-            detail: curr.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)',
-          });
-        }
-        if (curr.location_enabled && prev && prev.is_inside_campus !== curr.is_inside_campus) {
-          const action = curr.is_inside_campus ? 'Entered campus perimeter' : 'Exited campus perimeter';
-          events.push({
-            time: curr.ping_time,
-            type: 'Campus',
-            detail: `${action} — Zone: ${curr.location_name || 'Designated Area'}`,
-          });
+    if (validTimeline.length > 0) {
+      // 1. Group into segments of stable state
+      let currentSegment = {
+        location_enabled: validTimeline[0].location_enabled,
+        is_inside_campus: validTimeline[0].is_inside_campus,
+        location_name: validTimeline[0].location_name,
+        startTime: validTimeline[0].ping_time,
+        endTime: validTimeline[0].ping_time
+      };
+      
+      const segments = [];
+
+      for (let i = 1; i < validTimeline.length; i++) {
+        const curr = validTimeline[i];
+        if (
+          currentSegment.location_enabled === curr.location_enabled &&
+          currentSegment.is_inside_campus === curr.is_inside_campus &&
+          currentSegment.location_name === curr.location_name
+        ) {
+          currentSegment.endTime = curr.ping_time;
+        } else {
+          segments.push(currentSegment);
+          currentSegment = {
+            location_enabled: curr.location_enabled,
+            is_inside_campus: curr.is_inside_campus,
+            location_name: curr.location_name,
+            startTime: curr.ping_time,
+            endTime: curr.ping_time
+          };
         }
       }
+      segments.push(currentSegment);
+
+      // 2. Filter out segments shorter than 2 minutes (to remove GPS flickers)
+      const MIN_DURATION_MS = 120000; // 2 mins
+      const stableSegments = segments.filter((seg, idx) => {
+        if (idx === segments.length - 1) return true; // Always keep the latest state
+        const duration = new Date(seg.endTime).getTime() - new Date(seg.startTime).getTime();
+        return duration >= MIN_DURATION_MS || idx === 0;
+      });
+
+      // 3. Push clean events
+      stableSegments.forEach(seg => {
+        events.push({
+          time: seg.startTime,
+          type: 'GPS',
+          detail: seg.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)',
+        });
+        if (seg.location_enabled) {
+          events.push({
+            time: seg.startTime,
+            type: 'Campus',
+            detail: seg.is_inside_campus
+              ? `Position inside perimeter — Zone: ${seg.location_name || 'Designated Area'}`
+              : `Position outside perimeter — Zone: ${seg.location_name || 'Outside Campus'}`,
+          });
+        }
+      });
     }
 
+   
     (timelineData.alerts || []).forEach(alert => {
       events.push({
         time: alert.created_at,
@@ -398,6 +459,8 @@ const LocationTracking = () => {
     return events;
   }, [timelineData, toTimestamp]);
 
+    
+
   const totalTimelinePages = Math.max(1, Math.ceil(unifiedEvents.length / TIMELINE_PAGE_SIZE));
   const safeTimelinePage = Math.min(timelinePage, totalTimelinePages);
   useEffect(() => {
@@ -409,10 +472,12 @@ const LocationTracking = () => {
     return unifiedEvents.slice(start, start + TIMELINE_PAGE_SIZE);
   }, [unifiedEvents, safeTimelinePage]);
 
-  const renderEventTime = (time) => {
+    const renderEventTime = (time) => {
     const ts = toTimestamp(time);
     if (!Number.isFinite(ts)) return String(time ?? '—');
-    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return new Date(ts).toLocaleTimeString('en-US', { 
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Asia/Manila'
+    });
   };
 
   /* ---------------- handlers ---------------- */
@@ -747,7 +812,7 @@ const isAlert =
                 ) : (
                   alertHistory.map(alert => (
                     <tr key={alert.id}>
-                      <td className="lt-time-text">{new Date(alert.created_at).toLocaleString()}</td>
+                      <td className="lt-time-text">{formatPHT(alert.created_at)}</td>
                       <td className="font-semibold text-dark">{alert.full_name}</td>
                       <td className="text-red-600">{alert.alert_message}</td>
                       <td>{alert.location_name || '—'}</td>
@@ -804,13 +869,13 @@ const isAlert =
                 <span className="summary-label">Last Known Position</span>
                 <span className="summary-value">{selectedInstructor?.last_position_name || 'Unavailable'}</span>
               </div>
-              <div className="summary-item">
-                <span className="summary-label">Campus Entry Time</span>
-                <span className="summary-value">{selectedInstructor?.campus_entry_time || '—'}</span>
+                <div className="summary-item">
+                <span className="summary-label">Clock in Time</span>
+                <span className="summary-value">{formatTimePHT(selectedInstructor?.campus_entry_time)}</span>
               </div>
               <div className="summary-item">
-                <span className="summary-label">Campus Exit Time</span>
-                <span className="summary-value">{selectedInstructor?.campus_exit_time || '—'}</span>
+                <span className="summary-label">Clock out Time</span>
+                <span className="summary-value">{formatTimePHT(selectedInstructor?.campus_exit_time)}</span>
               </div>
             </div>
 
