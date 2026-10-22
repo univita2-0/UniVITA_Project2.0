@@ -113,6 +113,21 @@ const formatTimeForDB = (timeStr) => {
   return timeStr;
 };
 
+const getCorrectionWindow = (type, start, end) => {
+  const toMin = (t) => {
+    if (!t) return null;
+    const [h, m] = String(t).substring(0, 5).split(':').map(Number);
+    return isNaN(h) || isNaN(m) ? null : h * 60 + m;
+  };
+  const s = toMin(start);
+  const e = toMin(end);
+  if (s === null || e === null) return null;
+  if (type === 'clock_in')  return { min: s - 120, max: e,        label: '2h before shift start up to shift end' };
+  if (type === 'clock_out') return { min: s,       max: e + 240,  label: 'shift start up to 4h after shift end' };
+  if (type === 'early_out') return { min: s,       max: e - 1,    label: 'inside the shift, strictly before end' };
+  return null;
+};
+
 const getPHNowString = () => {
   const now = new Date();
   const options = { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' };
@@ -125,6 +140,12 @@ const getPHDateOffset = (daysOffset) => {
   now.setDate(now.getDate() + daysOffset);
   const options = { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' };
   return now.toLocaleDateString('en-CA', options);
+};
+
+const getPHDateOffsetIn = (days) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 };
 
 const parseServerResponse = async (response) => {
@@ -156,6 +177,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timePickerMode, setTimePickerMode] = useState('');
   const [tempDate, setTempDate] = useState(new Date());
+  const [scheduleForOTDate, setScheduleForOTDate] = useState(null);
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
 
   // --- LEAVE STATE ---
   const [leaveStep, setLeaveStep] = useState(1);
@@ -201,6 +224,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [correctionAttachment, setCorrectionAttachment] = useState(null);
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
   const [showCorrectionCalendar, setShowCorrectionCalendar] = useState(false);
+  const [scheduleForCorrection, setScheduleForCorrection] = useState(null); 
+  const [scheduleForAppeal,     setScheduleForAppeal]     = useState(null)
 
   // --- OVERTIME STATE ---
   const [overtimeStep, setOvertimeStep] = useState(1);
@@ -216,10 +241,10 @@ export default function RequestsScreen({ navigation, route }) {
   const [myOvertimeRequests, setMyOvertimeRequests] = useState([]);
 
   const todayStr = getPHNowString();
-  // ✅ FIX M1 (cont.) — 30 days ago in PH timezone
+  
   const thirtyDaysAgoStr = getPHDateOffset(-30);
+  const minDateForLeave = /emergency|sick/i.test(leaveType) ? thirtyDaysAgoStr : todayStr;
 
-  // AUTOMATIC INITIAL LOAD
   const loadInitialLeaveData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -232,9 +257,10 @@ export default function RequestsScreen({ navigation, route }) {
       const dataTypes = await resTypes.json();
       if (resTypes.ok && Array.isArray(dataTypes) && dataTypes.length > 0) {
         setAvailableLeaveTypes(dataTypes);
-        if (!dataTypes.some(t => t.name === leaveType)) {
-          setLeaveType(dataTypes[0].name);
-        }
+        
+        setLeaveType(prev =>
+          dataTypes.some(t => t.name === prev) ? prev : dataTypes[0].name
+        );
       }
 
       if (userId) {
@@ -249,7 +275,91 @@ export default function RequestsScreen({ navigation, route }) {
     } catch (err) {
       console.log('Error loading initial leave data:', err);
     }
-  }, [leaveType]);
+  }, []); 
+
+
+  const fetchMyPendingRequests = async (kind) => {
+  // kind = 'corrections' | 'appeals'
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    const empId = await AsyncStorage.getItem('employee_id');
+    if (!empId) return [];
+    const url = kind === 'corrections'
+      ? `${API_URL}/attendance/corrections/user/${empId}`
+      : `${API_URL}/attendance-appeals/user/${empId}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token || ''}` } });
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+};
+
+  const loadScheduleForDate = async (date, setter) => {
+  if (!date) { setter(null); return; }
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    const userStr = await AsyncStorage.getItem('user');
+    let empId = null;
+    if (userStr) { try { empId = JSON.parse(userStr).employee_id; } catch {} }
+    if (!empId) return setter(null);
+
+    const res  = await fetch(`${API_URL}/schedules/${empId}`, {
+      headers: { Authorization: `Bearer ${token || ''}` }
+    });
+    const data = await res.json();
+    const sched = Array.isArray(data)
+      ? data.find(s => String(s.date).split('T')[0] === date)
+      : null;
+    setter(sched);
+  } catch { setter(null); }
+};
+
+
+    useEffect(() => {
+        const fetchScheduleForOT = async () => {
+      if (!overtimeDate) {
+        setScheduleForOTDate(null);
+        return;
+      }
+      setLoadingSchedule(true);
+      try {
+        const token = await AsyncStorage.getItem('auth_token');
+        const userStr = await AsyncStorage.getItem('user');
+        let empId = null;
+        if (userStr) {
+          try { empId = JSON.parse(userStr).employee_id; } catch(e) {}
+        }
+        
+        if (!empId) {
+           setScheduleForOTDate(null);
+           return;
+        }
+
+        const res = await fetch(`${API_URL}/schedules/${empId}`, {
+          headers: { Authorization: `Bearer ${token || ''}` }
+        });
+        const data = await res.json();
+        const sched = Array.isArray(data) ? data.find(s => String(s.date).split('T')[0] === overtimeDate) : null;
+        setScheduleForOTDate(sched);
+      } catch (err) {
+        console.error("Failed to fetch schedule for OT:", err);
+        setScheduleForOTDate(null);
+      } finally {
+        setLoadingSchedule(false);
+      }
+    };
+    fetchScheduleForOT();
+  }, [overtimeDate]);
+
+    
+  useEffect(() => { 
+    loadScheduleForDate(correctionDate, setScheduleForCorrection); 
+  }, [correctionDate]);
+
+  useEffect(() => { 
+    loadScheduleForDate(appealDate, setScheduleForAppeal);     
+  }, [appealDate]);
+
+  
 
   useEffect(() => {
     loadInitialLeaveData();
@@ -335,22 +445,54 @@ export default function RequestsScreen({ navigation, route }) {
     } finally { setLoadingBalances(false); }
   };
 
-  const pickDocument = async (setFn) => {
+  const pickDocument = async (setFn, currentFile = null) => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/*', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
         copyToCacheDirectory: true
       });
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const file = result.assets[0];
-        if (file.size > 5 * 1024 * 1024) {
-          Alert.alert('File Too Large', 'Maximum file size is 5MB.');
-          return;
+
+     
+      if (result.canceled) {
+        
+        if (currentFile) {
+          Alert.alert(
+            'No New File Selected',
+            `Your previously attached file "${currentFile.name || 'attachment'}" is still active.`,
+            [{ text: 'OK' }]
+          );
         }
-        setFn(file);
+        return;
       }
+
+      
+      if (!result.assets || result.assets.length === 0) {
+        Alert.alert(
+          'No File Selected',
+          'The picker returned no file. Please try again.'
+        );
+        return;
+      }
+
+      const file = result.assets[0];
+
+     
+      if (file.size > 5 * 1024 * 1024) {
+        Alert.alert(
+          'File Too Large',
+          'Maximum file size is 5MB. Please select a smaller file.'
+        );
+        return;
+      }
+
+      setFn(file);
     } catch (err) {
-      console.error(err);
+      
+      console.error('Document picker error:', err);
+      Alert.alert(
+        'Upload Error',
+        'Could not open the file picker. Please check that the app has permission to access your files, then try again.'
+      );
     }
   };
 
@@ -428,8 +570,9 @@ export default function RequestsScreen({ navigation, route }) {
   };
 
   const updateBreakdownDuration = (index, value) => {
-    const newBreakdown = [...leaveBreakdown];
-    newBreakdown[index].duration = value;
+    const newBreakdown = leaveBreakdown.map((item, i) =>
+  i === index ? { ...item, duration: value } : item
+);
 
     let totalCost = 0;
     newBreakdown.forEach(item => {
@@ -466,60 +609,60 @@ export default function RequestsScreen({ navigation, route }) {
     }
 
     setSubmittingLeave(true);
-    try {
-      const token = await AsyncStorage.getItem('auth_token');
-      let successCount = 0;
-      let lastMessage = '';
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    
+    // 🚨 NEW: Format the array for the backend
+    const requestsPayload = leaveBreakdown.map(item => ({
+      date: item.date,
+      duration: item.duration
+    }));
 
-      for (const item of leaveBreakdown) {
-        const result = await uploadRequestWithFile(`${API_URL}/leave-requests`, token, 'image', leaveImage, {
-          type: leaveType,
-          reason: leaveReason.trim(),
-          request_date: item.date,
-          duration: item.duration,
-          is_paid: '1',
-        });
-        if (result.ok && result.success) {
-          successCount++;
-        } else {
-          lastMessage = result.message || 'Failed to submit request.';
-        }
-      }
+    // 🚨 Send ONE request instead of looping
+    const result = await uploadRequestWithFile(`${API_URL}/leave-requests`, token, 'image', leaveImage, {
+      type: leaveType,
+      reason: leaveReason.trim(),
+      requests: JSON.stringify(requestsPayload), // Pass the JSON string
+      is_paid: '1',
+    });
 
-      if (successCount === leaveBreakdown.length) {
-        Alert.alert('Success', 'Leave Application submitted successfully!');
-        setLeaveDateFrom('');
-        setLeaveDateTo('');
-        setLeaveReason('');
-        setLeaveImage(null);
-        setIsRange(false);
-        setLeaveStep(1);
-        loadInitialLeaveData();
-      } else {
-        Alert.alert('Submission Notice', `${successCount}/${leaveBreakdown.length} submitted. ${lastMessage}`);
-      }
-    } catch (err) {
-      console.error('Submit Leave Error:', err);
-      Alert.alert('Submission Error', err.message || 'Failed to connect to server.');
-    } finally {
-      setSubmittingLeave(false);
+    if (result.ok && result.success) {
+      Alert.alert('Success', 'Leave Application submitted successfully!');
+      setLeaveDateFrom('');
+      setLeaveDateTo('');
+      setLeaveReason('');
+      setLeaveImage(null);
+      setIsRange(false);
+      setLeaveStep(1);
+      loadInitialLeaveData();
+    } else {
+      Alert.alert('Submission Error', result.message || 'Failed to submit request.');
     }
-  };
+  } catch (err) {
+    console.error('Submit Leave Error:', err);
+    Alert.alert('Submission Error', err.message || 'Failed to connect to server.');
+  } finally {
+    setSubmittingLeave(false);
+  }
+};
 
   // ============================================================
   // APPEAL
   // ============================================================
-  const handleNextAppeal = () => {
+     const handleNextAppeal = async () => {  
     if (!appealDate) { Alert.alert('Validation Error', 'Please select a date for your appeal.'); return; }
 
-    // ✅ FIX M3 — No future dates
     if (appealDate > todayStr) {
       Alert.alert('Validation Error', 'Appeals cannot be filed for future dates.');
       return;
     }
-    // ✅ FIX M4 — 30-day backdate window (matches backend)
     if (appealDate < thirtyDaysAgoStr) {
       Alert.alert('Validation Error', 'Appeals can only be filed for the last 30 days.');
+      return;
+    }
+
+    if (!scheduleForAppeal) {
+      Alert.alert('No Schedule', 'You have no scheduled shift on this date, so an appeal cannot be filed.');
       return;
     }
 
@@ -528,7 +671,6 @@ export default function RequestsScreen({ navigation, route }) {
       Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 10 characters).');
       return;
     }
-    // ✅ FIX M5 — Reason max length
     if (trimmed.length > 500) {
       Alert.alert('Validation Error', 'Reason is too long (maximum 500 characters).');
       return;
@@ -536,7 +678,16 @@ export default function RequestsScreen({ navigation, route }) {
 
     if (!appealImage) { Alert.alert('Validation Error', 'An attachment or proof is strictly required.'); return; }
 
-    // ✅ FIX M6 — Time order check (only if both provided)
+    
+    if (!appealTimeIn && !appealTimeOut) {
+      Alert.alert(
+        'Missing Time',
+        'Please provide at least a Time In or a Time Out so HR knows what to correct.'
+      );
+      return;
+    }
+
+    
     if (appealTimeIn && appealTimeOut) {
       const inMin = toMinutes(appealTimeIn);
       const outMin = toMinutes(appealTimeOut);
@@ -544,6 +695,18 @@ export default function RequestsScreen({ navigation, route }) {
         Alert.alert('Validation Error', 'Time Out must be later than Time In.');
         return;
       }
+    }
+    const pending = await fetchMyPendingRequests('appeals');
+    const already = pending.find(p =>
+      String(p.status).toLowerCase() === 'pending' &&
+      String(p.attendance_date || p.date).substring(0,10) === appealDate
+    );
+    if (already) {
+      Alert.alert(
+        'Already Pending',
+        'You already have a pending appeal for this date. Please wait for HR to review it.'
+      );
+      return;
     }
 
     setAppealStep(2);
@@ -582,17 +745,20 @@ export default function RequestsScreen({ navigation, route }) {
   // ============================================================
   // CORRECTION
   // ============================================================
-  const handleNextCorrection = () => {
+    const handleNextCorrection = async () => {  // ✅ Added async here
     if (!correctionDate) { Alert.alert('Validation Error', 'Please select a date.'); return; }
 
-    // ✅ FIX M7 — No future dates
     if (correctionDate > todayStr) {
       Alert.alert('Validation Error', 'Corrections cannot be filed for future dates.');
       return;
     }
-    // ✅ FIX M8 — 30-day backdate window
     if (correctionDate < thirtyDaysAgoStr) {
       Alert.alert('Validation Error', 'Corrections can only be filed for the last 30 days.');
+      return;
+    }
+
+    if (!scheduleForCorrection) {
+      Alert.alert('No Schedule', 'You have no scheduled shift on this date, so a correction cannot be filed.');
       return;
     }
 
@@ -603,15 +769,51 @@ export default function RequestsScreen({ navigation, route }) {
       Alert.alert('Validation Error', 'Please provide a valid reason (minimum 5 characters).');
       return;
     }
-    // ✅ FIX M9 — Reason max length
     if (trimmed.length > 500) {
       Alert.alert('Validation Error', 'Reason is too long (maximum 500 characters).');
       return;
     }
 
-    if (!correctionAttachment) { Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.'); return; }
+    if (!correctionAttachment) {
+      Alert.alert('Validation Error', 'An attachment (Image/PDF/DOC) is strictly required.');
+      return;
+    }
+
+    const shiftStart = scheduleForCorrection.start_time;
+    const shiftEnd   = scheduleForCorrection.end_time;
+    const window     = getCorrectionWindow(correctionType, shiftStart, shiftEnd);
+
+    if (window) {
+      const [h, m] = correctionTime.substring(0, 5).split(':').map(Number);
+      const reqMin = h * 60 + m;
+
+      if (reqMin < window.min || reqMin > window.max) {
+        Alert.alert(
+          'Invalid Time',
+          `For ${correctionType.replace('_', ' ')}, the time must be within the shift window (${window.label}).\n\nYour shift: ${formatTo12Hour(shiftStart)} – ${formatTo12Hour(shiftEnd)}`
+        );
+        return;
+      }
+    }
+
+    // ✅ NEW: H2 - Check for duplicate pending request
+    const pending = await fetchMyPendingRequests('corrections');
+    const already = pending.find(p =>
+      String(p.status).toLowerCase() === 'pending' &&
+      String(p.attendance_date || p.date).substring(0,10) === correctionDate
+    );
+    if (already) {
+      Alert.alert(
+        'Already Pending',
+        'You already have a pending correction for this date. Please wait for HR to review it.'
+      );
+      return;
+    }
+
     setCorrectionStep(2);
   };
+
+  
 
   const handleSubmitCorrection = async () => {
     setSubmittingCorrection(true);
@@ -637,13 +839,13 @@ export default function RequestsScreen({ navigation, route }) {
       const formattedTime = formatTimeForDB(correctionTime);
 
       const res = await uploadRequestWithFile(`${API_URL}/attendance/correction-request`, token, 'attachment', correctionAttachment, {
-        employee_id: employeeId,
-        date: correctionDate,
-        type: dbType,
-        time: formattedTime,
-        reason: finalReason,
-        schedule_id: correctionScheduleId || '',
-      });
+  employee_id: employeeId,
+  date: correctionDate,
+  type: correctionType,
+  time: formattedTime,
+  reason: finalReason,
+  schedule_id: correctionScheduleId || '',
+});
 
       if (res.ok && (res.success || res.success === undefined)) {
         Alert.alert('Success', res.message || 'Correction request submitted.');
@@ -669,7 +871,7 @@ export default function RequestsScreen({ navigation, route }) {
   // ============================================================
   // OVERTIME
   // ============================================================
-  const handleNextOvertime = () => {
+    const handleNextOvertime = () => {
     if (!overtimeDate) {
       Alert.alert('Validation Error', 'Please select a date.');
       return;
@@ -698,6 +900,48 @@ export default function RequestsScreen({ navigation, route }) {
     if (duration > 12 * 60) {
       Alert.alert('Validation Error', 'Maximum overtime duration is 12 hours per request.');
       return;
+    }
+
+    
+    if (overtimeType === 'Compensatory Time Off (CTO)' && duration < 60) {
+      Alert.alert('Validation Error', 'CTO conversion requires at least 1 hour (60 minutes) of overtime.');
+      return;
+    }
+
+    
+    if (loadingSchedule) {
+  Alert.alert('Please Wait', 'Checking your schedule...');
+  return;
+}
+if (!scheduleForOTDate) {
+  Alert.alert('No Schedule Found', 'You do not have a scheduled shift on this date.');
+  return;
+}
+
+
+    if (scheduleForOTDate) {
+      const shiftStart = toMinutes(scheduleForOTDate.start_time);
+      const shiftEnd = toMinutes(scheduleForOTDate.end_time);
+
+      if (overtimeTiming === 'Early OT') {
+        
+        if (endMin > shiftStart) {
+          Alert.alert(
+            'Invalid Early OT', 
+            `Your shift starts at ${formatTo12Hour(scheduleForOTDate.start_time)}. Early OT must end at or before this time.`
+          );
+          return;
+        }
+      } else if (overtimeTiming === 'Normal OT') {
+       
+        if (startMin < shiftEnd) {
+          Alert.alert(
+            'Invalid Normal OT', 
+            `Your shift ends at ${formatTo12Hour(scheduleForOTDate.end_time)}. Normal OT must start at or after this time.`
+          );
+          return;
+        }
+      }
     }
 
     const trimmed = overtimeReason.trim();
@@ -754,7 +998,7 @@ export default function RequestsScreen({ navigation, route }) {
       const token = await AsyncStorage.getItem('auth_token');
       let response;
       const dbScenarioType = overtimeTiming === 'Early OT' ? 'early_ot' : 'normal_ot';
-      const scheduleId = prefill?.prefillScheduleId || null;
+      const scheduleId = scheduleForOTDate?.id || prefill?.prefillScheduleId || null;
 
       if (overtimeImage) {
         response = await uploadRequestWithFile(`${API_URL}/overtime-requests`, token, 'attachment', overtimeImage, {
@@ -897,7 +1141,7 @@ export default function RequestsScreen({ navigation, route }) {
                     <CalendarIcon size={20} color="#00897B" />
                     <Text style={styles.dateText}>{leaveDateFrom || 'Select date'}</Text>
                   </TouchableOpacity>
-                  {renderCalendar(showLeaveCalendarFrom, setShowLeaveCalendarFrom, leaveDateFrom, setLeaveDateFrom, todayStr)}
+                  {renderCalendar(showLeaveCalendarFrom, setShowLeaveCalendarFrom, leaveDateFrom, setLeaveDateFrom, minDateForLeave, getPHDateOffsetIn(180))}
 
                   {isRange && (
                     <>
@@ -906,7 +1150,7 @@ export default function RequestsScreen({ navigation, route }) {
                         <CalendarIcon size={20} color="#00897B" />
                         <Text style={styles.dateText}>{leaveDateTo || 'Select date'}</Text>
                       </TouchableOpacity>
-                      {renderCalendar(showLeaveCalendarTo, setShowLeaveCalendarTo, leaveDateTo, setLeaveDateTo, leaveDateFrom || todayStr)}
+                      {renderCalendar(showLeaveCalendarTo, setShowLeaveCalendarTo, leaveDateTo, setLeaveDateTo, leaveDateFrom || minDateForLeave, getPHDateOffsetIn(180) )}
                     </>
                   )}
 
@@ -944,7 +1188,7 @@ export default function RequestsScreen({ navigation, route }) {
                   />
 
                   <Text style={styles.label}>Attachment (Required - PDF, DOC, JPG up to 5MB)</Text>
-                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setLeaveImage)}>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setLeaveImage, leaveImage)}>
                     <Upload size={18} color="#00897B" />
                     <Text style={styles.uploadText}>{leaveImage ? (leaveImage.name || 'File Attached') : 'Upload Proof'}</Text>
                   </TouchableOpacity>
@@ -1066,6 +1310,19 @@ export default function RequestsScreen({ navigation, route }) {
                   </TouchableOpacity>
                   {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, thirtyDaysAgoStr, todayStr)}
 
+                  {/* ✅ NEW: Shift Info Banner for Appeal */}
+                  {appealDate && (
+                    <View style={{ padding: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 12, marginBottom: 12 }}>
+                      {scheduleForAppeal
+                        ? <Text style={{ fontSize: 12, color: '#00897B', fontFamily: 'Inter_18pt-Medium' }}>
+                            💡 Shift on this date: {formatTo12Hour(scheduleForAppeal.start_time)} – {formatTo12Hour(scheduleForAppeal.end_time)}
+                          </Text>
+                        : <Text style={{ fontSize: 12, color: '#EF4444', fontFamily: 'Inter_18pt-Medium' }}>
+                            ⚠️ No scheduled shift on this date — appeal cannot be filed.
+                          </Text>}
+                    </View>
+                  )}
+
                   <Text style={styles.label}>Time In (optional)</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealIn'); setShowTimePicker(true); }}>
                     <Clock size={20} color="#00897B" />
@@ -1090,7 +1347,7 @@ export default function RequestsScreen({ navigation, route }) {
                   />
 
                   <Text style={styles.label}>Proof (Required - PDF, DOC, JPG up to 5MB)</Text>
-                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setAppealImage)}>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setAppealImage, appealImage)}>
                     <Upload size={18} color="#00897B" />
                     <Text style={styles.uploadText}>{appealImage ? (appealImage.name || 'File Attached') : 'Upload Proof'}</Text>
                   </TouchableOpacity>
@@ -1165,6 +1422,21 @@ export default function RequestsScreen({ navigation, route }) {
                     <Text style={styles.dateText}>{correctionDate || 'Select date'}</Text>
                   </TouchableOpacity>
                   {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, thirtyDaysAgoStr, todayStr)}
+                  
+                  {/* ✅ NEW: Shift Info Banner for Correction */}
+                  {correctionDate && (
+                    <View style={{ padding: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 12, marginBottom: 12 }}>
+                      {scheduleForCorrection
+                        ? <Text style={{ fontSize: 12, color: '#00897B', fontFamily: 'Inter_18pt-Medium' }}>
+                            💡 Shift on this date: {formatTo12Hour(scheduleForCorrection.start_time)} – {formatTo12Hour(scheduleForCorrection.end_time)}
+                          </Text>
+                        : <Text style={{ fontSize: 12, color: '#EF4444', fontFamily: 'Inter_18pt-Medium' }}>
+                            ⚠️ No scheduled shift on this date — correction cannot be filed.
+                          </Text>}
+                    </View>
+                  )}
+
+                 
 
                   <Text style={styles.label}>What to correct?</Text>
                   <View style={styles.typeGroup}>
@@ -1178,6 +1450,21 @@ export default function RequestsScreen({ navigation, route }) {
                       <Text style={[styles.typeChipText, correctionType === 'early_out' && styles.typeChipTextActive]}>Early Out</Text>
                     </TouchableOpacity>
                   </View>
+
+                   {/* ✅ NEW: H4 - Show shift times next to Time picker */}
+                  {scheduleForCorrection && (
+                    <View style={{
+                      padding: 10, marginBottom: 6, borderRadius: 10,
+                      backgroundColor: isLight ? '#F1F5F9' : colors.iconBg
+                    }}>
+                      <Text style={{ fontSize: 12, color: isLight ? '#475569' : colors.textSecondary, fontFamily: 'Inter_18pt-Medium' }}>
+                        Shift: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#00897B' }}>
+                          {formatTo12Hour(scheduleForCorrection.start_time)} – {formatTo12Hour(scheduleForCorrection.end_time)}
+                        </Text>
+                        {'  '}(pick a time inside this window)
+                      </Text>
+                    </View>
+                  )}
 
                   <Text style={styles.label}>Time</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('correctionTime'); setShowTimePicker(true); }}>
@@ -1197,7 +1484,7 @@ export default function RequestsScreen({ navigation, route }) {
                   />
 
                   <Text style={styles.label}>Attachment (Required - PDF, DOC, JPG up to 5MB)</Text>
-                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setCorrectionAttachment)}>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setCorrectionAttachment, correctionAttachment)}>
                     <Upload size={18} color="#00897B" />
                     <Text style={styles.uploadText}>{correctionAttachment ? (correctionAttachment.name || 'File Attached') : 'Upload Proof'}</Text>
                   </TouchableOpacity>
@@ -1273,7 +1560,14 @@ export default function RequestsScreen({ navigation, route }) {
                     <CalendarIcon size={20} color="#00897B" />
                     <Text style={styles.dateText}>{overtimeDate || 'Select date'}</Text>
                   </TouchableOpacity>
-                  {renderCalendar(showOvertimeCalendar, setShowOvertimeCalendar, overtimeDate, setOvertimeDate, todayStr)}
+                  {renderCalendar(
+  showOvertimeCalendar, 
+  setShowOvertimeCalendar, 
+  overtimeDate, 
+  setOvertimeDate, 
+  getPHDateOffset(-7), 
+  todayStr             
+)}
 
                   <Text style={styles.label}>Overtime Type</Text>
                   <View style={styles.typeGroup}>
@@ -1301,6 +1595,23 @@ export default function RequestsScreen({ navigation, route }) {
                     ))}
                   </View>
 
+                  {/* ✅ NEW: Display User's Shift for Context */}
+                  {overtimeDate && (
+                    <View style={{ marginBottom: 16, padding: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 12 }}>
+                      {loadingSchedule ? (
+                        <Text style={{ fontFamily: 'Inter_18pt-Medium', color: colors.textSecondary, fontSize: 12 }}>Checking your schedule...</Text>
+                      ) : scheduleForOTDate ? (
+                        <Text style={{ fontFamily: 'Inter_18pt-Medium', color: isLight ? '#475569' : colors.textSecondary, fontSize: 12 }}>
+                          💡 Your shift on this date is: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#00897B' }}>{formatTo12Hour(scheduleForOTDate.start_time)} – {formatTo12Hour(scheduleForOTDate.end_time)}</Text>
+                        </Text>
+                      ) : (
+                        <Text style={{ fontFamily: 'Inter_18pt-Medium', color: '#EF4444', fontSize: 12 }}>
+                          ⚠️ You do not have a scheduled shift on this date. Overtime requires an existing schedule.
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
                   <Text style={styles.label}>Start Time</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('overtimeStart'); setShowTimePicker(true); }}>
                     <Clock size={20} color="#00897B" />
@@ -1316,11 +1627,16 @@ export default function RequestsScreen({ navigation, route }) {
                   {overtimeStart && overtimeEnd && toMinutes(overtimeStart) !== null && toMinutes(overtimeEnd) !== null && (
                     (() => {
                       const d = toMinutes(overtimeEnd) - toMinutes(overtimeStart);
-                      if (d <= 0) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>End time must be after start time.</Text>;
-                      if (d < 30) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Minimum 30 minutes required ({d} min).</Text>;
-                      if (d > 720) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Maximum 12 hours per request.</Text>;
-                      const h = Math.floor(d / 60), m = d % 60;
-                      return <Text style={{ color: '#059669', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Duration: {h}h {m}m</Text>;
+if (d <= 0) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>End time must be after start time.</Text>;
+if (overtimeType === 'Compensatory Time Off (CTO)' && d < 60) {
+  return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>
+    CTO requires at least 1 hour ({d} min selected).
+  </Text>;
+}
+if (d < 30) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Minimum 30 minutes required ({d} min).</Text>;
+if (d > 720) return <Text style={{ color: '#EF4444', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Maximum 12 hours per request.</Text>;
+const h = Math.floor(d / 60), m = d % 60;
+return <Text style={{ color: '#059669', fontFamily: 'Inter_18pt-Medium', fontSize: 12, marginBottom: 8 }}>Duration: {h}h {m}m</Text>;
                     })()
                   )}
 
@@ -1336,7 +1652,7 @@ export default function RequestsScreen({ navigation, route }) {
                   />
 
                   <Text style={styles.label}>Attachment (Optional - PDF, DOC, JPG up to 5MB)</Text>
-                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setOvertimeImage)}>
+                  <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setOvertimeImage, overtimeImage)}>
                     <Upload size={18} color="#00897B" />
                     <Text style={styles.uploadText}>{overtimeImage ? (overtimeImage.name || 'File Attached') : 'Upload File'}</Text>
                   </TouchableOpacity>

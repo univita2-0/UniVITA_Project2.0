@@ -18,12 +18,9 @@ const PAGE_SIZE = 25;
 const TIMELINE_PAGE_SIZE = 50;
 const GPS_DISPLAY_GRACE_MS = 60_000; 
 
-/* ---------------- date helpers (timezone-safe) ---------------- */
 const toLocalISODate = (d = new Date()) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 };
 
 const formatPHT = (dateStr) => {
@@ -169,6 +166,8 @@ const LocationTracking = () => {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelinePage, setTimelinePage] = useState(1);
 
+  const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0); 
+
   const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
 
   // Ref used by the WebSocket handler so it doesn't need to reconnect on date change
@@ -304,19 +303,31 @@ const LocationTracking = () => {
           fetchDataRef.current(today);
         }
       };
-      ws.onerror = () => { /* swallow — reconnect would be an enhancement */ };
+            ws.onerror = () => { 
+        console.warn('WebSocket error encountered.'); 
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected. Reconnecting in 5s...');
+        setTimeout(() => {
+          // This forces the useEffect to re-run and reconnect
+          setWsReconnectTrigger(prev => prev + 1);
+        }, 5000);
+      };
     } catch (err) {
       console.error('WebSocket Error:', err);
     }
 
-    return () => {
+        return () => {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        
+        ws.onclose = null; 
         try { ws.close(); } catch { /* noop */ }
       }
     };
-  }, []);
+  }, [wsReconnectTrigger]); 
 
-  // Alert history modal fetch
+  
   useEffect(() => {
     if (!showHistoryModal) return undefined;
     const controller = new AbortController();
@@ -666,7 +677,7 @@ const LocationTracking = () => {
 
                       
                       const gpsLastPing = inst.last_ping_time
-                        ? new Date(inst.last_ping_time).getTime()
+                        ? toTimestamp(inst.last_ping_time)
                         : null;
                       const gpsIsStale =
                         gpsLastPing !== null &&

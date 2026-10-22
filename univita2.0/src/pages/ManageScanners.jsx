@@ -68,6 +68,7 @@ const ManageScanners = () => {
   // Delete Modal State
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [scannerToDelete, setScannerToDelete] = useState(null);
+  const [editScannerId, setEditScannerId] = useState(null); 
 
   // Reset page on search
   useEffect(() => { setCurrentPage(1); }, [searchQuery]);
@@ -87,7 +88,7 @@ const ManageScanners = () => {
 
   useEffect(() => { fetchScanners(); }, []);
 
-  const handleAdd = async (e) => {
+    const handleAdd = async (e) => {
     e.preventDefault();
 
     if (!newScannerId.trim() || !newAssignedRoom.trim() || !newAssignedFloor.trim()) {
@@ -97,20 +98,29 @@ const ManageScanners = () => {
 
     setLoading(true);
     try {
-      await axios.post(`${API_BASE}/scanners`, {
+      const payload = {
         scanner_id: newScannerId.trim(),
         assigned_room: newAssignedRoom.trim(),
         assigned_floor: newAssignedFloor.trim()
-      }, getAuthHeaders());
+      };
 
-      toast.success('Scanner successfully saved.');
+      // ✅ NEW: If editScannerId exists, we are editing (PUT). Otherwise, adding (POST).
+      if (editScannerId) {
+        await axios.put(`${API_BASE}/scanners/${editScannerId}`, payload, getAuthHeaders());
+        toast.success('Scanner updated successfully.');
+      } else {
+        await axios.post(`${API_BASE}/scanners`, payload, getAuthHeaders());
+        toast.success('Scanner added successfully.');
+      }
+
       setNewScannerId('');
       setNewAssignedRoom('');
       setNewAssignedFloor('5');
+      setEditScannerId(null); // Reset edit mode
       setShowAddModal(false);
       fetchScanners();
     } catch (err) {
-      const errorMsg = err.response?.data?.error || 'Failed to save scanner configuration.';
+      const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Failed to save scanner configuration.';
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -168,7 +178,7 @@ const ManageScanners = () => {
         </div>
         <button
           className="expert-btn-primary"
-          onClick={() => { handleFloorChange('5'); setShowAddModal(true); }}
+          onClick={() => { setEditScannerId(null); handleFloorChange('5'); setShowAddModal(true); }}
         >
           <Plus size={16} /> Assign Scanner
         </button>
@@ -236,6 +246,7 @@ const ManageScanners = () => {
                             className="expert-btn-icon"
                             title="Edit Scanner"
                             onClick={() => {
+                              setEditScannerId(scanner.id);
                               setNewScannerId(scanner.scanner_id);
                               setNewAssignedFloor(scanner.assigned_floor);
                               setNewAssignedRoom(scanner.assigned_room);

@@ -104,7 +104,7 @@ const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
         const status = (record.status || '').toLowerCase();
         
         if (status === 'late') late++;
-        else if (status === 'present' || status === 'completed') present++;
+        else if (status === 'present' || status === 'completed' || status === 'auto clock-out (geofence)') present++;
         else if (['absent', 'missed schedule', 'did not attend', 'missed shift', 'did_not_attend', 'absent today'].includes(status)) absent++;
         else {
           if (record.time_in && record.time_in !== '--:--') present++;
@@ -223,16 +223,14 @@ export default function HomeScreen({ navigation }) {
         const hasClockOut = record && record.time_out && record.time_out !== '--:--' && record.time_out !== null;
 
         let computedStatus = 'SCHEDULED';
-            
-            if (hasClockOut) {
-              const dbStatus = (record?.status || '').toLowerCase();
-              if (dbStatus.includes('early') || dbStatus.includes('clock out') || dbStatus.includes('departure')) {
-                computedStatus = 'COMPLETED - EARLY CLOCK OUT';
-              } else {
-                
-                computedStatus = 'COMPLETED';
-              }
-            } else if (isPassed) {
+
+if (hasClockOut) {
+  
+  const outMins = parseMins(record.time_out);
+  const isEarlyByTime = endMins > 0 && outMins > 0 && outMins < endMins - 5;
+
+  computedStatus = isEarlyByTime ? 'COMPLETED - EARLY CLOCK OUT' : 'COMPLETED';
+} else if (isPassed) {
               if (hasClockIn && !hasClockOut) {
                 computedStatus = 'MISSING CLOCK-OUT';
               } else if (hasClockIn && hasClockOut) {
@@ -281,7 +279,7 @@ export default function HomeScreen({ navigation }) {
       return { 
         canClockIn: false, 
         // CRITICAL VALIDATION: If shift is done (isPassed is true), canClockOut is strictly FALSE so button is unclickable
-        canClockOut: isClockedIn && !isClockedOut && !isPassed, 
+        canClockOut: isClockedIn && !isClockedOut,
         todayRecord: { ...todayRecord, time_in: todayRecord.time_in || '--:--', time_out: todayRecord.time_out || '--:--' } 
       };
     } else { 
@@ -385,17 +383,46 @@ export default function HomeScreen({ navigation }) {
   }, [allTodaySchedules, todaySchedule, colors.primary, currentMinutes]);
 
   const captureSelfie = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Camera permission needed'); return null; }
-    
-    
-    const result = await ImagePicker.launchCameraAsync({ 
-      quality: 0.2, 
-      allowsEditing: true,
-      aspect: [3, 4]
-    });
-    return !result.canceled ? result.assets[0].uri : null;
-  };
+  const { status } = await ImagePicker.requestCameraPermissionsAsync();
+  if (status !== 'granted') {
+    Alert.alert('Camera permission needed', 'Please allow camera access to clock in.');
+    return null;
+  }
+
+  const result = await ImagePicker.launchCameraAsync({
+    quality: 0.45,        
+    cameraType: 'front',
+    allowsEditing: false,
+    exif: false,          
+  });
+
+  if (result.canceled || !result.assets || !result.assets[0]) return null;
+
+  let asset = result.assets[0];
+  const MAX_BYTES = 4 * 1024 * 1024; 
+
+  
+  if (asset.fileSize && asset.fileSize > MAX_BYTES) {
+    try {
+      const { manipulateAsync, SaveFormat } = require('expo-image-manipulator');
+      const resized = await manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 1080 } }],    
+        { compress: 0.55, format: SaveFormat.JPEG }
+      );
+      return resized.uri;
+    } catch (err) {
+      console.error('Selfie compression failed:', err);
+      Alert.alert(
+        'Photo Too Large',
+        'Your photo could not be compressed. In your phone\'s Camera settings, please reduce the photo resolution, or step back so the subject is smaller in the frame.'
+      );
+      return null;
+    }
+  }
+
+  return asset.uri;
+};
 
   const computeMonthlyStats = useCallback((historyList, scheduleList, monthStr) => {
     const result = calculateStatsForMonth(historyList, scheduleList, monthStr);
@@ -587,21 +614,36 @@ export default function HomeScreen({ navigation }) {
   }, [monthlySummaries, modalDateFilter]);
 
   const getModalStatusStyle = (sched) => {
-    const status = (sched.computedStatus || sched.attendance_status || '').toUpperCase();
-    if (status.includes('MISSING CLOCK-OUT')) return { label: 'MISSING CLOCK-OUT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
-    else if (status.includes('MISSED SHIFT') || status.includes('ABSENT') || status.includes('DID NOT ATTEND') || status.includes('MISSED SCHEDULE')) return { label: 'MISSED SCHEDULE', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
-    else if (status.includes('COMPLETED') || status.includes('PRESENT')) return { label: 'COMPLETED', bg: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)', text: isLight ? '#059669' : '#34D399' };
-    else if (status.includes('IN PROGRESS') || status.includes('LATE')) return { label: status, bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
-    else return { label: 'SCHEDULED', bg: isLight ? '#EFF6FF' : 'rgba(37, 99, 235, 0.15)', text: isLight ? '#2563EB' : '#60A5FA' };
-  };
+  const status = (sched.computedStatus || sched.attendance_status || '').toUpperCase();
+
+  if (status.includes('MISSING CLOCK-OUT')) {
+    return { label: 'MISSING CLOCK-OUT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+  }
+  else if (status.includes('MISSED SHIFT') || status.includes('ABSENT') || status.includes('DID NOT ATTEND') || status.includes('MISSED SCHEDULE')) {
+    return { label: 'MISSED SCHEDULE', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
+  }
+  else if (status.includes('EARLY') || status.includes('CLOCK OUT') || status.includes('DEPARTURE')) {
+    
+    return { label: 'EARLY CLOCK-OUT', bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#B45309' : '#FBBF24' };
+  }
+  else if (status.includes('COMPLETED') || status.includes('PRESENT')) {
+    return { label: 'COMPLETED', bg: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)', text: isLight ? '#059669' : '#34D399' };
+  }
+  else if (status.includes('IN PROGRESS') || status.includes('LATE')) {
+    return { label: status, bg: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)', text: isLight ? '#D97706' : '#FBBF24' };
+  }
+  else {
+    return { label: 'SCHEDULED', bg: isLight ? '#EFF6FF' : 'rgba(37, 99, 235, 0.15)', text: isLight ? '#2563EB' : '#60A5FA' };
+  }
+};
 
   const finalCanClockIn = todaySchedule !== null && attendanceStatus.canClockIn;
   const finalCanClockOut = todaySchedule !== null && attendanceStatus.canClockOut;
 
-  const isPendingCorrection = 
-  currentSchedule?.attendance_status === 'PENDING' || 
-  currentSchedule?.attendance_record_status === 'Pending' ||
-  attendance?.correction_status === 'pending';
+    const isPendingCorrection = 
+    todaySchedule?.attendance_status === 'PENDING' || 
+    todaySchedule?.attendance_record_status === 'Pending' ||
+    attendanceStatus.todayRecord?.correction_status === 'pending';
 
 
 const canClockOutNow = finalCanClockOut && !isPendingCorrection;
@@ -657,19 +699,23 @@ const canClockOutNow = finalCanClockOut && !isPendingCorrection;
                   let statusBadgeTextColor = isLight ? '#475569' : '#CBD5E1';
 
                   if (shiftStatus.includes('MISS') || shiftStatus.includes('ABSENT') || shiftStatus.includes('DID NOT ATTEND')) {
-                    statusBadgeStyle = { backgroundColor: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)' };
-                    statusBadgeTextColor = isLight ? '#DC2626' : '#F87171';
-                  } else if (shiftStatus.includes('IN PROGRESS') || shiftStatus.includes('LATE')) {
-                    statusBadgeStyle = styles.statusInProgress;
-                    statusBadgeTextColor = isLight ? '#059669' : '#34D399';
-                  } else if (shiftStatus.includes('COMPLETED') || shiftStatus.includes('PRESENT') || shiftStatus.includes('EARLY') || shiftStatus.includes('CLOCK OUT')) {
-                    // FORCE TEXT TO READ 'COMPLETED' WITH A GREEN THEME
-                    shiftStatus = 'COMPLETED';
-                    statusBadgeStyle = { backgroundColor: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)' };
-                    statusBadgeTextColor = isLight ? '#059669' : '#34D399';
-                  } else { 
-                    shiftStatus = 'SCHEDULED'; 
-                  }
+  statusBadgeStyle = { backgroundColor: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)' };
+  statusBadgeTextColor = isLight ? '#DC2626' : '#F87171';
+} else if (shiftStatus.includes('IN PROGRESS') || shiftStatus.includes('LATE')) {
+  statusBadgeStyle = styles.statusInProgress;
+  statusBadgeTextColor = isLight ? '#059669' : '#34D399';
+} else if (shiftStatus.includes('EARLY') || shiftStatus.includes('CLOCK OUT') || shiftStatus.includes('DEPARTURE')) {
+ 
+  shiftStatus = 'EARLY CLOCK-OUT';
+  statusBadgeStyle = { backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)' };
+  statusBadgeTextColor = isLight ? '#B45309' : '#FBBF24';
+} else if (shiftStatus.includes('COMPLETED') || shiftStatus.includes('PRESENT')) {
+  shiftStatus = 'COMPLETED';
+  statusBadgeStyle = { backgroundColor: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)' };
+  statusBadgeTextColor = isLight ? '#059669' : '#34D399';
+} else { 
+  shiftStatus = 'SCHEDULED'; 
+}
 
                   return (
                     <>

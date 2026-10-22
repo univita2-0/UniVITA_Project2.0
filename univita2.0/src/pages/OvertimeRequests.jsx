@@ -138,15 +138,10 @@ const OvertimeRequests = () => {
   };
 
   const getScenarioLabel = (scenario) => {
-    switch (scenario) {
-      case 'future': return 'Future Date';
-      case 'ongoing': return 'Ongoing Shift';
-      case 'after_shift': return 'After Shift';
-      case 'early_ot': return 'Early OT';
-      case 'normal_ot': return 'Normal OT';
-      default: return scenario || '—';
-    }
-  };
+  if (scenario === 'early_ot') return 'Early OT';
+  if (scenario === 'normal_ot') return 'Normal OT';
+  return scenario || '—';
+};
 
   // 1) Apply search filter first
   const searchFiltered = historyRequests.filter(r =>

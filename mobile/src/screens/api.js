@@ -110,13 +110,15 @@ const parseUploadResult = (uploadResult) => {
   }
 };
 
-// Helper: resolve clean MIME type from filename
+
 const getMimeTypeFromUri = (uri, customName = null) => {
   const filename = customName || uri?.split('/')?.pop() || '';
   const ext = filename.split('.').pop()?.toLowerCase();
   switch (ext) {
     case 'pdf': return 'application/pdf';
     case 'png': return 'image/png';
+    case 'webp': return 'image/webp';
+    case 'heic': return 'image/heic';
     case 'doc': return 'application/msword';
     case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     case 'jpeg':
@@ -586,34 +588,38 @@ export const submitLeaveRequest = async (payload) => {
     const imageObj = payload.image || payload.attachment;
     const imageUri = imageObj ? (typeof imageObj === 'string' ? imageObj : imageObj.uri) : null;
 
-    if (imageUri) {
-      const mimeType = getMimeTypeFromUri(imageUri, typeof imageObj === 'object' ? imageObj.name : null);
-      const uploadResult = await uploadWithTimeout(`${API_URL}/leave-requests`, imageUri, {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'image',
-        mimeType,
-        headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
-        parameters: {
-          type: String(payload.type || ''),
-          reason: String(payload.reason || ''),
-          request_date: String(payload.request_date || ''),
-          duration: String(payload.duration || 'Whole Day'),
-          is_paid: String(payload.is_paid || '1')
-        }
-      });
-      return parseUploadResult(uploadResult);
-    } else {
-      let headers = await getAuthHeaders();
-      const response = await apiFetch(`${API_URL}/leave-requests`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-      return await handleResponse(response);
+    
+    if (!imageUri) {
+      return { success: false, message: 'An attachment (Image/PDF/DOC) is strictly required.' };
     }
+
+    const mimeType = getMimeTypeFromUri(imageUri, typeof imageObj === 'object' ? imageObj.name : null);
+    
+    
+    const requestsPayload = Array.isArray(payload.requests) ? payload.requests : [];
+
+    const uploadResult = await uploadWithTimeout(`${API_URL}/leave-requests`, imageUri, {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'image',
+      mimeType,
+      headers: { 
+        Authorization: `Bearer ${token || ''}`, 
+        Accept: 'application/json' 
+      },
+      parameters: {
+        type: String(payload.type || ''),
+        reason: String(payload.reason || '').trim(),
+        
+        requests: JSON.stringify(requestsPayload), 
+        is_paid: String(payload.is_paid || '1')
+      }
+    });
+    
+    return parseUploadResult(uploadResult);
   } catch (error) {
-    return { success: false, message: "Server unreachable" };
+    console.error("Submit Leave Request Error:", error);
+    return { success: false, message: "Server unreachable. Please check your connection." };
   }
 };
 

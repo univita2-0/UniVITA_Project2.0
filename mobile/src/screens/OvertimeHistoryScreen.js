@@ -77,12 +77,9 @@ const getStatusTheme = (status, isLight) => {
 };
 
 const getScenarioLabel = (scenario) => {
-  switch (scenario) {
-    case 'future': return 'Future Date';
-    case 'ongoing': return 'Ongoing Shift (extend)';
-    case 'after_shift': return 'After Shift (extra)';
-    default: return scenario || '—';
-  }
+  if (scenario === 'early_ot') return 'Early OT';
+  if (scenario === 'normal_ot') return 'Normal OT';
+  return scenario || '—';
 };
 
 const ITEMS_PER_PAGE = 10;

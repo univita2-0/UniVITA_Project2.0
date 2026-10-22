@@ -245,6 +245,11 @@ const ROOM_COORDINATES = {
   }
 };
 
+const ALLOWED_ROOMS = {
+  '3': ['Classroom', 'AHA Room', 'Private Room', 'Operating Room', 'Delivery Room', 'NICU', 'ICU', 'Library', 'Breakout Room 1', 'Breakout Room 2', 'Breakout Room 3', 'Faculty Room', 'Main Entrance'],
+  '5': ['Lounge / IV Drip', 'Operating Room', 'Delivery Room', 'ICU', 'Educ Head', 'Executive', 'Conference', 'Creatives', 'Debrief Room', 'Lobby', 'Entrance', 'AHA Room', 'Classroom 1', 'Classroom 2', 'HR / Admin', 'Pantry', 'Toilet']
+};
+
 const getRoomCoords = (floor, room) => {
   const f = String(floor).trim();
   const r = String(room).trim();
@@ -553,7 +558,7 @@ const selfieStorage = multer.diskStorage({
     cb(null, unique + '.jpg');
   }
 });
-const multerSelfie = multer({ storage: selfieStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imageFilter });
+const multerSelfie = multer({ storage: selfieStorage, limits: { fileSize: 8 * 1024 * 1024 }, fileFilter: imageFilter });
 
 const correctionDir = path.join(uploadsPath, 'corrections');
 if (!fs.existsSync(correctionDir)) fs.mkdirSync(correctionDir, { recursive: true });
@@ -1091,13 +1096,14 @@ const GEO_EXIT_SUBQUERY = `
       AND t1.schedule_id = s.id
       AND t1.is_inside_campus = 0
       AND t1.location_enabled = 1
-      AND DATE(t1.ping_time) = s.date -- ✅ Prevents picking up next-day pings
+      AND DATE(t1.ping_time) = s.date 
       AND t1.ping_time > (
-        SELECT MAX(t2.ping_time)      -- ✅ Uses MAX to ignore lunch break exits
+        SELECT MAX(t2.ping_time)      
         FROM instructor_location_tracking t2
         WHERE t2.employee_id = u.employee_id
           AND t2.schedule_id = s.id
           AND t2.is_inside_campus = 1
+          AND DATE(t2.ping_time) = s.date  -- ✅ ADD THIS LINE
       )
   )
 `;
@@ -1402,6 +1408,8 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
   const attachmentPath = uploadedFile ? `/uploads/corrections/${uploadedFile.filename}` : null;
   const phNow = getPHDateTime();
 
+  
+
  
   if (!uploadedFile) {
     return res.status(400).json({
@@ -1478,145 +1486,171 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
     }
     const resolvedEmployeeId = userRows[0].employee_id;
 
-    // Fix 10.3 — cap pending correction requests per user (matches appeal & OT caps)
+        
     const MAX_PENDING_CORRECTIONS = 10;
-    const [pendingCorrRows] = await db.promise().query(
-      `SELECT COUNT(*) AS c FROM attendance_corrections
-        WHERE (user_id = ? OR user_id = ?) AND status = 'pending'`,
-      [resolvedEmployeeId, userId]
-    );
-    if (pendingCorrRows[0].c >= MAX_PENDING_CORRECTIONS) {
-      return res.status(429).json({
-        success: false,
-        message: `You already have ${MAX_PENDING_CORRECTIONS} pending correction requests. Please wait for HR review.`
-      });
-    }
+    const connection = await db.promise().getConnection();
 
-    // ✅ FIX 9 — Now fetch start_time / end_time for window validation
-    let scheduleRow;
-    if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
-      const [schedRows] = await db.promise().query(
-        `SELECT id, start_time, end_time FROM schedules
-          WHERE (user_id = ? OR user_id = ?) AND date = ?
-          ORDER BY start_time ASC`,
-        [resolvedEmployeeId, userId, date]
+    try {
+      await connection.beginTransaction();
+
+      
+      await connection.query(`SELECT id FROM users WHERE id = ? FOR UPDATE`, [userId]);
+
+      
+      const [pendingCorrRows] = await connection.query(
+        `SELECT COUNT(*) AS c FROM attendance_corrections
+          WHERE (user_id = ? OR user_id = ?) AND status = 'pending'`,
+        [resolvedEmployeeId, userId]
       );
-      if (schedRows.length === 0) {
-        return res.status(400).json({
+      if (pendingCorrRows[0].c >= MAX_PENDING_CORRECTIONS) {
+        await connection.rollback();
+        return res.status(429).json({
           success: false,
-          message: 'No schedule found for this date. Correction not allowed.'
+          message: `You already have ${MAX_PENDING_CORRECTIONS} pending correction requests. Please wait for HR review.`
         });
       }
-      scheduleRow = schedRows[0];
-      schedule_id = scheduleRow.id;
-    } else {
-      const [schedVerify] = await db.promise().query(
-        `SELECT id, start_time, end_time FROM schedules
-          WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?`,
-        [schedule_id, resolvedEmployeeId, userId, date]
+
+      
+      let scheduleRow;
+      if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
+        const [schedRows] = await connection.query(
+          `SELECT id, start_time, end_time FROM schedules
+            WHERE (user_id = ? OR user_id = ?) AND date = ?
+            ORDER BY start_time ASC`,
+          [resolvedEmployeeId, userId, date]
+        );
+        if (schedRows.length === 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'No schedule found for this date. Correction not allowed.'
+          });
+        }
+        scheduleRow = schedRows[0];
+        schedule_id = scheduleRow.id;
+      } else {
+        const [schedVerify] = await connection.query(
+          `SELECT id, start_time, end_time FROM schedules
+            WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?`,
+          [schedule_id, resolvedEmployeeId, userId, date]
+        );
+        if (schedVerify.length === 0) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid schedule selected for this date.'
+          });
+        }
+        scheduleRow = schedVerify[0];
+      }
+
+      
+      const toMinutes = (t) => {
+        const [h, m] = String(t).split(':').map(Number);
+        return (h || 0) * 60 + (m || 0);
+      };
+      const reqMin     = toMinutes(normalizedTime);
+      const shiftStart = toMinutes(scheduleRow.start_time);
+      const shiftEnd   = toMinutes(scheduleRow.end_time);
+
+      if (type === 'clock_in') {
+       
+        if (reqMin < shiftStart - 120 || reqMin > shiftEnd) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Clock-in correction must fall within the shift window (${formatTo12Hour(scheduleRow.start_time)} – ${formatTo12Hour(scheduleRow.end_time)}), up to 2 hours before start.`
+          });
+        }
+      } else if (type === 'clock_out') {
+        
+        if (reqMin < shiftStart || reqMin > shiftEnd + 240) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Clock-out correction must be after shift start (${formatTo12Hour(scheduleRow.start_time)}) and no later than 4 hours after shift end (${formatTo12Hour(scheduleRow.end_time)}).`
+          });
+        }
+      } else if (type === 'early_out') {
+        
+        if (reqMin < shiftStart || reqMin >= shiftEnd) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Early departure time must be within the shift, strictly before the scheduled end (${formatTo12Hour(scheduleRow.end_time)}).`
+          });
+        }
+      }
+
+      
+      const isClockInRequest = type === 'clock_in';
+      const [existingCorr] = await connection.query(
+        `SELECT id FROM attendance_corrections
+          WHERE (user_id = ? OR user_id = ?)
+            AND attendance_date = ?
+            AND schedule_id = ?
+            AND status IN ('pending', 'approved')
+            AND ${isClockInRequest
+                   ? 'requested_clock_in  IS NOT NULL'
+                   : 'requested_clock_out IS NOT NULL'}`,
+        [userId, resolvedEmployeeId, date, schedule_id]
       );
-      if (schedVerify.length === 0) {
-        return res.status(400).json({
+
+      if (existingCorr.length > 0) {
+        await connection.rollback();
+        return res.status(409).json({
           success: false,
-          message: 'Invalid schedule selected for this date.'
+          message: `You already have a pending or approved ${type.replace('_', ' ')} request for this specific shift.`
         });
       }
-      scheduleRow = schedVerify[0];
-    }
 
-    // ✅ FIX 10 — Time must fall inside a sane window around the shift
-    const toMinutes = (t) => {
-      const [h, m] = String(t).split(':').map(Number);
-      return (h || 0) * 60 + (m || 0);
-    };
-    const reqMin     = toMinutes(normalizedTime);
-    const shiftStart = toMinutes(scheduleRow.start_time);
-    const shiftEnd   = toMinutes(scheduleRow.end_time);
-
-    if (type === 'clock_in') {
-      // 2 hours before shift → end of shift
-      if (reqMin < shiftStart - 120 || reqMin > shiftEnd) {
-        return res.status(400).json({
-          success: false,
-          message: `Clock-in correction must fall within the shift window (${formatTo12Hour(scheduleRow.start_time)} – ${formatTo12Hour(scheduleRow.end_time)}), up to 2 hours before start.`
-        });
-      }
-    } else if (type === 'clock_out') {
-      // Shift start → 4 hours after shift end (covers "forgot to clock out")
-      if (reqMin < shiftStart || reqMin > shiftEnd + 240) {
-        return res.status(400).json({
-          success: false,
-          message: `Clock-out correction must be after shift start (${formatTo12Hour(scheduleRow.start_time)}) and no later than 4 hours after shift end (${formatTo12Hour(scheduleRow.end_time)}).`
-        });
-      }
-    } else if (type === 'early_out') {
-      // Early departure must be strictly before scheduled end
-      if (reqMin < shiftStart || reqMin >= shiftEnd) {
-        return res.status(400).json({
-          success: false,
-          message: `Early departure time must be within the shift, strictly before the scheduled end (${formatTo12Hour(scheduleRow.end_time)}).`
-        });
-      }
-    }
-
-    const isClockInRequest = type === 'clock_in';
-    const [existingCorr] = await db.promise().query(
-      `SELECT id FROM attendance_corrections
-        WHERE (user_id = ? OR user_id = ?)
-          AND attendance_date = ?
-          AND schedule_id = ?
-          AND status IN ('pending', 'approved')
-          AND ${isClockInRequest
-                 ? 'requested_clock_in  IS NOT NULL'
-                 : 'requested_clock_out IS NOT NULL'}`,
-      [userId, resolvedEmployeeId, date, schedule_id]
-    );
-
-    if (existingCorr.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: `You already have a pending or approved ${type.replace('_', ' ')} request for this specific shift.`
-      });
-    }
-
-    const [insertResult] = await db.promise().query(
-      `INSERT INTO attendance_corrections
-         (user_id, attendance_date, schedule_id,
-          requested_clock_in, requested_clock_out,
-          reason, selfie_url, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [
-        userId,
-        date,
-        schedule_id,
-        isClockInRequest  ? normalizedTime : null,
-        !isClockInRequest ? normalizedTime : null,
-        trimmedReason,
-        attachmentPath,
-        phNow
-      ]
-    );
-
-    await db.promise().query(
-      `UPDATE attendance
-          SET correction_requested = 1,
-              correction_status    = 'pending',
-              status               = 'pending'
-        WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
-      [resolvedEmployeeId, userId, schedule_id]
-    );
-
-    if (type === 'clock_out' || type === 'early_out') {
-      await db.promise().query(
-        "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
-        [resolvedEmployeeId]
+      
+      const [insertResult] = await connection.query(
+        `INSERT INTO attendance_corrections
+           (user_id, attendance_date, schedule_id,
+            requested_clock_in, requested_clock_out,
+            reason, selfie_url, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        [
+          userId,
+          date,
+          schedule_id,
+          isClockInRequest  ? normalizedTime : null,
+          !isClockInRequest ? normalizedTime : null,
+          trimmedReason,
+          attachmentPath,
+          phNow
+        ]
       );
+
+      
+      await connection.query(
+        `UPDATE attendance
+            SET correction_requested = 1,
+                correction_status    = 'pending',
+                status               = 'pending'
+          WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
+        [resolvedEmployeeId, userId, schedule_id]
+      );
+
+      
+      if (type === 'clock_out' || type === 'early_out') {
+        await connection.query(
+          "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
+          [resolvedEmployeeId]
+        );
+      }
+
+      await connection.commit();
+
+      logAction(userId, 'SUBMIT_CORRECTION', 'attendance_correction', insertResult.insertId, req);
+      return res.json({ success: true, message: 'Correction request submitted. HR will review.' });
+    } catch (txErr) {
+      await connection.rollback();
+      throw txErr;  
+    } finally {
+      connection.release();
     }
-
-    
-    logAction(userId, 'SUBMIT_CORRECTION', 'attendance_correction', insertResult.insertId, req);
-
-    res.json({ success: true, message: 'Correction request submitted. HR will review.' });
   } catch (err) {
     console.error("Correction request error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -1802,7 +1836,15 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
 
   const { date: today } = getPHTime();
 
-  // Fix 10.2a — date must be present before comparison (undefined > today is false)
+
+  if (!req.file) {
+  return res.status(400).json({
+    success: false,
+    error: "Supporting proof (image/PDF/DOC) is required for appeals."
+  });
+}
+
+ 
   if (!date) {
     return res.status(400).json({ success: false, error: "Date is required." });
   }
@@ -1813,19 +1855,19 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
     return res.status(400).json({ success: false, error: "Appeals are only allowed for the last 30 days." });
   }
 
-  // Fix 10.2b — reason presence + length window (mirrors corrections & OT endpoints)
+  
   if (!reason || !String(reason).trim()) {
     return res.status(400).json({ success: false, error: "Reason is required." });
   }
   const trimmedAppealReason = String(reason).trim();
-  if (trimmedAppealReason.length < 5) {
-    return res.status(400).json({ success: false, error: "Please provide a more detailed reason (minimum 5 characters)." });
-  }
+  if (trimmedAppealReason.length < 10) {
+  return res.status(400).json({ success: false, error: "Please provide a more detailed reason (minimum 10 characters)." });
+}
   if (trimmedAppealReason.length > 500) {
     return res.status(400).json({ success: false, error: "Reason is too long (maximum 500 characters)." });
   }
 
-  // Fix 10.2c — optional time_in / time_out format + ordering
+  
   const HHMM_APPEAL_REGEX = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
   if (time_in && !HHMM_APPEAL_REGEX.test(String(time_in).trim())) {
     return res.status(400).json({ success: false, error: "Invalid time_in format. Expected HH:mm or HH:mm:ss." });
@@ -1849,66 +1891,87 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
     if (userRows.length === 0) return res.status(404).json({ success: false, error: "User not found or inactive." });
     const employee_id = userRows[0].employee_id;
 
-    // Fix 10.2d — cap pending appeals per user (matches MAX_PENDING_OT of 10)
+       
     const MAX_PENDING_APPEALS = 10;
-    const [pendingAppealRows] = await db.promise().query(
-      `SELECT COUNT(*) AS c FROM attendance_appeals
-        WHERE (user_id = ? OR user_id = ?) AND status = 'pending'`,
-      [employee_id, userId]
-    );
-    if (pendingAppealRows[0].c >= MAX_PENDING_APPEALS) {
-      return res.status(429).json({
-        success: false,
-        error: `You already have ${MAX_PENDING_APPEALS} pending appeals. Please wait for HR to review them.`
-      });
-    }
+    const connection = await db.promise().getConnection();
 
-    // Resolve or validate target schedule_id
-    let targetScheduleId = schedule_id;
-    if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
-      const [schedRows] = await db.promise().query(
-        "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
-        [employee_id, userId, date]
+    try {
+      await connection.beginTransaction();
+
+      
+      await connection.query(`SELECT id FROM users WHERE id = ? FOR UPDATE`, [userId]);
+
+      
+      const [pendingAppealRows] = await connection.query(
+        `SELECT COUNT(*) AS c FROM attendance_appeals
+          WHERE (user_id = ? OR user_id = ?) AND status = 'pending'`,
+        [employee_id, userId]
       );
-      if (schedRows.length === 0) {
-        return res.status(400).json({ success: false, error: "No schedule found for this date. Cannot submit appeal." });
+      if (pendingAppealRows[0].c >= MAX_PENDING_APPEALS) {
+        await connection.rollback();
+        return res.status(429).json({
+          success: false,
+          error: `You already have ${MAX_PENDING_APPEALS} pending appeals. Please wait for HR to review them.`
+        });
       }
-      targetScheduleId = schedRows[0].id;
-    } else {
-      const [schedVerify] = await db.promise().query(
-        "SELECT id FROM schedules WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?",
-        [targetScheduleId, employee_id, userId, date]
+
+      
+      let targetScheduleId = schedule_id;
+      if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
+        const [schedRows] = await connection.query(
+          "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
+          [employee_id, userId, date]
+        );
+        if (schedRows.length === 0) {
+          await connection.rollback();
+          return res.status(400).json({ success: false, error: "No schedule found for this date. Cannot submit appeal." });
+        }
+        targetScheduleId = schedRows[0].id;
+      } else {
+        const [schedVerify] = await connection.query(
+          "SELECT id FROM schedules WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?",
+          [targetScheduleId, employee_id, userId, date]
+        );
+        if (schedVerify.length === 0) {
+          await connection.rollback();
+          return res.status(400).json({ success: false, error: "Invalid schedule selected for this date." });
+        }
+      }
+
+      
+      const [existingAppeal] = await connection.query(
+        `SELECT id FROM attendance_appeals 
+         WHERE (user_id = ? OR user_id = ?) AND date = ? AND schedule_id = ? AND status IN ('pending', 'approved')`,
+        [employee_id, userId, date, targetScheduleId]
       );
-      if (schedVerify.length === 0) {
-        return res.status(400).json({ success: false, error: "Invalid schedule selected for this date." });
+
+      if (existingAppeal.length > 0) {
+        await connection.rollback();
+        return res.status(409).json({ success: false, error: "You already have a pending or approved appeal for this specific shift." });
       }
+
+      const image_url = req.file ? `/uploads/attendance_appeals/${req.file.filename}` : null;
+      const appealTimeIn = time_in ? normalizeHHMM(time_in) : null;
+      const appealTimeOut = time_out ? normalizeHHMM(time_out) : null;
+
+      
+      const [result] = await connection.query(
+        `INSERT INTO attendance_appeals 
+          (user_id, date, schedule_id, reason, image_url, status, requested_time_in, requested_time_out, submitted_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+        [employee_id, date, targetScheduleId, trimmedAppealReason, image_url, appealTimeIn, appealTimeOut, phNow]
+      );
+
+      await connection.commit();
+
+      logAction(req.user.id, 'SUBMIT_APPEAL', 'attendance_appeal', result.insertId, req);
+      return res.json({ success: true, message: 'Appeal submitted successfully.' });
+    } catch (txErr) {
+      await connection.rollback();
+      throw txErr;  
+    } finally {
+      connection.release();
     }
-
-    // Check for existing pending or approved appeal on this shift
-    const [existingAppeal] = await db.promise().query(
-      `SELECT id FROM attendance_appeals 
-       WHERE (user_id = ? OR user_id = ?) AND date = ? AND schedule_id = ? AND status IN ('pending', 'approved')`,
-      [employee_id, userId, date, targetScheduleId]
-    );
-
-    if (existingAppeal.length > 0) {
-      return res.status(409).json({ success: false, error: "You already have a pending or approved appeal for this specific shift." });
-    }
-
-    const image_url = req.file ? `/uploads/attendance_appeals/${req.file.filename}` : null;
-    const appealTimeIn = time_in ? normalizeHHMM(time_in) : null;
-    const appealTimeOut = time_out ? normalizeHHMM(time_out) : null;
-
-    // Explicitly stamp submitted_at with Philippine Standard Time
-    const [result] = await db.promise().query(
-      `INSERT INTO attendance_appeals 
-        (user_id, date, schedule_id, reason, image_url, status, requested_time_in, requested_time_out, submitted_at)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-      [employee_id, date, targetScheduleId, trimmedAppealReason, image_url, appealTimeIn, appealTimeOut, phNow]
-    );
-
-    logAction(req.user.id, 'SUBMIT_APPEAL', 'attendance_appeal', result.insertId, req);
-    res.json({ success: true, message: 'Appeal submitted successfully.' });
   } catch (err) {
     console.error("Appeal submission error:", err);
     res.status(500).json({ success: false, error: err.message });
@@ -2113,18 +2176,38 @@ app.put('/api/admin/leave-types/:id/toggle', authenticateToken, (req, res) => {
 // ============================================
 
 app.post('/api/leave-requests', authenticateToken, upload.single('image'), async (req, res) => {
-  const { request_date, reason, type } = req.body;
+  // 1. Parse inputs (Supports both single date and array of dates for batching)
+  const { reason, type, requests: requestsRaw, request_date, duration, is_paid } = req.body;
   const userId = req.user.id;
   const image_url = req.file ? `/uploads/leave_images/${req.file.filename}` : null;
-  const duration = req.body.duration || 'Whole Day';
   const phNow = getPHDateTime();
+  const isPaidInt = is_paid ? parseInt(is_paid, 10) : 1;
 
-  // ✅ FIX 1 — Presence check (whitespace-safe; original `!reason` accepted "   ")
-  if (!request_date || !reason || !type || !reason.trim() || !type.trim()) {
-    return res.status(400).json({ success: false, message: "Date, reason, and leave type are required." });
+  let requests = [];
+  if (requestsRaw) {
+    try {
+      requests = typeof requestsRaw === 'string' ? JSON.parse(requestsRaw) : requestsRaw;
+    } catch (e) {
+      return res.status(400).json({ success: false, message: "Invalid requests payload format." });
+    }
+  } else if (request_date) {
+    // Fallback for old mobile app versions
+    requests = [{ date: request_date, duration: duration || 'Whole Day' }];
   }
 
-  // ✅ FIX 2 — Reason length window (min 10, max 500 — mirrors corrections / appeals)
+  if (!Array.isArray(requests) || requests.length === 0) {
+    return res.status(400).json({ success: false, message: "At least one request date is required." });
+  }
+  
+  if (requests.length > 30) {
+    return res.status(400).json({ success: false, message: "Cannot request more than 30 days at once." });
+  }
+
+  // 2. Generic Validation (applies to all dates)
+  if (!reason || !type || !reason.trim() || !type.trim()) {
+    return res.status(400).json({ success: false, message: "Reason and leave type are required." });
+  }
+
   const trimmedReason = reason.trim();
   if (trimmedReason.length < 10) {
     return res.status(400).json({ success: false, message: "Please provide a more detailed reason (minimum 10 characters)." });
@@ -2133,14 +2216,12 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
     return res.status(400).json({ success: false, message: "Reason is too long (maximum 500 characters)." });
   }
 
-  // ✅ FIX 3 — Leave-type length cap + normalize (defensive against forged payloads)
   const cleanType = String(type).trim();
   if (cleanType.length > 50) {
     return res.status(400).json({ success: false, message: "Leave type name is too long (maximum 50 characters)." });
   }
   const lowerType = cleanType.toLowerCase();
 
-  // ✅ FIX 4 — Attachment required (matches mobile client contract, see handleNextLeave)
   if (!req.file) {
     return res.status(400).json({
       success: false,
@@ -2148,99 +2229,56 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
     });
   }
 
-  // ✅ FIX 5 — Duration whitelist
   const ALLOWED_DURATIONS = ['Whole Day', '1st Half', '2nd Half'];
-  if (!ALLOWED_DURATIONS.includes(duration)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid duration. Must be 'Whole Day', '1st Half', or '2nd Half'."
-    });
-  }
-
-  // ✅ FIX 6 — Strict date format
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(request_date)) {
-    return res.status(400).json({ success: false, message: "Invalid date format. Expected YYYY-MM-DD." });
-  }
-  const requestDateObj = new Date(`${request_date}T00:00:00`);
-  if (isNaN(requestDateObj.getTime())) {
-    return res.status(400).json({ success: false, message: "Invalid request date." });
-  }
-
-  // ✅ FIX 7 — Retroactive rules (kept logic, now uses normalized lowerType)
   const { date: today } = getPHTime();
   const isRetroactiveAllowed = /emergency|sick/i.test(lowerType);
-  if (request_date < today && !isRetroactiveAllowed) {
-    return res.status(400).json({ success: false, message: `${cleanType} cannot be filed retroactively.` });
+
+  // 3. Pre-validate all dates
+  for (const reqItem of requests) {
+    if (!reqItem.date || !/^\d{4}-\d{2}-\d{2}$/.test(reqItem.date)) {
+      return res.status(400).json({ success: false, message: `Invalid date format for ${reqItem.date}. Expected YYYY-MM-DD.` });
+    }
+
+    const reqDuration = reqItem.duration || 'Whole Day';
+    if (!ALLOWED_DURATIONS.includes(reqDuration)) {
+      return res.status(400).json({ success: false, message: `Invalid duration '${reqDuration}' for ${reqItem.date}.` });
+    }
+
+    const requestDateObj = new Date(`${reqItem.date}T00:00:00`);
+    if (isNaN(requestDateObj.getTime())) {
+      return res.status(400).json({ success: false, message: `Invalid calendar date: ${reqItem.date}.` });
+    }
+
+    if (reqItem.date < today && !isRetroactiveAllowed) {
+      return res.status(400).json({ success: false, message: `${cleanType} cannot be filed retroactively for ${reqItem.date}.` });
+    }
+
+    if (reqItem.date < today && !isDateWithinAllowedRange(reqItem.date)) {
+      return res.status(400).json({ success: false, message: `Retroactive leaves are only allowed within the last 30 days (${reqItem.date}).` });
+    }
+
+    const daysAhead = Math.floor((requestDateObj - new Date(`${today}T00:00:00`)) / 86400000);
+    if (daysAhead > 180) {
+      return res.status(400).json({ success: false, message: `Leave requests cannot be filed more than 180 days in advance (${reqItem.date}).` });
+    }
   }
 
-  // ✅ FIX 8 — Cap retroactive emergency/sick leaves at 30 days (mirrors appeals)
-  if (request_date < today && !isDateWithinAllowedRange(request_date)) {
-    return res.status(400).json({
-      success: false,
-      message: "Retroactive leaves are only allowed within the last 30 days."
-    });
-  }
-
-  // ✅ FIX 9 — Cap forward-dating at 180 days (prevents typo years like 2099)
-  const daysAhead = Math.floor(
-    (requestDateObj - new Date(`${today}T00:00:00`)) / 86400000
-  );
-  if (daysAhead > 180) {
-    return res.status(400).json({
-      success: false,
-      message: "Leave requests cannot be filed more than 180 days in advance."
-    });
-  }
-
-  const leaveYear = parseInt(String(request_date).split('-')[0], 10) || new Date().getFullYear();
+  // 4. Database Transaction (All or Nothing)
+  const connection = await db.promise().getConnection();
+  await connection.beginTransaction();
 
   try {
-    // ------------------------------------------------------------
-    // User resolution (✅ FIX 10 — also require status='active')
-    // ------------------------------------------------------------
-    const [userRows] = await db.promise().query(
+    const [userRows] = await connection.query(
       "SELECT employee_id FROM users WHERE id = ? AND status = 'active'",
       [userId]
     );
     if (userRows.length === 0) {
+      await connection.rollback();
       return res.status(404).json({ success: false, message: "User not found or inactive." });
     }
     const employee_id = userRows[0].employee_id;
 
-    // ------------------------------------------------------------
-    // ✅ FIX 11 — Smarter conflict check: allows 1st Half + 2nd Half on same day
-    //             (mobile submits each half as a separate request row)
-    // ------------------------------------------------------------
-    const [existingReq] = await db.promise().query(
-      `SELECT id, duration FROM leave_requests
-        WHERE (user_id = ? OR user_id = ?)
-          AND request_date = ?
-          AND status IN ('Pending', 'Approved')`,
-      [employee_id, userId, request_date]
-    );
-
-    if (existingReq.length > 0) {
-      const isHalf = (d) => d === '1st Half' || d === '2nd Half';
-      const existingIsFull = existingReq.some(r => !isHalf(r.duration));
-      const newIsFull      = !isHalf(duration);
-      const sameHalf       = existingReq.some(r => r.duration === duration);
-
-      // Block any full-day conflict, or any duplicate half
-      if (existingIsFull || newIsFull || sameHalf) {
-        return res.status(409).json({
-          success: false,
-          message: sameHalf
-            ? `A ${duration} request already exists for this date.`
-            : "A request already exists for this date."
-        });
-      }
-      // Otherwise: 1st Half + 2nd Half → allowed (combines into a full day)
-    }
-
-    // ------------------------------------------------------------
-    // 3. Flexible leave-type resolution (unchanged candidate logic,
-    //    now using already-normalized cleanType/lowerType)
-    // ------------------------------------------------------------
+    // Resolve Leave Type
     const candidateNames = [cleanType];
     if (lowerType === 'pto' || lowerType === 'paid time off') {
       candidateNames.push('PTO', 'Paid Time Off', 'Vacation', 'Vacation Leave');
@@ -2256,7 +2294,7 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       candidateNames.push('Compensatory Paid Off', 'Compensatory Time Off', 'Compensatory Leave', 'CTO', 'CPO');
     }
 
-    let [typeRows] = await db.promise().query(
+    let [typeRows] = await connection.query(
       `SELECT id, name, annual_quota FROM leave_types
         WHERE LOWER(name) IN (${candidateNames.map(() => '?').join(',')})
            OR LOWER(name) LIKE ?
@@ -2270,17 +2308,16 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
     if (typeRows.length > 0) {
       leaveTypeId = typeRows[0].id;
       annualQuota = typeRows[0].annual_quota !== undefined && typeRows[0].annual_quota !== null
-        ? parseFloat(typeRows[0].annual_quota)
-        : 15;
+        ? parseFloat(typeRows[0].annual_quota) : 15;
     } else {
       try {
-        const [insertResult] = await db.promise().query(
+        const [insertResult] = await connection.query(
           "INSERT INTO leave_types (name, annual_quota, is_active) VALUES (?, 15, 1)",
           [cleanType]
         );
         leaveTypeId = insertResult.insertId;
       } catch (insertErr) {
-        const [fallbackRows] = await db.promise().query("SELECT id, annual_quota FROM leave_types LIMIT 1");
+        const [fallbackRows] = await connection.query("SELECT id, annual_quota FROM leave_types LIMIT 1");
         if (fallbackRows.length > 0) {
           leaveTypeId = fallbackRows[0].id;
           annualQuota = parseFloat(fallbackRows[0].annual_quota) || 15;
@@ -2288,46 +2325,96 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       }
     }
 
-    // ------------------------------------------------------------
-    // 4. Strict balance validation (unchanged)
-    // ------------------------------------------------------------
+    // 🚨 NEW FIX: Pre-calculate total cost per year and check balance ONCE per year
     if (leaveTypeId) {
-      await db.promise().query(
-        `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated)
-         VALUES (?, ?, ?, ?, CURDATE())`,
-        [userId, leaveTypeId, annualQuota, leaveYear]
-      );
+      const costsByYear = {};
+      for (const reqItem of requests) {
+        const reqYear = parseInt(String(reqItem.date).split('-')[0], 10) || new Date().getFullYear();
+        const reqDuration = reqItem.duration || 'Whole Day';
+        const cost = (reqDuration === '1st Half' || reqDuration === '2nd Half') ? 0.5 : 1.0;
+        
+        costsByYear[reqYear] = (costsByYear[reqYear] || 0) + cost;
+      }
 
-      const [balanceRows] = await db.promise().query(
-        `SELECT remaining_days FROM employee_leave_balances
-          WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-        [userId, leaveTypeId, leaveYear]
-      );
+      for (const [yearStr, totalCost] of Object.entries(costsByYear)) {
+        const year = parseInt(yearStr, 10);
+        
+        await connection.query(
+          `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated)
+           VALUES (?, ?, ?, ?, CURDATE())`,
+          [userId, leaveTypeId, annualQuota, year]
+        );
 
-      const currentRemaining = balanceRows.length > 0 ? parseFloat(balanceRows[0].remaining_days) : 0;
-      const requiredCost = (duration === '1st Half' || duration === '2nd Half') ? 0.5 : 1.0;
+        const [balanceRows] = await connection.query(
+          `SELECT remaining_days FROM employee_leave_balances
+            WHERE user_id = ? AND leave_type_id = ? AND year = ? FOR UPDATE`,
+          [userId, leaveTypeId, year]
+        );
 
-      if (currentRemaining < requiredCost) {
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient ${cleanType} balance. You currently have ${currentRemaining.toFixed(2)} day(s) remaining (Required: ${requiredCost} day(s)).`
-        });
+        const currentRemaining = balanceRows.length > 0 ? parseFloat(balanceRows[0].remaining_days) : 0;
+        
+        if (currentRemaining < totalCost) {
+          await connection.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient ${cleanType} balance for ${year}. You requested ${totalCost} day(s), but only have ${currentRemaining.toFixed(2)} day(s) remaining.`
+          });
+        }
       }
     }
 
-    // ------------------------------------------------------------
-    // 5. Insert leave request (✅ FIX 12 — use pre-trimmed reason & cleanType)
-    // ------------------------------------------------------------
-    const [result] = await db.promise().query(
-      `INSERT INTO leave_requests
-         (user_id, request_date, duration, is_paid, reason, type, image_url, status, submitted_at)
-       VALUES (?, ?, ?, 1, ?, ?, ?, 'Pending', ?)`,
-      [employee_id, request_date, duration, trimmedReason, cleanType, image_url, phNow]
-    );
+    // Process each day in the array
+    const insertedIds = [];
+    
+    for (const reqItem of requests) {
+      const reqDuration = reqItem.duration || 'Whole Day';
+      const reqDate = reqItem.date;
 
-    logAction(req.user.id, 'SUBMIT_LEAVE', 'leave_request', result.insertId, req);
-    res.json({ success: true, message: "Leave request submitted successfully." });
+      // Conflict Check
+      const [existingReq] = await connection.query(
+        `SELECT id, duration FROM leave_requests
+          WHERE (user_id = ? OR user_id = ?)
+            AND request_date = ?
+            AND status IN ('Pending', 'Approved')`,
+        [employee_id, userId, reqDate]
+      );
+
+      if (existingReq.length > 0) {
+        const isHalf = (d) => d === '1st Half' || d === '2nd Half';
+        const existingIsFull = existingReq.some(r => !isHalf(r.duration));
+        const newIsFull      = !isHalf(reqDuration);
+        const sameHalf       = existingReq.some(r => r.duration === reqDuration);
+
+        if (existingIsFull || newIsFull || sameHalf) {
+          await connection.rollback();
+          return res.status(409).json({
+            success: false,
+            message: sameHalf
+              ? `A ${reqDuration} request already exists for ${reqDate}.`
+              : `A full-day request already exists for ${reqDate}.`
+          });
+        }
+      }
+
+      // Insert Row
+      const [result] = await connection.query(
+        `INSERT INTO leave_requests
+           (user_id, request_date, duration, is_paid, reason, type, image_url, status, submitted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?)`,
+        [employee_id, reqDate, reqDuration, isPaidInt, trimmedReason, cleanType, image_url, phNow]
+      );
+      
+      insertedIds.push(result.insertId);
+    }
+
+    await connection.commit();
+    
+    // ✅ FIX: Log the actual inserted request IDs instead of null
+    logAction(req.user.id, 'SUBMIT_LEAVE_BATCH', 'leave_request', insertedIds.join(','), req);
+    res.json({ success: true, message: "Leave request(s) submitted successfully." });
+
   } catch (err) {
+    await connection.rollback();
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ success: false, message: "Duplicate entry detected." });
     }
@@ -2336,6 +2423,8 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       success: false,
       message: err.message || "Server connection failed while submitting request."
     });
+  } finally {
+    connection.release();
   }
 });
 
@@ -3882,6 +3971,39 @@ app.post('/api/scanners', authenticateToken, async (req, res) => {
   }
 });
 
+app.put('/api/scanners/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  const { id } = req.params;
+  const { scanner_id, assigned_room, assigned_floor } = req.body;
+
+  if (!scanner_id || !assigned_room || !assigned_floor) {
+    return res.status(400).json({ success: false, message: "Scanner ID, assigned room, and floor are required." });
+  }
+
+  try {
+    // Check if the new scanner_id is already taken by a DIFFERENT scanner
+    const [existing] = await db.promise().query(
+      "SELECT id FROM scanners WHERE scanner_id = ? AND id != ?",
+      [scanner_id.trim(), id]
+    );
+    if (existing.length > 0) {
+      return res.status(409).json({ success: false, message: "Another scanner already uses this ID." });
+    }
+
+    await db.promise().query(
+      "UPDATE scanners SET scanner_id = ?, assigned_room = ?, assigned_floor = ? WHERE id = ?",
+      [scanner_id.trim(), assigned_room.trim(), assigned_floor.trim(), id]
+    );
+
+    logAction(req.user.id, 'UPDATE_SCANNER', 'scanner', id, req);
+    res.json({ success: true, message: "Scanner updated successfully." });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.delete('/api/scanners/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
@@ -3979,6 +4101,10 @@ app.put('/api/appointments/:id/status', authenticateToken, (req, res) => {
 
   if (adminNotes && adminNotes.length > 500) {
     return res.status(400).json({ success: false, message: "Admin notes must be 500 characters or less." });
+  }
+
+  if (status === 'REJECTED' && (!adminNotes || !adminNotes.trim())) {
+    return res.status(400).json({ success: false, message: "A reason is required when rejecting a request." });
   }
 
   if (!['APPROVED', 'REJECTED'].includes(status)) {
@@ -6562,13 +6688,19 @@ app.put('/api/visitor-requests/:id/arrive', authenticateToken, async (req, res) 
   const { id } = req.params;
   const { floor, destination, ble_id } = req.body; 
 
-  if (!destination || !destination.trim() || !ble_id || !ble_id.trim() || !floor) {
-    return res.status(400).json({ success: false, message: "Floor, destination room, and BLE tag are required." });
-  }
+      if (!destination || !destination.trim() || !ble_id || !ble_id.trim() || !floor) {
+      return res.status(400).json({ success: false, message: "Floor, destination room, and BLE tag are required." });
+    }
 
-  const cleanFloor = String(floor).trim();
-  const cleanRoom = destination.trim();
-  const cleanBleId = ble_id.trim();
+    const cleanFloor = String(floor).trim();
+    const cleanRoom = destination.trim();
+    const cleanBleId = ble_id.trim();
+
+    
+    const validRooms = ALLOWED_ROOMS[cleanFloor] || [];
+    if (!validRooms.includes(cleanRoom)) {
+      return res.status(400).json({ success: false, message: "Invalid destination room for the selected floor." });
+    }
 
   try {
     const [reqRows] = await db.promise().query(
@@ -6669,8 +6801,23 @@ app.put('/api/visitor-requests/:id/no-show', authenticateToken, async (req, res)
 app.put('/api/visitor-requests/:id/destination', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { destination, ble_id } = req.body;
+
   if (!destination || !destination.trim()) {
     return res.status(400).json({ success: false, message: "Destination room is required." });
+  }
+
+  const cleanRoom = destination.trim();
+
+  const allKnownRooms = new Set([
+    ...(ALLOWED_ROOMS['3'] || []),
+    ...(ALLOWED_ROOMS['5'] || []),
+  ]);
+
+  if (!allKnownRooms.has(cleanRoom)) {
+    return res.status(400).json({
+      success: false,
+      message: `Unknown destination room: "${cleanRoom}". Please pick one of the registered rooms.`
+    });
   }
 
   try {
@@ -6682,12 +6829,16 @@ app.put('/api/visitor-requests/:id/destination', authenticateToken, async (req, 
     const vis = rows[0];
     const targetBle = ble_id || vis.ble_id;
 
-    await db.promise().query("UPDATE visitor_requests SET destination = ? WHERE id = ?", [destination.trim(), vis.id]);
+    await db.promise().query(
+      "UPDATE visitor_requests SET destination = ? WHERE id = ?",
+      [cleanRoom, vis.id]
+    );
 
+    
     if (targetBle) {
-      visitorDestinations[targetBle] = destination.trim();
+      visitorDestinations[targetBle] = cleanRoom;
       if (liveVisitors[targetBle]) {
-        liveVisitors[targetBle].destination = destination.trim();
+        liveVisitors[targetBle].destination = cleanRoom;
       }
     }
 
@@ -6734,16 +6885,9 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       [employeeId, userId, today, currentTime]
     );
 
+    // ✅ FIXED: Removed the "closest schedule" fallback logic.
+    // If there is no active shift today, we reject the ping instead of attaching it to a random shift.
     let currentSchedule = scheduleRows[0];
-    if (!currentSchedule) {
-      const [anySched] = await db.promise().query(
-        `SELECT id, place, start_time, end_time FROM schedules 
-         WHERE (user_id = ? OR user_id = ?) AND date = ? 
-         ORDER BY ABS(TIME_TO_SEC(TIMEDIFF(?, start_time))) ASC LIMIT 1`,
-        [employeeId, userId, today, currentTime]
-      );
-      if (anySched.length > 0) currentSchedule = anySched[0];
-    }
 
     if (!currentSchedule) {
       return res.json({ success: false, message: "No active shift today" });
@@ -6939,35 +7083,46 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
 
 const broadcastInstructorStatus = async (employeeId) => {
   const { date: today } = getPHTime();
+  const phNow = getPHDateTime(); // ✅ ADDED THIS
+
   const [rows] = await db.promise().query(`
     SELECT 
       u.employee_id, u.full_name, u.last_location_ping, u.location_tracking_enabled,
       s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course, s.start_time, s.end_time,
       (CASE 
-        WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
+        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF'  -- ✅ [1] Replaced NOW()
         WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
         WHEN u.last_location_ping IS NULL THEN 'Unavailable'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > ? THEN 'Signal Lost'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'Signal Lost' -- ✅ [2, 3] Replaced NOW()
         ELSE (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_position_name,
       (CASE 
-        WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN NULL
+        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN NULL -- ✅ [4] Replaced NOW()
         WHEN u.location_tracking_enabled = 0 THEN NULL
         WHEN u.last_location_ping IS NULL THEN NULL
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > ? THEN NULL
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN NULL -- ✅ [5, 6] Replaced NOW()
         ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_is_inside,
       (CASE 
-        WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
+        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF' -- ✅ [7] Replaced NOW()
         WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
         WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > ? THEN 'GPS OFF'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'GPS OFF' -- ✅ [8, 9] Replaced NOW()
         ELSE 'GPS ON'
       END) AS gps_status
     FROM users u
     LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND DATE(s.date) = ?
     WHERE u.employee_id = ?
-  `, [GPS_STALE_SECONDS, GPS_STALE_SECONDS, GPS_STALE_SECONDS, today, employeeId]);
+  `, [
+    phNow,                        // [1]
+    phNow, GPS_STALE_SECONDS,     // [2, 3]
+    phNow,                        // [4]
+    phNow, GPS_STALE_SECONDS,     // [5, 6]
+    phNow,                        // [7]
+    phNow, GPS_STALE_SECONDS,     // [8, 9]
+    today,                        // [10] for DATE(s.date) = ?
+    employeeId                    // [11] for u.employee_id = ?
+  ]);
 
   if (rows.length === 0) return;
   broadcastToAdminAndHR({ type: 'instructor_status_update', instructor: rows[0] });
@@ -6977,6 +7132,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
 
   const selectedDate = req.query.date || getPHTime().date;
+  const phNow = getPHDateTime();
 
   try {
     const [rows] = await db.promise().query(`
@@ -6988,18 +7144,18 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         
         COALESCE(a.status, 
           CASE 
-            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() AND a.time_in IS NULL THEN 'Missed Schedule'
-            WHEN CONCAT(s.date, ' ', s.start_time) <= NOW() AND CONCAT(s.date, ' ', s.end_time) >= NOW() AND a.time_in IS NULL THEN 'Absent'
+            WHEN CONCAT(s.date, ' ', s.end_time) < ? AND a.time_in IS NULL THEN 'Missed Schedule' -- ✅ [1]
+            WHEN CONCAT(s.date, ' ', s.start_time) <= ? AND CONCAT(s.date, ' ', s.end_time) >= ? AND a.time_in IS NULL THEN 'Absent' -- ✅ [2, 3]
             ELSE 'Scheduled'
           END
         ) AS attendance_status,
         
-                CASE 
+        CASE 
           WHEN a.time_in IS NULL THEN 'Unavailable'
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Unavailable'
           WHEN u.last_location_ping IS NULL THEN 'Unavailable'
           WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > ? THEN 'Signal Lost'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'Signal Lost' -- ✅ [4, 5]
           ELSE COALESCE(ilt.location_name, 'Unavailable') 
         END AS last_position_name, 
         
@@ -7008,23 +7164,22 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN NULL
           WHEN u.last_location_ping IS NULL THEN NULL
           WHEN u.location_tracking_enabled = 0 THEN NULL
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > ? THEN NULL
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN NULL -- ✅ [6, 7]
           ELSE ilt.is_inside_campus 
         END AS last_is_inside,
         
         u.last_location_ping AS last_ping_time,
         
         CASE 
-          WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'GPS OFF'
+          WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF' -- ✅ [8]
           WHEN a.time_in IS NULL THEN 'GPS OFF'
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'GPS OFF'
           WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
           WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > ? THEN 'GPS OFF'
+          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'GPS OFF' -- ✅ [9, 10]
           ELSE 'GPS ON'
         END AS gps_status,
         
-         -- CAMPUS ENTRY TIME
         COALESCE(
           a.time_in, 
           (SELECT DATE_FORMAT(MIN(ping_time), '%H:%i:%s') FROM instructor_location_tracking 
@@ -7032,17 +7187,9 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
            AND ping_time >= CONCAT(s.date, ' ', s.start_time) - INTERVAL 1 HOUR)
         ) AS campus_entry_time,
         
-        -- CAMPUS EXIT TIME
         COALESCE(
           a.time_out, 
-          (
-            SELECT DATE_FORMAT(MIN(ping_time), '%H:%i:%s') FROM instructor_location_tracking 
-            WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 0 AND location_enabled = 1
-            AND ping_time > (
-              SELECT MIN(ping_time) FROM instructor_location_tracking 
-              WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1
-            )
-          ),
+          ${GEO_EXIT_SUBQUERY},
           s.end_time
         ) AS campus_exit_time
 
@@ -7055,9 +7202,15 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
       ) ilt ON u.employee_id = ilt.employee_id
       WHERE u.role = 'instructor' AND u.status = 'active' AND s.date = ?
       ORDER BY s.start_time ASC
-    `, [GPS_STALE_SECONDS, GPS_STALE_SECONDS, GPS_STALE_SECONDS,selectedDate]);
-
-            
+    `, [
+      phNow,                                  // [1]
+      phNow, phNow,                           // [2, 3]
+      phNow, GPS_STALE_SECONDS,               // [4, 5]
+      phNow, GPS_STALE_SECONDS,               // [6, 7]
+      phNow,                                  // [8]
+      phNow, GPS_STALE_SECONDS,               // [9, 10]
+      selectedDate                            // [11] for s.date = ?
+    ]);
 
     res.json(rows);
   } catch (err) {
@@ -7323,7 +7476,7 @@ app.get('/api/visitor-requests/history', authenticateToken, (req, res) => {
 // OVERTIME REQUESTS (Secured, Validated & Timezone-Synchronized)
 // ============================================
 
-const ALLOWED_OT_SCENARIOS = ['future', 'ongoing', 'after_shift', 'early_ot', 'normal_ot'];
+const ALLOWED_OT_SCENARIOS = ['early_ot', 'normal_ot'];
 const ALLOWED_OT_TYPES     = ['Regular Overtime', 'Compensatory Time Off (CTO)'];
 const MIN_OT_MINUTES       = 30;
 const MAX_OT_MINUTES       = 12 * 60; // 12 hours
@@ -7342,7 +7495,7 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
   const userId = req.user.id;
   const phNow = getPHDateTime();
 
-  // ---- 1. Field presence (✅ FIX 1 — whitespace-safe for reason) ----
+  // ---- 1. Field presence ----
   if (!date || !start_time || !end_time || !reason || !scenario_type) {
     return res.status(400).json({ success: false, message: 'All overtime fields are required.' });
   }
@@ -7380,7 +7533,11 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
     return res.status(400).json({ success: false, message: `Maximum overtime duration is ${MAX_OT_MINUTES / 60} hours per request.` });
   }
 
-  // ✅ FIX 2 — Normalize to HH:mm:ss so overlap & schedule comparisons are consistent
+  // ✅ CTO 1-hour rule
+  if (overtime_type === 'Compensatory Time Off (CTO)' && durationMin < 60) {
+    return res.status(400).json({ success: false, message: 'CTO conversion requires at least 1 hour (60 minutes) of overtime.' });
+  }
+
   const normalizedStart = String(start_time).trim().length === 5
     ? `${String(start_time).trim()}:00`
     : String(start_time).trim();
@@ -7396,26 +7553,22 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
     return res.status(400).json({ success: false, message: 'Invalid overtime type.' });
   }
 
-  // ---- 5. Date window ----
+  // ---- 5. Date window (Strict: Block Future, Allow 7 Days Back) ----
   const { date: today } = getPHTime();
   const todayObj = new Date(`${today}T00:00:00`);
   const daysDiff = Math.round((dateObjCheck - todayObj) / (1000 * 60 * 60 * 24));
 
-  if (scenario_type === 'ongoing' && daysDiff !== 0) {
-    return res.status(400).json({ success: false, message: 'Ongoing overtime can only be filed for today.' });
+  // Block any future dates
+  if (daysDiff > 0) {
+    return res.status(400).json({ success: false, message: 'Overtime cannot be filed for future dates. Please file on or after the date of the shift.' });
   }
-  if (scenario_type === 'after_shift' && daysDiff > 0) {
-    return res.status(400).json({ success: false, message: 'After-shift overtime cannot be filed for a future date.' });
-  }
+  // Allow backdating up to 7 days
   if (daysDiff < -OT_BACKDATE_LIMIT_DAYS) {
     return res.status(400).json({ success: false, message: `Overtime can only be filed up to ${OT_BACKDATE_LIMIT_DAYS} days in the past.` });
   }
-  if (daysDiff > 60) {
-    return res.status(400).json({ success: false, message: 'Overtime cannot be filed more than 60 days in advance.' });
-  }
 
   try {
-    // ---- 6. Resolve user (✅ FIX 3 — active only) ----
+    // ---- 6. Resolve user ----
     const [userRows] = await db.promise().query(
       "SELECT employee_id FROM users WHERE id = ? AND status = 'active'",
       [userId]
@@ -7425,7 +7578,22 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
     }
     const employeeId = userRows[0].employee_id;
 
-    // ---- 7. Resolve / validate schedule (✅ FIX 4 — also fetch shift times) ----
+    // ✅ FIX — Leave guard runs AFTER employeeId is defined (inside try)
+    const [leaveRows] = await db.promise().query(
+      `SELECT id FROM leave_requests
+        WHERE (user_id = ? OR user_id = ?)
+          AND request_date = ?
+          AND status = 'Approved'`,
+      [employeeId, userId, date]
+    );
+    if (leaveRows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'You are on an approved leave on this date. Overtime cannot be filed.'
+      });
+    }
+
+    // ---- 7. Resolve / validate schedule ----
     let targetScheduleId = schedule_id;
     let shiftStartStr = null;
     let shiftEndStr   = null;
@@ -7459,15 +7627,14 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
     }
 
     // These scenarios must map to an actual scheduled shift
-    const SCENARIOS_REQUIRING_SHIFT = ['early_ot', 'normal_ot', 'ongoing', 'after_shift'];
-    if (SCENARIOS_REQUIRING_SHIFT.includes(scenario_type) && !targetScheduleId) {
+    if (!targetScheduleId) {
       return res.status(400).json({
         success: false,
         message: 'No scheduled shift found on this date. Overtime requires an existing schedule.'
       });
     }
 
-    // ---- 7b. ✅ FIX 5 — OT window must not overlap the shift itself ----
+    // ---- 7b. Shift boundary validation ----
     if (shiftStartMin !== null && shiftEndMin !== null) {
       if (scenario_type === 'early_ot') {
         // Early OT must finish at or before shift start
@@ -7477,8 +7644,8 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
             message: `Early OT must end at or before shift start (${formatTo12Hour(shiftStartStr)}).`
           });
         }
-      } else if (scenario_type === 'normal_ot' || scenario_type === 'after_shift') {
-        // OT must begin at or after shift end
+      } else if (scenario_type === 'normal_ot') {
+        // Normal OT must begin at or after shift end
         if (startMin < shiftEndMin) {
           return res.status(400).json({
             success: false,
@@ -7486,80 +7653,78 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
           });
         }
       }
-      // 'ongoing' is intentionally unrestricted — the employee is filing
-      // during/right after the shift, so overlap with the shift is expected.
     }
 
-    // ---- 7c. ✅ FIX 6 — Cap pending overtime requests per user ----
+        
     const MAX_PENDING_OT = 10;
-    const [pendingRows] = await db.promise().query(
-      `SELECT COUNT(*) AS c FROM overtime_requests
-        WHERE (user_id = ? OR user_id = ?) AND status = 'pending'`,
-      [employeeId, userId]
-    );
-    if (pendingRows[0].c >= MAX_PENDING_OT) {
-      return res.status(429).json({
-        success: false,
-        message: `You already have ${MAX_PENDING_OT} pending overtime requests. Please wait for HR to review them.`
-      });
-    }
+    const connection = await db.promise().getConnection();
 
-    // ---- 8. Overlap check against other OT (pending or approved) ----
-    // Uses normalized HH:mm:ss so string comparison matches DB TIME semantics.
-    const [overlap] = await db.promise().query(
-      `SELECT id, start_time, end_time, status
-         FROM overtime_requests
-        WHERE (user_id = ? OR user_id = ?)
-          AND date = ?
-          AND status IN ('pending','approved')
-          AND NOT (end_time <= ? OR start_time >= ?)`,
-      [employeeId, userId, date, normalizedStart, normalizedEnd]
-    );
-    if (overlap.length > 0) {
-      const conflict = overlap[0];
-      return res.status(409).json({
-        success: false,
-        message: `You already have a ${conflict.status} overtime request from ${formatTo12Hour(conflict.start_time)} to ${formatTo12Hour(conflict.end_time)} on ${date}.`
-      });
-    }
+    try {
+      await connection.beginTransaction();
 
-    // ---- 9. Ongoing requires active clock-in ----
-    let attendanceId = null;
-    if (scenario_type === 'ongoing') {
-      const [attRecords] = await db.promise().query(
-        `SELECT id FROM attendance
-          WHERE (user_id = ? OR user_id = ?) AND schedule_id = ? AND time_out IS NULL
-          ORDER BY id DESC LIMIT 1`,
-        [employeeId, userId, targetScheduleId]
+      
+      await connection.query(`SELECT id FROM users WHERE id = ? FOR UPDATE`, [userId]);
+
+      
+      const [pendingRows] = await connection.query(
+        `SELECT COUNT(*) AS c FROM overtime_requests
+          WHERE (user_id = ? OR user_id = ?) AND status = 'pending'`,
+        [employeeId, userId]
       );
-      if (attRecords.length === 0) {
-        return res.status(400).json({ success: false, message: 'No active clock-in found for this shift. Cannot file ongoing overtime.' });
+      if (pendingRows[0].c >= MAX_PENDING_OT) {
+        await connection.rollback();
+        return res.status(429).json({
+          success: false,
+          message: `You already have ${MAX_PENDING_OT} pending overtime requests. Please wait for HR to review them.`
+        });
       }
-      attendanceId = attRecords[0].id;
+
+      
+      const [overlap] = await connection.query(
+        `SELECT id, start_time, end_time, status
+           FROM overtime_requests
+          WHERE (user_id = ? OR user_id = ?)
+            AND date = ?
+            AND status IN ('pending','approved')
+            AND NOT (end_time <= ? OR start_time >= ?)`,
+        [employeeId, userId, date, normalizedStart, normalizedEnd]
+      );
+      if (overlap.length > 0) {
+        await connection.rollback();
+        const conflict = overlap[0];
+        return res.status(409).json({
+          success: false,
+          message: `You already have a ${conflict.status} overtime request from ${formatTo12Hour(conflict.start_time)} to ${formatTo12Hour(conflict.end_time)} on ${date}.`
+        });
+      }
+
+      
+      const uploadedFile = req.file || (req.files && (req.files['attachment']?.[0] || req.files['image']?.[0]));
+      const attachment = uploadedFile ? `/uploads/leave_images/${uploadedFile.filename}` : null;
+
+      
+      const [result] = await connection.query(
+        `INSERT INTO overtime_requests
+          (user_id, date, schedule_id, start_time, end_time, reason, attachment,
+           scenario_type, overtime_type, attendance_id, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?)`,
+        [
+          userId, date, targetScheduleId, normalizedStart, normalizedEnd,
+          cleanReason, attachment, scenario_type,
+          overtime_type || 'Regular Overtime', phNow
+        ]
+      );
+
+      await connection.commit();
+
+      logAction(userId, 'SUBMIT_OVERTIME', 'overtime_request', result.insertId, req);
+      return res.json({ success: true, message: 'Overtime request submitted successfully.', requestId: result.insertId });
+    } catch (txErr) {
+      await connection.rollback();
+      throw txErr; 
+    } finally {
+      connection.release();  
     }
-
-    // ---- 10. Attachment ----
-    // Note: files land in `uploads/leave_images/` because `uploadOvertimeFiles`
-    // reuses the leave_images storage. Semantically should be a dedicated
-    // `uploads/overtime/` folder — flagged as a follow-up (requires multer config change).
-    const uploadedFile = req.file || (req.files && (req.files['attachment']?.[0] || req.files['image']?.[0]));
-    const attachment = uploadedFile ? `/uploads/leave_images/${uploadedFile.filename}` : null;
-
-    // ---- 11. Insert (normalized times) ----
-    const [result] = await db.promise().query(
-      `INSERT INTO overtime_requests
-        (user_id, date, schedule_id, start_time, end_time, reason, attachment,
-         scenario_type, overtime_type, attendance_id, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [
-        userId, date, targetScheduleId || null, normalizedStart, normalizedEnd,
-        cleanReason, attachment, scenario_type,
-        overtime_type || 'Regular Overtime', attendanceId, phNow
-      ]
-    );
-
-    logAction(userId, 'SUBMIT_OVERTIME', 'overtime_request', result.insertId, req);
-    res.json({ success: true, message: 'Overtime request submitted successfully.', requestId: result.insertId });
   } catch (err) {
     console.error("Overtime Submit Error:", err);
     res.status(500).json({ success: false, message: 'Server connection failed while submitting request.' });
@@ -7571,7 +7736,7 @@ app.get('/api/overtime-requests', authenticateToken, (req, res) => {
   const userId = req.user.id;
   const sql = `
     SELECT 
-      id, user_id, schedule_id, start_time, end_time, reason, attachment, scenario_type, attendance_id, status, admin_remarks,
+      id, user_id, schedule_id, start_time, end_time, reason, attachment, scenario_type, attendance_id, status, admin_remarks, overtime_type,
       DATE_FORMAT(date, '%Y-%m-%d') AS date,
       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
       DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
@@ -7592,9 +7757,11 @@ app.get('/api/overtime-requests', authenticateToken, (req, res) => {
 
 app.get('/api/overtime-requests/user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
   const { employeeId } = req.params;
+
+  
   const sql = `
     SELECT 
-      o.id, o.user_id, o.schedule_id, o.start_time, o.end_time, o.reason, o.attachment, o.scenario_type, o.attendance_id, o.status, o.admin_remarks,
+      o.id, o.user_id, o.schedule_id, o.start_time, o.end_time, o.reason, o.attachment, o.scenario_type, o.attendance_id, o.status, o.admin_remarks, o.overtime_type,
       DATE_FORMAT(o.date, '%Y-%m-%d') AS date,
       DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
       DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
@@ -7682,45 +7849,74 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
 
     // Defensive re-validation on approval
     if (status === 'approved') {
+      // ✅ ENFORCE TWO-OPTION CONTRACT: Timing must be 'Early OT' or 'Normal OT'
+      if (!ALLOWED_OT_SCENARIOS.includes(reqData.scenario_type)) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Cannot approve: invalid timing "${reqData.scenario_type || 'null'}". Timing must be "Early OT" or "Normal OT". Please reject this request and ask the employee to re-submit.`
+        });
+      }
+
+      // ✅ ENFORCE TWO-OPTION CONTRACT: Type must be 'Regular Overtime' or 'CTO'
+      const reqOtType = reqData.overtime_type || 'Regular Overtime';
+      if (!ALLOWED_OT_TYPES.includes(reqOtType)) {
+        await connection.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Cannot approve: invalid overtime type "${reqData.overtime_type || 'null'}". Type must be "Regular Overtime" or "Compensatory Time Off (CTO)".`
+        });
+      }
+
       const sMin = toMinutes((reqData.start_time || '').substring(0, 5));
       const eMin = toMinutes((reqData.end_time   || '').substring(0, 5));
       if (sMin === null || eMin === null || sMin >= eMin) {
         await connection.rollback();
         return res.status(400).json({ success: false, message: 'Cannot approve: invalid overtime time range.' });
       }
+
       const dur = eMin - sMin;
       if (dur < MIN_OT_MINUTES) {
         await connection.rollback();
-        return res.status(400).json({ success: false, message: `Cannot approve: overtime duration is below ${MIN_OT_MINUTES} minutes.` });
+        return res.status(400).json({
+          success: false,
+          message: `Cannot approve: overtime duration is below ${MIN_OT_MINUTES} minutes.`
+        });
       }
       if (dur > MAX_OT_MINUTES) {
         await connection.rollback();
-        return res.status(400).json({ success: false, message: `Cannot approve: overtime duration exceeds ${MAX_OT_MINUTES / 60} hours.` });
+        return res.status(400).json({
+          success: false,
+          message: `Cannot approve: overtime duration exceeds ${MAX_OT_MINUTES / 60} hours.`
+        });
       }
 
       // Reject if ANY overlapping request is pending OR approved (not just approved)
-const [overlap] = await connection.query(
-  `SELECT id, status FROM overtime_requests
-    WHERE (user_id = ? OR user_id = ?)
-      AND date = ?
-      AND status IN ('pending', 'approved')
-      AND id <> ?
-      AND NOT (end_time <= ? OR start_time >= ?)`,
-  [reqData.employee_id, reqData.user_id, reqData.date,
-   id, reqData.start_time, reqData.end_time]
-);
-if (overlap.length > 0) {
-  await connection.rollback();
-  return res.status(409).json({
-    success: false,
-    message: `Cannot approve: overlaps with another ${overlap[0].status} overtime request on this date.`
-  });
-}
+      const [overlap] = await connection.query(
+        `SELECT id, status FROM overtime_requests
+          WHERE (user_id = ? OR user_id = ?)
+            AND date = ?
+            AND status IN ('pending', 'approved')
+            AND id <> ?
+            AND NOT (end_time <= ? OR start_time >= ?)`,
+        [reqData.employee_id, reqData.user_id, reqData.date,
+         id, reqData.start_time, reqData.end_time]
+      );
+      if (overlap.length > 0) {
+        await connection.rollback();
+        return res.status(409).json({
+          success: false,
+          message: `Cannot approve: overlaps with another ${overlap[0].status} overtime request on this date.`
+        });
+      }
 
       // CTO requires at least 1 hour
-      if ((reqData.overtime_type || '').toLowerCase().includes('cto') && dur < 60) {
+      if (reqOtType === 'Compensatory Time Off (CTO)' && dur < 60) {
         await connection.rollback();
-        return res.status(400).json({ success: false, message: 'Cannot approve: CTO conversion requires at least 1 hour of overtime.' });
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot approve: CTO conversion requires at least 1 hour of overtime.'
+        });
       }
     }
 
@@ -7733,7 +7929,7 @@ if (overlap.length > 0) {
 
     if (status === 'approved') {
       const overtimeHours = calculateHours(reqData.start_time, reqData.end_time);
-      const isCTO = (reqData.overtime_type || '').toLowerCase().includes('cto');
+      const isCTO = reqData.overtime_type === 'Compensatory Time Off (CTO)';
 
       if (isCTO) {
         const earnedDays = overtimeHours / 8;
@@ -7799,16 +7995,9 @@ if (overlap.length > 0) {
       }
 
       // ---- Attendance recording ----
-      if (reqData.scenario_type === 'ongoing' && reqData.attendance_id) {
-        await connection.query(
-          `UPDATE attendance
-              SET time_out = ?,
-                  total_hours = TIMESTAMPDIFF(MINUTE, time_in, ?) / 60
-            WHERE id = ?`,
-          [reqData.end_time, reqData.end_time, reqData.attendance_id]
-        );
-      } else if (reqData.schedule_id) {
-        // Only touch attendance when we have a concrete schedule to link against
+      // Only 'early_ot' and 'normal_ot' can reach here (legacy scenarios blocked above).
+      // Preserves actual clock-in/out; only fills missing time_out (covers forgot-to-clock-out).
+      if (reqData.schedule_id) {
         const [existingAtt] = await connection.query(
           `SELECT id FROM attendance
             WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
@@ -7818,12 +8007,20 @@ if (overlap.length > 0) {
         if (existingAtt.length > 0) {
           await connection.query(
             `UPDATE attendance
-                SET time_in = COALESCE(time_in, ?),
+                SET time_in  = COALESCE(time_in, ?),
                     time_out = COALESCE(time_out, ?),
-                    total_hours = TIMESTAMPDIFF(MINUTE, COALESCE(time_in, ?), COALESCE(time_out, ?)) / 60,
+                    total_hours = TIMESTAMPDIFF(
+                                    MINUTE,
+                                    COALESCE(time_in, ?),
+                                    COALESCE(time_out, ?)
+                                  ) / 60,
                     status = 'overtime'
               WHERE id = ?`,
-            [reqData.start_time, reqData.end_time, reqData.start_time, reqData.end_time, existingAtt[0].id]
+            [
+              reqData.start_time, reqData.end_time,
+              reqData.start_time, reqData.end_time,
+              existingAtt[0].id
+            ]
           );
         } else {
           await connection.query(
@@ -8143,42 +8340,130 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
 // USER CANCELLATION ENDPOINTS
 // ============================================
 
-// 1. Cancel Leave Request
 app.put('/api/leave-requests/:id/cancel', authenticateToken, async (req, res) => {
-    const { id } = req.params;
+  const { id } = req.params;
   const { reason } = req.body;
   const userId = req.user.id;
   const phNow = getPHDateTime();
 
- 
   const cancelReason = reason ? String(reason).trim() : '';
   if (cancelReason.length > 500) {
     return res.status(400).json({ success: false, message: 'Cancellation reason is too long (maximum 500 characters).' });
   }
 
+  const connection = await db.promise().getConnection();
+  await connection.beginTransaction();
+
   try {
-    const [rows] = await db.promise().query(
-      "SELECT id, status FROM leave_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
+    const [rows] = await connection.query(
+      "SELECT id, status FROM leave_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?)) FOR UPDATE",
       [id, userId, userId]
     );
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
-    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    
+    if (rows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    }
+    if (rows[0].status.toLowerCase() !== 'pending') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    }
 
     const cancelRemark = cancelReason ? `[Cancelled by User] Reason: ${cancelReason}` : '[Cancelled by User]';
-    await db.promise().query(
+    
+    await connection.query(
       "UPDATE leave_requests SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
       [cancelRemark, phNow, id]
     );
+    
+    await connection.commit();
     logAction(userId, 'CANCEL_LEAVE', 'leave_request', id, req);
     res.json({ success: true, message: "Request cancelled successfully." });
   } catch (err) {
+    await connection.rollback();
     res.status(500).json({ success: false, message: "Server error." });
+  } finally {
+    connection.release();
   }
 });
 
-// 2. Cancel Overtime Request
+app.put('/api/leave-requests/batch-cancel', authenticateToken, async (req, res) => {
+  const { ids, reason } = req.body;
+  const userId = req.user.id;
+  const phNow = getPHDateTime();
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, message: 'No request IDs provided for cancellation.' });
+  }
+
+  const cancelReason = reason ? String(reason).trim() : '';
+  if (cancelReason.length > 500) {
+    return res.status(400).json({ success: false, message: 'Cancellation reason is too long (maximum 500 characters).' });
+  }
+
+  const connection = await db.promise().getConnection();
+  await connection.beginTransaction();
+
+  let cancelledCount = 0;
+  let skippedCount = 0;
+
+  try {
+    // Resolve user's employee_id to match the DB schema
+    const [userRows] = await connection.query("SELECT employee_id FROM users WHERE id = ?", [userId]);
+    const employeeId = userRows.length > 0 ? userRows[0].employee_id : null;
+
+    const cancelRemark = cancelReason ? `[Cancelled by User] Reason: ${cancelReason}` : '[Cancelled by User]';
+
+    for (const id of ids) {
+      // Lock each row to prevent race conditions with Admin approvals
+      const [rows] = await connection.query(
+        "SELECT id, status FROM leave_requests WHERE id = ? AND (user_id = ? OR user_id = ?) FOR UPDATE",
+        [id, userId, employeeId]
+      );
+
+      // If not found, or HR already approved/rejected it, skip it
+      if (rows.length === 0 || rows[0].status.toLowerCase() !== 'pending') {
+        skippedCount++;
+        continue;
+      }
+
+      await connection.query(
+        "UPDATE leave_requests SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
+        [cancelRemark, phNow, id]
+      );
+      cancelledCount++;
+    }
+
+    await connection.commit();
+    
+    if (cancelledCount > 0) {
+      logAction(userId, 'BATCH_CANCEL_LEAVE', 'leave_request', `IDs: ${ids.join(',')}`, req);
+    }
+
+    if (cancelledCount === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'None of the requests could be cancelled. They may have already been processed by HR.' 
+      });
+    }
+
+    const msg = skippedCount > 0
+      ? `Successfully cancelled ${cancelledCount} day(s). However, ${skippedCount} day(s) could not be cancelled (likely already approved/rejected by HR).`
+      : `All ${cancelledCount} day(s) cancelled successfully.`;
+
+    res.json({ success: true, message: msg });
+
+  } catch (err) {
+    await connection.rollback();
+    console.error("Batch cancel error:", err);
+    res.status(500).json({ success: false, message: "Server error during cancellation." });
+  } finally {
+    connection.release();
+  }
+});
+
 app.put('/api/overtime-requests/:id/cancel', authenticateToken, async (req, res) => {
-    const { id } = req.params;
+  const { id } = req.params;
   const { reason } = req.body;
   const userId = req.user.id;
   const phNow = getPHDateTime();
@@ -8188,66 +8473,101 @@ app.put('/api/overtime-requests/:id/cancel', authenticateToken, async (req, res)
     return res.status(400).json({ success: false, message: 'Cancellation reason is too long (maximum 500 characters).' });
   }
 
+  const connection = await db.promise().getConnection();
+  await connection.beginTransaction();
+
   try {
-    const [rows] = await db.promise().query(
-      "SELECT id, status FROM leave_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?))",
+    const [rows] = await connection.query(
+      "SELECT id, status FROM overtime_requests WHERE id = ? AND (user_id = ? OR user_id = (SELECT employee_id FROM users WHERE id = ?)) FOR UPDATE",
       [id, userId, userId]
     );
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
-    if (rows[0].status.toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    
+    if (rows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    }
+    if (rows[0].status.toLowerCase() !== 'pending') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    }
 
     const cancelRemark = cancelReason ? `[Cancelled by User] Reason: ${cancelReason}` : '[Cancelled by User]';
-    await db.promise().query(
+    
+    await connection.query(
       "UPDATE overtime_requests SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
       [cancelRemark, phNow, id]
     );
+    
+    await connection.commit();
     logAction(userId, 'CANCEL_OVERTIME', 'overtime_request', id, req);
     res.json({ success: true, message: "Request cancelled successfully." });
   } catch (err) {
+    await connection.rollback();
     res.status(500).json({ success: false, message: "Server error." });
+  } finally {
+    connection.release();
   }
 });
 
 
 
-// 4. Cancel Attendance Appeal
 app.put('/api/attendance-appeals/:id/cancel', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { reason } = req.body;
   const userId = req.user.id;
   const phNow = getPHDateTime();
 
-    const cancelReason = reason ? String(reason).trim() : '';
+  const cancelReason = reason ? String(reason).trim() : '';
   if (cancelReason.length > 500) {
     return res.status(400).json({ success: false, message: 'Cancellation reason is too long (maximum 500 characters).' });
   }
 
+  const connection = await db.promise().getConnection();
+  await connection.beginTransaction();
+
   try {
-    const [userRows] = await db.promise().query(
+    const [userRows] = await connection.query(
       "SELECT id, employee_id FROM users WHERE id = ?",
       [userId]
     );
-    if (userRows.length === 0) return res.status(403).json({ success: false, message: "Unauthorized user." });
+    
+    if (userRows.length === 0) {
+      await connection.rollback();
+      return res.status(403).json({ success: false, message: "Unauthorized user." });
+    }
 
     const internalId = userRows[0].id;
     const empId = userRows[0].employee_id;
 
-    const [rows] = await db.promise().query(
-      "SELECT id, status FROM attendance_appeals WHERE id = ? AND (user_id = ? OR user_id = ?)",
+    const [rows] = await connection.query(
+      "SELECT id, status FROM attendance_appeals WHERE id = ? AND (user_id = ? OR user_id = ?) FOR UPDATE",
       [id, internalId, empId]
     );
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
-    if (String(rows[0].status).toLowerCase() !== 'pending') return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    
+    if (rows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
+    }
+    if (String(rows[0].status).toLowerCase() !== 'pending') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
+    }
 
-      const cancelRemark = cancelReason ? `[Cancelled by User] Reason: ${cancelReason}` : '[Cancelled by User]';
-    await db.promise().query(
+    const cancelRemark = cancelReason ? `[Cancelled by User] Reason: ${cancelReason}` : '[Cancelled by User]';
+    
+    await connection.query(
       "UPDATE attendance_appeals SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
       [cancelRemark, phNow, id]
     );
+    
+    await connection.commit();
     logAction(userId, 'CANCEL_APPEAL', 'attendance_appeal', id, req);
     res.json({ success: true, message: "Request cancelled successfully." });
   } catch (err) {
+    await connection.rollback();
     res.status(500).json({ success: false, message: err.message || "Server error." });
+  } finally {
+    connection.release();
   }
 });
 
@@ -8257,51 +8577,61 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
   const userId = req.user.id;
   const phNow = getPHDateTime();
 
-    const cancelReason = reason ? String(reason).trim() : '';
+  const cancelReason = reason ? String(reason).trim() : '';
   if (cancelReason.length > 500) {
     return res.status(400).json({ success: false, message: 'Cancellation reason is too long (maximum 500 characters).' });
   }
 
+  const connection = await db.promise().getConnection();
+  await connection.beginTransaction();
+
   try {
     // 1. Resolve current user's internal ID and employee_id safely
-    const [userRows] = await db.promise().query(
+    const [userRows] = await connection.query(
       "SELECT id, employee_id FROM users WHERE id = ?",
       [userId]
     );
 
     if (userRows.length === 0) {
+      await connection.rollback();
       return res.status(403).json({ success: false, message: "Unauthorized user." });
     }
 
     const internalId = userRows[0].id;
     const empId = userRows[0].employee_id;
 
-    // 2. Find request by matching either internal user_id OR employee_id
-    const [rows] = await db.promise().query(
-      "SELECT id, status FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = ?)",
+    // 2. Find request and LOCK the row for update
+    const [rows] = await connection.query(
+      "SELECT id, status FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = ?) FOR UPDATE",
       [id, internalId, empId]
     );
 
     if (rows.length === 0) {
+      await connection.rollback();
       return res.status(404).json({ success: false, message: "Request not found or unauthorized." });
     }
 
     if (String(rows[0].status).toLowerCase() !== 'pending') {
+      await connection.rollback();
       return res.status(400).json({ success: false, message: "Only pending requests can be cancelled." });
     }
 
-      const cancelRemark = cancelReason ? `[Cancelled by User] Reason: ${cancelReason}` : '[Cancelled by User]';
+    const cancelRemark = cancelReason ? `[Cancelled by User] Reason: ${cancelReason}` : '[Cancelled by User]';
 
-    await db.promise().query(
+    await connection.query(
       "UPDATE attendance_corrections SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
       [cancelRemark, phNow, id]
     );
 
+    await connection.commit();
     logAction(userId, 'CANCEL_CORRECTION', 'attendance_correction', id, req);
     res.json({ success: true, message: "Request cancelled successfully." });
   } catch (err) {
+    await connection.rollback();
     console.error("Cancel Correction DB Error:", err);
     res.status(500).json({ success: false, message: err.message || "Server error." });
+  } finally {
+    connection.release();
   }
 });
 

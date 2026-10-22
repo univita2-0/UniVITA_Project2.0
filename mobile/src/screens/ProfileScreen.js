@@ -177,61 +177,130 @@ export default function ProfileScreen({ navigation }) {
   );
 
   const handlePickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      return Alert.alert('Permission Denied', 'Camera roll access is required to update your profile picture.');
+ 
+  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (status !== 'granted') {
+    return Alert.alert(
+      'Permission Denied',
+      'Photo library access is required to update your profile picture. Please enable it in your device settings.'
+    );
+  }
+
+  
+  const result = await ImagePicker.launchImageLibraryAsync({
+  mediaTypes: ['images'],   
+  allowsEditing: true,
+  aspect: [1, 1],
+  quality: 0.7,
+  exif: false,
+});
+
+  
+  if (result.canceled) return;
+
+  
+  if (!result.assets || result.assets.length === 0 || !result.assets[0]?.uri) {
+    return Alert.alert(
+      'No Image Selected',
+      'The picker returned no file. Please try again.'
+    );
+  }
+
+  const asset = result.assets[0];
+
+ 
+  const MAX_BYTES = 5 * 1024 * 1024;
+  if (asset.fileSize && asset.fileSize > MAX_BYTES) {
+    const sizeMB = (asset.fileSize / (1024 * 1024)).toFixed(2);
+    return Alert.alert(
+      'Image Too Large',
+      `Your selected image is ${sizeMB}MB. The maximum is 5MB. Please choose a smaller image.`
+    );
+  }
+
+ 
+  const mime = (asset.mimeType || '').toLowerCase();
+  const uriLower = (asset.uri || '').toLowerCase();
+  const validMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic'];
+  const validExts = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+  const hasValidMime = validMimes.includes(mime);
+  const hasValidExt = validExts.some(ext => uriLower.endsWith(ext));
+
+  if (!hasValidMime && !hasValidExt) {
+    return Alert.alert(
+      'Invalid File Type',
+      'Please select a JPG, PNG, or WEBP image.'
+    );
+  }
+
+  
+  if (!userData.id) {
+    return Alert.alert(
+      'Not Signed In',
+      'Unable to identify your account. Please sign out and sign in again.'
+    );
+  }
+
+  
+  const previousImage = profileImage;
+  setProfileImage(asset.uri);
+  setIsUploadingImage(true);
+
+  try {
+    
+    const res = await updateProfile(userData.id, {
+      full_name: userData.name,
+      email: userData.email,
+      profile_picture: {
+        uri: asset.uri,
+        name: asset.fileName || `profile_${Date.now()}.jpg`,
+        mimeType: asset.mimeType || 'image/jpeg',
+      },
+    });
+
+    if (!res || !res.success) {
+      throw new Error(res?.message || 'Server rejected the profile picture.');
     }
 
     
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.6, 
-      base64: true, 
-    });
+    if (res.profile_picture) {
+      const baseUrl = API_URL.replace('/api', '');
+      const cleanPath = res.profile_picture.startsWith('/')
+        ? res.profile_picture
+        : `/${res.profile_picture}`;
+      const fullImageUrl = `${baseUrl}${cleanPath}?t=${Date.now()}`;
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      const asset = result.assets[0];
-      setProfileImage(asset.uri); 
-      setIsUploadingImage(true);
-
-      try {
-        const token = await AsyncStorage.getItem('auth_token');
-        
-        
-        const res = await axios.put(`${API_URL}/users/${userData.id}/profile`, {
-          full_name: userData.name,
-          email: userData.email,
-          base64_image: asset.base64
-        }, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        if (res.data.success && res.data.profile_picture) {
-          const baseUrl = API_URL.replace('/api', '');
-          const cleanPath = res.data.profile_picture.startsWith('/') ? res.data.profile_picture : `/${res.data.profile_picture}`;
-          const fullImageUrl = `${baseUrl}${cleanPath}?t=${Date.now()}`;
-          
-          setProfileImage(fullImageUrl);
-          await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
-          Alert.alert("Success", "Profile picture updated successfully!");
-        } else {
-          throw new Error(res.data.message || "Failed to update profile picture on server.");
-        }
-      } catch (err) {
-        console.error("Upload Error:", err);
-        const savedImage = await AsyncStorage.getItem(`@profile_picture_${userData.id}`);
-        setProfileImage(savedImage || null);
-        Alert.alert("Upload Error", err.response?.data?.message || err.message || "Could not save profile picture to server.");
-      } finally {
-        setIsUploadingImage(false);
-      }
+      setProfileImage(fullImageUrl);
+      await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
     }
-  };
+
+    Alert.alert('Success', 'Profile picture updated successfully!');
+  } catch (err) {
+    console.error('Profile picture upload error:', err);
+
+    
+    setProfileImage(previousImage);
+
+    
+    
+let errorMessage = 'Could not save profile picture. Please try again.';
+const msg = (err?.message || '').toLowerCase();
+
+if (msg.includes('timeout')) {
+  errorMessage = 'Upload timed out. Please check your internet connection and try again.';
+} else if (msg.includes('file too large')) {
+  errorMessage = 'Image is too large for the server. Please choose a smaller image.';
+} else if (msg.includes('forbidden') || msg.includes('unauthorized') || msg.includes('session')) {
+  errorMessage = 'Your session has expired. Please sign in again.';
+} else if (err?.message) {
+  errorMessage = err.message;
+}
+
+    Alert.alert('Upload Failed', errorMessage);
+  } finally {
+    setIsUploadingImage(false);
+  }
+};
 
   const handleUpdateProfile = async () => {
     if (!hasProfileChanges) {

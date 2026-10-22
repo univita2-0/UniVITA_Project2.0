@@ -10,7 +10,7 @@ import { fetchMyLeaveRequests, API_URL } from './api';
 
 /* ---------------- Fix #8: shared validation + date helpers ---------------- */
 const CANCEL_REASON_MAX_LENGTH = 500;
-const CANCEL_REASON_MIN_LENGTH = 3;
+const CANCEL_REASON_MIN_LENGTH = 10;
 
 const validateCancelReason = (reason) => {
   const trimmed = String(reason || '').trim();
@@ -200,7 +200,7 @@ export default function LeaveHistoryScreen({ navigation }) {
     setSelectedRequestId(null);
   };
 
-  const handleCancelRequest = async () => {
+    const handleCancelRequest = async () => {
     const validationError = validateCancelReason(cancelReason);
     if (validationError) {
       setCancelError(validationError);
@@ -212,42 +212,33 @@ export default function LeaveHistoryScreen({ navigation }) {
     }
     setCancelError('');
     setCancelling(true);
+    
     try {
       const token = await AsyncStorage.getItem('auth_token');
-
       const idsToCancel = Array.isArray(selectedRequestId) ? selectedRequestId : [selectedRequestId];
-      let successCount = 0;
 
-      for (const id of idsToCancel) {
-        try {
-          const res = await fetch(`${API_URL}/leave-requests/${id}/cancel`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({ reason: cancelReason.trim() })
-          });
-          const data = await res.json();
-          if (res.ok && data.success) successCount++;
-        } catch {
-          // swallow per-id error; count reflects overall failures
-        }
-      }
-
-      if (successCount === idsToCancel.length) {
-        Alert.alert('Success', 'Request cancelled successfully.');
-        closeCancelModal();
-        loadHistory();
-      } else if (successCount > 0) {
-        Alert.alert(
-          'Partial Success',
-          `${successCount} of ${idsToCancel.length} day(s) cancelled. Please try again for the rest.`
-        );
+      // 🚨 NEW: Single request to the batch-cancel endpoint
+      const res = await fetch(`${API_URL}/leave-requests/batch-cancel`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          ids: idsToCancel, 
+          reason: cancelReason.trim() 
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        Alert.alert('Success', data.message || 'Request(s) cancelled successfully.');
         closeCancelModal();
         loadHistory();
       } else {
-        setCancelError('Failed to cancel request. Please try again.');
+        // E.g., "None of the requests could be cancelled. They may have already been processed by HR."
+        setCancelError(data.message || 'Failed to cancel request. Please refresh and try again.');
       }
     } catch (err) {
       setCancelError('Server connection failed. Please try again.');

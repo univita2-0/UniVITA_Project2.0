@@ -10,7 +10,38 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { fetchEmployeePayrollHistory } from './api';
 
+
+
 export default function MyPayrollScreen({ navigation }) {
+
+
+  
+const getMonthKey = (str) => {
+  if (!str) return null;
+
+ 
+  const s = String(str).trim().replace(/\s+/g, ' ');
+
+  
+  const monthYearMatch = s.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (monthYearMatch) {
+    const monthNames = [
+      'january','february','march','april','may','june',
+      'july','august','september','october','november','december'
+    ];
+    const idx = monthNames.indexOf(monthYearMatch[1].toLowerCase());
+    if (idx !== -1) {
+      return `${monthYearMatch[2]}-${String(idx + 1).padStart(2, '0')}`;
+    }
+  }
+
+  
+  const isoMatch = s.match(/^(\d{4})-(\d{2})$/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}`;
+
+  
+  return s.toLowerCase();
+};
   const insets = useSafeAreaInsets();
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
@@ -26,6 +57,16 @@ export default function MyPayrollScreen({ navigation }) {
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+  const currentMonthKey = getMonthKey(currentMonth);
+
+  const currentMonthPayslip = allPayslips.find(
+  record => getMonthKey(record.month_year) === currentMonthKey
+);
+const pastPayslips = allPayslips.filter(
+  record => getMonthKey(record.month_year) !== currentMonthKey
+);
+
+  
 
   const loadData = useCallback(async () => {
     setError(false);
@@ -51,8 +92,7 @@ export default function MyPayrollScreen({ navigation }) {
     loadData();
   };
 
-  const currentMonthPayslip = allPayslips.find(record => record.month_year === currentMonth);
-  const pastPayslips = allPayslips.filter(record => record.month_year !== currentMonth);
+  
 
   const openDetailModal = (record) => {
     setSelectedPayslip(record);
