@@ -93,7 +93,10 @@ export default function ProfileScreen({ navigation }) {
           if (!token || !userId) return;
 
           const savedImage = await AsyncStorage.getItem(`@profile_picture_${userId}`);
-          if (savedImage) setProfileImage(savedImage);
+          // SAFETY CHECK: Ensure it's not a corrupted string like "null"
+          if (savedImage && savedImage !== 'null' && savedImage !== 'undefined') {
+            setProfileImage(savedImage);
+          }
 
           const response = await axios.get(`${API_URL}/employees/${userId}`, {
             headers: { Authorization: `Bearer ${token}` }
@@ -177,7 +180,7 @@ export default function ProfileScreen({ navigation }) {
     }, [])
   );
 
-    const handlePickImage = async () => {
+  const handlePickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       return Alert.alert(
@@ -236,12 +239,10 @@ export default function ProfileScreen({ navigation }) {
     }
 
     const previousImage = profileImage;
-    setProfileImage(asset.uri);
+    setProfileImage(asset.uri); // Show local image immediately
     setIsUploadingImage(true);
 
     try {
-      // ✅ FIX: Convert image to JPEG and resize to 800px width
-      // This prevents HEIC format issues and guarantees the app can display it
       const manipResult = await manipulateAsync(
         asset.uri,
         [{ resize: { width: 800 } }],
@@ -252,8 +253,8 @@ export default function ProfileScreen({ navigation }) {
         full_name: userData.name,
         email: userData.email,
         profile_picture: {
-          uri: manipResult.uri, // Use the converted image
-          name: `profile_${Date.now()}.jpg`, // Force a .jpg extension
+          uri: manipResult.uri,
+          name: `profile_${Date.now()}.jpg`,
           mimeType: 'image/jpeg',
         },
       });
@@ -271,6 +272,9 @@ export default function ProfileScreen({ navigation }) {
 
         setProfileImage(fullImageUrl);
         await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
+      } else {
+        // Fallback: If backend didn't return a path, keep the local image displayed
+        setProfileImage(manipResult.uri);
       }
 
       Alert.alert('Success', 'Profile picture updated successfully!');
@@ -444,27 +448,27 @@ export default function ProfileScreen({ navigation }) {
           </View>
 
           <TouchableOpacity 
-  style={styles.logoutBtn} 
-  onPress={() => Alert.alert("Logout", "Are you sure you want to log out?", [
-    { text: "Cancel", style: "cancel" }, 
-    { 
-      text: "Logout", 
-      onPress: async () => { 
-        const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
-        await AsyncStorage.clear(); 
-        if (rememberedEmail) {
-          await AsyncStorage.setItem('@remembered_email', rememberedEmail);
-        }
-        navigation.replace('Login'); 
-      }, 
-      style: 'destructive' 
-    }
-  ])} 
-  activeOpacity={0.8}
->
-  <LogOut size={18} color={isLight ? "#FFFFFF" : colors.buttonText} />
-  <Text style={styles.logoutText}>Logout</Text>
-</TouchableOpacity>
+            style={styles.logoutBtn} 
+            onPress={() => Alert.alert("Logout", "Are you sure you want to log out?", [
+              { text: "Cancel", style: "cancel" }, 
+              { 
+                text: "Logout", 
+                onPress: async () => { 
+                  const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
+                  await AsyncStorage.clear(); 
+                  if (rememberedEmail) {
+                    await AsyncStorage.setItem('@remembered_email', rememberedEmail);
+                  }
+                  navigation.replace('Login'); 
+                }, 
+                style: 'destructive' 
+              }
+            ])} 
+            activeOpacity={0.8}
+          >
+            <LogOut size={18} color={isLight ? "#FFFFFF" : colors.buttonText} />
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
         </ScrollView>
 
         {/* Read-Only Employment Modal */}

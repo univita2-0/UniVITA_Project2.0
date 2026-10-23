@@ -9,15 +9,22 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+const LEAVE_STATUS_TABS = [
+  { key: 'all',       label: 'All' },
+  { key: 'approved',  label: 'Approved' },
+  { key: 'rejected',  label: 'Rejected' },
+  { key: 'cancelled', label: 'Cancelled' },
+];
+
 const LeaveManagement = () => {
   const [historyGroups, setHistoryGroups] = useState([]);
   const [pendingGroups, setPendingGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingPending, setLoadingPending] = useState(false);
-  
+
   const [searchTerm, setSearchTerm] = useState('');
   const [pendingSearch, setPendingSearch] = useState('');
-  
+
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -32,7 +39,10 @@ const LeaveManagement = () => {
   const [remarks, setRemarks] = useState('');
   const [processing, setProcessing] = useState(false);
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm]);
+  // Status tab for history table
+  const [activeStatusTab, setActiveStatusTab] = useState('all');
+
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, activeStatusTab]);
   useEffect(() => { setPendingPage(1); }, [pendingSearch]);
 
   const fetchData = useCallback(async () => {
@@ -41,7 +51,7 @@ const LeaveManagement = () => {
     try {
       const res = await axios.get(`${API_BASE}/leave-requests/grouped`, getAuthHeaders());
       const all = res.data || [];
-      
+
       const pending = all.filter(g => g.status === 'Pending').sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
       const history = all.filter(g => g.status !== 'Pending').sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
 
@@ -125,12 +135,25 @@ const LeaveManagement = () => {
     });
   };
 
-  const filteredHistory = historyGroups.filter(group =>
+  // Search-filtered history (before tab filter) → drives tab counts
+  const searchFilteredHistory = historyGroups.filter(group =>
     !searchTerm ||
     group.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.employee_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     group.type?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const tabCounts = {
+    all: searchFilteredHistory.length,
+    approved: searchFilteredHistory.filter(g => g.status?.toLowerCase() === 'approved').length,
+    rejected: searchFilteredHistory.filter(g => g.status?.toLowerCase() === 'rejected').length,
+    cancelled: searchFilteredHistory.filter(g => g.status?.toLowerCase() === 'cancelled').length,
+  };
+
+  const filteredHistory = searchFilteredHistory.filter(group => {
+    if (activeStatusTab === 'all') return true;
+    return group.status?.toLowerCase() === activeStatusTab;
+  });
 
   const filteredPending = pendingGroups.filter(group =>
     !pendingSearch ||
@@ -150,7 +173,6 @@ const LeaveManagement = () => {
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-           
             <p className="expert-subtitle">Review historical and resolved employee leave logs across the organization.</p>
           </div>
         </div>
@@ -158,11 +180,29 @@ const LeaveManagement = () => {
           <button className="expert-btn-secondary" onClick={fetchData} title="Refresh Data">
             <RefreshCw size={15} className={loading ? "spin-icon" : ""} /> Refresh
           </button>
-          <button className="expert-btn-primary" onClick={() => setShowPendingModal(true)}>
+          
+          {/* FIXED: Changed class to expert-btn-secondary to match Appeals page */}
+          <button className="expert-btn-secondary" onClick={() => setShowPendingModal(true)}>
             <ClipboardList size={16} /> Pending Requests
             {pendingCount > 0 && <span className="lm-badge-count">{pendingCount}</span>}
           </button>
         </div>
+      </div>
+
+      {/* STATUS TABS */}
+      <div className="lm-tabs" role="tablist" aria-label="Leave status filter">
+        {LEAVE_STATUS_TABS.map(tab => (
+          <button
+            key={tab.key}
+            role="tab"
+            aria-selected={activeStatusTab === tab.key}
+            className={`lm-tab ${activeStatusTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveStatusTab(tab.key)}
+          >
+            {tab.label}
+            <span className="lm-tab-count">{tabCounts[tab.key] ?? 0}</span>
+          </button>
+        ))}
       </div>
 
       <div className="expert-search-card">
@@ -248,7 +288,7 @@ const LeaveManagement = () => {
         )}
       </div>
 
-      {/* FORMAL & REDESIGNED DETAILS MODAL (Eye Icon Click) */}
+      {/* DETAILS MODAL */}
       {showDetailsModal && selectedGroup && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowDetailsModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
@@ -261,9 +301,8 @@ const LeaveManagement = () => {
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="lm-custom-modal-body">
-              {/* Employee Banner */}
               <div className="lm-detail-banner">
                 <div className="lm-detail-user">
                   <div className="lm-detail-avatar">
@@ -279,7 +318,6 @@ const LeaveManagement = () => {
                 </span>
               </div>
 
-              {/* Structured Key Details Table / Grid */}
               <div className="lm-detail-section">
                 <div className="lm-detail-grid-2col">
                   <div className="lm-detail-card-item">
@@ -311,7 +349,6 @@ const LeaveManagement = () => {
                   </div>
                 </div>
 
-                {/* Reason Box */}
                 <div className="lm-detail-block">
                   <div className="lm-detail-label">
                     <MessageSquare size={14} /> Reason for Leave
@@ -321,7 +358,6 @@ const LeaveManagement = () => {
                   </div>
                 </div>
 
-                {/* Admin Remarks Box */}
                 <div className="lm-detail-block">
                   <div className="lm-detail-label">
                     <User size={14} /> Administrator Remarks
@@ -331,16 +367,15 @@ const LeaveManagement = () => {
                   </div>
                 </div>
 
-                {/* Attachment Proof */}
                 {selectedGroup.image_url && (
                   <div className="lm-detail-block">
                     <div className="lm-detail-label">
                       <ExternalLink size={14} /> Attached Proof / Document
                     </div>
-                    <a 
-                      href={`${API_BASE.replace(/\/api$/, '')}${selectedGroup.image_url}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
+                    <a
+                      href={`${API_BASE.replace(/\/api$/, '')}${selectedGroup.image_url}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="lm-attachment-link"
                     >
                       <ExternalLink size={14} /> View Supporting Document
@@ -367,7 +402,7 @@ const LeaveManagement = () => {
         </div>
       )}
 
-      {/* PENDING LEAVE REQUESTS MODAL */}
+      {/* PENDING MODAL */}
       {showPendingModal && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="lm-custom-modal" onClick={e => e.stopPropagation()}>
@@ -380,7 +415,7 @@ const LeaveManagement = () => {
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="lm-custom-modal-body">
               <div className="expert-search-input-group modal-search">
                 <Search size={18} className="search-icon" />
@@ -423,7 +458,7 @@ const LeaveManagement = () => {
                             <span>{group.request_count || 1} day(s)</span>
                           </div>
                         </div>
-                        
+
                         <div className="lm-minimal-field full-width">
                           <label>Reason for Leave</label>
                           <p>{group.reason || '—'}</p>
@@ -479,7 +514,7 @@ const LeaveManagement = () => {
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="lm-custom-modal-body">
               <div className="lm-action-notice-box">
                 <p>

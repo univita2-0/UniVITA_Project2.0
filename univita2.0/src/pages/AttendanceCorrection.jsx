@@ -42,22 +42,21 @@ const formatDate = (dateString) => {
   return dateString.split('T')[0];
 };
 
-// ✅ FIX C13 — Centralized audit-status helper (fixes old isCorrected-only check
-//               that showed "Original" for approved/rejected corrections)
 const getAuditStatus = (rec) => {
   if (!rec) return { label: 'Original', cls: 'default' };
   const cs = String(rec.correction_status || '').toLowerCase();
-  if (cs === 'pending') return { label: 'Pending Review', cls: 'warning' };
-  if (cs === 'approved') return { label: 'Approved', cls: 'success' };
-  if (cs === 'rejected') return { label: 'Rejected', cls: 'danger' };
+  if (cs === 'pending')   return { label: 'Pending Review', cls: 'warning' };
+  if (cs === 'approved')  return { label: 'Approved',       cls: 'success' };
+  if (cs === 'rejected')  return { label: 'Rejected',       cls: 'danger'  };
+  if (cs === 'cancelled') return { label: 'Cancelled',      cls: 'default' };
   return { label: 'Original', cls: 'default' };
 };
 
-// ✅ FIX T6 — Tab config
 const STATUS_TABS = [
-  { key: 'all',      label: 'All' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'rejected', label: 'Rejected' },
+  { key: 'all',       label: 'All' },
+  { key: 'approved',  label: 'Approved' },
+  { key: 'rejected',  label: 'Rejected' },
+  { key: 'cancelled', label: 'Cancelled' },
 ];
 
 const ALLOWED_STATUSES = ['present', 'late', 'absent', 'on leave'];
@@ -88,7 +87,6 @@ const AttendanceCorrection = () => {
   const [previewImage, setPreviewImage] = useState(null);
   const [viewingRecord, setViewingRecord] = useState(null);
 
-  // ✅ FIX T7 — Active status tab
   const [activeStatusTab, setActiveStatusTab] = useState('all');
 
   const debouncedEmployeeId = useDebounce(employeeId);
@@ -105,7 +103,6 @@ const AttendanceCorrection = () => {
     }
   }, [debouncedEmployeeId]);
 
-  // Reset to page 1 whenever tab changes
   useEffect(() => { setCurrentPage(1); }, [activeStatusTab]);
   useEffect(() => { setPendingPage(1); }, [pendingTypeFilter]);
 
@@ -266,7 +263,6 @@ const AttendanceCorrection = () => {
 
   const baseRecords = searchDone ? searchRecords : defaultRecords;
 
-  // ✅ FIX T8 — Search + date filtered base (before tab filter) → drives tab counts
   const searchFilteredRecords = baseRecords.filter(rec => {
     const matchesDate = !searchDate || formatDate(rec.date) === searchDate;
     const matchesLiveSearch = searchDone || !debouncedEmployeeId.trim() ||
@@ -279,9 +275,9 @@ const AttendanceCorrection = () => {
     all: searchFilteredRecords.length,
     approved: searchFilteredRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'approved').length,
     rejected: searchFilteredRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'rejected').length,
+    cancelled: searchFilteredRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'cancelled').length,
   };
 
-  // ✅ FIX T9 — Apply status tab filter on top of search + date
   const filteredRecords = searchFilteredRecords.filter(rec => {
     if (activeStatusTab === 'all') return true;
     return String(rec.correction_status || '').toLowerCase() === activeStatusTab;
@@ -316,7 +312,7 @@ const AttendanceCorrection = () => {
         </button>
       </div>
 
-      {/* ✅ FIX T10 — Status tabs row */}
+      {/* STATUS TABS */}
       <div className="ac-tabs" role="tablist" aria-label="Correction audit status filter">
         {STATUS_TABS.map(tab => (
           <button
@@ -393,7 +389,6 @@ const AttendanceCorrection = () => {
                     </tr>
                   ) : (
                     currentRecords.map(rec => {
-                      // ✅ FIX C13 (cont.) — use helper for the audit column
                       const audit = getAuditStatus(rec);
                       return (
                         <tr key={rec.id}>
@@ -561,11 +556,11 @@ const AttendanceCorrection = () => {
                     onClick={() => setPendingTypeFilter(opt.key)}
                     style={{
                       padding: '6px 14px',
-                      borderRadius: 999,
-                      border: '1px solid ' + (pendingTypeFilter === opt.key ? '#0D9488' : '#CBD5E1'),
-                      background: pendingTypeFilter === opt.key ? '#0D9488' : '#FFFFFF',
-                      color: pendingTypeFilter === opt.key ? '#FFFFFF' : '#334155',
-                      fontWeight: 600,
+                      borderRadius: 6,
+                      border: '1px solid ' + (pendingTypeFilter === opt.key ? '#0F172A' : '#CBD5E1'),
+                      background: '#FFFFFF',
+                      color: '#0F172A',
+                      fontWeight: pendingTypeFilter === opt.key ? 700 : 500,
                       fontSize: '0.8rem',
                       cursor: 'pointer'
                     }}

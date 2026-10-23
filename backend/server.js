@@ -2107,7 +2107,7 @@ app.get('/api/attendance-appeals/history', authenticateToken, (req, res) => {
       u.employee_id 
     FROM attendance_appeals a 
     JOIN users u ON (a.user_id = u.employee_id OR a.user_id = u.id) 
-    WHERE a.status IN ('approved', 'rejected') 
+    WHERE a.status IN ('approved', 'rejected', 'cancelled') 
     ORDER BY a.submitted_at DESC
   `;
 
@@ -8586,7 +8586,7 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
   await connection.beginTransaction();
 
   try {
-    // 1. Resolve current user's internal ID and employee_id safely
+    
     const [userRows] = await connection.query(
       "SELECT id, employee_id FROM users WHERE id = ?",
       [userId]
@@ -8600,9 +8600,9 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
     const internalId = userRows[0].id;
     const empId = userRows[0].employee_id;
 
-    // 2. Find request and LOCK the row for update
+    
     const [rows] = await connection.query(
-      "SELECT id, status FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = ?) FOR UPDATE",
+      "SELECT id, status, schedule_id FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = ?) FOR UPDATE",
       [id, internalId, empId]
     );
 
@@ -8622,6 +8622,22 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
       "UPDATE attendance_corrections SET status = 'cancelled', admin_remarks = ?, reviewed_at = ? WHERE id = ?",
       [cancelRemark, phNow, id]
     );
+
+    
+    if (rows[0].schedule_id) {
+      await connection.query(
+        `UPDATE attendance 
+         SET correction_requested = 0, 
+             correction_status = 'cancelled',
+             status = CASE 
+               WHEN time_in IS NOT NULL AND (time_out IS NULL OR time_out = '--:--') THEN 'missing clock-out'
+               WHEN time_in IS NULL THEN 'missed schedule'
+               ELSE status
+             END
+         WHERE schedule_id = ?`,
+        [rows[0].schedule_id]
+      );
+    }
 
     await connection.commit();
     logAction(userId, 'CANCEL_CORRECTION', 'attendance_correction', id, req);

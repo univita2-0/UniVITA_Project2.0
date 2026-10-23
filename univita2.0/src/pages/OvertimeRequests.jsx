@@ -28,7 +28,6 @@ const formatTo12Hour = (timeStr) => {
   return `${hours}:${minutes} ${ampm}`;
 };
 
-// --- Status helpers: null-safe, case-insensitive, whitelist-normalized ---
 const normalizeStatus = (status) => {
   const s = String(status || '').toLowerCase().trim();
   if (['pending', 'approved', 'rejected', 'cancelled'].includes(s)) return s;
@@ -46,9 +45,10 @@ const getChipClass = (status) => {
 };
 
 const TABS = [
-  { key: 'all', label: 'All' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'rejected', label: 'Rejected' },
+  { key: 'all',       label: 'All' },
+  { key: 'approved',  label: 'Approved' },
+  { key: 'rejected',  label: 'Rejected' },
+  { key: 'cancelled', label: 'Cancelled' },
 ];
 
 const OvertimeRequests = () => {
@@ -73,7 +73,6 @@ const OvertimeRequests = () => {
   const [pendingPage, setPendingPage] = useState(1);
   const itemsPerPage = 20;
 
-  // Reset pagination when search OR tab changes
   useEffect(() => { setHistoryPage(1); }, [searchQuery, activeTab]);
   useEffect(() => { setPendingPage(1); }, [pendingSearch]);
 
@@ -130,7 +129,6 @@ const OvertimeRequests = () => {
       setReviewingRequest(null);
       setReviewRemarks('');
     } catch (err) {
-      // Surface backend validation messages (overlap, CTO min, invalid range, etc.)
       toast.error(err.response?.data?.message || `Failed to ${status} request`);
     } finally {
       setProcessing(false);
@@ -138,26 +136,24 @@ const OvertimeRequests = () => {
   };
 
   const getScenarioLabel = (scenario) => {
-  if (scenario === 'early_ot') return 'Early OT';
-  if (scenario === 'normal_ot') return 'Normal OT';
-  return scenario || '—';
-};
+    if (scenario === 'early_ot') return 'Early OT';
+    if (scenario === 'normal_ot') return 'Normal OT';
+    return scenario || '—';
+  };
 
-  // 1) Apply search filter first
   const searchFiltered = historyRequests.filter(r =>
     !searchQuery ||
     r.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     r.employee_id?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // 2) Compute tab counts from the search-filtered set so badges match what's visible
   const tabCounts = {
     all: searchFiltered.length,
     approved: searchFiltered.filter(r => normalizeStatus(r.status) === 'approved').length,
     rejected: searchFiltered.filter(r => normalizeStatus(r.status) === 'rejected').length,
+    cancelled: searchFiltered.filter(r => normalizeStatus(r.status) === 'cancelled').length,
   };
 
-  // 3) Apply tab filter on top of search
   const filteredHistory = searchFiltered.filter(r => {
     if (activeTab === 'all') return true;
     return normalizeStatus(r.status) === activeTab;
@@ -195,23 +191,24 @@ const OvertimeRequests = () => {
         </button>
       </div>
 
-      {/* TAB BAR + SEARCH merged into a single control card */}
-      <div className="ot-controls-card">
-        <div className="ot-tab-bar" role="tablist">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              role="tab"
-              aria-selected={activeTab === tab.key}
-              className={`ot-tab ${activeTab === tab.key ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-              <span className="ot-tab-count">{tabCounts[tab.key]}</span>
-            </button>
-          ))}
-        </div>
+      {/* STATUS TABS */}
+      <div className="ot-tabs" role="tablist" aria-label="Overtime status filter">
+        {TABS.map(tab => (
+          <button
+            key={tab.key}
+            role="tab"
+            aria-selected={activeTab === tab.key}
+            className={`ot-tab ${activeTab === tab.key ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+            <span className="ot-tab-count">{tabCounts[tab.key] ?? 0}</span>
+          </button>
+        ))}
+      </div>
 
+      {/* SEARCH CARD */}
+      <div className="ot-search-card">
         <div className="ot-search-input-group">
           <Search size={18} className="text-muted" />
           <input

@@ -38,11 +38,11 @@ const formatTo12Hour = (timeStr) => {
   return `${hours}:${minutes} ${ampm}`;
 };
 
-// ✅ FIX T1 — Tab configuration
 const STATUS_TABS = [
-  { key: 'all',      label: 'All' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'rejected', label: 'Rejected' },
+  { key: 'all',       label: 'All' },
+  { key: 'approved',  label: 'Approved' },
+  { key: 'rejected',  label: 'Rejected' },
+  { key: 'cancelled', label: 'Cancelled' },
 ];
 
 const AttendanceAppeals = () => {
@@ -67,7 +67,6 @@ const AttendanceAppeals = () => {
   const [pendingPage, setPendingPage] = useState(1);
   const itemsPerPage = 20;
 
-  // ✅ FIX T2 — Active status tab
   const [activeStatusTab, setActiveStatusTab] = useState('all');
 
   const debouncedSearchQuery = useDebounce(searchQuery);
@@ -163,7 +162,6 @@ const AttendanceAppeals = () => {
     }
   };
 
-  // ✅ FIX T3 — Search-filtered history (before tab filter) → drives tab counts
   const searchFilteredHistory = historyAppeals.filter(r =>
     !debouncedSearchQuery ||
     r.full_name?.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) ||
@@ -174,9 +172,9 @@ const AttendanceAppeals = () => {
     all: searchFilteredHistory.length,
     approved: searchFilteredHistory.filter(r => r.status?.toLowerCase() === 'approved').length,
     rejected: searchFilteredHistory.filter(r => r.status?.toLowerCase() === 'rejected').length,
+    cancelled: searchFilteredHistory.filter(r => r.status?.toLowerCase() === 'cancelled').length,
   };
 
-  // ✅ FIX T4 — Apply status tab filter on top of search
   const filteredHistory = searchFilteredHistory.filter(r => {
     if (activeStatusTab === 'all') return true;
     return r.status?.toLowerCase() === activeStatusTab;
@@ -208,7 +206,7 @@ const AttendanceAppeals = () => {
         </button>
       </div>
 
-      {/* ✅ FIX T5 — Status tabs row */}
+      {/* STATUS TABS */}
       <div className="aa-tabs" role="tablist" aria-label="Appeal status filter">
         {STATUS_TABS.map(tab => (
           <button
