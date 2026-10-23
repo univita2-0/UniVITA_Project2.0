@@ -1112,7 +1112,7 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
   let { latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
 
-  // 1. STRICT PAYLOAD VALIDATION: Require selfie and valid GPS
+ 
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'A selfie is required to verify your attendance.' });
   }
@@ -1196,14 +1196,24 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     if (locRows.length === 0) return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered in the system.` });
     const schoolGeo = locRows[0];
 
-    // Calculate distance strictly using provided GPS coordinates
     const distance = getDistanceFromLatLonInMeters(parsedLat, parsedLon, schoolGeo.latitude, schoolGeo.longitude);
     if (distance > schoolGeo.radius) {
       return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
     }
 
-    const [existing] = await db.promise().query("SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ?", [employee_id, schedule_id]);
-    if (existing.length > 0) return res.status(400).json({ success: false, message: 'You have already clocked in for this schedule.' });
+   
+    const [existing] = await db.promise().query(
+      "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ? AND DATE(date) = ?", 
+      [employee_id, schedule_id, todayDate]
+    );
+    if (existing.length > 0) return res.status(400).json({ success: false, message: 'You have already clocked in for this schedule today.' });
+
+    
+    const [activeShift] = await db.promise().query(
+      "SELECT id FROM attendance WHERE user_id = ? AND DATE(date) = ? AND time_out IS NULL AND status != 'missed schedule'", 
+      [employee_id, todayDate]
+    );
+    if (activeShift.length > 0) return res.status(400).json({ success: false, message: 'You already have an active clock-in for today. Please clock out first.' });
 
     const status = diffMinutes > 30 ? 'late' : 'present';
 
@@ -8623,7 +8633,6 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
   await connection.beginTransaction();
 
   try {
-    
     const [userRows] = await connection.query(
       "SELECT id, employee_id FROM users WHERE id = ?",
       [userId]
@@ -8639,7 +8648,7 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
 
     
     const [rows] = await connection.query(
-      "SELECT id, status, schedule_id FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = ?) FOR UPDATE",
+      "SELECT id, status, schedule_id, attendance_date FROM attendance_corrections WHERE id = ? AND (user_id = ? OR user_id = ?) FOR UPDATE",
       [id, internalId, empId]
     );
 
@@ -8671,8 +8680,10 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
                WHEN time_in IS NULL THEN 'missed schedule'
                ELSE status
              END
-         WHERE schedule_id = ?`,
-        [rows[0].schedule_id]
+         WHERE user_id = ? 
+           AND schedule_id = ? 
+           AND DATE(date) = DATE(?)`,
+        [empId, rows[0].schedule_id, rows[0].attendance_date]
       );
     }
 
