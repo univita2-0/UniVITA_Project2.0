@@ -1399,7 +1399,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
   let { employee_id, date, type, time, reason, schedule_id } = req.body;
   const userId = req.user.id;
 
-
   const uploadedFile = req.file || (req.files && (
     req.files['attachment']?.[0] ||
     req.files['image']?.[0]      ||
@@ -1408,9 +1407,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
   const attachmentPath = uploadedFile ? `/uploads/corrections/${uploadedFile.filename}` : null;
   const phNow = getPHDateTime();
 
-  
-
- 
   if (!uploadedFile) {
     return res.status(400).json({
       success: false,
@@ -1418,17 +1414,14 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
     });
   }
 
-
   if (!employee_id || !date || !type || !time || !reason || !reason.trim()) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
-  
   const ALLOWED_TYPES = ['clock_in', 'clock_out', 'early_out'];
   if (!ALLOWED_TYPES.includes(type)) {
     return res.status(400).json({ success: false, message: 'Invalid correction type.' });
   }
-
 
   const trimmedReason = reason.trim();
   if (trimmedReason.length < 5) {
@@ -1444,7 +1437,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
     });
   }
 
-
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res.status(400).json({
       success: false,
@@ -1452,7 +1444,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
     });
   }
 
-  
   if (!/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(time)) {
     return res.status(400).json({
       success: false,
@@ -1461,13 +1452,11 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
   }
   const normalizedTime = time.length === 5 ? `${time}:00` : time;
 
- 
   const { date: today } = getPHTime();
   if (date > today) {
     return res.status(400).json({ success: false, message: 'Cannot request correction for future dates.' });
   }
 
-  
   if (!isDateWithinAllowedRange(date)) {
     return res.status(400).json({
       success: false,
@@ -1476,7 +1465,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
   }
 
   try {
-
     const [userRows] = await db.promise().query(
       "SELECT id, employee_id FROM users WHERE id = ? AND status = 'active'",
       [userId]
@@ -1486,17 +1474,14 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
     }
     const resolvedEmployeeId = userRows[0].employee_id;
 
-        
     const MAX_PENDING_CORRECTIONS = 10;
     const connection = await db.promise().getConnection();
 
     try {
       await connection.beginTransaction();
 
-      
       await connection.query(`SELECT id FROM users WHERE id = ? FOR UPDATE`, [userId]);
 
-      
       const [pendingCorrRows] = await connection.query(
         `SELECT COUNT(*) AS c FROM attendance_corrections
           WHERE (user_id = ? OR user_id = ?) AND status = 'pending'`,
@@ -1510,7 +1495,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
         });
       }
 
-      
       let scheduleRow;
       if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
         const [schedRows] = await connection.query(
@@ -1544,7 +1528,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
         scheduleRow = schedVerify[0];
       }
 
-      
       const toMinutes = (t) => {
         const [h, m] = String(t).split(':').map(Number);
         return (h || 0) * 60 + (m || 0);
@@ -1554,7 +1537,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
       const shiftEnd   = toMinutes(scheduleRow.end_time);
 
       if (type === 'clock_in') {
-       
         if (reqMin < shiftStart - 120 || reqMin > shiftEnd) {
           await connection.rollback();
           return res.status(400).json({
@@ -1563,7 +1545,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
           });
         }
       } else if (type === 'clock_out') {
-        
         if (reqMin < shiftStart || reqMin > shiftEnd + 240) {
           await connection.rollback();
           return res.status(400).json({
@@ -1572,7 +1553,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
           });
         }
       } else if (type === 'early_out') {
-        
         if (reqMin < shiftStart || reqMin >= shiftEnd) {
           await connection.rollback();
           return res.status(400).json({
@@ -1582,7 +1562,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
         }
       }
 
-      
       const isClockInRequest = type === 'clock_in';
       const [existingCorr] = await connection.query(
         `SELECT id FROM attendance_corrections
@@ -1604,7 +1583,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
         });
       }
 
-      
       const [insertResult] = await connection.query(
         `INSERT INTO attendance_corrections
            (user_id, attendance_date, schedule_id,
@@ -1624,6 +1602,19 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
       );
 
       
+      const [existingAtt] = await connection.query(
+        `SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
+        [resolvedEmployeeId, userId, schedule_id]
+      );
+
+      if (existingAtt.length === 0) {
+        await connection.query(
+          `INSERT INTO attendance (user_id, schedule_id, date, status, correction_requested, correction_status)
+           VALUES (?, ?, ?, 'absent', 1, 'pending')`,
+          [resolvedEmployeeId, schedule_id, date]
+        );
+      }
+
       await connection.query(
         `UPDATE attendance
             SET correction_requested = 1,
@@ -1633,7 +1624,6 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
         [resolvedEmployeeId, userId, schedule_id]
       );
 
-      
       if (type === 'clock_out' || type === 'early_out') {
         await connection.query(
           "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
@@ -3195,7 +3185,22 @@ app.get('/api/attendance/all-recent', authenticateToken, (req, res) => {
               WHERE c.schedule_id = a.schedule_id 
               ORDER BY c.id DESC LIMIT 1),
              a.correction_status
-           ) as correction_status
+           ) as correction_status,
+           -- ✅ FIX: Override the main status if the correction is cancelled/rejected
+           CASE
+             WHEN COALESCE(
+               (SELECT status FROM attendance_corrections c 
+                WHERE c.schedule_id = a.schedule_id 
+                ORDER BY c.id DESC LIMIT 1),
+               a.correction_status
+             ) IN ('cancelled', 'rejected') THEN
+               CASE
+                 WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN 'missing clock-out'
+                 WHEN a.time_in IS NULL THEN 'missed schedule'
+                 ELSE COALESCE(a.status, 'present')
+               END
+             ELSE a.status
+           END as status
     FROM attendance a 
     JOIN users u ON a.user_id = u.employee_id 
     ORDER BY a.date DESC, a.time_in DESC 
@@ -3686,7 +3691,6 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
 });
 
 app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
- 
   const sql = `
     SELECT a.*, 
            DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
@@ -3697,13 +3701,27 @@ app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwne
               WHERE c.schedule_id = a.schedule_id 
               ORDER BY c.id DESC LIMIT 1),
              a.correction_status
-           ) as correction_status
+           ) as correction_status,
+           -- ✅ FIX: Override the main status if the correction is cancelled/rejected
+           CASE
+             WHEN COALESCE(
+               (SELECT status FROM attendance_corrections c 
+                WHERE c.schedule_id = a.schedule_id 
+                ORDER BY c.id DESC LIMIT 1),
+               a.correction_status
+             ) IN ('cancelled', 'rejected') THEN
+               CASE
+                 WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN 'missing clock-out'
+                 WHEN a.time_in IS NULL THEN 'missed schedule'
+                 ELSE COALESCE(a.status, 'present')
+               END
+             ELSE a.status
+           END as status
     FROM attendance a
     LEFT JOIN users u ON a.user_id = u.employee_id
     WHERE a.user_id = ? 
     ORDER BY a.date DESC
   `;
-  
   db.query(sql, [req.params.employeeId], (err, result) => {
       if (err) return res.status(500).json({ success: false, message: "Failed to load report." });
       res.json(result || []);
