@@ -3184,13 +3184,24 @@ app.get('/api/attendance/all-recent', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to view attendance records.' });
   }
+  
   const sql = `
-    SELECT a.*, DATE_FORMAT(a.date, '%Y-%m-%d') as date, u.full_name, u.employee_id 
+    SELECT a.*, 
+           DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
+           u.full_name, 
+           u.employee_id,
+           COALESCE(
+             (SELECT status FROM attendance_corrections c 
+              WHERE c.schedule_id = a.schedule_id 
+              ORDER BY c.id DESC LIMIT 1),
+             a.correction_status
+           ) as correction_status
     FROM attendance a 
     JOIN users u ON a.user_id = u.employee_id 
     ORDER BY a.date DESC, a.time_in DESC 
     LIMIT 500
   `;
+  
   db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Failed to fetch recent attendance records.' });
     res.json(results || []);
@@ -3675,16 +3686,24 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
 });
 
 app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
+ 
   const sql = `
     SELECT a.*, 
            DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
            ROUND(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60, 2) as total_hours,
-           a.reviewed_at, a.updated_at, u.full_name, u.employee_id
+           a.reviewed_at, a.updated_at, u.full_name, u.employee_id,
+           COALESCE(
+             (SELECT status FROM attendance_corrections c 
+              WHERE c.schedule_id = a.schedule_id 
+              ORDER BY c.id DESC LIMIT 1),
+             a.correction_status
+           ) as correction_status
     FROM attendance a
     LEFT JOIN users u ON a.user_id = u.employee_id
     WHERE a.user_id = ? 
     ORDER BY a.date DESC
   `;
+  
   db.query(sql, [req.params.employeeId], (err, result) => {
       if (err) return res.status(500).json({ success: false, message: "Failed to load report." });
       res.json(result || []);
