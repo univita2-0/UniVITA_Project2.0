@@ -426,13 +426,19 @@ export default function RequestsScreen({ navigation, route }) {
     }
   };
 
-  const fetchLeaveBalances = async () => {
+    const fetchLeaveBalances = async () => {
     setLoadingBalances(true);
     const userId = await AsyncStorage.getItem('user_id');
     if (!userId) { Alert.alert('Error', 'User account not found.'); setLoadingBalances(false); return; }
     try {
+      const token = await AsyncStorage.getItem('auth_token'); // ✅ ADD THIS
       const year = new Date().getFullYear();
-      const res = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`);
+      
+      
+      const res = await fetch(`${API_URL}/leave-balances/${userId}?year=${year}`, {
+        headers: { Authorization: `Bearer ${token || ''}` }
+      });
+      
       const data = await res.json();
       if (res.ok && Array.isArray(data)) {
         setLeaveBalances(data);

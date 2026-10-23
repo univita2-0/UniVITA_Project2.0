@@ -928,8 +928,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
       </div>
       <div>
         <a 
-          href="https://github.com/univita2-0/UniVITA_Project2.0/releases/download/v1.0.0/application-110b2f0a-e666-40de-bfa2-d5e5bb3d6f77.apk" 
-          download="UniVITA_Instructor_App.apk"
+  href="https://github.com/univita2-0/UniVITA_Project2.0/releases/latest/download/UniVITA_Instructor_App.apk" 
+  download="UniVITA_Instructor_App.apk"
           style={{
             background: '#0D9488',
             color: '#FFFFFF',

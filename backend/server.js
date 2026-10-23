@@ -3537,9 +3537,9 @@ app.get('/api/employees/last-id', authenticateToken, (req, res) => {
 });
 
 app.get('/api/employees/:id', authenticateToken, verifyOwnership, (req, res) => {
-  
   db.query(
-    "SELECT id, employee_id, full_name, email, role, phone_number, position_level, position, status FROM users WHERE id = ?", 
+    
+    "SELECT id, employee_id, full_name, email, role, phone_number, position_level, position, status, profile_picture FROM users WHERE id = ?", 
     [req.params.id], 
     (err, results) => {
       if (err) return res.status(500).json({ success: false, message: 'Database error loading profile.' });
