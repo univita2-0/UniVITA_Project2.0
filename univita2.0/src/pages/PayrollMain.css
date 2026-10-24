@@ -3,6 +3,7 @@
 
 .pm-container {
   background: transparent;
+  padding: 1.5rem 2rem;
   font-family: 'Inter', system-ui, sans-serif;
   box-sizing: border-box;
   color: #0F172A;

@@ -508,9 +508,7 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
                 <input type="text" placeholder="Search employee..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
               </div>
               <div className="pm-toolbar-actions">
-                <button className="pm-btn-outline" onClick={onShowHistory}>
-                  <History size={15} /> Logs
-                </button>
+                
                 <button className="pm-btn-outline" onClick={exportToCSV}>
                   <Download size={15} /> Payroll CSV
                 </button>

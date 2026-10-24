@@ -365,7 +365,7 @@ const JobPostings = () => {
                   <th>Job Title</th>
                   <th>Type</th>
                   <th>Status</th>
-                  <th>Applicants</th>
+                  <th>New Applicants</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
