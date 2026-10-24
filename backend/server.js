@@ -379,27 +379,35 @@ const verifyOwnership = (req, res, next) => {
     return next();
   }
 
-  
   const requestedEmployeeId = req.params.employeeId || req.params.identifier || req.params.userId || req.params.id;
   
   if (!requestedEmployeeId) {
     return res.status(400).json({ error: "Missing employee identifier in request." });
   }
 
-  db.query("SELECT id, employee_id FROM users WHERE id = ?", [req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ error: "Database verification error" });
-    
-    if (rows.length === 0) {
-      return res.status(403).json({ error: "Forbidden: User not found." });
-    }
+  
+  try {
+    db.query("SELECT id, employee_id FROM users WHERE id = ?", [req.user.id], (err, rows) => {
+      if (err) {
+        console.error("Ownership DB Error:", err); 
+        return res.status(500).json({ error: "Database verification error" });
+      }
+      
+      if (rows.length === 0) {
+        return res.status(403).json({ error: "Forbidden: User not found." });
+      }
 
-    if (rows[0].employee_id !== requestedEmployeeId && rows[0].id.toString() !== requestedEmployeeId.toString()) {
-      console.warn(`IDOR Blocked: User ID ${req.user.id} attempted to access ${requestedEmployeeId}`);
-      return res.status(403).json({ error: "Forbidden: You can only access your own data." });
-    }
-    
-    next();
-  });
+      if (rows[0].employee_id !== requestedEmployeeId && rows[0].id.toString() !== requestedEmployeeId.toString()) {
+        console.warn(`IDOR Blocked: User ID ${req.user.id} attempted to access ${requestedEmployeeId}`);
+        return res.status(403).json({ error: "Forbidden: You can only access your own data." });
+      }
+      
+      next();
+    });
+  } catch (err) {
+    console.error("Ownership Middleware Error:", err);
+    return res.status(500).json({ error: "Server error during verification." });
+  }
 };
 
 function logVisitorHistory(visitorId, visitorName, bleId, floor, currentRoom, eventType, x = null, y = null) {
@@ -1114,7 +1122,6 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
   let { latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
 
- 
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'A selfie is required to verify your attendance.' });
   }
@@ -1128,16 +1135,27 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
   const selfiePath = `/uploads/selfies/${req.file.filename}`;
   const { date: todayDate, time: currentTime } = getPHTime();
 
+ 
+  const connection = await db.promise().getConnection();
+  
   try {
-    const [userRows] = await db.promise().query(
-      "SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active'",
+    await connection.beginTransaction();
+
+    
+    const [userRows] = await connection.query(
+      "SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active' FOR UPDATE",
       [userId]
     );
-    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'User inactive or not found.' });
+    if (userRows.length === 0) {
+      await connection.rollback();
+      
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ success: false, message: 'User inactive or not found.' });
+    }
     const employee_id = userRows[0].employee_id;
 
     if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
-      const [autoSched] = await db.promise().query(
+      const [autoSched] = await connection.query(
         `SELECT id FROM schedules 
          WHERE user_id = ? AND date = ? 
          ORDER BY ABS(TIME_TO_SEC(TIMEDIFF(?, start_time))) ASC LIMIT 1`,
@@ -1149,31 +1167,39 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     }
 
     if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
+      await connection.rollback();
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(400).json({ success: false, message: 'No active schedule found for today to check in.' });
     }
 
-    const [schedRows] = await db.promise().query(
+    const [schedRows] = await connection.query(
       "SELECT id, place, start_time, end_time FROM schedules WHERE id = ? AND user_id = ?",
       [schedule_id, employee_id]
     );
-    if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'No work schedule found.' });
+    if (schedRows.length === 0) {
+      await connection.rollback();
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ success: false, message: 'No work schedule found.' });
+    }
     const { place: schedulePlace, start_time: scheduledStartTime, end_time: scheduledEndTime } = schedRows[0];
 
     if (currentTime > scheduledEndTime) {
-      const [existingAtt] = await db.promise().query(
+      const [existingAtt] = await connection.query(
         "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ? AND date = ?", 
         [employee_id, schedule_id, todayDate]
       );
       
       if (existingAtt.length > 0) {
-        await db.promise().query("UPDATE attendance SET status = 'missed schedule' WHERE id = ?", [existingAtt[0].id]);
+        await connection.query("UPDATE attendance SET status = 'missed schedule' WHERE id = ?", [existingAtt[0].id]);
       } else {
-        await db.promise().query(
+        await connection.query(
           `INSERT INTO attendance (user_id, schedule_id, date, status, location) 
            VALUES (?, ?, ?, 'missed schedule', 'Missed Schedule')`,
           [employee_id, schedule_id, todayDate]
         );
       }
+      await connection.commit(); 
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(403).json({
         success: false,
         message: 'This shift has already passed and has been marked as Missed Schedule.'
@@ -1185,41 +1211,56 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     const diffMinutes = (actualTime - scheduledStart) / 60000;
 
     if (diffMinutes < -15) {
+      await connection.rollback();
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(403).json({
         success: false,
         message: `Too early to clock in. Allowed from 15 minutes before (${formatTo12Hour(scheduledStartTime)}).`
       });
     }
 
-    const [locRows] = await db.promise().query(
+    const [locRows] = await connection.query(
       "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
       [schedulePlace]
     );
-    if (locRows.length === 0) return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered in the system.` });
+    if (locRows.length === 0) {
+      await connection.rollback();
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered in the system.` });
+    }
     const schoolGeo = locRows[0];
 
     const distance = getDistanceFromLatLonInMeters(parsedLat, parsedLon, schoolGeo.latitude, schoolGeo.longitude);
     if (distance > schoolGeo.radius) {
+      await connection.rollback();
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
     }
 
-   
-    const [existing] = await db.promise().query(
+    const [existing] = await connection.query(
       "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ? AND DATE(date) = ?", 
       [employee_id, schedule_id, todayDate]
     );
-    if (existing.length > 0) return res.status(400).json({ success: false, message: 'You have already clocked in for this schedule today.' });
+    if (existing.length > 0) {
+      await connection.rollback();
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: 'You have already clocked in for this schedule today.' });
+    }
 
-    
-    const [activeShift] = await db.promise().query(
+    const [activeShift] = await connection.query(
       "SELECT id FROM attendance WHERE user_id = ? AND DATE(date) = ? AND time_out IS NULL AND status != 'missed schedule'", 
       [employee_id, todayDate]
     );
-    if (activeShift.length > 0) return res.status(400).json({ success: false, message: 'You already have an active clock-in for today. Please clock out first.' });
+    if (activeShift.length > 0) {
+      await connection.rollback();
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: 'You already have an active clock-in for today. Please clock out first.' });
+    }
 
     const status = diffMinutes > 30 ? 'late' : 'present';
 
-    const [result] = await db.promise().query(
+    
+    const [result] = await connection.query(
       `INSERT INTO attendance 
         (user_id, schedule_id, date, time_in, status, clock_in_selfie,
          clock_in_latitude, clock_in_longitude, location)
@@ -1229,26 +1270,38 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
        `${schedulePlace} (${parsedLat.toFixed(6)}, ${parsedLon.toFixed(6)})`]
     );
 
-    logAction(req.user.id, 'CLOCK_IN', 'attendance', result.insertId, req);
-
-    await db.promise().query(
+    await connection.query(
       `INSERT INTO instructor_location_tracking 
        (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
        VALUES (?, ?, ?, ?, ?, 1, 1, NOW())`,
       [employee_id, schedule_id, parsedLat, parsedLon, schedulePlace]
     );
 
-    await db.promise().query(
+    await connection.query(
       "UPDATE users SET last_location_ping = NOW(), location_tracking_enabled = 1 WHERE employee_id = ?",
       [employee_id]
     );
 
+    
+    await connection.commit();
+
+    
+    logAction(req.user.id, 'CLOCK_IN', 'attendance', result.insertId, req);
     await broadcastInstructorStatus(employee_id);
 
     res.json({ success: true, message: `Clocked in successfully as ${status} at ${formatTo12Hour(currentTime)}.` });
+
   } catch (err) {
+    
+    await connection.rollback();
     console.error("Clock-in error:", err);
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({ success: false, message: "A server error occurred during clock-in." });
+  } finally {
+  
+    connection.release();
   }
 });
 
@@ -4368,7 +4421,7 @@ setInterval(async () => {
     const [deadScanners] = await db.promise().query(`
       SELECT scanner_id, assigned_room FROM scanners 
       WHERE last_ping < NOW() - INTERVAL 5 MINUTE AND status = 'ONLINE'
-    `);
+    `, [phNow]);
 
     for (const scanner of deadScanners) {
       
@@ -5062,7 +5115,7 @@ app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/emergency-alerts/active', authenticateToken,  async (req, res) => {
+app.get('/api/emergency-alerts/active', authenticateToken, async (req, res) => {
   const userId = req.user.id;
   
   if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
@@ -5072,14 +5125,26 @@ app.get('/api/emergency-alerts/active', authenticateToken,  async (req, res) => 
     if (userRows.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
     const userRole = userRows[0].role.toLowerCase().trim();
 
+    
     const [activeAlerts] = await db.promise().query(`
-      SELECT id, title, message, severity, sent_at, target_roles, is_active, expires_at 
-      FROM emergency_alerts 
-      WHERE is_active = 1 AND (expires_at IS NULL OR expires_at > NOW())
-      ORDER BY sent_at DESC
-    `);
+      SELECT 
+        ea.id, 
+        ea.title, 
+        ea.message, 
+        ea.severity, 
+        ea.sent_at, 
+        ea.target_roles, 
+        ea.is_active, 
+        ea.expires_at,
+        ar.read_at
+      FROM emergency_alerts ea
+      LEFT JOIN alert_receipts ar ON ea.id = ar.alert_id AND ar.user_id = ?
+      WHERE ea.is_active = 1 AND (ea.expires_at IS NULL OR ea.expires_at > NOW())
+      ORDER BY ea.sent_at DESC
+    `, [userId]);
 
     const validAlerts = [];
+    const receiptsToInsert = [];
 
     for (const alert of activeAlerts) {
       let targetRoles = [];
@@ -5092,28 +5157,26 @@ app.get('/api/emergency-alerts/active', authenticateToken,  async (req, res) => 
       const isTargeted = targetRoles.map(r => r.toLowerCase().trim()).includes(userRole) || targetRoles.length === 0;
 
       if (isTargeted) {
-        await db.promise().query(
-          `INSERT IGNORE INTO alert_receipts (alert_id, user_id) VALUES (?, ?)`,
-          [alert.id, userId]
-        );
+        
+        receiptsToInsert.push([alert.id, userId]);
 
-        const [receiptRows] = await db.promise().query(
-          `SELECT read_at FROM alert_receipts WHERE alert_id = ? AND user_id = ?`,
-          [alert.id, userId]
-        );
-
-        const readAt = receiptRows.length > 0 ? receiptRows[0].read_at : null;
-
-        // Include all targeted alerts (both read and unread) for history view
         validAlerts.push({
           id: alert.id,
           title: alert.title,
           message: alert.message,
           severity: alert.severity,
           sent_at: alert.sent_at,
-          read_at: readAt
+          read_at: alert.read_at || null
         });
       }
+    }
+
+    
+    if (receiptsToInsert.length > 0) {
+      await db.promise().query(
+        `INSERT IGNORE INTO alert_receipts (alert_id, user_id) VALUES ?`,
+        [receiptsToInsert]
+      );
     }
 
     res.json(validAlerts);
