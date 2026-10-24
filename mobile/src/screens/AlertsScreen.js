@@ -45,9 +45,30 @@ export default function AlertsScreen({ navigation }) {
     if (!userId) return;
     setError(null);
     try {
+      // 1. GET THE TOKEN
+      const token = await AsyncStorage.getItem('auth_token');
+      if (!token) {
+        throw new Error("Session expired. Please log in again.");
+      }
+
       const url = `${API_URL}/emergency-alerts/active?userId=${userId}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      
+      // 2. ATTACH THE TOKEN
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`, // This fixes the 401 error!
+          'Content-Type': 'application/json'
+        }
+      });
+
+      // 3. CUSTOM ERROR HANDLING
+      if (res.status === 401) {
+        throw new Error("Session expired. Please log out and log in again.");
+      }
+      if (!res.ok) {
+        throw new Error(`Server connection failed (${res.status})`);
+      }
+
       const data = await res.json();
       setAlerts(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -65,11 +86,17 @@ export default function AlertsScreen({ navigation }) {
 
   const markAsRead = async (alertId) => {
     try {
+      const token = await AsyncStorage.getItem('auth_token');
+      
       const res = await fetch(`${API_URL}/emergency-alerts/${alertId}/read`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` // Attach token here too
+        },
         body: JSON.stringify({ userId })
       });
+      
       if (res.ok) {
         setAlerts(prev =>
           prev.map(a => (a.id === alertId ? { ...a, read_at: new Date().toISOString() } : a))
@@ -85,11 +112,16 @@ export default function AlertsScreen({ navigation }) {
     if (unreadAlerts.length === 0) return;
 
     try {
+      const token = await AsyncStorage.getItem('auth_token');
+      
       await Promise.all(
         unreadAlerts.map(a =>
           fetch(`${API_URL}/emergency-alerts/${a.id}/read`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}` // Attach token here too
+            },
             body: JSON.stringify({ userId })
           })
         )
@@ -206,6 +238,7 @@ export default function AlertsScreen({ navigation }) {
 }
 
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
+  // ... Keep all your styles exactly as they are ...
   safeArea: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background },
   

@@ -122,53 +122,52 @@ const ManageReasons = () => {
   const currentReasons = filteredReasons.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
-    <div className="expert-container">
-      <div className="expert-header">
-        <div className="expert-title-group">
-          <div>
-            
-            <p className="expert-subtitle">Manage the list of official purposes for campus visits.</p>
-          </div>
+    <div className="mr-container">
+      <div className="mr-header">
+        <div className="mr-title-group">
+          <p className="mr-subtitle">Manage the list of official purposes for campus visits.</p>
         </div>
-        <button className="expert-btn-primary" onClick={() => setShowAddModal(true)}>
+        <button className="mr-btn-primary" onClick={() => setShowAddModal(true)}>
           <Plus size={16} /> Add New Reason
         </button>
       </div>
 
-      <div className="expert-search-card">
-        <div className="expert-search-row">
-          <div className="expert-search-input-group">
-            <Search size={18} className="text-muted" />
-            <input
-              type="text"
-              placeholder="Search existing reasons..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="expert-clean-input"
-            />
-            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
-          </div>
-          <div className="expert-stats-badge">
-            Total Active: <strong>{reasons.length}</strong>
-          </div>
+      <div className="mr-toolbar">
+        <div className="mr-search-wrapper">
+          <Search size={18} className="mr-search-icon" />
+          <input
+            type="text"
+            placeholder="Search existing reasons..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="mr-input"
+          />
+          {searchQuery && <X size={16} className="mr-clear-icon" onClick={() => setSearchQuery('')} />}
+        </div>
+        <div className="mr-stats-badge">
+          Total Active: <strong>{reasons.length}</strong>
         </div>
       </div>
 
-      <div className="expert-card">
+      <div className="mr-card">
         {fetchLoading ? (
-          <div className="expert-loading">Loading reasons...</div>
+          <div className="mr-loading">Loading reasons...</div>
         ) : filteredReasons.length === 0 ? (
-          <div className="expert-empty">
-            <AlertCircle size={48} className="text-muted" />
-            <p>No visit reasons found.</p>
-            {searchQuery
-              ? <span>Try adjusting your search criteria.</span>
-              : <span>Click "Add New Reason" to configure options for visitors.</span>}
+          <div className="mr-empty">
+            <div className="mr-empty-icon-wrapper">
+              <AlertCircle size={32} className="text-muted" />
+            </div>
+            <h4>No visit reasons found</h4>
+            <p>
+              {searchQuery
+                ? "Try adjusting your search criteria."
+                : "Click 'Add New Reason' to configure options for visitors."}
+            </p>
           </div>
         ) : (
           <>
-            <div className="expert-table-wrapper">
-              <table className="expert-table">
+            <div className="mr-table-wrapper">
+              <table className="mr-table">
                 <thead>
                   <tr>
                     <th>Reason Title</th>
@@ -179,15 +178,15 @@ const ManageReasons = () => {
                   {currentReasons.map((reason) => (
                     <tr key={reason.id}>
                       <td>
-                        <span className="font-semibold text-dark">{reason.reason_text}</span>
+                        <span className="mr-reason-text">{reason.reason_text}</span>
                       </td>
                       <td>
-                        <div className="expert-action-group right">
-                          <button className="expert-btn-icon" onClick={() => openEditModal(reason.id, reason.reason_text)} title="Edit">
-                            <Edit3 size={18} color="#475569" />
+                        <div className="mr-action-group">
+                          <button className="mr-btn-icon" onClick={() => openEditModal(reason.id, reason.reason_text)} title="Edit">
+                            <Edit3 size={18} />
                           </button>
-                          <button className="expert-btn-icon danger" onClick={() => openDeleteModal(reason.id)} title="Delete">
-                            <Trash2 size={18} color="#EF4444" />
+                          <button className="mr-btn-icon danger" onClick={() => openDeleteModal(reason.id)} title="Delete">
+                            <Trash2 size={18} />
                           </button>
                         </div>
                       </td>
@@ -198,17 +197,17 @@ const ManageReasons = () => {
             </div>
 
             {totalPages > 1 && (
-              <div className="expert-pagination">
-                <span className="expert-page-info">
+              <div className="mr-pagination">
+                <span className="mr-page-info">
                   Showing {(currentPage - 1) * itemsPerPage + 1} to{' '}
                   {Math.min(currentPage * itemsPerPage, filteredReasons.length)} of {filteredReasons.length} entries
                 </span>
-                <div className="expert-page-controls">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn">
+                <div className="mr-page-controls">
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="mr-page-btn">
                     <ChevronLeft size={16} /> Prev
                   </button>
-                  <span className="expert-page-current">{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">
+                  <span className="mr-page-current">{currentPage} / {totalPages}</span>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="mr-page-btn">
                     Next <ChevronRight size={16} />
                   </button>
                 </div>
@@ -225,22 +224,22 @@ const ManageReasons = () => {
         title="Add Visit Reason"
         footer={
           <>
-            <button className="expert-btn-secondary" onClick={() => setShowAddModal(false)} disabled={processing}>Cancel</button>
-            <button className="expert-btn-primary" onClick={handleAdd} disabled={processing}>
+            <button className="mr-btn-secondary" onClick={() => setShowAddModal(false)} disabled={processing}>Cancel</button>
+            <button className="mr-btn-primary" onClick={handleAdd} disabled={processing}>
               {processing ? 'Saving...' : 'Save Reason'}
             </button>
           </>
         }
       >
-        <div className="expert-form-group">
-          <label>Reason Title <span className="text-danger">*</span></label>
+        <div className="mr-form-group">
+          <label>Reason Title <span className="mr-req-star">*</span></label>
           <input
             type="text"
             placeholder="e.g., Facility Tour, Interview, Meeting"
             value={newReason}
             onChange={(e) => setNewReason(e.target.value)}
             disabled={processing}
-            className="expert-clean-input border"
+            className="mr-input border"
             autoFocus
             onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(e); }}
           />
@@ -254,21 +253,21 @@ const ManageReasons = () => {
         title="Edit Visit Reason"
         footer={
           <>
-            <button className="expert-btn-secondary" onClick={() => setShowEditModal(false)} disabled={processing}>Cancel</button>
-            <button className="expert-btn-primary" onClick={handleEdit} disabled={processing}>
+            <button className="mr-btn-secondary" onClick={() => setShowEditModal(false)} disabled={processing}>Cancel</button>
+            <button className="mr-btn-primary" onClick={handleEdit} disabled={processing}>
               {processing ? 'Updating...' : 'Update Reason'}
             </button>
           </>
         }
       >
-        <div className="expert-form-group">
-          <label>Reason Title <span className="text-danger">*</span></label>
+        <div className="mr-form-group">
+          <label>Reason Title <span className="mr-req-star">*</span></label>
           <input
             type="text"
             value={editReasonText}
             onChange={(e) => setEditReasonText(e.target.value)}
             disabled={processing}
-            className="expert-clean-input border"
+            className="mr-input border"
             autoFocus
             onKeyDown={(e) => { if (e.key === 'Enter') handleEdit(e); }}
           />
@@ -282,19 +281,20 @@ const ManageReasons = () => {
         title="Delete Visit Reason"
         footer={
           <>
-            <button className="expert-btn-secondary" onClick={() => setShowDeleteConfirm(false)} disabled={processing}>Cancel</button>
-            <button className="expert-btn-primary bg-red" onClick={confirmDelete} disabled={processing}>
+            <button className="mr-btn-secondary" onClick={() => setShowDeleteConfirm(false)} disabled={processing}>Cancel</button>
+            <button className="mr-btn-primary bg-red" onClick={confirmDelete} disabled={processing}>
               {processing ? 'Processing...' : 'Confirm Deletion'}
             </button>
           </>
         }
       >
-        <div className="expert-confirm-body">
-          <p className="expert-confirm-title">
+        <div className="mr-confirm-body">
+          <p className="mr-confirm-title">
             Are you sure you want to permanently delete{' '}
             <strong>{reasons.find(r => r.id === deleteTargetId)?.reason_text}</strong>?
           </p>
-          <div className="expert-confirm-note danger">
+          <div className="mr-confirm-note">
+            <AlertCircle size={20} color="#DC2626" />
             <p>
               Warning: This action cannot be undone. Visitors will no longer see
               this reason when booking appointments.

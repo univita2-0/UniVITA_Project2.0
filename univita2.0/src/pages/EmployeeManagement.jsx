@@ -634,21 +634,21 @@ const EmployeeManagement = () => {
           <div className="stat-icon"><Users size={22} /></div>
           <div className="stat-info">
             <span className="stat-value">{activeEmployees.length}</span>
-            <span className="stat-label">Active Personnel</span>
+            <span className="stat-label">ACTIVE PERSONNEL</span>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon"><UserCheck size={22} /></div>
           <div className="stat-info">
             <span className="stat-value">{instructorsCount}</span>
-            <span className="stat-label">Instructors</span>
+            <span className="stat-label">INSTRUCTORS</span>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon"><AlertCircle size={22} /></div>
           <div className="stat-info">
             <span className="stat-value">{staffCount}</span>
-            <span className="stat-label">Administrative Staff</span>
+            <span className="stat-label">ADMINISTRATIVE STAFF</span>
           </div>
         </div>
       </div>
@@ -1095,11 +1095,10 @@ const EmployeeManagement = () => {
                 </>
               )}
 
-              {/* ADDRESS TAB (WITH REGION & INTELLIGENT AUTOCOMPLETE) */}
+              {/* ADDRESS TAB */}
               {activeTabModal === 'address' && (
                 <div className="address-tab-content">
                   <div className="form-row">
-                    {/* REGION FIELD WITH AUTOCOMPLETE */}
                     <AutocompleteInput
                       label="Region"
                       name="region"
@@ -1116,7 +1115,6 @@ const EmployeeManagement = () => {
                       }}
                     />
 
-                    {/* PROVINCE / STATE FIELD WITH AUTOCOMPLETE */}
                     <AutocompleteInput
                       label="State / Province"
                       name="state"
@@ -1134,7 +1132,6 @@ const EmployeeManagement = () => {
                   </div>
 
                   <div className="form-row">
-                    {/* CITY FIELD WITH AUTOCOMPLETE */}
                     <AutocompleteInput
                       label="City / Municipality"
                       name="city"
@@ -1153,7 +1150,6 @@ const EmployeeManagement = () => {
                       }}
                     />
 
-                    {/* POSTAL CODE */}
                     <div className="form-group">
                       <label>Postal Code</label>
                       <input

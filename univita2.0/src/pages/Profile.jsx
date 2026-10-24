@@ -1,7 +1,6 @@
 // src/pages/Profile.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import './Profile.css';
-import { Mail, Shield, Clock, Phone, Briefcase, UserCircle, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import axios from 'axios';
 import { API_BASE } from '../api';
 
@@ -53,141 +52,88 @@ const Profile = () => {
   };
 
   const getDisplayPosition = () => {
-    if (user.role === 'hr_admin') return 'HR ADMINISTRATOR';
-    if (user.role === 'security') return 'SECURITY PERSONNEL';
-    if (user.role === 'admin') return 'SYSTEM ADMINISTRATOR';
+    if (user.role === 'hr_admin') return 'HR Administrator';
+    if (user.role === 'security') return 'Security Personnel';
+    if (user.role === 'admin') return 'System Administrator';
     return user.position || 'Not assigned';
   };
 
   return (
     <div className="pro-container">
       {/* Page Header */}
-      <header className="pro-page-header">
+      <header className="pro-header">
         <div>
           
-          <p className="pro-page-subtitle">
-            Your personal identity, credentials, and secure account overview.
-          </p>
         </div>
-        <div className="pro-header-badge">
-          <ShieldCheck size={14} />
-          <span>Verified Account</span>
+        <div className="pro-status-badge">
+          <span className="pro-dot"></span>
+          Verified Account
         </div>
       </header>
 
-      {/* Identity Hero (Strictly Identity Only) */}
+      {/* Identity Hero */}
       <section className="pro-hero">
-        <div className="pro-hero-accent" aria-hidden="true" />
-        <div className="pro-hero-inner">
-          <div className="pro-hero-identity">
-            <div className="pro-avatar-wrapper">
-              <div className="pro-avatar">
-                {user.name ? user.name.charAt(0).toUpperCase() : '?'}
-              </div>
-              <span className="pro-online-dot" title="Active Authentication" />
-            </div>
-            <div className="pro-hero-info">
-              <h2 className="pro-hero-name">{user.name || 'Unknown User'}</h2>
-              <div className="pro-hero-meta">
-                <span className="pro-role-pill">{getRoleLabel(user.role)}</span>
-              </div>
-            </div>
-          </div>
+        <div className="pro-avatar">
+          {user.name ? user.name.charAt(0).toUpperCase() : '?'}
+        </div>
+        <div className="pro-hero-info">
+          <h2 className="pro-name">{user.name || 'Unknown User'}</h2>
+          <p className="pro-role">{getRoleLabel(user.role)}</p>
         </div>
       </section>
 
-      {/* Detailed Information Cards */}
-      <div className="pro-cards-grid">
+      {/* Detailed Information Grid */}
+      <div className="pro-grid">
+        
         {/* Personal Information */}
-        <article className="pro-info-card">
-          <header className="pro-info-header">
-            <div className="pro-info-icon slate">
-              <UserCircle size={18} />
+        <article className="pro-card">
+          <h3 className="pro-card-title">Personal Information</h3>
+          <div className="pro-card-body">
+            <div className="pro-row">
+              <span className="pro-label">Employee ID</span>
+              <span className="pro-value mono">{user.employeeId || 'N/A'}</span>
             </div>
-            <div>
-              <h3>Personal Information</h3>
-              
-            </div>
-          </header>
-          <div className="pro-info-body">
-            <div className="pro-info-row">
-              <span className="pro-info-label">
-                <Briefcase size={14} /> Employee ID
-              </span>
-              <span className="pro-info-value mono">{user.employeeId || 'N/A'}</span>
-            </div>
-            <div className="pro-info-row">
-              <span className="pro-info-label">
-                <Shield size={14} /> Designation
-              </span>
-              <span className="pro-info-value">{getDisplayPosition()}</span>
+            <div className="pro-row">
+              <span className="pro-label">Designation</span>
+              <span className="pro-value">{getDisplayPosition()}</span>
             </div>
           </div>
         </article>
 
         {/* Contact Information */}
-        <article className="pro-info-card">
-          <header className="pro-info-header">
-            <div className="pro-info-icon ">
-              <Mail size={18} />
+        <article className="pro-card">
+          <h3 className="pro-card-title">Contact Information</h3>
+          <div className="pro-card-body">
+            <div className="pro-row">
+              <span className="pro-label">Email Address</span>
+              <span className="pro-value">{user.email || '—'}</span>
             </div>
-            <div>
-              <h3>Contact Information</h3>
-              
-            </div>
-          </header>
-          <div className="pro-info-body">
-            <div className="pro-info-row">
-              <span className="pro-info-label">
-                <Mail size={14} /> Email
-              </span>
-              <span className="pro-info-value">{user.email || '—'}</span>
-            </div>
-            <div className="pro-info-row">
-              <span className="pro-info-label">
-                <Phone size={14} /> Phone
-              </span>
-              <span className="pro-info-value">
-                {user.phone || 'Not registered'}
-              </span>
+            <div className="pro-row">
+              <span className="pro-label">Phone Number</span>
+              <span className="pro-value">{user.phone || 'Not registered'}</span>
             </div>
           </div>
         </article>
 
         {/* Security & Access */}
-        <article className="pro-info-card">
-          <header className="pro-info-header">
-            <div className="pro-info-icon ">
-              <ShieldCheck size={18} />
+        <article className="pro-card">
+          <h3 className="pro-card-title">Security & Access</h3>
+          <div className="pro-card-body">
+            <div className="pro-row">
+              <span className="pro-label">Authorization Tier</span>
+              <span className="pro-value">{(user.role || 'USER').toUpperCase()} LEVEL</span>
             </div>
-            <div>
-              <h3>Security & Access</h3>
-              
+            <div className="pro-row">
+              <span className="pro-label">Last Authentication</span>
+              <span className="pro-value">{user.lastLogin}</span>
             </div>
-          </header>
-          <div className="pro-info-body">
-            <div className="pro-info-row">
-              <span className="pro-info-label">
-                <Shield size={14} /> Authorization Tier
-              </span>
-              <span className="pro-info-value ">
-                {(user.role || 'USER').toUpperCase()} LEVEL
-              </span>
-            </div>
-            <div className="pro-info-row">
-              <span className="pro-info-label">
-                <Clock size={14} /> Last Authentication
-              </span>
-              <span className="pro-info-value">{user.lastLogin}</span>
-            </div>
-            <div className="pro-info-row">
-              <span className="pro-info-label">Session Status</span>
-              <span className="pro-status-pill ">
-                <CheckCircle2 size={13} /> Encrypted & Secure
-              </span>
+            <div className="pro-row">
+              <span className="pro-label">Session Status</span>
+              <span className="pro-value text-success">Encrypted & Secure</span>
             </div>
           </div>
         </article>
+
       </div>
     </div>
   );

@@ -337,7 +337,7 @@ export default function ChatScreen({ onClose }) {
           <View style={{ flex: 1 }}>
             
             <View style={styles.chatHeaderBar}>
-              <Text style={styles.chatHeaderTitle}>Communications</Text>
+              <Text style={styles.chatHeaderTitle}>Messages</Text>
               {onClose && (
                 <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                   <X size={24} color={colors.textPrimary} />

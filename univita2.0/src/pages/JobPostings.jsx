@@ -56,7 +56,7 @@ const JobPostings = () => {
   const [applicantTab, setApplicantTab] = useState('all');
   const [applicantSearch, setApplicantSearch] = useState('');
   const [applicantsPage, setApplicantsPage] = useState(1);
-  const applicantsPerPage = 7; // Adjusted to fit the new sleek list
+  const applicantsPerPage = 7;
 
   // Applicant Details State
   const [showApplicantDetailsModal, setShowApplicantDetailsModal] = useState(false);
@@ -323,18 +323,19 @@ const JobPostings = () => {
       <div className="jp-main-card">
         
         <div className="jp-control-bar">
-          <div className="jp-segmented-tabs">
+          {/* Formal Tabs */}
+          <div className="jp-formal-tabs">
             <button 
-              className={`jp-seg-tab ${activeTab === 'active' ? 'active' : ''}`}
+              className={`jp-tab ${activeTab === 'active' ? 'active' : ''}`}
               onClick={() => { setActiveTab('active'); setCurrentPage(1); }}
             >
-              Active Post <span className={`jp-badge ${activeTab === 'active' ? 'blue' : ''}`}>{activeCount}</span>
+              Active Posts <span className="tab-count">{activeCount}</span>
             </button>
             <button 
-              className={`jp-seg-tab ${activeTab === 'closed' ? 'active' : ''}`}
+              className={`jp-tab ${activeTab === 'closed' ? 'active' : ''}`}
               onClick={() => { setActiveTab('closed'); setCurrentPage(1); }}
             >
-              Closed <span className={`jp-badge ${activeTab === 'closed' ? 'gray' : ''}`}>{closedCount}</span>
+              Closed <span className="tab-count">{closedCount}</span>
             </button>
           </div>
 
@@ -597,7 +598,7 @@ const JobPostings = () => {
         </div>
       </FormalModal>
 
-      {/* --- REPLACED: Modern Applicants ATS Pipeline Modal --- */}
+      {/* --- ATS Pipeline View --- */}
       <FormalModal 
         show={showApplicantsModal} 
         onClose={() => setShowApplicantsModal(false)} 
@@ -607,11 +608,11 @@ const JobPostings = () => {
         <div className="jp-modal-widen jp-ats-wrapper hide-scrollbar">
           
           <div className="jp-ats-toolbar">
-            <div className="jp-ats-segmented">
+            <div className="jp-formal-tabs">
               {['all', 'new', 'reviewed', 'shortlisted', 'rejected', 'hired'].map(tab => (
                 <button 
                   key={tab} 
-                  className={`jp-ats-tab ${applicantTab === tab ? 'active' : ''}`} 
+                  className={`jp-tab small ${applicantTab === tab ? 'active' : ''}`} 
                   onClick={() => { setApplicantTab(tab); setApplicantsPage(1); }}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}

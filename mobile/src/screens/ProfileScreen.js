@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { 
   User, Shield, ChevronRight, LogOut, ArrowLeft, Bell, Sun, Moon, Lock, Check, X, 
-  Eye, EyeOff, Camera, FileText, CreditCard, Briefcase, MapPin, ShieldCheck, Phone, Mail
+  Eye, EyeOff, Camera, FileText, CreditCard, Briefcase, MapPin, ShieldCheck
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -32,6 +32,8 @@ export default function ProfileScreen({ navigation }) {
   
   // Profile Picture States
   const [profileImage, setProfileImage] = useState(null);
+  const [localFallback, setLocalFallback] = useState(null); 
+  const [imageError, setImageError] = useState(false); // NEW: Tracks if remote image fails
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   // Modals
@@ -41,26 +43,11 @@ export default function ProfileScreen({ navigation }) {
 
   // Full Read-Only Record Details
   const [fullDetails, setFullDetails] = useState({
-    employee_id: '—',
-    full_name: '—',
-    email: '—',
-    phone: '—',
-    position: 'Simulationist',
-    contract_type: 'Full-time',
-    date_of_joining: '—',
-    date_of_birth: '—',
-    gender: 'Prefer not to say',
-    emergency_contact_name: '—',
-    emergency_contact_phone: '—',
-    street: '—',
-    city: '—',
-    state: '—',
-    postal_code: '—',
-    country: 'Philippines',
-    sss_number: 'Not Provided',
-    pagibig_number: 'Not Provided',
-    philhealth_number: 'Not Provided',
-    tin_number: 'Not Provided',
+    employee_id: '—', full_name: '—', email: '—', phone: '—', position: 'Simulationist',
+    contract_type: 'Full-time', date_of_joining: '—', date_of_birth: '—', gender: 'Prefer not to say',
+    emergency_contact_name: '—', emergency_contact_phone: '—', street: '—', city: '—', state: '—',
+    postal_code: '—', country: 'Philippines', sss_number: 'Not Provided', pagibig_number: 'Not Provided',
+    philhealth_number: 'Not Provided', tin_number: 'Not Provided',
   });
 
   // Edit Profile States
@@ -81,8 +68,16 @@ export default function ProfileScreen({ navigation }) {
   const hasUppercase = /[A-Z]/.test(newPassword);
   const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(newPassword);
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword;
-
   const hasProfileChanges = editName.trim() !== userData.name || editEmail.trim() !== userData.email;
+
+  // Helper: Safely build the image URL (handles if backend sends full URL or relative path)
+  const getFullImageUrl = (path) => {
+    if (!path) return null;
+    if (path.startsWith('http')) return `${path}?t=${Date.now()}`;
+    const baseUrl = API_URL.replace('/api', '').replace(/\/$/, '');
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    return `${baseUrl}${cleanPath}?t=${Date.now()}`;
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -93,7 +88,6 @@ export default function ProfileScreen({ navigation }) {
           if (!token || !userId) return;
 
           const savedImage = await AsyncStorage.getItem(`@profile_picture_${userId}`);
-          // SAFETY CHECK: Ensure it's not a corrupted string like "null"
           if (savedImage && savedImage !== 'null' && savedImage !== 'undefined') {
             setProfileImage(savedImage);
           }
@@ -104,28 +98,21 @@ export default function ProfileScreen({ navigation }) {
           
           const freshUser = response.data;
           setUserData({ 
-            id: freshUser.id, 
-            name: freshUser.full_name || freshUser.name, 
-            email: freshUser.email, 
-            role: freshUser.role 
+            id: freshUser.id, name: freshUser.full_name || freshUser.name, 
+            email: freshUser.email, role: freshUser.role 
           });
 
           let parsedAdditional = {};
           if (freshUser.additional_info) {
             try {
               parsedAdditional = typeof freshUser.additional_info === 'string'
-                ? JSON.parse(freshUser.additional_info)
-                : freshUser.additional_info;
-            } catch (e) {
-              parsedAdditional = {};
-            }
+                ? JSON.parse(freshUser.additional_info) : freshUser.additional_info;
+            } catch (e) { parsedAdditional = {}; }
           }
 
           setFullDetails({
-            employee_id: freshUser.employee_id || '—',
-            full_name: freshUser.full_name || freshUser.name || '—',
-            email: freshUser.email || '—',
-            phone: freshUser.phone_number || freshUser.phone || '—',
+            employee_id: freshUser.employee_id || '—', full_name: freshUser.full_name || freshUser.name || '—',
+            email: freshUser.email || '—', phone: freshUser.phone_number || freshUser.phone || '—',
             position: freshUser.position_level || freshUser.position || 'Simulationist',
             contract_type: freshUser.contract_type || freshUser.employment_type || 'Full-time',
             date_of_joining: freshUser.date_of_joining ? freshUser.date_of_joining.split('T')[0] : '—',
@@ -133,10 +120,8 @@ export default function ProfileScreen({ navigation }) {
             gender: freshUser.gender || 'Prefer not to say',
             emergency_contact_name: freshUser.emergency_contact_name || '—',
             emergency_contact_phone: freshUser.emergency_contact_phone || '—',
-            street: freshUser.street_address || freshUser.street || '—',
-            city: freshUser.city || '—',
-            state: freshUser.state_province || freshUser.state || '—',
-            postal_code: freshUser.postal_code || '—',
+            street: freshUser.street_address || freshUser.street || '—', city: freshUser.city || '—',
+            state: freshUser.state_province || freshUser.state || '—', postal_code: freshUser.postal_code || '—',
             country: freshUser.country || 'Philippines',
             sss_number: freshUser.sss_number || parsedAdditional.sss_number || 'Not Provided',
             pagibig_number: freshUser.pagibig_number || parsedAdditional.pagibig_number || 'Not Provided',
@@ -145,11 +130,9 @@ export default function ProfileScreen({ navigation }) {
           });
 
           if (freshUser.profile_picture) {
-            const baseUrl = API_URL.replace('/api', '');
-            const cleanPath = freshUser.profile_picture.startsWith('/') ? freshUser.profile_picture : `/${freshUser.profile_picture}`;
-            const fullImageUrl = `${baseUrl}${cleanPath}?t=${Date.now()}`;
-            setProfileImage(fullImageUrl);
-            await AsyncStorage.setItem(`@profile_picture_${userId}`, fullImageUrl);
+            const fullUrl = getFullImageUrl(freshUser.profile_picture);
+            setProfileImage(fullUrl);
+            await AsyncStorage.setItem(`@profile_picture_${userId}`, fullUrl);
           }
 
           const lastChangedStr = freshUser.password_last_changed || freshUser.password_updated_at;
@@ -158,8 +141,7 @@ export default function ProfileScreen({ navigation }) {
             const today = new Date();
             updatedDate.setHours(0, 0, 0, 0); today.setHours(0, 0, 0, 0);
             const diffDays = Math.floor((today - updatedDate) / (1000 * 60 * 60 * 24)); 
-            const remaining = 365 - diffDays;
-            setDaysRemaining(remaining > 0 ? remaining : 0);
+            setDaysRemaining(Math.max(0, 365 - diffDays));
           } else { setDaysRemaining(365); }
         } catch (error) {
           const id = await AsyncStorage.getItem('user_id');
@@ -168,12 +150,7 @@ export default function ProfileScreen({ navigation }) {
           const role = await AsyncStorage.getItem('user_role');
           const empId = await AsyncStorage.getItem('employee_id');
           setUserData({ id: id || '', name: name || 'Employee', email: email || 'user@hct.com', role: role || '' });
-          setFullDetails(prev => ({
-            ...prev,
-            employee_id: empId || '—',
-            full_name: name || '—',
-            email: email || '—'
-          }));
+          setFullDetails(prev => ({ ...prev, employee_id: empId || '—', full_name: name || '—', email: email || '—' }));
         }
       };
       fetchRealProfile();
@@ -182,143 +159,66 @@ export default function ProfileScreen({ navigation }) {
 
   const handlePickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      return Alert.alert(
-        'Permission Denied',
-        'Photo library access is required to update your profile picture. Please enable it in your device settings.'
-      );
-    }
+    if (status !== 'granted') return Alert.alert('Permission Denied', 'Photo library access is required.');
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-      exif: false,
+      mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7, exif: false,
     });
 
-    if (result.canceled) return;
-
-    if (!result.assets || result.assets.length === 0 || !result.assets[0]?.uri) {
-      return Alert.alert(
-        'No Image Selected',
-        'The picker returned no file. Please try again.'
-      );
-    }
-
+    if (result.canceled || !result.assets || result.assets.length === 0) return;
     const asset = result.assets[0];
 
-    const MAX_BYTES = 5 * 1024 * 1024;
-    if (asset.fileSize && asset.fileSize > MAX_BYTES) {
-      const sizeMB = (asset.fileSize / (1024 * 1024)).toFixed(2);
-      return Alert.alert(
-        'Image Too Large',
-        `Your selected image is ${sizeMB}MB. The maximum is 5MB. Please choose a smaller image.`
-      );
+    if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
+      return Alert.alert('Image Too Large', `Max size is 5MB.`);
     }
 
-    const mime = (asset.mimeType || '').toLowerCase();
-    const uriLower = (asset.uri || '').toLowerCase();
-    const validMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic'];
-    const validExts = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
-    const hasValidMime = validMimes.includes(mime);
-    const hasValidExt = validExts.some(ext => uriLower.endsWith(ext));
-
-    if (!hasValidMime && !hasValidExt) {
-      return Alert.alert(
-        'Invalid File Type',
-        'Please select a JPG, PNG, or WEBP image.'
-      );
-    }
-
-    if (!userData.id) {
-      return Alert.alert(
-        'Not Signed In',
-        'Unable to identify your account. Please sign out and sign in again.'
-      );
-    }
+    if (!userData.id) return Alert.alert('Not Signed In', 'Please sign in again.');
 
     const previousImage = profileImage;
-    setProfileImage(asset.uri); // Show local image immediately
+    setProfileImage(asset.uri); 
+    setImageError(false); // Reset error state for the new image
     setIsUploadingImage(true);
 
     try {
       const manipResult = await manipulateAsync(
-        asset.uri,
-        [{ resize: { width: 800 } }],
-        { compress: 0.7, format: SaveFormat.JPEG }
+        asset.uri, [{ resize: { width: 800 } }], { compress: 0.7, format: SaveFormat.JPEG }
       );
 
+      setLocalFallback(manipResult.uri); 
+      setProfileImage(manipResult.uri);
+
       const res = await updateProfile(userData.id, {
-        full_name: userData.name,
-        email: userData.email,
-        profile_picture: {
-          uri: manipResult.uri,
-          name: `profile_${Date.now()}.jpg`,
-          mimeType: 'image/jpeg',
-        },
+        full_name: userData.name, email: userData.email,
+        profile_picture: { uri: manipResult.uri, name: `profile_${Date.now()}.jpg`, mimeType: 'image/jpeg' },
       });
 
-      if (!res || !res.success) {
-        throw new Error(res?.message || 'Server rejected the profile picture.');
-      }
+      if (!res || !res.success) throw new Error(res?.message || 'Server rejected the profile picture.');
 
       if (res.profile_picture) {
-        const baseUrl = API_URL.replace('/api', '');
-        const cleanPath = res.profile_picture.startsWith('/')
-          ? res.profile_picture
-          : `/${res.profile_picture}`;
-        const fullImageUrl = `${baseUrl}${cleanPath}?t=${Date.now()}`;
-
-        setProfileImage(fullImageUrl);
-        await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullImageUrl);
-      } else {
-        // Fallback: If backend didn't return a path, keep the local image displayed
-        setProfileImage(manipResult.uri);
+        const fullUrl = getFullImageUrl(res.profile_picture);
+        setProfileImage(fullUrl);
+        await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullUrl);
       }
-
+      
       Alert.alert('Success', 'Profile picture updated successfully!');
     } catch (err) {
       console.error('Profile picture upload error:', err);
-
       setProfileImage(previousImage);
-
-      let errorMessage = 'Could not save profile picture. Please try again.';
-      const msg = (err?.message || '').toLowerCase();
-
-      if (msg.includes('timeout')) {
-        errorMessage = 'Upload timed out. Please check your internet connection and try again.';
-      } else if (msg.includes('file too large')) {
-        errorMessage = 'Image is too large for the server. Please choose a smaller image.';
-      } else if (msg.includes('forbidden') || msg.includes('unauthorized') || msg.includes('session')) {
-        errorMessage = 'Your session has expired. Please sign in again.';
-      } else if (err?.message) {
-        errorMessage = err.message;
-      }
-
-      Alert.alert('Upload Failed', errorMessage);
+      Alert.alert('Upload Failed', err.message || 'Could not save profile picture.');
     } finally {
       setIsUploadingImage(false);
     }
   };
 
   const handleUpdateProfile = async () => {
-    if (!hasProfileChanges) {
-      setShowEditModal(false);
-      return; 
-    }
-
+    if (!hasProfileChanges) return setShowEditModal(false); 
     if (!editName.trim() || !editEmail.trim()) return Alert.alert("Validation Error", "Name and Email cannot be empty.");
     if (!EMAIL_REGEX.test(editEmail.trim())) return Alert.alert("Validation Error", "Please enter a valid email address.");
 
     setLoading(true);
     try {
-      const res = await updateProfile(userData.id, {
-        full_name: editName.trim(),
-        email: editEmail.trim()
-      });
-
-      if (!res.success) throw new Error(res.message || "Could not update profile information.");
+      const res = await updateProfile(userData.id, { full_name: editName.trim(), email: editEmail.trim() });
+      if (!res.success) throw new Error(res.message || "Could not update profile.");
       
       await AsyncStorage.setItem('user_name', editName.trim());
       await AsyncStorage.setItem('user_email', editEmail.trim());
@@ -328,37 +228,33 @@ export default function ProfileScreen({ navigation }) {
       Alert.alert("Success", "Profile updated successfully");
       setShowEditModal(false);
     } catch (err) { 
-      Alert.alert("Error", err.response?.data?.message || err.message || "Could not update profile information."); 
-    } finally { 
-      setLoading(false); 
-    }
+      Alert.alert("Error", err.response?.data?.message || err.message || "Could not update profile."); 
+    } finally { setLoading(false); }
   };
 
   const handleUpdatePassword = async () => {
     if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) return Alert.alert("Validation Error", "Please complete all password fields.");
     if (!hasLength || !hasUppercase || !hasSpecial) return Alert.alert("Security Requirement", "New password must meet all security criteria.");
-    if (currentPassword === newPassword) return Alert.alert("Validation Error", "New password must differ from your current password.");
+    if (currentPassword === newPassword) return Alert.alert("Validation Error", "New password must differ from current.");
     if (!passwordsMatch) return Alert.alert("Validation Error", "New passwords do not match.");
 
     setLoadingPwd(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      
       const empIdentifier = (fullDetails.employee_id && fullDetails.employee_id !== '—') ? fullDetails.employee_id : userData.id;
       
-      const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`, { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() }, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`, 
+        { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() }, 
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       
       if (res.data.success) {
         setShowPasswordModal(false);
-        Alert.alert("Security Updated", "Your password has been changed successfully. Please sign in again.", [{ text: "Sign In", onPress: async () => { await AsyncStorage.clear(); navigation.replace('Login'); } }]);
-      } else { 
-        Alert.alert("Error", res.data.message || "Password update failed."); 
-      }
+        Alert.alert("Security Updated", "Your password has been changed.", [{ text: "Sign In", onPress: async () => { await AsyncStorage.clear(); navigation.replace('Login'); } }]);
+      } else { Alert.alert("Error", res.data.message || "Password update failed."); }
     } catch (error) { 
       Alert.alert("Error", error.response?.data?.message || "Network error occurred."); 
-    } finally { 
-      setLoadingPwd(false); 
-    }
+    } finally { setLoadingPwd(false); }
   };
 
   const MenuItem = ({ icon: Icon, title, subtitle, onPress }) => (
@@ -387,16 +283,25 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.headerSection}>
             <View style={styles.avatarContainer}>
               <View style={styles.avatar}>
-                {profileImage && profileImage !== '' ? (
+                {/* FIX: Fallback Logic Hierarchy (Remote -> Local -> Icon) */}
+                {profileImage && !imageError ? (
                   <Image 
                     key={profileImage}
                     source={{ uri: profileImage }} 
+                    style={styles.avatarImage} 
+                    resizeMode="cover"
+                    onError={() => setImageError(true)} // If URL fails, trigger fallback
+                  />
+                ) : localFallback ? (
+                  <Image 
+                    source={{ uri: localFallback }} 
                     style={styles.avatarImage} 
                     resizeMode="cover"
                   />
                 ) : (
                   <User size={44} color={isLight ? "#FFFFFF" : colors.primary} />
                 )}
+                
                 {isUploadingImage && (
                   <View style={styles.uploadOverlay}>
                     <ActivityIndicator color="#FFFFFF" size="small" />
@@ -417,33 +322,13 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.menuSection}>
             <Text style={styles.sectionHeader}>ACCOUNT</Text>
             <View style={styles.menuCard}>
-              <MenuItem 
-                icon={FileText} 
-                title="Personal & Employment Details" 
-                subtitle="Official HR records, statutory IDs & address" 
-                onPress={() => setShowDetailsModal(true)} 
-              />
+              <MenuItem icon={FileText} title="Personal & Employment Details" subtitle="Official HR records, statutory IDs & address" onPress={() => setShowDetailsModal(true)} />
               <View style={styles.divider} />
-              <MenuItem 
-                icon={User} 
-                title="Edit Profile" 
-                subtitle="Update your name and email" 
-                onPress={() => { setEditName(userData.name); setEditEmail(userData.email); setShowEditModal(true); }} 
-              />
+              <MenuItem icon={User} title="Edit Profile" subtitle="Update your name and email" onPress={() => { setEditName(userData.name); setEditEmail(userData.email); setShowEditModal(true); }} />
               <View style={styles.divider} />
-              <MenuItem 
-                icon={Shield} 
-                title="Change Password" 
-                subtitle="Update your login credentials" 
-                onPress={() => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setShowPasswordModal(true); }} 
-              />
+              <MenuItem icon={Shield} title="Change Password" subtitle="Update your login credentials" onPress={() => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setShowPasswordModal(true); }} />
               <View style={styles.divider} />
-              <MenuItem 
-                icon={Bell} 
-                title="Emergency Alerts" 
-                subtitle="View active broadcasts" 
-                onPress={() => navigation.navigate('Alerts')} 
-              />
+              <MenuItem icon={Bell} title="Emergency Alerts" subtitle="View active broadcasts" onPress={() => navigation.navigate('Alerts')} />
             </View>
           </View>
 
@@ -456,9 +341,7 @@ export default function ProfileScreen({ navigation }) {
                 onPress: async () => { 
                   const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
                   await AsyncStorage.clear(); 
-                  if (rememberedEmail) {
-                    await AsyncStorage.setItem('@remembered_email', rememberedEmail);
-                  }
+                  if (rememberedEmail) await AsyncStorage.setItem('@remembered_email', rememberedEmail);
                   navigation.replace('Login'); 
                 }, 
                 style: 'destructive' 
@@ -471,13 +354,8 @@ export default function ProfileScreen({ navigation }) {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Read-Only Employment Modal */}
-        <Modal 
-          visible={showDetailsModal} 
-          animationType="slide" 
-          transparent={false} 
-          onRequestClose={() => setShowDetailsModal(false)}
-        >
+        {/* Modals... (Unchanged) */}
+        <Modal visible={showDetailsModal} animationType="slide" transparent={false} onRequestClose={() => setShowDetailsModal(false)}>
           <SafeAreaView style={[styles.detailModalSafeArea, { paddingTop: insets.top }]}>
             <View style={styles.detailModalHeader}>
               <TouchableOpacity onPress={() => setShowDetailsModal(false)} style={styles.detailBackBtn}>
@@ -486,162 +364,53 @@ export default function ProfileScreen({ navigation }) {
               <Text style={styles.detailModalTitle}>Employment Record</Text>
               <View style={{ width: 40 }} />
             </View>
-
             <ScrollView contentContainerStyle={styles.detailModalBody} showsVerticalScrollIndicator={false}>
               <View style={styles.verifiedNoticeBanner}>
                 <ShieldCheck size={20} color="#059669" />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.verifiedNoticeTitle}>Official HR Personnel Record</Text>
-                  <Text style={styles.verifiedNoticeSub}>
-                    These verified credentials cannot be edited directly. To request corrections, please contact HR Administration.
-                  </Text>
+                  <Text style={styles.verifiedNoticeSub}>These verified credentials cannot be edited directly. To request corrections, please contact HR Administration.</Text>
                 </View>
               </View>
-
               <View style={styles.detailsGroupCard}>
                 <View style={styles.groupHeaderRow}>
                   <Briefcase size={16} color="#00897B" />
                   <Text style={styles.groupHeaderTitle}>Employment Information</Text>
                 </View>
-                
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Employee ID</Text>
-                  <Text style={styles.infoValueBold}>{fullDetails.employee_id}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Position / Role</Text>
-                  <Text style={styles.infoValue}>{fullDetails.position}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Employment Contract</Text>
-                  <Text style={styles.infoValue}>{fullDetails.contract_type}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Date of Joining</Text>
-                  <Text style={styles.infoValue}>{fullDetails.date_of_joining}</Text>
-                </View>
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Employee ID</Text><Text style={styles.infoValueBold}>{fullDetails.employee_id}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Position / Role</Text><Text style={styles.infoValue}>{fullDetails.position}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Employment Contract</Text><Text style={styles.infoValue}>{fullDetails.contract_type}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Date of Joining</Text><Text style={styles.infoValue}>{fullDetails.date_of_joining}</Text></View>
               </View>
-
               <View style={styles.detailsGroupCard}>
-                <View style={styles.groupHeaderRow}>
-                  <CreditCard size={16} color="#00897B" />
-                  <Text style={styles.groupHeaderTitle}>Government Statutory IDs (Philippines)</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Social Security System (SSS)</Text>
-                  <Text style={styles.infoValueMono}>{fullDetails.sss_number}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Pag-IBIG / HDMF MID</Text>
-                  <Text style={styles.infoValueMono}>{fullDetails.pagibig_number}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>PhilHealth PIN</Text>
-                  <Text style={styles.infoValueMono}>{fullDetails.philhealth_number}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Tax Identification No. (TIN)</Text>
-                  <Text style={styles.infoValueMono}>{fullDetails.tin_number}</Text>
-                </View>
+                <View style={styles.groupHeaderRow}><CreditCard size={16} color="#00897B" /><Text style={styles.groupHeaderTitle}>Government Statutory IDs (Philippines)</Text></View>
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Social Security System (SSS)</Text><Text style={styles.infoValueMono}>{fullDetails.sss_number}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Pag-IBIG / HDMF MID</Text><Text style={styles.infoValueMono}>{fullDetails.pagibig_number}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>PhilHealth PIN</Text><Text style={styles.infoValueMono}>{fullDetails.philhealth_number}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Tax Identification No. (TIN)</Text><Text style={styles.infoValueMono}>{fullDetails.tin_number}</Text></View>
               </View>
-
               <View style={styles.detailsGroupCard}>
-                <View style={styles.groupHeaderRow}>
-                  <User size={16} color="#00897B" />
-                  <Text style={styles.groupHeaderTitle}>Personal & Emergency Details</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Full Name</Text>
-                  <Text style={styles.infoValue}>{fullDetails.full_name}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Date of Birth</Text>
-                  <Text style={styles.infoValue}>{fullDetails.date_of_birth}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Gender</Text>
-                  <Text style={styles.infoValue}>{fullDetails.gender}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Phone Number</Text>
-                  <Text style={styles.infoValue}>{fullDetails.phone}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Emergency Contact</Text>
-                  <Text style={styles.infoValue}>{fullDetails.emergency_contact_name}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Emergency Contact Phone</Text>
-                  <Text style={styles.infoValue}>{fullDetails.emergency_contact_phone}</Text>
-                </View>
+                <View style={styles.groupHeaderRow}><User size={16} color="#00897B" /><Text style={styles.groupHeaderTitle}>Personal & Emergency Details</Text></View>
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Full Name</Text><Text style={styles.infoValue}>{fullDetails.full_name}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Date of Birth</Text><Text style={styles.infoValue}>{fullDetails.date_of_birth}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Gender</Text><Text style={styles.infoValue}>{fullDetails.gender}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Phone Number</Text><Text style={styles.infoValue}>{fullDetails.phone}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Emergency Contact</Text><Text style={styles.infoValue}>{fullDetails.emergency_contact_name}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Emergency Contact Phone</Text><Text style={styles.infoValue}>{fullDetails.emergency_contact_phone}</Text></View>
               </View>
-
               <View style={styles.detailsGroupCard}>
-                <View style={styles.groupHeaderRow}>
-                  <MapPin size={16} color="#00897B" />
-                  <Text style={styles.groupHeaderTitle}>Registered Address</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Street Address</Text>
-                  <Text style={styles.infoValue}>{fullDetails.street}</Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>City / Province</Text>
-                  <Text style={styles.infoValue}>
-                    {fullDetails.city && fullDetails.state 
-                      ? `${fullDetails.city}, ${fullDetails.state}` 
-                      : fullDetails.city}
-                  </Text>
-                </View>
-                <View style={styles.infoDivider} />
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Postal Code / Country</Text>
-                  <Text style={styles.infoValue}>
-                    {fullDetails.postal_code ? `${fullDetails.postal_code}, ` : ''}{fullDetails.country}
-                  </Text>
-                </View>
+                <View style={styles.groupHeaderRow}><MapPin size={16} color="#00897B" /><Text style={styles.groupHeaderTitle}>Registered Address</Text></View>
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Street Address</Text><Text style={styles.infoValue}>{fullDetails.street}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>City / Province</Text><Text style={styles.infoValue}>{fullDetails.city && fullDetails.state ? `${fullDetails.city}, ${fullDetails.state}` : fullDetails.city}</Text></View><View style={styles.infoDivider} />
+                <View style={styles.infoRow}><Text style={styles.infoLabel}>Postal Code / Country</Text><Text style={styles.infoValue}>{fullDetails.postal_code ? `${fullDetails.postal_code}, ` : ''}{fullDetails.country}</Text></View>
               </View>
-
-              <TouchableOpacity 
-                style={styles.detailCloseBtn} 
-                onPress={() => setShowDetailsModal(false)}
-                activeOpacity={0.8}
-              >
+              <TouchableOpacity style={styles.detailCloseBtn} onPress={() => setShowDetailsModal(false)} activeOpacity={0.8}>
                 <Text style={styles.detailCloseBtnText}>Close Window</Text>
               </TouchableOpacity>
             </ScrollView>
           </SafeAreaView>
         </Modal>
 
-        {/* Edit Profile Modal */}
         <Modal visible={showEditModal} animationType="fade" transparent={true} onRequestClose={() => setShowEditModal(false)}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', alignItems: 'center' }}>
@@ -660,11 +429,7 @@ export default function ProfileScreen({ navigation }) {
                     <TouchableOpacity style={styles.modalBtnOutline} onPress={() => setShowEditModal(false)}>
                       <Text style={styles.modalBtnTextOutline}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={[styles.modalBtnFill, (!hasProfileChanges || loading) && { opacity: 0.6 }]} 
-                      onPress={handleUpdateProfile} 
-                      disabled={!hasProfileChanges || loading}
-                    >
+                    <TouchableOpacity style={[styles.modalBtnFill, (!hasProfileChanges || loading) && { opacity: 0.6 }]} onPress={handleUpdateProfile} disabled={!hasProfileChanges || loading}>
                       {loading ? <ActivityIndicator color={isLight ? "#FFFFFF" : colors.buttonText} size="small" /> : <Text style={styles.modalBtnTextFill}>Save Changes</Text>}
                     </TouchableOpacity>
                   </View>
@@ -674,7 +439,6 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </Modal>
 
-        {/* Change Password Modal */}
         <Modal visible={showPasswordModal} animationType="fade" transparent={true} onRequestClose={() => setShowPasswordModal(false)}>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', alignItems: 'center' }}>
@@ -684,7 +448,6 @@ export default function ProfileScreen({ navigation }) {
                   <Text style={styles.modalTitle}>Change Password</Text>
                   <View style={{ width: 24 }} />
                 </View>
-                
                 <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 10 }}>
                   <View style={styles.secInputGroup}>
                     <Text style={styles.inputLabel}>CURRENT PASSWORD</Text>
@@ -696,7 +459,6 @@ export default function ProfileScreen({ navigation }) {
                       </TouchableOpacity>
                     </View>
                   </View>
-
                   <View style={styles.secInputGroup}>
                     <Text style={styles.inputLabel}>NEW PASSWORD</Text>
                     <View style={styles.secInputWrapper}>
@@ -707,13 +469,11 @@ export default function ProfileScreen({ navigation }) {
                       </TouchableOpacity>
                     </View>
                   </View>
-
                   <View style={styles.secChecklistCard}>
                     <View style={styles.secCheckRow}>{hasLength ? <Check size={14} color="#059669" /> : <X size={14} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasLength && styles.secCheckPassed]}>At least 8 characters</Text></View>
                     <View style={styles.secCheckRow}>{hasUppercase ? <Check size={14} color="#059669" /> : <X size={14} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasUppercase && styles.secCheckPassed]}>At least 1 uppercase letter</Text></View>
                     <View style={styles.secCheckRow}>{hasSpecial ? <Check size={14} color="#059669" /> : <X size={14} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasSpecial && styles.secCheckPassed]}>At least 1 special character (!@#$...)</Text></View>
                   </View>
-
                   <View style={styles.secInputGroup}>
                     <Text style={styles.inputLabel}>CONFIRM NEW PASSWORD</Text>
                     <View style={styles.secInputWrapper}>
@@ -729,7 +489,6 @@ export default function ProfileScreen({ navigation }) {
                       </Text>
                     )}
                   </View>
-
                   <View style={styles.modalActions}>
                     <TouchableOpacity style={styles.modalBtnOutline} onPress={() => setShowPasswordModal(false)}>
                       <Text style={styles.modalBtnTextOutline}>Cancel</Text>
@@ -743,7 +502,6 @@ export default function ProfileScreen({ navigation }) {
             </KeyboardAvoidingView>
           </View>
         </Modal>
-
       </SafeAreaView>
     </>
   );
@@ -816,114 +574,21 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: isLight ? '#E2E8F0' : colors.border
   },
-  detailBackBtn: {
-    padding: 6
-  },
-  detailModalTitle: {
-    fontFamily: 'Inter_18pt-Bold',
-    fontSize: 18,
-    color: isLight ? '#0F172A' : colors.textPrimary
-  },
-  detailModalBody: {
-    padding: 20,
-    paddingBottom: 40
-  },
-  verifiedNoticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 20
-  },
-  verifiedNoticeTitle: {
-    fontFamily: 'Inter_18pt-Bold',
-    fontSize: 13,
-    color: '#065F46',
-    marginBottom: 2
-  },
-  verifiedNoticeSub: {
-    fontFamily: 'Inter_18pt-Medium',
-    fontSize: 12,
-    color: '#047857',
-    lineHeight: 18
-  },
-  detailsGroupCard: {
-    backgroundColor: isLight ? '#FFFFFF' : colors.surface,
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: isLight ? '#E2E8F0' : colors.border,
-    marginBottom: 16
-  },
-  groupHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingBottom: 10,
-    marginBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: isLight ? '#F1F5F9' : colors.border
-  },
-  groupHeaderTitle: {
-    fontFamily: 'Inter_18pt-Bold',
-    fontSize: 13,
-    color: '#00897B',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8
-  },
-  infoLabel: {
-    fontFamily: 'Inter_18pt-Medium',
-    fontSize: 13,
-    color: isLight ? '#64748B' : colors.textSecondary
-  },
-  infoValue: {
-    fontFamily: 'Inter_18pt-Medium',
-    fontSize: 13,
-    color: isLight ? '#0F172A' : colors.textPrimary,
-    textAlign: 'right',
-    flexShrink: 1,
-    marginLeft: 14
-  },
-  infoValueBold: {
-    fontFamily: 'Inter_18pt-Bold',
-    fontSize: 14,
-    color: '#00897B'
-  },
-  infoValueMono: {
-    fontFamily: 'Inter_18pt-Bold',
-    fontSize: 13,
-    color: isLight ? '#0F172A' : colors.textPrimary,
-    letterSpacing: 0.5
-  },
-  infoDivider: {
-    height: 1,
-    backgroundColor: isLight ? '#F8FAFC' : colors.border
-  },
-  detailCloseBtn: {
-    backgroundColor: isLight ? '#0F172A' : '#334155',
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: 'center',
-    marginTop: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 3
-  },
-  detailCloseBtnText: {
-    fontFamily: 'Inter_18pt-Bold',
-    fontSize: 14,
-    color: '#FFFFFF'
-  }
+  detailBackBtn: { padding: 6 },
+  detailModalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary },
+  detailModalBody: { padding: 20, paddingBottom: 40 },
+  verifiedNoticeBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 16, padding: 14, marginBottom: 20 },
+  verifiedNoticeTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: '#065F46', marginBottom: 2 },
+  verifiedNoticeSub: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: '#047857', lineHeight: 18 },
+  detailsGroupCard: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 16 },
+  groupHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 10, marginBottom: 12, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
+  groupHeaderTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: '#00897B', textTransform: 'uppercase', letterSpacing: 0.5 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
+  infoLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary },
+  infoValue: { fontFamily: 'Inter_18pt-Medium', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary, textAlign: 'right', flexShrink: 1, marginLeft: 14 },
+  infoValueBold: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: '#00897B' },
+  infoValueMono: { fontFamily: 'Inter_18pt-Bold', fontSize: 13, color: isLight ? '#0F172A' : colors.textPrimary, letterSpacing: 0.5 },
+  infoDivider: { height: 1, backgroundColor: isLight ? '#F8FAFC' : colors.border },
+  detailCloseBtn: { backgroundColor: isLight ? '#0F172A' : '#334155', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3 },
+  detailCloseBtnText: { fontFamily: 'Inter_18pt-Bold', fontSize: 14, color: '#FFFFFF' }
 });

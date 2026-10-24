@@ -55,7 +55,7 @@ const menuConfig = [
     ],
     roles: ['admin']
   },
-  { id: 'emergency', label: 'Emergency Alerts', icon: <Bell size={18} />, path: 'emergency-alerts', roles: ['admin', 'hr_admin'] },
+  { id: 'emergency', label: 'Emergency Alerts', icon: <Bell size={18} />, path: 'emergency-alerts', roles: ['admin'] },
   {
     id: 'reports', label: 'Reports', icon: <FileSpreadsheet size={18} />,
     submenu: [

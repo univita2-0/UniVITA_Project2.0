@@ -75,11 +75,65 @@
   margin-left: 0.25rem; line-height: 1;
 }
 
+/* UPDATED: Search Card with Tabs */
 .vm-search-card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 1rem 1.25rem;
-  margin-bottom: 1.5rem; box-shadow: var(--shadow-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background: var(--surface); 
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg); 
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem; 
+  box-shadow: var(--shadow-sm);
 }
+
+/* NEW: Formal Tabs */
+.vm-filter-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.vm-filter-tab {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: #0F172A; /* Simple Black Font */
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.vm-filter-tab:hover {
+  background: #F8FAFC;
+  border-color: #94A3B8;
+}
+
+.vm-filter-tab.active {
+  background: #FFFFFF;
+  border: 2px solid #0F172A;
+  font-weight: 700;
+  padding: calc(0.55rem - 1px) calc(1rem - 1px);
+}
+
+/* Removed background and styling from tab counts */
+.vm-filter-tab .tab-count {
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  margin-left: 0.25rem;
+  font-size: inherit;
+  font-weight: 700;
+}
+
 .vm-search-input-group {
   display: flex; align-items: center; gap: 0.75rem;
   flex: 1; min-width: 250px; max-width: 400px;
@@ -344,7 +398,8 @@ textarea.vm-clean-input.border { height: auto; padding: 0.75rem 0.875rem; }
 
 @media (max-width: 768px) {
   .vm-container { padding: 1.25rem; }
-  .vm-search-input-group { max-width: 100%; }
+  .vm-search-input-group { max-width: 100%; min-width: 100%; }
+  .vm-search-card { flex-direction: column; align-items: stretch; }
   .vm-pagination, .vm-custom-modal-pagination { justify-content: center; }
   .vm-details-grid-clean, .vm-form-row { grid-template-columns: 1fr; }
 }

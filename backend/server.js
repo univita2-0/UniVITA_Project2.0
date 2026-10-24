@@ -312,11 +312,13 @@ function verifyPayrollAccess(req, res, next) {
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
-  // Check if the token has the specific payroll purpose
   jwt.verify(token, PAYROLL_JWT_SECRET, (err, decoded) => {
     if (err || decoded.purpose !== 'payroll-access') {
       return res.status(403).json({ success: false, message: 'Payroll access expired or invalid. Please re-enter your PIN.' });
     }
+    
+    
+    req.user = decoded; 
     next();
   });
 }
@@ -6266,7 +6268,7 @@ app.post('/api/payroll/unlock', authenticateToken, (req, res) => {
       clearPinAttempts(email);
 
       const payrollToken = jwt.sign(
-        { id: admin.id, email: admin.email, purpose: 'payroll-access' },
+        { id: admin.id, email: admin.email, role: admin.role, purpose: 'payroll-access' },
         PAYROLL_JWT_SECRET,
         { expiresIn: '15m' }
       );

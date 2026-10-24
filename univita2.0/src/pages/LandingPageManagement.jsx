@@ -355,7 +355,7 @@ const LandingPageManagement = () => {
 
           <div className="lpm-card-actions">
             <button className="lpm-btn-primary" onClick={() => saveSection('contact_details', contact)} disabled={saving}>
-              <Save size={16} /> {saving ? 'Saving Changes...' : 'Save Contact Information'}
+               {saving ? 'Saving Changes...' : 'Save Changes'}
             </button>
           </div>
         </div>
@@ -484,7 +484,7 @@ const LandingPageManagement = () => {
               <Plus size={16} /> Add Program Category
             </button>
             <button className="lpm-btn-primary" onClick={() => saveSection('courses_catalog', courses)} disabled={saving}>
-              <Save size={16} /> {saving ? 'Saving...' : 'Save All Course Changes'}
+               {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </div>
@@ -553,7 +553,7 @@ const LandingPageManagement = () => {
 
           <div className="lpm-bottom-actions">
             <button className="lpm-btn-primary" onClick={() => saveSection('facilities_gallery', facilities)} disabled={saving}>
-              <Save size={16} /> {saving ? 'Saving...' : 'Save Gallery Changes'}
+              {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </div>

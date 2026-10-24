@@ -468,10 +468,7 @@ const Reports = () => {
     <div className="formal-rep-container">
       <div className="formal-rep-header">
         <div className="formal-rep-title-block">
-          <div>
-            
-            <p>Comprehensive administrative intelligence, verified operational analytics, and printable institutional registers.</p>
-          </div>
+          
         </div>
 
         <div className="formal-rep-controls">

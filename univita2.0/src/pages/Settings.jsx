@@ -389,7 +389,7 @@ const Settings = () => {
             <section className="stx-section">
               <div className="stx-section-header">
                 <div className="stx-header-title-row">
-                  <ShieldCheck size={20} className="stx-accent-icon" />
+                  
                   <h3>Payroll Security PIN</h3>
                 </div>
                 <p>Your 4 to 6 digit numerical PIN is required to access sensitive payroll modules and records.</p>

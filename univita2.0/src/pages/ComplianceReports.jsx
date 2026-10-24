@@ -110,10 +110,7 @@ const ComplianceReports = () => {
     <div className="formal-cr-container">
       <div className="formal-cr-header">
         <div className="formal-cr-title-block">
-          <div>
-            
-            <p>Generate monthly attendance summaries and DTR timekeeping reports for faculty review and institutional compliance.</p>
-          </div>
+          
         </div>
         <div className="formal-cr-security-badge">
           <ShieldCheck size={16} />

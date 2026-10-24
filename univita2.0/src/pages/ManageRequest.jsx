@@ -35,6 +35,7 @@ const ManageRequest = () => {
   const [historyData, setHistoryData] = useState([]);
   const [historySearch, setHistorySearch] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [activeHistoryTab, setActiveHistoryTab] = useState('all'); // NEW: Tab state
 
   const [pendingData, setPendingData] = useState([]);
   const [pendingSearch, setPendingSearch] = useState('');
@@ -58,7 +59,8 @@ const ManageRequest = () => {
   const [pendingPage, setPendingPage] = useState(1);
   const itemsPerPage = 20;
 
-  useEffect(() => { setHistoryPage(1); }, [historySearch]);
+  // Reset page when tab or search changes
+  useEffect(() => { setHistoryPage(1); }, [historySearch, activeHistoryTab]);
   useEffect(() => { setPendingPage(1); }, [pendingSearch]);
 
   const fetchHistory = useCallback(async () => {
@@ -224,9 +226,24 @@ const ManageRequest = () => {
     }
   };
 
+  // NEW: Calculate counts for tabs
+  const approvedCount = historyData.filter(item => ['approved', 'completed'].includes(item.status?.toLowerCase())).length;
+  const rejectedCount = historyData.filter(item => ['rejected', 'cancelled'].includes(item.status?.toLowerCase())).length;
+
   const filteredHistory = historyData.filter(item => {
+    // 1. Filter by Search
     const searchString = `${item.first_name} ${item.last_name} ${item.email} ${item.reason}`.toLowerCase();
-    return !historySearch || searchString.includes(historySearch.toLowerCase());
+    const matchesSearch = !historySearch || searchString.includes(historySearch.toLowerCase());
+
+    // 2. Filter by Tab
+    let matchesTab = true;
+    if (activeHistoryTab === 'approved') {
+      matchesTab = ['approved', 'completed'].includes(item.status?.toLowerCase());
+    } else if (activeHistoryTab === 'rejected') {
+      matchesTab = ['rejected', 'cancelled'].includes(item.status?.toLowerCase());
+    }
+
+    return matchesSearch && matchesTab;
   });
 
   const filteredPending = pendingData.filter(item => {
@@ -245,7 +262,6 @@ const ManageRequest = () => {
       <div className="vm-header">
         <div className="vm-title-group">
           <div>
-            
             <p className="vm-subtitle">Review, inspect, and manage visitor appointments and campus schedules.</p>
           </div>
         </div>
@@ -255,7 +271,29 @@ const ManageRequest = () => {
         </button>
       </div>
 
+      {/* UPDATED: Search Card now holds both Tabs and Search Bar */}
       <div className="vm-search-card">
+        <div className="vm-filter-tabs">
+          <button 
+            className={`vm-filter-tab ${activeHistoryTab === 'all' ? 'active' : ''}`} 
+            onClick={() => setActiveHistoryTab('all')}
+          >
+            All <span className="tab-count">{historyData.length}</span>
+          </button>
+          <button 
+            className={`vm-filter-tab ${activeHistoryTab === 'approved' ? 'active' : ''}`} 
+            onClick={() => setActiveHistoryTab('approved')}
+          >
+            Approved <span className="tab-count">{approvedCount}</span>
+          </button>
+          <button 
+            className={`vm-filter-tab ${activeHistoryTab === 'rejected' ? 'active' : ''}`} 
+            onClick={() => setActiveHistoryTab('rejected')}
+          >
+            Rejected <span className="tab-count">{rejectedCount}</span>
+          </button>
+        </div>
+
         <div className="vm-search-input-group">
           <Search size={18} className="text-muted" />
           <input

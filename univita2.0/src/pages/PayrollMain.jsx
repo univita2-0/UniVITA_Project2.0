@@ -439,11 +439,11 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
             if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear(selectedYear - 1); }
             else { setSelectedMonth(selectedMonth - 1); }
           }}>
-            <ChevronLeft size={20}/>
+            <ChevronLeft size={18}/>
           </button>
           
           <div className="pm-current-date">
-            <CalendarDays size={18} />
+            <CalendarDays size={16} />
             <span>{monthName} {selectedYear}</span>
           </div>
           
@@ -451,18 +451,18 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
             if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear(selectedYear + 1); }
             else { setSelectedMonth(selectedMonth + 1); }
           }}>
-            <ChevronRight size={20}/>
+            <ChevronRight size={18}/>
           </button>
         </div>
 
         <button className="pm-btn-lock" onClick={handleLockModule} title="Lock Payroll Module">
-          <Lock size={16} /> Lock Access
+          <Lock size={15} /> Lock Access
         </button>
       </div>
 
       {isFutureMonth ? (
         <div className="pm-empty-state">
-          <CalendarDays size={48} className="pm-empty-icon" />
+          <CalendarDays size={40} className="pm-empty-icon" />
           <h3>Future Period</h3>
           <p>Payroll data is not available for future dates. Please select the current or a past month.</p>
         </div>
@@ -471,28 +471,28 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
           {/* Horizontal 4-Column Metrics Grid */}
           <div className="pm-metrics-grid">
             <div className="pm-metric-card">
-              <div className="pm-metric-icon bg-slate"><Users size={22} /></div>
+              <div className="pm-metric-icon"><Users size={20} /></div>
               <div className="pm-metric-data">
                 <span className="pm-metric-label">Eligible Instructors</span>
                 <span className="pm-metric-value">{summary.totalEmployees}</span>
               </div>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon bg-teal"><Wallet size={22} /></div>
+              <div className="pm-metric-icon"><Wallet size={20} /></div>
               <div className="pm-metric-data">
                 <span className="pm-metric-label">Total Gross Pay</span>
                 <span className="pm-metric-value">₱{summary.totalGross.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon bg-rose"><TrendingUp size={22} /></div>
+              <div className="pm-metric-icon"><TrendingUp size={20} /></div>
               <div className="pm-metric-data">
                 <span className="pm-metric-label">Tax Withheld</span>
                 <span className="pm-metric-value">₱{summary.totalTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon bg-emerald"><DollarSign size={22} /></div>
+              <div className="pm-metric-icon"><DollarSign size={20} /></div>
               <div className="pm-metric-data">
                 <span className="pm-metric-label">Total Net Pay</span>
                 <span className="pm-metric-value text-success">₱{summary.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
@@ -644,7 +644,6 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
               
               <div className="pm-modal-body bg-gray">
                 
-                {/* Formal Document Layout */}
                 <div className="pm-formal-payslip">
                   
                   {/* Earnings Section */}
