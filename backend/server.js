@@ -3040,6 +3040,12 @@ app.post('/api/schedules', authenticateToken, async (req, res) => {
   }
 
   try {
+    // ✅ NEW: Ensure employee is strictly ACTIVE
+    const [userStatus] = await db.promise().query("SELECT status FROM users WHERE employee_id = ?", [user_id]);
+    if (userStatus.length === 0 || userStatus[0].status !== 'active') {
+      return res.status(400).json({ success: false, message: 'Cannot assign schedule. Employee is not active (Deactivated/Archived).' });
+    }
+
     const [leaveRows] = await db.promise().query(
       "SELECT id FROM leave_requests WHERE user_id = ? AND request_date = ? AND status = 'Approved'",
       [user_id, date]
@@ -3183,12 +3189,13 @@ app.post('/api/schedules/bulk', authenticateToken, async (req, res) => {
         continue;
       }
 
+     
       const [userRows] = await db.promise().query(
         "SELECT employee_id FROM users WHERE employee_id = ? AND LOWER(role) = 'instructor' AND status = 'active'",
         [employee_id]
       );
       if (userRows.length === 0) {
-        results.errors.push(`Row ${rowNum}: Invalid or inactive Instructor ID (${employee_id}).`);
+        results.errors.push(`Row ${rowNum}: Cannot assign. Instructor ${employee_id} is not active (Deactivated/Archived/Deleted).`);
         continue;
       }
 
@@ -3350,16 +3357,23 @@ app.get('/api/employees', authenticateToken, async (req, res) => {
       return res.json(results || []);
     }
 
-    
-    const [results] = await db.promise().query(
-      `SELECT id, employee_id, full_name, first_name, last_name, email, role, status, 
+    let sql = `SELECT id, employee_id, full_name, first_name, last_name, email, role, status, 
               employment_type, position_level, contract_type, monthly_salary, 
               work_days_per_month, payroll_access, middle_initial, date_of_joining, 
               account_expiration_date, date_of_birth, phone_number, gender, 
               emergency_contact_name, emergency_contact_phone, street_address, 
               city, state_province, postal_code, country, position, profile_picture 
-       FROM users ORDER BY full_name ASC`
-    );
+       FROM users`;
+       
+    const params = [];
+    
+    if (req.user.role !== 'admin') {
+      sql += ` WHERE status != 'deleted'`;
+    }
+    
+    sql += ` ORDER BY full_name ASC`;
+
+    const [results] = await db.promise().query(sql, params);
     res.json(results || []);
   } catch (err) {
     console.error("Failed to fetch employee directory:", err);
@@ -3630,28 +3644,7 @@ app.get('/api/employees/:id', authenticateToken, verifyOwnership, (req, res) => 
   );
 });
 
-app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to delete accounts.' });
-  }
 
-  const userId = req.params.id;
-
-  try {
-    const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
-    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: "Employee not found." });
-    const oldData = oldRecord[0];
-
-    db.query("DELETE FROM users WHERE id = ?", [userId], (err, result) => {
-      if (err) return res.status(500).json({ success: false, message: 'Failed to delete employee due to database constraint.' });
-      
-      logAction(req.user.id, 'DELETE_EMPLOYEE', 'user', userId, req, oldData, null);
-      res.json({ success: true, message: 'Employee account successfully deleted.' });
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server connection failed.' });
-  }
-});
 
 app.put('/api/employees/:employeeId/toggle-status', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -3744,7 +3737,7 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
       LEFT JOIN attendance_corrections ac ON s.id = ac.schedule_id AND ac.status = 'pending'
       LEFT JOIN attendance_appeals ap ON s.id = ap.schedule_id AND ap.status = 'pending'
       WHERE LOWER(u.role) = 'instructor' 
-        AND u.status = 'active'
+        AND u.status IN ('active', 'deactivated') -- ✅ Includes Deactivated (e.g. for Leave reports), excludes Archived/Deleted
         AND ${dateCondition}
       ORDER BY u.full_name ASC, s.start_time ASC
   `;
@@ -3753,6 +3746,42 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ success: false, message: "Database query failed." });
     res.json(result || []);
   });
+});
+
+
+app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Only System Admins can permanently delete records.' });
+  }
+
+  const employeeId = req.params.id;
+
+  try {
+    
+    const [userRows] = await db.promise().query("SELECT id, employee_id, status FROM users WHERE id = ?", [employeeId]);
+    if (userRows.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    if (userRows[0].status !== 'deleted') {
+      return res.status(400).json({ success: false, message: 'Employee must be moved to Deleted status before permanent deletion.' });
+    }
+
+    const empIdString = userRows[0].employee_id;
+
+
+    await db.promise().query("DELETE FROM attendance WHERE user_id = ?", [empIdString]);
+    await db.promise().query("DELETE FROM schedules WHERE user_id = ?", [empIdString]);
+    await db.promise().query("DELETE FROM leave_requests WHERE user_id = ? OR user_id = ?", [empIdString, employeeId]);
+    await db.promise().query("DELETE FROM payroll WHERE user_id = ?", [employeeId]);
+    
+    
+   
+    await db.promise().query("DELETE FROM users WHERE id = ?", [employeeId]);
+
+    logAction(req.user.id, 'PERMANENT_DELETE_EMPLOYEE', 'user', employeeId, req);
+    res.json({ success: true, message: 'Employee permanently deleted from the system.' });
+  } catch (err) {
+    console.error("Permanent Delete Error:", err);
+    res.status(500).json({ success: false, message: 'Failed to permanently delete employee. They may have dependent records.' });
+  }
 });
 
 app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
@@ -5950,7 +5979,6 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR authorization required.' });
   }
 
- 
   const period = parseReportPeriod(req.query.month, req.query.year);
   if (period.error) {
     return res.status(400).json({ success: false, message: period.error });
@@ -5980,6 +6008,14 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
             ELSE 0
           END
         ), 0) AS rendered_hours,
+        -- ✅ Undertime calculation
+        COALESCE(SUM(
+          CASE 
+            WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' AND a.time_out < s.end_time
+            THEN TIMESTAMPDIFF(MINUTE, a.time_out, s.end_time)
+            ELSE 0
+          END
+        ), 0) AS undertime_minutes,
         COALESCE(SUM(
           CASE 
             WHEN a.status = 'late' OR (a.time_in IS NOT NULL AND s.start_time IS NOT NULL AND a.time_in > ADDTIME(s.start_time, '00:15:00')) 
@@ -6026,15 +6062,16 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
       const lateCount = Number(row.late_count) || 0;
       const leaveDays = Number(row.leave_days) || 0;
       
-      // Expected Shifts excludes approved leaves
       const expectedShifts = Math.max(0, scheduledShifts - leaveDays);
       const unexcused = Math.max(0, expectedShifts - presentShifts);
       
       const schedHours = Number(row.scheduled_hours) || 0;
       const actHours = Number(row.rendered_hours) || 0;
       const otHours = Number(row.overtime_hours) || 0;
+      
+      // ✅ Equivalent Days (Total Hours / 8)
+      const equivalentDays = (actHours / 8).toFixed(2);
 
-      // Rate Calculation Logic
       let attendanceRateText = 'N/A';
       let auditStatus = 'NO SCHEDULE';
       let rateNumber = null;
@@ -6063,10 +6100,12 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
         present_shifts: presentShifts,
         late_count: lateCount,
         total_late_mins: Math.round(row.total_late_minutes || 0),
+        total_undertime_mins: Math.round(row.undertime_minutes || 0),
         leave_days: leaveDays,
         unexcused_absences: unexcused,
         scheduled_hours: schedHours.toFixed(1),
         rendered_hours: actHours.toFixed(1),
+        equivalent_days: equivalentDays,
         overtime_hours: otHours.toFixed(1),
         attendance_rate: attendanceRateText,
         rate_number: rateNumber,
@@ -6075,7 +6114,6 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
     });
 
     const PDFDocument = require('pdfkit');
-    // LANDSCAPE A4: Width 841.89 pt x Height 595.28 pt
     const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
     
     res.setHeader('Content-Type', 'application/pdf');
@@ -6086,14 +6124,18 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
     const phtNow = getPHDateTime();
     const reportRefId = `DTR-AUD-${year}${String(month).padStart(2, '0')}-${Date.now().toString().slice(-4)}`;
 
-    // ----------------------------------------------------
+    // ✅ WATERMARK
+    doc.save();
+    doc.opacity(0.08);
+    doc.rotate(45, { origin: [400, 300] });
+    doc.fontSize(60).font('Helvetica-Bold').fillColor('#000000').text('CONFIDENTIAL', 100, 250, { align: 'center', width: 600 });
+    doc.restore();
+
     // 1. INSTITUTIONAL LETTERHEAD & TITLE
-    // ----------------------------------------------------
     doc.fontSize(15).font('Helvetica-Bold').fillColor('#0F172A').text('HCT ACADEMY - HEALTHCARE TRAINING CENTER', 36, 34);
     doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#00897B').text('MONTHLY ATTENDANCE & TIMEKEEPING REPORT', 36, 51);
-    doc.fontSize(7.5).font('Helvetica').fillColor('#64748B').text('Healthcare Simulation & Clinical Training Faculty | 123 Healthcare Avenue, Pasay City, Metro Manila', 36, 62);
+    doc.fontSize(7.5).font('Helvetica').fillColor('#64748B').text('HCT Academy 611 Shaw Blvd 1550, Pasig, Metro Manila', 36, 62);
 
-    // Meta box top-right
     doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0F172A').text(`REPORT ID: ${reportRefId}`, 580, 34, { align: 'right' });
     doc.fontSize(7).font('Helvetica').fillColor('#475569').text(`Reporting Period: ${monthName} 1–${lastDay}, ${year}`, 580, 44, { align: 'right' });
     doc.text(`Department: Simulation & Clinical Faculty`, 580, 54, { align: 'right' });
@@ -6102,9 +6144,7 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
 
     doc.moveTo(36, 86).lineTo(805, 86).lineWidth(1).stroke('#CBD5E1');
 
-    // ----------------------------------------------------
     // 2. EXECUTIVE SUMMARY TILES
-    // ----------------------------------------------------
     const totalInstructors = reportData.length;
     const sumSchedShifts = reportData.reduce((acc, r) => acc + r.scheduled_shifts, 0);
     const sumPresentShifts = reportData.reduce((acc, r) => acc + r.present_shifts, 0);
@@ -6123,30 +6163,24 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
     const tileHeight = 40;
     const tileY = 94;
 
-    // Tile 1: Headcount
     doc.rect(36, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
     doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('AUDITED FACULTY HEADCOUNT', 46, tileY + 6);
     doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(13).text(`${totalInstructors} Instructors`, 46, tileY + 18);
 
-    // Tile 2: Hours Comparison
     doc.rect(231, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
     doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('INSTRUCTION HOURS (SCHED VS RENDERED)', 241, tileY + 6);
     doc.fillColor('#00897B').font('Helvetica-Bold').fontSize(12).text(`${sumRenderedHours.toFixed(1)} / ${sumSchedHours.toFixed(1)} hrs`, 241, tileY + 18);
 
-    // Tile 3: Incidents
     doc.rect(426, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
     doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('RECORDED INCIDENTS (MONTHLY)', 436, tileY + 6);
     doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(11).text(`${sumLates} Lates | ${sumLeaves} Leaves | ${sumAbsences} Unexcused`, 436, tileY + 19);
 
-    // Tile 4: Attendance Rate
     const slaColor = overallAttendanceRate !== 'N/A' && parseFloat(overallAttendanceRate) >= 85 ? '#059669' : '#DC2626';
     doc.rect(621, tileY, tileWidth, tileHeight).fillAndStroke('#F8FAFC', '#E2E8F0');
     doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('DEPARTMENTAL ATTENDANCE RATE', 631, tileY + 6);
     doc.fillColor(slaColor).font('Helvetica-Bold').fontSize(13).text(`${overallAttendanceRate}%`, 631, tileY + 18);
 
-    // ----------------------------------------------------
     // 3. METHODOLOGY & DTR REFERENCE BOX
-    // ----------------------------------------------------
     const methY = 140;
     doc.rect(36, methY, 769, 28).fillAndStroke('#F1F5F9', '#CBD5E1');
     doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7).text('AUDIT METHODOLOGY & DTR SOURCE RECORD REFERENCE:', 44, methY + 5);
@@ -6156,21 +6190,19 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
       44, methY + 13, { width: 753, lineGap: 1.5 }
     );
 
-    // ----------------------------------------------------
-    // 4. TABLE STRUCTURE (769 pt total width)
-    // ----------------------------------------------------
+    // 4. TABLE STRUCTURE
     const tableTop = 176;
-    const colWidths = [48, 130, 90, 42, 42, 42, 44, 55, 52, 52, 44, 62, 66];
+    const colWidths = [42, 115, 75, 38, 38, 38, 38, 42, 45, 45, 40, 45, 45, 48, 60]; // Adjusted widths
     const headers = [
       'EMP ID', 'INSTRUCTOR NAME', 'POSITION / TITLE', 'SCHED', 'PRES', 'LATE', 
-      'LEAVE', 'UNEXC ABS', 'SCHED HRS', 'REND HRS', 'OT HRS', 'ATT RATE', 'STATUS'
+      'UT', 'LEAVE', 'UNEXC ABS', 'SCHED HRS', 'REND HRS', 'EQV DAYS', 'OT HRS', 'ATT RATE', 'STATUS'
     ];
     const rowHeight = 18;
     let currentY = tableTop;
 
     const drawTableHeader = (y) => {
       doc.rect(36, y, 769, rowHeight).fillAndStroke('#0F172A', '#0F172A');
-      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(6.5);
+      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(6);
       
       let x = 36;
       headers.forEach((h, i) => {
@@ -6184,9 +6216,7 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
     drawTableHeader(currentY);
     currentY += rowHeight;
 
-    // ----------------------------------------------------
     // 5. EMPLOYEE DATA ROWS
-    // ----------------------------------------------------
     reportData.forEach((emp, index) => {
       if (currentY > 480) {
         doc.addPage();
@@ -6197,7 +6227,7 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
 
       const isEven = index % 2 === 0;
       doc.rect(36, currentY, 769, rowHeight).fillAndStroke(isEven ? '#FFFFFF' : '#F8FAFC', '#E2E8F0');
-      doc.fontSize(7).font('Helvetica');
+      doc.fontSize(6.5).font('Helvetica');
 
       let x = 36;
       const values = [
@@ -6207,10 +6237,12 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
         emp.scheduled_shifts.toString(),
         emp.present_shifts.toString(),
         emp.late_count.toString(),
+        emp.total_undertime_mins.toString(),
         emp.leave_days.toString(),
         emp.unexcused_absences.toString(),
         `${emp.scheduled_hours}h`,
         `${emp.rendered_hours}h`,
+        emp.equivalent_days,
         `${emp.overtime_hours}h`,
         emp.attendance_rate,
         emp.audit_status
@@ -6225,15 +6257,17 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
           doc.font('Helvetica-Bold');
         } else if (i === 5 && emp.late_count > 0) {
           doc.fillColor('#B45309').font('Helvetica-Bold');
-        } else if (i === 7 && emp.unexcused_absences > 0) {
+        } else if (i === 6 && emp.total_undertime_mins > 0) {
+          doc.fillColor('#B45309').font('Helvetica-Bold');
+        } else if (i === 8 && emp.unexcused_absences > 0) {
           doc.fillColor('#DC2626').font('Helvetica-Bold');
-        } else if (i === 11) {
+        } else if (i === 13) {
           doc.font('Helvetica-Bold');
           if (emp.attendance_rate === 'N/A') doc.fillColor('#64748B');
           else if (emp.rate_number >= 95) doc.fillColor('#059669');
           else if (emp.rate_number < 80) doc.fillColor('#DC2626');
           else doc.fillColor('#0F172A');
-        } else if (i === 12) {
+        } else if (i === 14) {
           doc.font('Helvetica-Bold');
           if (emp.audit_status === 'NO SCHEDULE') doc.fillColor('#64748B');
           else if (emp.audit_status === 'EXCELLENT' || emp.audit_status === 'EXCUSED LEAVE') doc.fillColor('#059669');
@@ -6250,32 +6284,31 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
       currentY += rowHeight;
     });
 
-    // ----------------------------------------------------
     // 6. TRIPARTITE SIGN-OFF BLOCK
-    // ----------------------------------------------------
     if (currentY > 440) { doc.addPage(); currentY = 40; }
 
     currentY += 12;
     const signColWidth = 230;
 
-    // Prepared By
     doc.moveTo(36, currentY + 22).lineTo(36 + signColWidth, currentY + 22).lineWidth(0.8).stroke('#0F172A');
     doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('PREPARED BY: HR COMPLIANCE OFFICER', 36, currentY + 26);
     doc.font('Helvetica').fontSize(6.5).fillColor('#64748B').text('Records & Timekeeping Specialist | Date: ____________', 36, currentY + 36);
 
-    // Reviewed By
     doc.moveTo(305, currentY + 22).lineTo(305 + signColWidth, currentY + 22).stroke('#0F172A');
     doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('REVIEWED BY: DEAN / SIMULATION HEAD', 305, currentY + 26);
     doc.font('Helvetica').fontSize(6.5).fillColor('#64748B').text('Academic & Clinical Faculty Division | Date: ____________', 305, currentY + 36);
 
-    // Approved By
     doc.moveTo(575, currentY + 22).lineTo(575 + signColWidth, currentY + 22).stroke('#0F172A');
     doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('APPROVED BY: EXECUTIVE VICE PRESIDENT', 575, currentY + 26);
     doc.font('Helvetica').fontSize(6.5).fillColor('#64748B').text('HCT Academy Executive Directorate | Date: ____________', 575, currentY + 36);
 
-    // ----------------------------------------------------
+    // ✅ EMPLOYEE ACKNOWLEDGMENT BLOCK
+    currentY += 60;
+    doc.moveTo(36, currentY + 22).lineTo(36 + signColWidth, currentY + 22).lineWidth(0.8).stroke('#0F172A');
+    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('EMPLOYEE ACKNOWLEDGMENT (SIGNATURE OVER PRINTED NAME)', 36, currentY + 26);
+    doc.font('Helvetica').fontSize(6.5).fillColor('#64748B').text('Faculty Member Signature | Date: ____________', 36, currentY + 36);
+
     // 7. NATIONAL PRIVACY COMMISSION (NPC) COMPLIANT NOTICE
-    // ----------------------------------------------------
     const footerY = 554;
     doc.fontSize(6.5).font('Helvetica-Bold').fillColor('#475569');
     doc.text('CONFIDENTIAL - AUTHORIZED HR AND MANAGEMENT USE ONLY', 36, footerY, { align: 'center', width: 769 });
@@ -6443,19 +6476,47 @@ app.post('/api/payroll/finalize', verifyPayrollAccess, (req, res) => {
   });
 });
 
+
+// PHILIPPINE STATUTORY CALCULATION HELPERS
+
+const calcPHSSS = (monthlySalary) => {
+  if (monthlySalary <= 0) return 0;
+  let msc = 5000;
+  if (monthlySalary >= 34750) msc = 35000;
+  else if (monthlySalary > 5000) {
+    const step = Math.floor((monthlySalary - 4750) / 500);
+    msc = 5000 + (step * 500);
+  }
+  return msc * 0.045; 
+};
+
+const calcPHPhilHealth = (monthlySalary) => {
+  if (monthlySalary <= 0) return 0;
+  let base = monthlySalary;
+  if (base < 10000) base = 10000; 
+  if (base > 100000) base = 100000; 
+  return (base * 0.05) / 2; 
+};
+
+const calcPHPagIbig = (monthlySalary) => {
+  if (monthlySalary <= 0) return 0;
+  let base = monthlySalary;
+  if (base > 5000) base = 5000; 
+  return base * 0.02; 
+};
+
+
 app.post('/api/payroll/run-monthly', verifyPayrollAccess, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
 
-  
   const period = parseReportPeriod(req.body.month, req.body.year);
   if (period.error) {
     return res.status(400).json({ success: false, message: period.error });
   }
   const { month, year } = period;
 
-  
   if (!month || !year || isNaN(month) || isNaN(year)) {
     return res.status(400).json({ success: false, message: 'A valid numeric month and year are required.' });
   }
@@ -6466,7 +6527,7 @@ app.post('/api/payroll/run-monthly', verifyPayrollAccess, async (req, res) => {
   const monthYear = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
 
   try {
-    // 1. Gather all logged hours, late minutes, leaves, and overtime
+   
     const [attSummary] = await db.promise().query(`
       SELECT 
         u.id,
@@ -6502,7 +6563,7 @@ app.post('/api/payroll/run-monthly', verifyPayrollAccess, async (req, res) => {
     const processed = [];
     const skipped = [];
     
-    // Philippine TRAIN Law Tax Brackets
+   
     const taxTable = [
       { min: 0, max: 20833, rate: 0, base: 0 },
       { min: 20833, max: 33332, rate: 0.15, base: 0 },
@@ -6525,7 +6586,7 @@ app.post('/api/payroll/run-monthly', verifyPayrollAccess, async (req, res) => {
       
       const regularHours = Number(emp.regular_hours);
       const leaveDays = Number(emp.leave_days);
-      const paidLeaveHours = leaveDays * 8; // Convert approved leaves to paid hours
+      const paidLeaveHours = leaveDays * 8; 
       const baseEarnings = (regularHours + paidLeaveHours) * hourlyRate;
 
       const overtimeHours = Number(emp.overtime_hours);
@@ -6536,15 +6597,15 @@ app.post('/api/payroll/run-monthly', verifyPayrollAccess, async (req, res) => {
 
       const grossPay = baseEarnings + overtimePay;
       
-      // Deduct lates BEFORE statutory deductions
+      
       const netBaseForStatutory = Math.max(0, (monthlySalary > 0 ? monthlySalary : baseEarnings) - lateDeduction);
 
-      const sssCredit = Math.min(netBaseForStatutory, 35000); 
-      let sss = (sssCredit * 0.05); 
-      let philHealth = (netBaseForStatutory * 0.025); 
-      let pagIbig = (netBaseForStatutory * 0.02); 
+      
+      let sss = calcPHSSS(netBaseForStatutory); 
+      let philHealth = calcPHPhilHealth(netBaseForStatutory); 
+      let pagIbig = calcPHPagIbig(netBaseForStatutory); 
 
-      // Tax computation based on taxable income
+      
       const taxableIncome = Math.max(0, (baseEarnings + overtimePay - lateDeduction) - sss - philHealth - pagIbig);
       
       let tax = 0;

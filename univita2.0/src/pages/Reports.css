@@ -101,10 +101,10 @@
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
-.formal-rep-btn-primary {
-  background: var(--primary);
-  color: #FFFFFF;
-  border: 1px solid transparent;
+.formal-rep-btn-primary, .formal-rep-btn-outline {
+  background: var(--surface);
+  color: var(--text-2);
+  border: 1px solid #CBD5E1;
   padding: 0.65rem 1.25rem;
   border-radius: var(--radius-md);
   font-family: inherit;
@@ -118,9 +118,20 @@
   transition: all 0.15s ease;
   white-space: nowrap;
 }
+
+.formal-rep-btn-primary {
+  background: var(--primary);
+  color: #FFFFFF;
+  border-color: var(--primary);
+}
 .formal-rep-btn-primary:hover:not(:disabled) {
   background: var(--primary-hover);
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15);
+}
+.formal-rep-btn-outline:hover:not(:disabled) {
+  background: #F1F5F9;
+  color: var(--text);
+  border-color: #94A3B8;
 }
 
 .formal-rep-tabs {
@@ -341,7 +352,7 @@
   .formal-rep-chart-grid { grid-template-columns: 1fr; }
 }
 
-/* ================== PRINT ENGINE (UNCHANGED) ================== */
+/* ================== PRINT ENGINE ================== */
 .print-only { display: none; }
 
 @media print {
@@ -462,7 +473,7 @@
   .print-signatures {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
     gap: 15px;
   }
   .sig-block {
@@ -479,6 +490,14 @@
   .sig-name { font-size: 7.5pt; font-weight: 800; color: #0F172A; }
   .sig-title { font-size: 6.5pt; color: #64748B; margin-top: 1px; }
   .sig-date { font-size: 6.5pt; color: #475569; margin-top: 2px; }
+
+  .print-employee-ack {
+    display: flex;
+    margin-bottom: 14px;
+  }
+  .print-employee-ack .sig-block {
+    padding-right: 20px;
+  }
 
   .print-privacy-banner {
     text-align: center;

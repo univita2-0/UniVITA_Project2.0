@@ -9,7 +9,6 @@ const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
-// ✅ C3 — read the backend's JSON message out of a Blob response body
 const readBlobError = async (err) => {
   const data = err?.response?.data;
   if (!data) return null;
@@ -37,8 +36,6 @@ const ComplianceReports = () => {
   }, []);
 
   const generateReport = async () => {
-    // ✅ C1 (client mirror) — validate month/year before firing the request.
-    // Backend also validates, but the pickers give us free client-side guards.
     if (!Number.isInteger(month) || month < 1 || month > 12) {
       toast.warning('Please select a valid month (1–12).');
       return;
@@ -87,7 +84,6 @@ const ComplianceReports = () => {
       } else if (status === 404) {
         errorMsg = 'No active instructor records found for this period.';
       } else if (status === 400) {
-        // ✅ C3 — extract the backend's validation message from the blob
         const backendMsg = await readBlobError(err);
         errorMsg = backendMsg || 'Invalid report parameters.';
       } else if (!err.response) {
@@ -210,8 +206,8 @@ const ComplianceReports = () => {
               <li>
                 <FileText size={18} className="specs-icon" />
                 <div>
-                  <strong>Unscheduled Faculty Handling</strong>
-                  <span>Instructors with zero scheduled shifts are reported as N/A rather than flagged as non-compliant.</span>
+                  <strong>Undertime & Equivalent Days (DOLE)</strong>
+                  <span>Tracks early departures (Undertime) separately from lates, and calculates Equivalent Days Worked (Total Hours ÷ 8) for payroll alignment.</span>
                 </div>
               </li>
               <li>
@@ -224,8 +220,8 @@ const ComplianceReports = () => {
               <li>
                 <ShieldAlert size={18} className="specs-icon" />
                 <div>
-                  <strong>DTR Timekeeping Reference & NPC Notice</strong>
-                  <span>Includes primary biometric/geofence references and strict statutory data privacy handling clauses.</span>
+                  <strong>DTR Timekeeping Reference, Watermark & NPC Notice</strong>
+                  <span>Includes a CONFIDENTIAL watermark, Employee Acknowledgment signature line, and strict statutory data privacy handling clauses.</span>
                 </div>
               </li>
             </ul>

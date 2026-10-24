@@ -344,13 +344,13 @@ const JobPostings = () => {
               <Search size={15} className="text-muted" />
               <input 
                 type="text" 
-                placeholder="Search jobs..." 
+                placeholder="Search job titles..." 
                 value={searchTerm} 
                 onChange={e => setSearchTerm(e.target.value)} 
               />
             </div>
             <button className="jp-btn-create" onClick={() => openJobForm()}>
-              <Plus size={16} /> Create Job
+              <Plus size={16} /> Create Post
             </button>
           </div>
         </div>
@@ -365,7 +365,7 @@ const JobPostings = () => {
                   <th>Job Title</th>
                   <th>Type</th>
                   <th>Status</th>
-                  <th>New Applicants</th>
+                  <th>Applicants</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
@@ -395,9 +395,9 @@ const JobPostings = () => {
                           {job.status.toUpperCase()}
                         </span>
                       </td>
-                      <td>
+                      <td className="text-center">
                         <div className="jp-app-count">
-                          <span>{job.applicant_count} </span>
+                          <span>{job.applicant_count}</span>
                         </div>
                       </td>
                       <td className="text-right">
@@ -407,7 +407,7 @@ const JobPostings = () => {
                             className="jp-action-btn-text primary" 
                             onClick={() => viewApplicants(job)}
                           >
-                            View applicants
+                            View Applicants
                           </button>
                           
                           <button 

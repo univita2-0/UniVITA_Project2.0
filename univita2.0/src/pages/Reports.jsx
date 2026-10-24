@@ -47,6 +47,7 @@ const Reports = () => {
   const [currentYear, currentMonthNum] = selectedMonth.split('-');
   const monthLabel = availableMonths.find(m => m.value === selectedMonth)?.label || selectedMonth;
   const lastDayOfMonth = new Date(parseInt(currentYear, 10), parseInt(currentMonthNum, 10), 0).getDate();
+  const lastDayStr = String(lastDayOfMonth).padStart(2, '0');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -152,6 +153,36 @@ const Reports = () => {
     } catch (error) {
       console.error("Error fetching requests data", error);
     }
+  };
+
+  const handleExportCSV = () => {
+    let headers = [];
+    let rows = [];
+    let filename = `Report_${selectedReport}_${selectedMonth}.csv`;
+
+    if (selectedReport === 'attendance') {
+      headers = ["Employee ID", "Name", "Regular Hours", "Overtime Hours", "Leave Days"];
+      rows = attendanceData.map(e => [e.employee_id, e.full_name, e.regular_hours, e.overtime_hours, e.leave_days]);
+    } else if (selectedReport === 'payroll') {
+      headers = ["Employee ID", "Name", "Gross Pay", "SSS", "PhilHealth", "Pag-IBIG", "Tax", "Net Pay"];
+      rows = payrollData.map(p => [p.employee_id, p.full_name, p.gross_pay, p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.tax_deduction, p.net_pay]);
+    } else if (selectedReport === 'requests') {
+      headers = ["Category", "Name", "Date", "Reason", "Status"];
+      rows = [
+        ...requestsData.leaves.map(x => ["Leave", x.full_name, x.start_date, x.reason, x.status]),
+        ...requestsData.overtime.map(x => ["Overtime", x.full_name, x.date, x.reason, x.status]),
+        ...requestsData.appeals.map(x => ["Appeal", x.full_name, x.date, x.reason, x.status])
+      ];
+    } else {
+      return alert("CSV Export not configured for this tab yet.");
+    }
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v||'').replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   const handleExport = () => window.print();
@@ -347,10 +378,18 @@ const Reports = () => {
       { name: 'Appeals', Pending: countStatus(requestsData.appeals, 'pending'), Approved: countStatus(requestsData.appeals, 'approved'), Rejected: countStatus(requestsData.appeals, 'rejected') },
     ];
     const totalPending = chartData.reduce((acc, curr) => acc + curr.Pending, 0);
+    
+    const today = new Date();
+    const addDaysPending = (req, type) => {
+      const created = new Date(req.created_at || req.submitted_at || req.date);
+      const diff = Math.floor((today - created) / (1000 * 60 * 60 * 24));
+      return { ...req, type, daysPending: isNaN(diff) ? 0 : diff };
+    };
+
     const recentPending = [
-      ...requestsData.leaves.filter(x => x.status?.toLowerCase() === 'pending').map(x => ({ id: `L-${x.ids?.[0] || x.id}`, type: 'Leave', date: x.start_date, name: x.full_name, reason: x.reason })),
-      ...requestsData.overtime.filter(x => x.status?.toLowerCase() === 'pending').map(x => ({ id: `O-${x.id}`, type: 'Overtime', date: x.date, name: x.full_name, reason: x.reason })),
-      ...requestsData.appeals.filter(x => x.status?.toLowerCase() === 'pending').map(x => ({ id: `A-${x.id}`, type: 'Appeal', date: x.date, name: x.full_name, reason: x.reason }))
+      ...requestsData.leaves.filter(x => x.status?.toLowerCase() === 'pending').map(x => addDaysPending(x, 'Leave')),
+      ...requestsData.overtime.filter(x => x.status?.toLowerCase() === 'pending').map(x => addDaysPending(x, 'Overtime')),
+      ...requestsData.appeals.filter(x => x.status?.toLowerCase() === 'pending').map(x => addDaysPending(x, 'Appeal'))
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
 
     return (
@@ -387,13 +426,16 @@ const Reports = () => {
               {recentPending.length === 0 ? <div className="formal-rep-empty m-4">All requests have been evaluated.</div> : (
                 <div className="formal-rep-table-wrapper" style={{ maxHeight: '280px', overflowY: 'auto' }}>
                   <table className="formal-rep-table">
-                    <thead><tr><th>Category</th><th>Faculty Member</th><th>Target Date</th></tr></thead>
+                    <thead><tr><th>Category</th><th>Faculty Member</th><th>Target Date</th><th>Days Pending</th></tr></thead>
                     <tbody>
                       {recentPending.map(req => (
                         <tr key={req.id}>
                           <td><span className="formal-rep-badge">{req.type}</span></td>
-                          <td className="fw-600 text-dark">{req.name}</td>
+                          <td className="fw-600 text-dark">{req.full_name}</td>
                           <td className="font-mono text-muted">{req.date?.split('T')[0]}</td>
+                          <td className={`font-mono ${req.daysPending > 3 ? 'text-danger fw-600' : 'text-muted'}`}>
+                            {req.daysPending} days
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -413,11 +455,11 @@ const Reports = () => {
         <div>
           <h1 className="print-brand-title">HCT ACADEMY</h1>
           <p className="print-brand-sub">Healthcare Training Center & Clinical Simulation Laboratories</p>
-          <p className="print-brand-contact">123 Healthcare Avenue, Pasay City, Metro Manila | ISO 9001 / ISMS Compliant</p>
+          <p className="print-brand-contact">HCT Academy 611 Shaw Blvd 1550, Pasig, Metro Manila | ISO 9001 / ISMS Compliant</p>
         </div>
         <div className="print-audit-box">
           <div className="print-dcn">DCN: {reportCode}-{currentYear}{currentMonthNum}-{Date.now().toString().slice(-4)}</div>
-          <div><strong>Period:</strong> {monthLabel} 1–{lastDayOfMonth}, {currentYear}</div>
+          <div><strong>Period:</strong> {monthLabel} 01–{lastDayStr}, {currentYear}</div>
           <div><strong>Department:</strong> Faculty & Simulation Operations</div>
           <div><strong>Generated:</strong> {new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}</div>
         </div>
@@ -457,6 +499,14 @@ const Reports = () => {
         </div>
       </div>
 
+      <div className="print-employee-ack">
+        <div className="sig-block" style={{ width: '33.33%', textAlign: 'left' }}>
+          <div className="sig-line" style={{ width: '100%' }} />
+          <span className="sig-name">EMPLOYEE ACKNOWLEDGMENT</span>
+          <span className="sig-title">Faculty Member Signature | Date: ____________</span>
+        </div>
+      </div>
+
       <div className="print-privacy-banner">
         <strong>CONFIDENTIAL - AUTHORIZED INTERNAL AUDIT & MANAGEMENT USE ONLY</strong><br />
         This document contains employee personal and work-related information. Retain, process, and disclose strictly in accordance with HCT Academy records retention schedules and the Philippine Data Privacy Act of 2012 (Republic Act No. 10173).
@@ -478,6 +528,9 @@ const Reports = () => {
               {availableMonths.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </div>
+          <button className="formal-rep-btn-outline" onClick={handleExportCSV} disabled={loading}>
+            <Download size={16} /> Export CSV
+          </button>
           <button className="formal-rep-btn-primary" onClick={handleExport} disabled={loading}>
             <Printer size={16} /> Print Official Document
           </button>
@@ -576,10 +629,13 @@ const Reports = () => {
               <tr>
                 <th style={{ width: '4%' }}>No.</th>
                 <th style={{ width: '12%' }}>Employee ID</th>
-                <th style={{ width: '28%' }}>Personnel Name</th>
-                <th style={{ width: '18%' }} className="text-right">Gross Earnings</th>
-                <th style={{ width: '18%' }} className="text-right">Taxes & Deductions</th>
-                <th style={{ width: '20%' }} className="text-right">Net Compensation</th>
+                <th style={{ width: '24%' }}>Personnel Name</th>
+                <th style={{ width: '12%' }} className="text-right">Gross Earnings</th>
+                <th style={{ width: '12%' }} className="text-right">SSS</th>
+                <th style={{ width: '12%' }} className="text-right">PhilHealth</th>
+                <th style={{ width: '12%' }} className="text-right">Pag-IBIG</th>
+                <th style={{ width: '12%' }} className="text-right">Tax</th>
+                <th style={{ width: '12%' }} className="text-right">Net Pay</th>
               </tr>
             </thead>
             <tbody>
@@ -589,7 +645,10 @@ const Reports = () => {
                   <td className="font-mono">{p.employee_id || p.user_id}</td>
                   <td><strong>{p.full_name}</strong></td>
                   <td className="text-right">₱{Number(p.gross_pay || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                  <td className="text-right">₱{Number(p.tax_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="text-right text-danger">₱{Number(p.sss_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="text-right text-danger">₱{Number(p.philhealth_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="text-right text-danger">₱{Number(p.pagibig_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="text-right text-danger">₱{Number(p.tax_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="text-right"><strong>₱{Number(p.net_pay || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
                 </tr>
               ))}
@@ -708,7 +767,7 @@ const Reports = () => {
             <tbody>
               {[
                 ...requestsData.leaves.map(x => ({ type: 'Leave Request', date: x.start_date, name: x.full_name, reason: x.reason, status: x.status })),
-                ...requestsData.overtime.map(x => ({ type: 'Overtime Claim', date: x.date, name: x.full_name, reason: x.reason, status: x.status })),
+                ...requestsData.overtime.map(x => ({ type: 'Overtime Request', date: x.date, name: x.full_name, reason: x.reason, status: x.status })),
                 ...requestsData.appeals.map(x => ({ type: 'Attendance Appeal', date: x.date, name: x.full_name, reason: x.reason, status: x.status }))
               ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 50).map((r, i) => (
                 <tr key={i}>

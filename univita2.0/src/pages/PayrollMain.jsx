@@ -19,7 +19,11 @@ const getPayrollAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('payroll_token')}` }
 });
 
-// Philippine TRAIN Law Monthly Tax Brackets
+// ==========================================
+// PHILIPPINE STATUTORY COMPLIANCE UTILITIES
+// ==========================================
+
+// 1. TRAIN Law Monthly Tax Brackets
 const taxTable = [
   { min: 0, max: 20833, rate: 0, base: 0 },
   { min: 20833, max: 33332, rate: 0.15, base: 0 },
@@ -36,6 +40,70 @@ const computeMonthlyTax = (taxableIncome) => {
     }
   }
   return 0;
+};
+
+// 2. SSS Employee Share (4.5% based on MSC Stepped Table)
+const computeSSS = (monthlySalary) => {
+  if (monthlySalary <= 0) return 0;
+  const mscTable = [
+    { min: 0, max: 4249.99, msc: 4000 }, { min: 4250, max: 4749.99, msc: 4500 },
+    { min: 4750, max: 5249.99, msc: 5000 }, { min: 5250, max: 5749.99, msc: 5500 },
+    { min: 5750, max: 6249.99, msc: 6000 }, { min: 6250, max: 6749.99, msc: 6500 },
+    { min: 6750, max: 7249.99, msc: 7000 }, { min: 7250, max: 7749.99, msc: 7500 },
+    { min: 7750, max: 8249.99, msc: 8000 }, { min: 8250, max: 8749.99, msc: 8500 },
+    { min: 8750, max: 9249.99, msc: 9000 }, { min: 9250, max: 9749.99, msc: 9500 },
+    { min: 9750, max: 10249.99, msc: 10000 }, { min: 10250, max: 10749.99, msc: 10500 },
+    { min: 10750, max: 11249.99, msc: 11000 }, { min: 11250, max: 11749.99, msc: 11500 },
+    { min: 11750, max: 12249.99, msc: 12000 }, { min: 12250, max: 12749.99, msc: 12500 },
+    { min: 12750, max: 13249.99, msc: 13000 }, { min: 13250, max: 13749.99, msc: 13500 },
+    { min: 13750, max: 14249.99, msc: 14000 }, { min: 14250, max: 14749.99, msc: 14500 },
+    { min: 14750, max: 15249.99, msc: 15000 }, { min: 15250, max: 15749.99, msc: 15500 },
+    { min: 15750, max: 16249.99, msc: 16000 }, { min: 16250, max: 16749.99, msc: 16500 },
+    { min: 16750, max: 17249.99, msc: 17000 }, { min: 17250, max: 17749.99, msc: 17500 },
+    { min: 17750, max: 18249.99, msc: 18000 }, { min: 18250, max: 18749.99, msc: 18500 },
+    { min: 18750, max: 19249.99, msc: 19000 }, { min: 19250, max: 19749.99, msc: 19500 },
+    { min: 19750, max: 20249.99, msc: 20000 }, { min: 20250, max: 20749.99, msc: 20500 },
+    { min: 20750, max: 21249.99, msc: 21000 }, { min: 21250, max: 21749.99, msc: 21500 },
+    { min: 21750, max: 22249.99, msc: 22000 }, { min: 22250, max: 22749.99, msc: 22500 },
+    { min: 22750, max: 23249.99, msc: 23000 }, { min: 23250, max: 23749.99, msc: 23500 },
+    { min: 23750, max: 24249.99, msc: 24000 }, { min: 24250, max: 24749.99, msc: 24500 },
+    { min: 24750, max: 25249.99, msc: 25000 }, { min: 25250, max: 25749.99, msc: 25500 },
+    { min: 25750, max: 26249.99, msc: 26000 }, { min: 26250, max: 26749.99, msc: 26500 },
+    { min: 26750, max: 27249.99, msc: 27000 }, { min: 27250, max: 27749.99, msc: 27500 },
+    { min: 27750, max: 28249.99, msc: 28000 }, { min: 28250, max: 28749.99, msc: 28500 },
+    { min: 28750, max: 29249.99, msc: 29000 }, { min: 29250, max: 29749.99, msc: 29500 },
+    { min: 29750, max: 30249.99, msc: 30000 }, { min: 30250, max: 30749.99, msc: 30500 },
+    { min: 30750, max: 31249.99, msc: 31000 }, { min: 31250, max: 31749.99, msc: 31500 },
+    { min: 31750, max: 32249.99, msc: 32000 }, { min: 32250, max: 32749.99, msc: 32500 },
+    { min: 32750, max: 33249.99, msc: 33000 }, { min: 33250, max: 33749.99, msc: 33500 },
+    { min: 33750, max: 34249.99, msc: 34000 }, { min: 34250, max: 34749.99, msc: 34500 },
+    { min: 34750, max: Infinity, msc: 35000 }
+  ];
+  let msc = 5000;
+  if (monthlySalary < 5000) msc = 5000;
+  else if (monthlySalary >= 34750) msc = 35000;
+  else {
+    const bracket = mscTable.find(b => monthlySalary >= b.min && monthlySalary <= b.max);
+    if (bracket) msc = bracket.msc;
+  }
+  return msc * 0.045;
+};
+
+// 3. PhilHealth Employee Share (2.5% with 10k Floor and 100k Ceiling)
+const computePhilHealth = (monthlySalary) => {
+  if (monthlySalary <= 0) return 0;
+  let base = monthlySalary;
+  if (base < 10000) base = 10000;
+  if (base > 100000) base = 100000;
+  return (base * 0.05) / 2;
+};
+
+// 4. Pag-IBIG Employee Share (2% capped at 5,000 Max Fund Salary)
+const computePagIbig = (monthlySalary) => {
+  if (monthlySalary <= 0) return 0;
+  let base = monthlySalary;
+  if (base > 5000) base = 5000;
+  return base * 0.02;
 };
 
 const OT_MULTIPLIER = 1.25;
@@ -146,12 +214,13 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
     
     const grossPay = baseEarnings + overtimePay + allowances + bonusPay;
     
+    // Determine base for statutory deductions (Basic + Allowances - Late)
     const netBaseForStatutory = Math.max(0, (monthlySalary > 0 ? monthlySalary : baseEarnings) - lateDeduction);
 
-    const sssCredit = Math.min(netBaseForStatutory, 35000); 
-    let sss = (extras.sssOverride != null) ? Number(extras.sssOverride) : (sssCredit * 0.05); 
-    let philHealth = (extras.philHealthOverride != null) ? Number(extras.philHealthOverride) : (netBaseForStatutory * 0.025); 
-    let pagIbig = (extras.pagIbigOverride != null) ? Number(extras.pagIbigOverride) : (netBaseForStatutory * 0.02); 
+    // ✅ APPLY EXACT PHILIPPINE STATUTORY CALCULATIONS
+    let sss = (extras.sssOverride != null) ? Number(extras.sssOverride) : computeSSS(netBaseForStatutory); 
+    let philHealth = (extras.philHealthOverride != null) ? Number(extras.philHealthOverride) : computePhilHealth(netBaseForStatutory); 
+    let pagIbig = (extras.pagIbigOverride != null) ? Number(extras.pagIbigOverride) : computePagIbig(netBaseForStatutory); 
 
     const taxableIncome = Math.max(0, (baseEarnings + overtimePay + allowances + bonusPay - lateDeduction) - sss - philHealth - pagIbig);
     const tax = computeMonthlyTax(taxableIncome);
@@ -250,92 +319,300 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
     setShowPayslipModal(true);
   };
 
-  const printPayslip = (emp) => {
+    const printPayslip = (emp) => {
     const calc = computePayroll(emp);
     const extras = employeeExtras[emp.employee_id] || {};
-    const printWindow = window.open('', '_blank', 'width=850,height=700');
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
     
     printWindow.document.write(`
       <html><head><title>Payslip - ${emp.full_name}</title>
       <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; padding: 40px; color: #0F172A; background: #FFF; }
-        .brand { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #E2E8F0; padding-bottom: 20px; }
-        .brand h1 { margin: 0; font-size: 28px; color: #0F172A; letter-spacing: -0.5px; }
-        .brand p { margin: 5px 0 0 0; color: #64748B; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
-        .header { display: flex; justify-content: space-between; margin-bottom: 30px; background: #F8FAFC; padding: 20px; border-radius: 12px; border: 1px solid #E2E8F0; }
-        .header-col h4 { margin: 0 0 5px 0; color: #64748B; font-size: 12px; text-transform: uppercase; }
-        .header-col p { margin: 0; font-size: 16px; font-weight: 600; color: #0F172A; }
+        @page { 
+          size: A4 portrait; 
+          margin: 15mm; 
+        }
+
+        body { 
+          font-family: 'Inter', Arial, sans-serif; 
+          padding: 0; 
+          color: #000; 
+          background: #FFF; 
+          font-size: 11px; /* Reduced from 13px */
+          line-height: 1.3;
+          -webkit-print-color-adjust: exact;
+        }
         
-        .grid { display: flex; flex-wrap: wrap; gap: 30px; margin-bottom: 30px; }
-        .box { flex: 1 1 300px; border: 1px solid #E2E8F0; border-radius: 12px; overflow: hidden; }
-        .box-title { background: #F8FAFC; padding: 15px; margin: 0; font-size: 14px; text-transform: uppercase; color: #475569; border-bottom: 1px solid #E2E8F0; }
+        /* Header Section */
+        .header { 
+          text-align: center; 
+          border-bottom: 2px solid #000; 
+          padding-bottom: 10px; 
+          margin-bottom: 15px; 
+          page-break-inside: avoid;
+        }
+        .header h1 { margin: 0 0 2px 0; font-size: 18px; font-weight: 800; letter-spacing: 1px; }
+        .header p { margin: 0; font-size: 10px; color: #333; }
+        .header h2 { margin: 10px 0 0 0; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+
+        /* Employee Info Grid */
+        .info-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 5px 30px;
+          margin-bottom: 15px;
+          padding: 10px;
+          border: 1px solid #000;
+          page-break-inside: avoid;
+        }
+        .info-row { display: flex; justify-content: space-between; }
+        .info-label { font-weight: 600; color: #555; text-transform: uppercase; font-size: 9px; }
+        .info-value { font-weight: 600; text-align: right; }
+
+        /* Table Layout */
+        .payslip-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 15px;
+          border: 1px solid #000;
+          page-break-inside: avoid; /* Prevents table from splitting across pages */
+        }
+        .payslip-table th, .payslip-table td {
+          padding: 4px 8px; /* Reduced padding */
+          border-bottom: 1px solid #ccc;
+        }
+        .payslip-table th {
+          background: #F8FAFC;
+          font-size: 9px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          border-bottom: 2px solid #000;
+        }
+        .payslip-table tr:last-child td { border-bottom: none; }
         
-        table { width: 100%; border-collapse: collapse; }
-        td { padding: 12px 15px; border-bottom: 1px solid #F1F5F9; font-size: 14px; color: #334155; }
-        .right { text-align: right; font-weight: 600; color: #0F172A; }
-        tr:last-child td { border-bottom: none; }
+        .amount { text-align: right; font-family: 'Courier New', Courier, monospace; font-weight: 600; }
+        .deduction-amount { text-align: right; font-family: 'Courier New', Courier, monospace; }
         
-        .subtotal { background: #F8FAFC; font-weight: bold; }
-        .net-pay-box { background: #0F172A; color: white; padding: 25px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; }
-        .net-pay-box h2 { margin: 0; font-size: 16px; font-weight: 500; color: #94A3B8; text-transform: uppercase; }
-        .net-pay-box .amount { margin: 0; font-size: 32px; font-weight: bold; color: #10B981; }
+        .section-header td {
+          background: #F1F5F9;
+          font-weight: 700;
+          text-transform: uppercase;
+          font-size: 10px;
+          border-bottom: 2px solid #000;
+        }
+
+        /* Summary Section */
+        .summary-container {
+          display: flex;
+          justify-content: flex-end;
+          margin-bottom: 20px;
+          page-break-inside: avoid; /* Prevents summary from splitting */
+        }
+        .summary-box {
+          width: 300px;
+          border: 2px solid #000;
+        }
+        .summary-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 5px 10px;
+          border-bottom: 1px solid #ccc;
+        }
+        .summary-row:last-child {
+          border-bottom: none;
+          background: #F8FAFC;
+          font-weight: 800;
+          font-size: 13px;
+        }
+        .summary-label { text-transform: uppercase; font-size: 10px; font-weight: 600; }
+        .summary-value { font-family: 'Courier New', Courier, monospace; font-weight: 600; }
+
+        /* Signatures */
+        .signature-section {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 30px; /* Reduced from 60px */
+          page-break-inside: avoid; /* Keeps signatures together */
+        }
+        .sig-block {
+          width: 200px;
+          text-align: center;
+        }
+        .sig-line {
+          border-bottom: 1px solid #000;
+          height: 25px;
+          margin-bottom: 4px;
+        }
+        .sig-name { font-weight: 700; font-size: 10px; text-transform: uppercase; }
+        .sig-title { font-size: 9px; color: #555; }
+
+        .footer-note {
+          margin-top: 20px;
+          text-align: center;
+          font-size: 8px;
+          color: #666;
+          border-top: 1px solid #ccc;
+          padding-top: 8px;
+          page-break-inside: avoid;
+        }
+
+        /* Force everything to stay on 1 page if possible */
+        .page-wrapper {
+          display: flex;
+          flex-direction: column;
+          min-height: 100vh;
+        }
         
-        @media print { body { padding: 0; } button { display: none; } .box { break-inside: avoid; } }
+        @media print { 
+          .payslip-table, .summary-container, .signature-section { page-break-inside: avoid; }
+        }
       </style></head><body>
       
-      <div class="brand">
-        <h1>HCT ACADEMY</h1>
-        <p>Official Payslip Document</p>
-      </div>
+      <div class="page-wrapper">
+        <div class="header">
+          <h1>HCT ACADEMY</h1>
+          <p>Healthcare Training Center & Clinical Simulation Laboratories</p>
+          <p>HCT Academy 611 Shaw Blvd 1550, Pasig, Metro Manila</p>
+          <h2>EMPLOYEE PAYSLIP</h2>
+        </div>
 
-      <div class="header">
-        <div class="header-col">
-          <h4>Employee Name</h4>
-          <p>${emp.full_name}</p>
+        <div class="info-grid">
+          <div class="info-row">
+            <span class="info-label">Employee Name:</span>
+            <span class="info-value">${emp.full_name}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Pay Period:</span>
+            <span class="info-value">${monthName} ${selectedYear}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Employee ID:</span>
+            <span class="info-value">${emp.employee_id}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Pay Date:</span>
+            <span class="info-value">${new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          </div>
         </div>
-        <div class="header-col">
-          <h4>Employee ID</h4>
-          <p>${emp.employee_id}</p>
-        </div>
-        <div class="header-col">
-          <h4>Pay Period</h4>
-          <p>${monthName} ${selectedYear}</p>
-        </div>
-      </div>
-      
-      <div class="grid">
-        <div class="box">
-          <h4 class="box-title">Earnings & Allowances</h4>
-          <table>
-            <tr><td>Hourly Rate</td><td class="right">₱${calc.hourlyRate.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Base Pay (${calc.regularHours}h logged + ${calc.paidLeaveHours}h leave)</td><td class="right">₱${calc.baseEarnings.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Overtime Pay (${calc.overtimeHours} hrs)</td><td class="right">₱${calc.overtimePay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Transport Allowance</td><td class="right">₱${(Number(extras.transport)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Meal Allowance</td><td class="right">₱${(Number(extras.meal)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Housing Allowance</td><td class="right">₱${(Number(extras.housing)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>13th Month / Bonus</td><td class="right">₱${calc.bonusPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr class="subtotal"><td>Gross Earnings</td><td class="right">₱${calc.grossPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-          </table>
-        </div>
-        <div class="box">
-          <h4 class="box-title">Taxes & Deductions</h4>
-          <table>
-            <tr><td>Withholding Tax</td><td class="right">₱${calc.tax.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Late Deductions (${calc.lateMinutes} mins)</td><td class="right" style="color: #EF4444;">-₱${calc.lateDeduction.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>SSS Contribution</td><td class="right">₱${calc.sss.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>PhilHealth</td><td class="right">₱${calc.philHealth.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Pag-IBIG</td><td class="right">₱${calc.pagIbig.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Loans / Advances</td><td class="right">₱${calc.loans.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Other Deductions</td><td class="right">₱${calc.other.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr class="subtotal"><td>Total Deductions</td><td class="right" style="color: #EF4444;">-₱${calc.totalDeductions.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-          </table>
-        </div>
-      </div>
+        
+        <table class="payslip-table">
+          <thead>
+            <tr>
+              <th style="width: 60%;">Earnings</th>
+              <th style="width: 40%;" class="amount">Amount (PHP)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Basic Pay (${calc.regularHours}h logged + ${calc.paidLeaveHours}h leave)</td>
+              <td class="amount">${calc.baseEarnings.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Overtime Pay (${calc.overtimeHours} hrs)</td>
+              <td class="amount">${calc.overtimePay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Transport Allowance</td>
+              <td class="amount">${(Number(extras.transport)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Meal Allowance</td>
+              <td class="amount">${(Number(extras.meal)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Housing Allowance</td>
+              <td class="amount">${(Number(extras.housing)||0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>13th Month / Bonus</td>
+              <td class="amount">${calc.bonusPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr class="section-header">
+              <td>Total Gross Earnings</td>
+              <td class="amount">${calc.grossPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+          </tbody>
+        </table>
 
-      <div class="net-pay-box">
-        <h2>Total Net Pay</h2>
-        <div class="amount">₱${calc.netPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</div>
+        <table class="payslip-table">
+          <thead>
+            <tr>
+              <th style="width: 60%;">Deductions</th>
+              <th style="width: 40%;" class="deduction-amount">Amount (PHP)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Withholding Tax</td>
+              <td class="deduction-amount">${calc.tax.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>SSS Contribution (Employee Share)</td>
+              <td class="deduction-amount">${calc.sss.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>PhilHealth (Employee Share)</td>
+              <td class="deduction-amount">${calc.philHealth.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Pag-IBIG Contribution (Employee Share)</td>
+              <td class="deduction-amount">${calc.pagIbig.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Late / Undertime Deductions (${calc.lateMinutes} mins)</td>
+              <td class="deduction-amount">${calc.lateDeduction.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Loans / Advances</td>
+              <td class="deduction-amount">${calc.loans.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr>
+              <td>Other Deductions</td>
+              <td class="deduction-amount">${calc.other.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+            <tr class="section-header">
+              <td>Total Deductions</td>
+              <td class="deduction-amount">${calc.totalDeductions.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="summary-container">
+          <div class="summary-box">
+            <div class="summary-row">
+              <span class="summary-label">Gross Pay</span>
+              <span class="summary-value">₱${calc.grossPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Total Deductions</span>
+              <span class="summary-value">-₱${calc.totalDeductions.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Net Take-Home Pay</span>
+              <span class="summary-value">₱${calc.netPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="signature-section">
+          <div class="sig-block">
+            <div class="sig-line"></div>
+            <div class="sig-name">${emp.full_name}</div>
+            <div class="sig-title">Employee Signature</div>
+          </div>
+          <div class="sig-block">
+            <div class="sig-line"></div>
+            <div class="sig-name">HR DEPARTMENT</div>
+            <div class="sig-title">Authorized Representative</div>
+          </div>
+        </div>
+
+        <div class="footer-note">
+          <strong>CONFIDENTIAL</strong> - This document contains privileged payroll information intended solely for the named employee. <br/>
+          Unauthorized distribution or reproduction is strictly prohibited under the Data Privacy Act of 2012 (RA 10173).
+        </div>
       </div>
       
       <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 500); }</script>

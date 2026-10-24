@@ -1,5 +1,7 @@
 /* src/pages/JobPostings.css - Enterprise ATS Clean Redesign */
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 .jp-wrapper {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: #F8FAFC;
@@ -32,7 +34,7 @@
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid #E2E8F0;
-  padding: 1rem 1.25rem;
+  padding: 0 1.25rem;
   background: #FFFFFF;
   flex-wrap: wrap;
   gap: 1rem;
@@ -41,59 +43,73 @@
 /* Formal Tabs */
 .jp-formal-tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: 0;
   flex-wrap: wrap;
 }
 
 .jp-tab {
-  background: #FFFFFF;
-  border: 1px solid #CBD5E1;
-  padding: 0.55rem 1rem;
-  border-radius: 6px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 1rem 1.25rem;
   font-weight: 500;
-  font-size: 0.85rem;
-  color: #0F172A;
+  font-size: 0.875rem;
+  color: #64748B;
   cursor: pointer;
   transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  margin-bottom: -1px; /* Overlap the border */
 }
 
 .jp-tab:hover {
-  background: #F8FAFC;
-  border-color: #94A3B8;
+  color: #0F172A;
+  border-bottom-color: #CBD5E1;
 }
 
 .jp-tab.active {
-  background: #FFFFFF;
-  border: 2px solid #0F172A;
-  font-weight: 700;
-  padding: calc(0.55rem - 1px) calc(1rem - 1px);
+  color: #0F172A;
+  border-bottom-color: #0F172A;
+  font-weight: 600;
 }
 
 /* Small tabs for ATS modal */
 .jp-tab.small {
-  padding: 0.35rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+.jp-tab.small:hover {
+  background: #F1F5F9;
 }
 .jp-tab.small.active {
-  padding: calc(0.35rem - 1px) calc(0.75rem - 1px);
+  background: #0F172A;
+  color: #FFFFFF;
 }
 
 .jp-tab .tab-count {
-  background: transparent !important;
-  color: inherit !important;
-  padding: 0 !important;
+  background: #F1F5F9;
+  color: #475569;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
   margin-left: 0.25rem;
-  font-size: inherit;
-  font-weight: 700;
+}
+.jp-tab.active .tab-count {
+  background: #E2E8F0;
+  color: #0F172A;
 }
 
 .jp-control-actions {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  padding: 0.75rem 0;
 }
 
 .jp-search-input {
@@ -108,7 +124,7 @@
   width: 240px;
   transition: all 0.2s;
 }
-.jp-search-input.small { height: 32px; width: 200px; }
+.jp-search-input.small { height: 32px; width: 200px; background: #F8FAFC; }
 .jp-search-input:focus-within { border-color: #0F172A; box-shadow: 0 0 0 2px rgba(15,23,42,0.05); }
 .jp-search-input input { border: none; background: transparent; font-size: 0.85rem; color: #0F172A; width: 100%; height: 100%; outline: none; }
 
@@ -123,30 +139,29 @@
 
 /* Table Setup */
 .jp-table-container { width: 100%; overflow: visible; }
-.jp-table-container.outline { border: 1px solid #E2E8F0; border-radius: 8px; margin-bottom: 1rem; overflow-x: auto; }
 .jp-data-table { width: 100%; border-collapse: collapse; text-align: left; }
 
 .jp-data-table th {
-  background: #F8FAFC; padding: 0.85rem 1.25rem;
-  font-size: 0.75rem; font-weight: 600; color: #64748B;
+  background: #F8FAFC; padding: 0.75rem 1.25rem;
+  font-size: 0.7rem; font-weight: 600; color: #64748B;
   text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #E2E8F0;
 }
-.jp-data-table td { padding: 1rem 1.25rem; border-bottom: 1px solid #F1F5F9; vertical-align: middle; }
+.jp-data-table td { padding: 0.875rem 1.25rem; border-bottom: 1px solid #F1F5F9; vertical-align: middle; }
 .jp-data-table tr:hover td { background: #F8FAFC; }
 .jp-data-table tr:last-child td { border-bottom: none; }
 
 /* Cell Content */
-.jp-cell-primary { font-size: 0.9rem; font-weight: 600; color: #0F172A; margin-bottom: 0.15rem; }
-.jp-cell-secondary { font-size: 0.8rem; color: #64748B; font-weight: 400; }
+.jp-cell-primary { font-size: 0.875rem; font-weight: 600; color: #0F172A; margin-bottom: 0.15rem; }
+.jp-cell-secondary { font-size: 0.75rem; color: #64748B; font-weight: 400; }
 
 .jp-status-pill {
-  padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 700;
+  padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.65rem; font-weight: 700;
   letter-spacing: 0.05em; display: inline-block;
 }
 .jp-status-pill.open { background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; }
 .jp-status-pill.closed { background: #F1F5F9; color: #64748B; border: 1px solid #E2E8F0; }
 
-.jp-app-count { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; font-weight: 600; color: #0F172A; }
+.jp-app-count { display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 600; color: #0F172A; }
 
 /* Action Buttons */
 .jp-actions-row {
@@ -160,8 +175,8 @@
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
   border-radius: 6px;
-  padding: 0.4rem 0.85rem;
-  font-size: 0.8rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: #475569;
   cursor: pointer;
@@ -170,11 +185,13 @@
   align-items: center;
   justify-content: center;
   font-family: inherit;
+  height: 30px;
 }
 
 .jp-action-btn-text:hover {
   background: #F8FAFC;
   border-color: #94A3B8;
+  color: #0F172A;
 }
 
 .jp-action-btn-text.primary {
@@ -192,7 +209,9 @@
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
   border-radius: 6px;
-  padding: 0.4rem;
+  padding: 0;
+  width: 30px;
+  height: 30px;
   color: #64748B;
   cursor: pointer;
   display: inline-flex;
@@ -220,8 +239,8 @@
   background: #FFFFFF;
   border: 1px solid #E2E8F0;
   border-radius: 6px;
-  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-  min-width: 150px;
+  box-shadow: 0 4px 12px -2px rgba(0,0,0,0.1), 0 2px 6px -2px rgba(0,0,0,0.05);
+  min-width: 160px;
   z-index: 50;
   display: flex;
   flex-direction: column;
@@ -233,7 +252,7 @@
   border: none;
   padding: 0.5rem 0.75rem;
   text-align: left;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
   color: #334155;
   border-radius: 4px;
@@ -259,16 +278,17 @@
   padding: 1rem 1.25rem; background: #FFFFFF; border-top: 1px solid #E2E8F0;
 }
 .jp-pagination.small { padding: 0.75rem 1rem; background: #F8FAFC; border: none;}
-.jp-page-text { font-size: 0.85rem; color: #64748B; font-weight: 500; }
+.jp-page-text { font-size: 0.8rem; color: #64748B; font-weight: 500; }
 .jp-page-controls { display: flex; align-items: center; gap: 0.75rem; }
 .jp-page-controls button {
-  display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.4rem 0.75rem;
+  display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.35rem 0.75rem;
   background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px;
-  font-size: 0.85rem; font-weight: 600; color: #334155; cursor: pointer; transition: all 0.2s;
+  font-size: 0.8rem; font-weight: 600; color: #334155; cursor: pointer; transition: all 0.2s;
+  height: 30px;
 }
 .jp-page-controls button:hover:not(:disabled) { background: #F8FAFC; border-color: #94A3B8; color: #0F172A; }
 .jp-page-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
-.jp-page-num { font-size: 0.85rem; font-weight: 700; color: #0F172A; }
+.jp-page-num { font-size: 0.8rem; font-weight: 700; color: #0F172A; }
 
 /* Empty States */
 .jp-empty-box { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 5rem 2rem; color: #64748B; font-size: 0.95rem; }
@@ -288,7 +308,7 @@
 
 .jp-btn-confirm, .jp-btn-cancel {
   display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
-  padding: 0.6rem 1.25rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent; height: 38px;
+  padding: 0 1.25rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent; height: 36px;
 }
 .jp-btn-confirm { background: #0F172A; color: #FFFFFF; }
 .jp-btn-confirm:hover:not(:disabled) { background: #334155; }
@@ -306,7 +326,7 @@
 
 .jp-input-field {
   border: 1px solid #CBD5E1; border-radius: 6px; background: #FFFFFF;
-  padding: 0.6rem 0.75rem; font-size: 0.85rem; color: #0F172A; outline: none;
+  padding: 0.5rem 0.75rem; font-size: 0.85rem; color: #0F172A; outline: none;
   transition: border-color 0.2s; width: 100%; box-sizing: border-box; font-family: inherit;
 }
 .jp-input-field:focus { border-color: #0F172A; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.05); }
@@ -316,7 +336,7 @@
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
   background-repeat: no-repeat; background-position: right 0.5rem center; background-size: 1.2em 1.2em; padding-right: 2rem;
 }
-.jp-input-field.select.small { padding: 0.35rem 2rem 0.35rem 0.6rem; font-weight: 600; font-size: 0.75rem; width: auto; }
+.jp-input-field.select.small { padding: 0.25rem 2rem 0.25rem 0.6rem; font-weight: 600; font-size: 0.75rem; width: auto; height: 30px; }
 .jp-input-field.textarea { resize: vertical; min-height: 70px; line-height: 1.5; }
 
 /* Details Overview Modal */
@@ -352,7 +372,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
+  padding: 0.75rem 1rem;
   background: #FFFFFF;
   border-bottom: 1px solid #E2E8F0;
   flex-wrap: wrap;
@@ -397,12 +417,12 @@
 }
 
 .jp-ats-avatar {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: #F1F5F9;
   color: #475569;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -411,7 +431,7 @@
 }
 
 .jp-ats-name {
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: #0F172A;
 }
@@ -424,7 +444,7 @@
 .jp-app-badge {
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   display: inline-block;
@@ -446,9 +466,9 @@
   background: #FFFFFF;
   border: 1px solid transparent;
   color: #64748B;
-  padding: 0.4rem 0.8rem;
+  padding: 0.35rem 0.75rem;
   border-radius: 4px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
@@ -474,7 +494,7 @@
 
 /* Responsive */
 @media (max-width: 768px) {
-  .jp-control-bar { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .jp-control-bar { flex-direction: column; align-items: stretch; padding: 1rem; }
   .jp-control-actions { width: 100%; flex-direction: column; }
   .jp-search-input { width: 100%; max-width: 100%; }
   .jp-btn-create { width: 100%; justify-content: center; }
@@ -484,7 +504,8 @@
   .jp-details-grid.dual { grid-template-columns: 1fr; }
   
   .jp-ats-toolbar { flex-direction: column; align-items: stretch; }
-  .jp-formal-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 0.25rem; }
+  .jp-formal-tabs { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 0.25rem; border-bottom: 1px solid #E2E8F0; }
+  .jp-tab { padding: 0.75rem 1rem; white-space: nowrap; }
   .jp-ats-row { flex-direction: column; gap: 1rem; align-items: flex-start; }
   .jp-ats-status, .jp-ats-action { flex: auto; text-align: left; justify-content: flex-start; }
   

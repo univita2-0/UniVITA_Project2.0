@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import './EmployeeManagement.css';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
   Search, Edit2, Trash2, UserCheck, AlertCircle, ChevronLeft, ChevronRight, 
   Users, Eye, EyeOff, Plus, Copy, CheckCircle, FileText, Calendar, UploadCloud,
-  CreditCard, RefreshCw
+  CreditCard, RefreshCw, Archive, MoreVertical, Power, RotateCcw, AlertTriangle
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
@@ -164,6 +165,15 @@ const EmployeeManagement = () => {
   const [activeTab, setActiveTab] = useState('instructors');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  
+  // Role Check for Admin
+  const currentUserRole = localStorage.getItem('role') || 'hr_admin'; 
+  const isAdmin = currentUserRole === 'admin';
+
+  // Dropdown state with position
+  const [openDropdownId, setOpenDropdownId] = useState(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+
   const itemsPerPage = 10;
 
   // Modal state
@@ -194,11 +204,14 @@ const EmployeeManagement = () => {
     sss_number: '', pagibig_number: '', philhealth_number: '', tin_number: ''
   });
 
-  const [showSoftDeleteModal, setShowSoftDeleteModal] = useState(false);
-  const [softDeleteTarget, setSoftDeleteTarget] = useState(null);
+  // Action Modals
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState(null);
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const [showPermanentDeleteModal, setShowPermanentDeleteModal] = useState(false);
-  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState(null);
   
   const [generatedEmpId, setGeneratedEmpId] = useState('');
   const [generatedPassword, setGeneratedPassword] = useState('');
@@ -240,6 +253,43 @@ const EmployeeManagement = () => {
   useEffect(() => {
     loadEmployees();
   }, [loadEmployees]);
+
+  // Handle closing dropdown on click outside or scroll
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest('.action-dropdown') && !event.target.closest('.dropdown-menu')) {
+        setOpenDropdownId(null);
+      }
+    };
+    const handleScroll = () => setOpenDropdownId(null);
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true); 
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
+
+  const handleDropdownClick = (e, empId) => {
+    e.stopPropagation();
+    if (openDropdownId === empId) {
+      setOpenDropdownId(null);
+      return;
+    }
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 180; 
+    
+    let left = rect.right - menuWidth;
+    let top = rect.bottom + 4; 
+    
+    if (left < 10) left = 10;
+    
+    setDropdownPos({ top, left });
+    setOpenDropdownId(empId);
+  };
 
   const generateNewEmployeeId = async () => {
     try {
@@ -562,24 +612,60 @@ const EmployeeManagement = () => {
     }
   };
 
-  const handleSoftDelete = (emp) => { setSoftDeleteTarget(emp); setShowSoftDeleteModal(true); };
-  const confirmSoftDelete = async () => {
-    if (!softDeleteTarget) return;
+  // --- STATUS CHANGE, ARCHIVE & DELETE FLOW ---
+  const handleStatusChange = async (emp, newStatus) => {
     try {
-      await axios.put(`${API_BASE}/employees/${softDeleteTarget.id}`, { status: 'deleted' }, getAuthHeaders());
-      toast.info('Employee moved to deleted accounts.'); loadEmployees();
-    } catch (err) { toast.error(err.response?.data?.message || 'Failed to move to deleted accounts.'); } 
-    finally { setShowSoftDeleteModal(false); setSoftDeleteTarget(null); }
+      await axios.put(`${API_BASE}/employees/${emp.id}`, { status: newStatus }, getAuthHeaders());
+      toast.success(`Employee status updated to ${newStatus} successfully.`);
+      loadEmployees();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update employee status.');
+    }
   };
 
-  const handlePermanentDelete = (emp) => { setPermanentDeleteTarget(emp); setShowPermanentDeleteModal(true); };
-  const confirmPermanentDelete = async () => {
-    if (!permanentDeleteTarget) return;
+  const handleArchive = (emp) => { setArchiveTarget(emp); setShowArchiveModal(true); };
+  const confirmArchive = async () => {
+    if (!archiveTarget) return;
     try {
-      await axios.delete(`${API_BASE}/employees/${permanentDeleteTarget.id}`, getAuthHeaders());
-      toast.success('Employee permanently deleted.'); loadEmployees();
-    } catch (err) { toast.error(err.response?.data?.message || 'Delete failed.'); } 
-    finally { setShowPermanentDeleteModal(false); setPermanentDeleteTarget(null); }
+      await axios.put(`${API_BASE}/employees/${archiveTarget.id}`, { status: 'archived' }, getAuthHeaders());
+      toast.info('Employee archived successfully.'); 
+      loadEmployees();
+    } catch (err) { 
+      toast.error(err.response?.data?.message || 'Failed to archive employee.'); 
+    } finally { 
+      setShowArchiveModal(false); 
+      setArchiveTarget(null); 
+    }
+  };
+
+  const handleDelete = (emp) => { setDeleteTarget(emp); setShowDeleteModal(true); };
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await axios.put(`${API_BASE}/employees/${deleteTarget.id}`, { status: 'deleted' }, getAuthHeaders());
+      toast.info('Employee moved to deleted accounts.'); 
+      loadEmployees();
+    } catch (err) { 
+      toast.error(err.response?.data?.message || 'Failed to move to deleted accounts.'); 
+    } finally { 
+      setShowDeleteModal(false); 
+      setDeleteTarget(null); 
+    }
+  };
+
+  const handlePermanentDelete = (emp) => { setDeleteTarget(emp); setShowPermanentDeleteModal(true); };
+  const confirmPermanentDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await axios.delete(`${API_BASE}/employees/${deleteTarget.id}`, getAuthHeaders());
+      toast.success('Employee permanently wiped from the system.');
+      loadEmployees();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to permanently delete employee.');
+    } finally {
+      setShowPermanentDeleteModal(false);
+      setDeleteTarget(null);
+    }
   };
 
   const getFilteredList = () => {
@@ -588,6 +674,7 @@ const EmployeeManagement = () => {
       case 'instructors': filtered = employees.filter(emp => emp.role === 'instructor' && emp.status === 'active'); break;
       case 'staff': filtered = employees.filter(emp => emp.role !== 'instructor' && emp.status === 'active'); break;
       case 'deactivated': filtered = employees.filter(emp => emp.status === 'deactivated'); break;
+      case 'archived': filtered = employees.filter(emp => emp.status === 'archived'); break;
       case 'deleted': filtered = employees.filter(emp => emp.status === 'deleted'); break;
       default: filtered = [];
     }
@@ -602,7 +689,7 @@ const EmployeeManagement = () => {
   const totalPages = Math.ceil(filteredEmployees.length / itemsPerPage);
   const paginatedEmployees = filteredEmployees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  useEffect(() => { setCurrentPage(1); }, [activeTab, searchTerm]);
+  useEffect(() => { setCurrentPage(1); setOpenDropdownId(null); }, [activeTab, searchTerm]);
 
   const getInitials = (name) => {
     if (!name) return '??';
@@ -664,9 +751,15 @@ const EmployeeManagement = () => {
           <button className={`filter-tab ${activeTab === 'deactivated' ? 'active' : ''}`} onClick={() => setActiveTab('deactivated')}>
             Deactivated <span className="tab-count">{employees.filter(e => e.status === 'deactivated').length}</span>
           </button>
-          <button className={`filter-tab ${activeTab === 'deleted' ? 'active' : ''}`} onClick={() => setActiveTab('deleted')}>
-            Deleted <span className="tab-count">{employees.filter(e => e.status === 'deleted').length}</span>
+          <button className={`filter-tab ${activeTab === 'archived' ? 'active' : ''}`} onClick={() => setActiveTab('archived')}>
+            Archived <span className="tab-count">{employees.filter(e => e.status === 'archived').length}</span>
           </button>
+          {/* ✅ Hide Deleted Tab if not Admin */}
+          {isAdmin && (
+            <button className={`filter-tab ${activeTab === 'deleted' ? 'active' : ''}`} onClick={() => setActiveTab('deleted')}>
+              Deleted (Trash) <span className="tab-count">{employees.filter(e => e.status === 'deleted').length}</span>
+            </button>
+          )}
         </div>
 
         <div className="search-wrapper">
@@ -707,17 +800,77 @@ const EmployeeManagement = () => {
                   </td>
                   <td className="emp-contract">{emp.contract_type || emp.employment_type || '—'}</td>
                   <td>
-                    <span className={`status-badge ${emp.status === 'active' ? 'active' : emp.status === 'deactivated' ? 'inactive' : 'deleted'}`}>
-                      {emp.status === 'active' ? 'Active' : emp.status === 'deactivated' ? 'Deactivated' : 'Deleted'}
+                    <span className={`status-badge ${emp.status === 'active' ? 'active' : emp.status === 'deactivated' ? 'inactive' : emp.status === 'archived' ? 'archived' : 'deleted'}`}>
+                      {emp.status === 'active' ? 'Active' : emp.status === 'deactivated' ? 'Deactivated' : emp.status === 'archived' ? 'Archived' : 'Deleted'}
                     </span>
                   </td>
                   <td className="actions" style={{ justifyContent: 'flex-end' }}>
-                    <button className="action-icon" onClick={() => openEditModal(emp)} title="Edit Profile"><Edit2 size={16} /></button>
-                    {emp.status !== 'deleted' ? (
-                      <button className="action-icon danger" onClick={() => handleSoftDelete(emp)} title="Move to Deleted"><Trash2 size={16} color="#EF4444"/></button>
-                    ) : (
-                      <button className="action-icon danger" onClick={() => handlePermanentDelete(emp)} title="Permanently Delete"><Trash2 size={16} color="#EF4444"/></button>
+                    {emp.status !== 'deleted' && (
+                      <button className="btn-action-edit" onClick={() => openEditModal(emp)}>
+                        Edit
+                      </button>
                     )}
+                    
+                    <div className="action-dropdown">
+                      <button 
+                        className="btn-action-more" 
+                        onClick={(e) => handleDropdownClick(e, emp.id)}
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                      
+                      {openDropdownId === emp.id && createPortal(
+                        <div 
+                          className="dropdown-menu" 
+                          style={{ top: dropdownPos.top, left: dropdownPos.left }}
+                        >
+                          {emp.status === 'active' && (
+                            <>
+                              <button className="dropdown-item" onClick={() => { setOpenDropdownId(null); handleStatusChange(emp, 'deactivated'); }}>
+                                <Power size={14} /> Deactivate
+                              </button>
+                              <button className="dropdown-item warning" onClick={() => { setOpenDropdownId(null); handleArchive(emp); }}>
+                                <Archive size={14} /> Archive
+                              </button>
+                            </>
+                          )}
+                          {emp.status === 'deactivated' && (
+                            <>
+                              <button className="dropdown-item success" onClick={() => { setOpenDropdownId(null); handleStatusChange(emp, 'active'); }}>
+                                <Power size={14} /> Activate
+                              </button>
+                              <button className="dropdown-item warning" onClick={() => { setOpenDropdownId(null); handleArchive(emp); }}>
+                                <Archive size={14} /> Archive
+                              </button>
+                            </>
+                          )}
+                          {emp.status === 'archived' && (
+                            <>
+                              <button className="dropdown-item success" onClick={() => { setOpenDropdownId(null); handleStatusChange(emp, 'active'); }}>
+                                <RotateCcw size={14} /> Restore
+                              </button>
+                              <button className="dropdown-item danger" onClick={() => { setOpenDropdownId(null); handleDelete(emp); }}>
+                                <Trash2 size={14} /> Move to Trash
+                              </button>
+                            </>
+                          )}
+                          {emp.status === 'deleted' && (
+                            <>
+                              <button className="dropdown-item success" onClick={() => { setOpenDropdownId(null); handleStatusChange(emp, 'active'); }}>
+                                <RotateCcw size={14} /> Restore
+                              </button>
+                              {/* ✅ Add Permanent Delete if Admin */}
+                              {isAdmin && (
+                                <button className="dropdown-item danger" onClick={() => { setOpenDropdownId(null); handlePermanentDelete(emp); }}>
+                                  <AlertTriangle size={14} /> Permanently Delete
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>,
+                        document.body
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -928,6 +1081,8 @@ const EmployeeManagement = () => {
                       <select name="status" value={formData.status} onChange={handleEditInputChange}>
                         <option value="active">Active</option>
                         <option value="deactivated">Deactivated</option>
+                        <option value="archived">Archived</option>
+                        <option value="deleted">Deleted</option>
                       </select>
                     </div>
                   </div>
@@ -1192,19 +1347,44 @@ const EmployeeManagement = () => {
         </div>
       </FormalModal>
 
-      <FormalModal show={showSoftDeleteModal} onClose={() => setShowSoftDeleteModal(false)} title="Move to Deleted" small>
-        <p className="modal-confirm-text">Are you sure you want to move <strong>{softDeleteTarget?.full_name}</strong> to <strong>Deleted Accounts</strong>?</p>
+      {/* ARCHIVE MODAL */}
+      <FormalModal show={showArchiveModal} onClose={() => setShowArchiveModal(false)} title="Archive Employee" small>
+        <p className="modal-confirm-text">
+          Are you sure you want to archive <strong>{archiveTarget?.full_name}</strong>? 
+          This will hide them from active lists while preserving their historical records. 
+          <br/><br/><strong>Note:</strong> Archived employees cannot be assigned to new schedules.
+        </p>
         <div className="modal-actions border-none">
-          <button className="btn-cancel" onClick={() => setShowSoftDeleteModal(false)}>Cancel</button>
-          <button className="btn-danger" onClick={confirmSoftDelete}>Move to Deleted</button>
+          <button className="btn-cancel" onClick={() => setShowArchiveModal(false)}>Cancel</button>
+          <button className="btn-save" onClick={confirmArchive}>Archive</button>
         </div>
       </FormalModal>
 
+      {/* SOFT DELETE MODAL (Move to Trash) */}
+      <FormalModal show={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Move to Trash" small>
+        <p className="modal-confirm-text">
+          Are you sure you want to move <strong>{deleteTarget?.full_name}</strong> to the <strong>Trash (Deleted Accounts)</strong>?
+          <br/><br/>Only a System Administrator can restore this record or permanently wipe it.
+        </p>
+        <div className="modal-actions border-none">
+          <button className="btn-cancel" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+          <button className="btn-danger" onClick={confirmDelete}>Move to Trash</button>
+        </div>
+      </FormalModal>
+
+      {/* PERMANENT DELETE MODAL */}
       <FormalModal show={showPermanentDeleteModal} onClose={() => setShowPermanentDeleteModal(false)} title="Permanently Delete Employee" small>
-        <p className="modal-confirm-text">Are you sure you want to <strong>permanently delete</strong> {permanentDeleteTarget?.full_name}? This action cannot be undone.</p>
+        <div className="danger-warning-box">
+          <p className="danger-title">
+            <AlertTriangle size={16} /> WARNING: Irreversible Action
+          </p>
+          <p className="danger-text">
+            This will permanently erase all records, schedules, attendance, and payroll data for <strong>{deleteTarget?.full_name}</strong>. This action cannot be undone.
+          </p>
+        </div>
         <div className="modal-actions border-none">
           <button className="btn-cancel" onClick={() => setShowPermanentDeleteModal(false)}>Cancel</button>
-          <button className="btn-danger" onClick={confirmPermanentDelete}>Permanently Delete</button>
+          <button className="btn-danger" onClick={confirmPermanentDelete}>Yes, Permanently Delete</button>
         </div>
       </FormalModal>
     </div>
