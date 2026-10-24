@@ -4450,7 +4450,7 @@ setInterval(async () => {
     const [deadScanners] = await db.promise().query(`
       SELECT scanner_id, assigned_room FROM scanners 
       WHERE last_ping < NOW() - INTERVAL 5 MINUTE AND status = 'ONLINE'
-    `, [phNow]);
+    `);
 
     for (const scanner of deadScanners) {
       
