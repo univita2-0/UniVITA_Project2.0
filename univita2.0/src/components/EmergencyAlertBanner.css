@@ -1,12 +1,16 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-
+/* Full viewport centered overlay */
 .ap-emergency-modal-overlay {
   position: fixed;
-  inset: 0;
-  background-color: rgba(15, 23, 42, 0.6);
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(15, 23, 42, 0.65); /* Dim the background */
   backdrop-filter: blur(4px);
-  z-index: 10000;
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 999999; /* Ensure it's above absolutely everything */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -24,14 +28,17 @@
   overflow-y: auto;
 }
 
+/* The White Card */
 .ap-emergency-banner {
   background: #FFFFFF;
   border-radius: 12px;
   font-family: 'Inter', system-ui, sans-serif;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.3);
   overflow: hidden;
   animation: apPopIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   border-top: 6px solid;
+  display: flex;
+  flex-direction: column;
 }
 
 @keyframes apPopIn {
@@ -39,7 +46,7 @@
   to { transform: scale(1); opacity: 1; }
 }
 
-/* Severity Themes (Applied to top border and icons) */
+/* Severity Themes */
 .ap-severity-critical { border-top-color: #DC2626; }
 .ap-severity-critical .ap-banner-icon-wrapper { color: #DC2626; }
 .ap-severity-critical .ap-banner-title { color: #DC2626; }
@@ -52,7 +59,7 @@
 .ap-severity-info .ap-banner-icon-wrapper { color: #2563EB; }
 .ap-severity-info .ap-banner-title { color: #2563EB; }
 
-/* Internal Layout */
+/* Header (Icon + Title + Close Button) */
 .ap-banner-header {
   display: flex;
   justify-content: space-between;
@@ -74,7 +81,7 @@
 
 .ap-banner-title {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -85,8 +92,8 @@
   border: none;
   color: #94A3B8;
   cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 4px;
+  padding: 0.35rem;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -98,13 +105,14 @@
   color: #0F172A;
 }
 
+/* Body (Subject + Message) */
 .ap-banner-body {
-  padding: 0.5rem 1.5rem 1.25rem 1.5rem;
+  padding: 0.5rem 1.5rem 1.5rem 1.5rem;
 }
 
 .ap-alert-subject {
   margin: 0 0 0.5rem 0;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #0F172A;
 }
@@ -115,9 +123,10 @@
   font-weight: 400;
   color: #475569;
   line-height: 1.6;
-  white-space: pre-wrap;
+  white-space: pre-wrap; 
 }
 
+/* Footer (Acknowledge Button) */
 .ap-banner-footer {
   padding: 1rem 1.5rem;
   background: #F8FAFC;
@@ -130,7 +139,7 @@
   background: #0F172A;
   color: #FFFFFF;
   border: none;
-  padding: 0.6rem 1.25rem;
+  padding: 0.65rem 1.5rem;
   border-radius: 6px;
   font-family: inherit;
   font-size: 0.875rem;
@@ -141,6 +150,8 @@
 
 .ap-btn-acknowledge:hover {
   background: #334155;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 /* Responsive */
@@ -152,10 +163,10 @@
     padding: 1rem 1rem 0.25rem 1rem;
   }
   .ap-banner-body {
-    padding: 0.5rem 1rem 1rem 1rem;
+    padding: 0.5rem 1rem 1.25rem 1rem;
   }
   .ap-banner-footer {
-    padding: 0.85rem 1rem;
+    padding: 1rem;
   }
   .ap-alert-subject {
     font-size: 1rem;

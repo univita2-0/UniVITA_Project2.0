@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom'; // 👈 Import Portal
 import axios from 'axios';
 import { AlertTriangle, AlertOctagon, Info, X } from 'lucide-react';
 import { API_BASE } from '../api';
 import './EmergencyAlertBanner.css';
 
+// Import your custom mp3 sound files
 import criticalSound from '../assets/sounds/critical.mp3';
 import warningSound from '../assets/sounds/warning.mp3';
 import infoSound from '../assets/sounds/info.mp3';
@@ -12,7 +14,7 @@ const EmergencyAlertBanner = () => {
   const [alerts, setAlerts] = useState([]);
   const userId = Number(localStorage.getItem('user_id'));
 
- 
+  // Pre-load audio elements
   const audioMap = useRef({
     critical: new Audio(criticalSound),
     warning: new Audio(warningSound),
@@ -59,7 +61,7 @@ const EmergencyAlertBanner = () => {
 
         const allAlerts = res.data || [];
         
-       
+        // Display only UNREAD alerts broadcasted within the LAST 24 HOURS
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const activeUnreadAlerts = allAlerts.filter(a => !a.read_at && new Date(a.sent_at) > oneDayAgo);
         
@@ -101,22 +103,24 @@ const EmergencyAlertBanner = () => {
 
   if (alerts.length === 0) return null;
 
-  return (
+  // ✅ Use React Portal to render directly to document.body
+  return createPortal(
     <div className="ap-emergency-modal-overlay">
       <div className="ap-emergency-modal-container">
         {alerts.map(alert => (
           <div key={alert.id} className={`ap-emergency-banner ap-severity-${alert.severity}`}>
+            
             <div className="ap-banner-header">
               <div className="ap-banner-title-group">
                 <div className="ap-banner-icon-wrapper">
-                  {alert.severity === 'critical' ? <AlertOctagon size={22} strokeWidth={2.5} /> :
-                   alert.severity === 'warning' ? <AlertTriangle size={22} strokeWidth={2.5} /> : <Info size={22} strokeWidth={2.5} />}
+                  {alert.severity === 'critical' ? <AlertOctagon size={24} strokeWidth={2.5} /> :
+                   alert.severity === 'warning' ? <AlertTriangle size={24} strokeWidth={2.5} /> : <Info size={24} strokeWidth={2.5} />}
                 </div>
                 <h4 className="ap-banner-title">
                   {alert.severity === 'critical' ? 'CRITICAL ALERT' : alert.severity === 'warning' ? 'WARNING' : 'SYSTEM INFO'}
                 </h4>
               </div>
-              <button className="ap-banner-dismiss-btn" onClick={() => handleDismiss(alert.id)} title="Acknowledge & Dismiss">
+              <button className="ap-banner-dismiss-btn" onClick={() => handleDismiss(alert.id)} title="Close">
                 <X size={20} />
               </button>
             </div>
@@ -128,13 +132,15 @@ const EmergencyAlertBanner = () => {
 
             <div className="ap-banner-footer">
               <button className="ap-btn-acknowledge" onClick={() => handleDismiss(alert.id)}>
-                Acknowledge & Dismiss
+                Acknowledge
               </button>
             </div>
+            
           </div>
         ))}
       </div>
-    </div>
+    </div>,
+    document.body // 👈 Render target
   );
 };
 
