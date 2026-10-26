@@ -44,7 +44,6 @@ const resolveMediaUrl = (img) => {
   return `${getBackendBaseUrl()}${clean}`;
 };
 
-// Helper to automatically sort course categories and sub-modules alphabetically (A to Z)
 const sortCourseModules = (cats) => {
   return (cats || []).map(cat => ({
     ...cat,
@@ -61,39 +60,19 @@ const checkAdmissionsStatus = () => {
     const timeNum = phDate.getHours() + phDate.getMinutes() / 60;
 
     if (day === 0) {
-      return { 
-        isOpen: false, 
-        text: 'Admissions Closed', 
-        note: 'Closed on Sundays • Opens Monday 8:00 AM' 
-      };
+      return { isOpen: false, text: 'Admissions Closed', note: 'Closed on Sundays • Opens Monday 8:00 AM' };
     }
     if (day >= 1 && day <= 5) {
       if (timeNum >= 8 && timeNum < 17) {
-        return { 
-          isOpen: true, 
-          text: 'Admissions Open', 
-          note: 'Walk-ins & scheduled visits active today' 
-        };
+        return { isOpen: true, text: 'Admissions Open', note: 'Walk-ins & scheduled visits active today' };
       }
-      return { 
-        isOpen: false, 
-        text: 'Admissions Closed', 
-        note: timeNum < 8 ? 'Opens today at 8:00 AM' : 'Closed for the day • Opens 8:00 AM tomorrow' 
-      };
+      return { isOpen: false, text: 'Admissions Closed', note: timeNum < 8 ? 'Opens today at 8:00 AM' : 'Closed for the day • Opens 8:00 AM tomorrow' };
     }
     if (day === 6) {
       if (timeNum >= 8 && timeNum < 12) {
-        return { 
-          isOpen: true, 
-          text: 'Admissions Open', 
-          note: 'Saturday session until 12:00 PM' 
-        };
+        return { isOpen: true, text: 'Admissions Open', note: 'Saturday session until 12:00 PM' };
       }
-      return { 
-        isOpen: false, 
-        text: 'Admissions Closed', 
-        note: 'Weekend hours concluded • Opens Monday 8:00 AM' 
-      };
+      return { isOpen: false, text: 'Admissions Closed', note: 'Weekend hours concluded • Opens Monday 8:00 AM' };
     }
     return { isOpen: false, text: 'Admissions Closed', note: 'Security registration is required at arrival.' };
   } catch (e) {
@@ -149,7 +128,6 @@ const DEFAULT_COURSES = sortCourseModules([
   }
 ]);
 
-// 100% Dynamic CMS state (No hardcoded fallback arrays)
 const DEFAULT_FACILITIES = [
   { name: 'Simulation Lab', images: [] },
   { name: 'Classrooms', images: [] }
@@ -211,7 +189,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', date: '', time: '', message: '' });
 
-  // 3-Column Dropdown Time Picker State
   const [showTimeDropdown, setShowTimeDropdown] = useState(false);
   const [selectedHour, setSelectedHour] = useState('09');
   const [selectedMinute, setSelectedMinute] = useState('00');
@@ -280,7 +257,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
     }
   };
 
-  // Fetch dynamic CMS data
   useEffect(() => {
     axios.get(`${API_BASE}/public/landing-content`)
       .then(res => {
@@ -314,12 +290,17 @@ const AppointmentPage = ({ onAdminLogin }) => {
       .then(res => setVisitReasons(res.data))
       .catch(console.error);
 
-    axios.get(`${API_BASE}/appointments/history`)
-      .then(res => {
-        const approved = (res.data || []).filter(item => item.status === 'APPROVED');
-        setBookedSlots(approved);
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      axios.get(`${API_BASE}/appointments/history`, {
+        headers: { Authorization: `Bearer ${token}` }
       })
-      .catch(console.error);
+        .then(res => {
+          const approved = (res.data || []).filter(item => item.status === 'APPROVED');
+          setBookedSlots(approved);
+        })
+        .catch(console.error);
+    }
   }, []);
 
   useEffect(() => {
@@ -634,32 +615,37 @@ const AppointmentPage = ({ onAdminLogin }) => {
           
           <nav className="ap-nav-desktop">
             <a 
+              href="#home"
               className={`ap-nav-link ${activePage === 'home' && activeNav === 'home' ? 'active' : ''}`} 
-              onClick={() => scrollToSection('home')}
+              onClick={(e) => { e.preventDefault(); scrollToSection('home'); }}
             >
               Home
             </a>
             <a 
+              href="#about"
               className={`ap-nav-link ${activePage === 'home' && activeNav === 'about' ? 'active' : ''}`} 
-              onClick={() => scrollToSection('about')}
+              onClick={(e) => { e.preventDefault(); scrollToSection('about'); }}
             >
               About
             </a>
             <a 
+              href="#courses"
               className={`ap-nav-link ${activePage === 'home' && activeNav === 'courses' ? 'active' : ''}`} 
-              onClick={() => scrollToSection('courses')}
+              onClick={(e) => { e.preventDefault(); scrollToSection('courses'); }}
             >
               Courses
             </a>
             <a 
+              href="#facilities"
               className={`ap-nav-link ${activePage === 'home' && activeNav === 'facilities' ? 'active' : ''}`} 
-              onClick={() => scrollToSection('facilities')}
+              onClick={(e) => { e.preventDefault(); scrollToSection('facilities'); }}
             >
               Facilities
             </a>
             <a 
+              href="#careers"
               className={`ap-nav-link ${activePage === 'careers' || activeNav === 'careers' ? 'active' : ''}`} 
-              onClick={navigateToCareers}
+              onClick={(e) => { e.preventDefault(); navigateToCareers(); }}
             >
               Careers
             </a>
@@ -668,11 +654,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-header-actions">
             <div className="ap-header-actions-desktop">
               <button className="btn-ap-nav-primary" onClick={() => setShowAppointmentModal(true)}>Book Visit</button>
-              <button className="btn-ap-nav-icon" onClick={onAdminLogin} title="Admin Portal">
+              <button className="btn-ap-nav-icon" onClick={onAdminLogin} title="Admin Portal" aria-label="Admin Portal">
                 <User size={18} />
               </button>
             </div>
-            <button className="ap-mobile-toggle" onClick={() => setMobileMenuOpen(true)}>
+            <button className="ap-mobile-toggle" onClick={() => setMobileMenuOpen(true)} aria-label="Open menu">
               <Menu size={22} />
             </button>
           </div>
@@ -684,18 +670,18 @@ const AppointmentPage = ({ onAdminLogin }) => {
         <nav className="ap-mobile-nav" onClick={(e) => e.stopPropagation()}>
           <div className="ap-nav-header">
             <h3 className="ap-mobile-brand">Menu</h3>
-            <button className="ap-nav-close" onClick={() => setMobileMenuOpen(false)}>
+            <button className="ap-nav-close" onClick={() => setMobileMenuOpen(false)} aria-label="Close menu">
               <X size={22} />
             </button>
           </div>
           
           <div className="ap-nav-body">
             <div className="ap-nav-list">
-              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'home' ? 'active' : ''}`} onClick={() => scrollToSection('home')}>Home</a>
-              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'about' ? 'active' : ''}`} onClick={() => scrollToSection('about')}>About</a>
-              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'courses' ? 'active' : ''}`} onClick={() => scrollToSection('courses')}>Courses</a>
-              <a className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'facilities' ? 'active' : ''}`} onClick={() => scrollToSection('facilities')}>Facilities</a>
-              <a className={`ap-mobile-nav-link ${activePage === 'careers' ? 'active' : ''}`} onClick={navigateToCareers}>Careers</a>
+              <a href="#home" className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'home' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); scrollToSection('home'); }}>Home</a>
+              <a href="#about" className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'about' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); scrollToSection('about'); }}>About</a>
+              <a href="#courses" className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'courses' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); scrollToSection('courses'); }}>Courses</a>
+              <a href="#facilities" className={`ap-mobile-nav-link ${activePage === 'home' && activeNav === 'facilities' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); scrollToSection('facilities'); }}>Facilities</a>
+              <a href="#careers" className={`ap-mobile-nav-link ${activePage === 'careers' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigateToCareers(); }}>Careers</a>
             </div>
             <div className="ap-nav-divider"></div>
             <div className="ap-nav-actions-mobile">
@@ -708,446 +694,458 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </nav>
       </div>
 
-      {/* HOME PAGE */}
-      {activePage === 'home' && (
-        <>
-          {/* HERO SECTION */}
-          <section id="home" className="ap-hero-section">
-            <div className="ap-hero-grid">
-              <div className="ap-hero-text">
-                <span className="ap-hero-badge">
-                  <Sparkles size={16} /> Philippines' Premier Healthcare Academy
-                </span>
-                <h1 className="ap-hero-title">
-                  <span className="text-white">Shaping Tomorrow's</span><br />
-                  <span className="text-accent">Healthcare Heroes</span>
-                </h1>
-                <p className="ap-hero-subtitle">
-                  Experience world-class clinical simulation-based training, renowned medical instructors, and a curriculum engineered to produce competent, compassionate healthcare leaders.
-                </p>
-                <div className="ap-hero-actions">
-                  <button className="btn-ap-primary-large" onClick={() => setShowAppointmentModal(true)}>
-                    <Calendar size={20} /> Schedule a Visit
-                  </button>
-                  <button className="btn-ap-secondary-large" onClick={() => scrollToSection('about')}>
-                    Learn More <ArrowRight size={20} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="ap-hero-visual">
-                <div className="ap-floating-panel">
-                  <div className="ap-floating-item float-1">
-                    <div className="ap-float-icon"><ShieldCheck size={30} /></div>
-                    <div><h4>Safe & Monitored Campus</h4><p>BLE-powered visitor positioning & security</p></div>
-                  </div>
-                  <div className="ap-floating-item float-2">
-                    <div className="ap-float-icon"><Users size={30} /></div>
-                    <div><h4>Expert Medical Faculty</h4><p>Actively practicing physicians & nurse clinicians</p></div>
-                  </div>
-                  <div className="ap-floating-item float-3">
-                    <div className="ap-float-icon"><GraduationCap size={30} /></div>
-                    <div><h4>Accredited Simulation Training</h4><p>High-fidelity patient simulation laboratories</p></div>
+      {/* ✅ LIGHTHOUSE FIX: Wrapped main content in <main> */}
+      <main>
+        {/* HOME PAGE */}
+        {activePage === 'home' && (
+          <>
+            {/* HERO SECTION */}
+            <section id="home" className="ap-hero-section">
+              <div className="ap-hero-grid">
+                <div className="ap-hero-text">
+                  <span className="ap-hero-badge">
+                    <Sparkles size={16} /> Philippines' Premier Healthcare Academy
+                  </span>
+                  <h1 className="ap-hero-title">
+                    <span className="text-white">Shaping Tomorrow's</span><br />
+                    <span className="text-accent">Healthcare Heroes</span>
+                  </h1>
+                  <p className="ap-hero-subtitle">
+                    Experience world-class clinical simulation-based training, renowned medical instructors, and a curriculum engineered to produce competent, compassionate healthcare leaders.
+                  </p>
+                  <div className="ap-hero-actions">
+                    <button className="btn-ap-primary-large" onClick={() => setShowAppointmentModal(true)}>
+                      <Calendar size={20} /> Schedule a Visit
+                    </button>
+                    <button className="btn-ap-secondary-large" onClick={() => scrollToSection('about')}>
+                      Learn More <ArrowRight size={20} />
+                    </button>
                   </div>
                 </div>
-              </div>
-            </div>
-          </section>
 
-          {/* ABOUT */}
-          <section id="about" className="ap-section ap-bg-white">
-            <div className="ap-container">
-              <div className="ap-section-header">
-                <span className="ap-tag">Why HCT Academy</span>
-                <h2>Building Careers in Healthcare</h2>
-                <p>Our approach combines cutting-edge simulation labs, experienced medical educators, and strong industry ties.</p>
-              </div>
-              <div className="ap-features-grid">
-                <div className="ap-feature-card stagger-1">
-                  <div className="ap-feature-icon"><Award size={24} /></div>
-                  <h4>Accredited Programs</h4>
-                  <p>CHED-recognized curricula meticulously aligned with global healthcare standards and best practices.</p>
+                <div className="ap-hero-visual">
+                  <div className="ap-floating-panel">
+                    <div className="ap-floating-item float-1">
+                      <div className="ap-float-icon"><ShieldCheck size={30} /></div>
+                      <div>
+                        {/* ✅ LIGHTHOUSE FIX: Changed H3 to H2 */}
+                        <h2>Safe & Monitored Campus</h2>
+                        <p>BLE-powered visitor positioning & security</p>
+                      </div>
+                    </div>
+                    <div className="ap-floating-item float-2">
+                      <div className="ap-float-icon"><Users size={30} /></div>
+                      <div>
+                        <h2>Expert Medical Faculty</h2>
+                        <p>Actively practicing physicians & nurse clinicians</p>
+                      </div>
+                    </div>
+                    <div className="ap-floating-item float-3">
+                      <div className="ap-float-icon"><GraduationCap size={30} /></div>
+                      <div>
+                        <h2>Accredited Simulation Training</h2>
+                        <p>High-fidelity patient simulation laboratories</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="ap-feature-card stagger-2">
-                  <div className="ap-feature-icon"><Users size={24} /></div>
-                  <h4>Expert Instructors</h4>
-                  <p>Learn directly from actively practicing doctors and nurses bringing decades of real-world experience.</p>
+              </div>
+            </section>
+
+            {/* ABOUT */}
+            <section id="about" className="ap-section ap-bg-white">
+              <div className="ap-container">
+                <div className="ap-section-header">
+                  <span className="ap-tag">Why HCT Academy</span>
+                  <h2>Building Careers in Healthcare</h2>
+                  <p>Our approach combines cutting-edge simulation labs, experienced medical educators, and strong industry ties.</p>
                 </div>
-                <div className="ap-feature-card stagger-3">
-                  <div className="ap-feature-icon"><Building2 size={24} /></div>
-                  <h4>Modern Facilities</h4>
-                  <p>Immersive learning through state-of-the-art simulation labs, smart classrooms, and clinical equipment.</p>
+                <div className="ap-features-grid">
+                  <div className="ap-feature-card stagger-1">
+                    <div className="ap-feature-icon"><Award size={24} /></div>
+                    <h3>Accredited Programs</h3>
+                    <p>CHED-recognized curricula meticulously aligned with global healthcare standards and best practices.</p>
+                  </div>
+                  <div className="ap-feature-card stagger-2">
+                    <div className="ap-feature-icon"><Users size={24} /></div>
+                    <h3>Expert Instructors</h3>
+                    <p>Learn directly from actively practicing doctors and nurses bringing decades of real-world experience.</p>
+                  </div>
+                  <div className="ap-feature-card stagger-3">
+                    <div className="ap-feature-icon"><Building2 size={24} /></div>
+                    <h3>Modern Facilities</h3>
+                    <p>Immersive learning through state-of-the-art simulation labs, smart classrooms, and clinical equipment.</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          </section>
+            </section>
 
-          {/* COURSES DIRECTORY */}
-          <section id="courses" className="ap-section ap-bg-gray">
-            <div className="ap-container">
-              <div className="ap-section-header">
-                <span className="ap-tag">Educational Programs</span>
-                <h2>Clinical Education & Certification</h2>
-                <p>Explore accredited clinical certifications, life support programs, and continuing professional development modules.</p>
-              </div>
+            {/* COURSES DIRECTORY */}
+            <section id="courses" className="ap-section ap-bg-gray">
+              <div className="ap-container">
+                <div className="ap-section-header">
+                  <span className="ap-tag">Educational Programs</span>
+                  <h2>Clinical Education & Certification</h2>
+                  <p>Explore accredited clinical certifications, life support programs, and continuing professional development modules.</p>
+                </div>
 
-              {courseCategories.length > 0 && activeCourse && (
-                <div className="ap-clean-showcase-wrap">
-                  <button className="ap-arrow-ctrl prev" onClick={prevCourse} aria-label="Previous Program">
-                    <ChevronLeft size={22} />
-                  </button>
+                {courseCategories.length > 0 && activeCourse && (
+                  <div className="ap-clean-showcase-wrap">
+                    <button className="ap-arrow-ctrl prev" onClick={prevCourse} aria-label="Previous Program">
+                      <ChevronLeft size={22} />
+                    </button>
 
-                  <div className="ap-clean-course-card">
-                    <div className="ap-clean-card-meta">
-                      <span className="ap-clean-card-badge">{activeCourse.badge || 'Accredited Track'}</span>
-                      <span className="ap-clean-card-count">{(activeCourse.courses || []).length} Modules</span>
+                    <div className="ap-clean-course-card">
+                      <div className="ap-clean-card-meta">
+                        <span className="ap-clean-card-badge">{activeCourse.badge || 'Accredited Track'}</span>
+                        <span className="ap-clean-card-count">{(activeCourse.courses || []).length} Modules</span>
+                      </div>
+
+                      <div className="ap-clean-card-body">
+                        <h3 className="ap-clean-card-title">{activeCourse.title}</h3>
+                        <p className="ap-clean-card-sub">{activeCourse.subtitle}</p>
+                        <p className="ap-clean-card-desc">{activeCourse.description}</p>
+                      </div>
+
+                      <div className="ap-clean-card-footer">
+                        <button 
+                          type="button" 
+                          className="btn-ap-clean-curriculum"
+                          onClick={() => setSelectedCourseModal(activeCourse)}
+                        >
+                          View
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="ap-clean-card-body">
-                      <h3 className="ap-clean-card-title">{activeCourse.title}</h3>
-                      <p className="ap-clean-card-sub">{activeCourse.subtitle}</p>
-                      <p className="ap-clean-card-desc">{activeCourse.description}</p>
-                    </div>
+                    <button className="ap-arrow-ctrl next" onClick={nextCourse} aria-label="Next Program">
+                      <ChevronRight size={22} />
+                    </button>
+                  </div>
+                )}
 
-                    <div className="ap-clean-card-footer">
+                {courseCategories.length > 1 && (
+                  <div className="ap-carousel-dots">
+                    {courseCategories.map((_, idx) => (
                       <button 
-                        type="button" 
-                        className="btn-ap-clean-curriculum"
-                        onClick={() => setSelectedCourseModal(activeCourse)}
-                      >
-                        View
-                      </button>
-                    </div>
+                        key={idx} 
+                        className={`ap-dot ${idx === currentCourseIndex ? 'active' : ''}`}
+                        onClick={() => setCurrentCourseIndex(idx)}
+                        aria-label={`Slide ${idx + 1}`}
+                      />
+                    ))}
                   </div>
-
-                  <button className="ap-arrow-ctrl next" onClick={nextCourse} aria-label="Next Program">
-                    <ChevronRight size={22} />
-                  </button>
-                </div>
-              )}
-
-              {courseCategories.length > 1 && (
-                <div className="ap-carousel-dots">
-                  {courseCategories.map((_, idx) => (
-                    <button 
-                      key={idx} 
-                      className={`ap-dot ${idx === currentCourseIndex ? 'active' : ''}`}
-                      onClick={() => setCurrentCourseIndex(idx)}
-                      aria-label={`Slide ${idx + 1}`}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* FACILITIES */}
-          <section id="facilities" className="ap-section ap-bg-white">
-            <div className="ap-container">
-              <div className="ap-section-header">
-                <span className="ap-tag">Campus</span>
-                <h2>World-Class Facilities</h2>
-                <p>Explore our modern learning environments specifically designed for hands-on healthcare education.</p>
-              </div>
-
-              <div className="ap-facilities-grid">
-                {facilities.map((fac, idx) => {
-                  const hasImages = Array.isArray(fac.images) && fac.images.length > 0;
-                  const thumbnailSrc = fac.thumbnail || (hasImages ? fac.images[0] : '');
-                  const totalCount = hasImages ? fac.images.length : 0;
-
-                  return (
-                    <div key={idx} className={`ap-facility-card stagger-${idx + 1}`} onClick={() => setSelectedFacility(fac)}>
-                      <div className="ap-facility-img-wrapper">
-                        {thumbnailSrc ? (
-                          <img 
-                            src={thumbnailSrc} 
-                            alt={fac.name} 
-                            className="ap-facility-img" 
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <div className="ap-facility-placeholder">
-                            <Camera size={36} />
-                            <span>No Photo Uploaded</span>
-                          </div>
-                        )}
-                        <div className="ap-facility-overlay">
-                          <Camera size={26} color="white" />
-                          <span>{totalCount > 0 ? `View ${totalCount} Photo${totalCount === 1 ? '' : 's'}` : 'View Gallery'}</span>
-                        </div>
-                      </div>
-                      <div className="ap-facility-name">
-                        <span>{fac.name}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </section>
-
-          {/* EXCLUSIVE INSTRUCTOR MOBILE APP DOWNLOAD SECTION */}
-<section className="ap-section ap-bg-white" style={{ padding: '4rem 0' }}>
-  <div className="ap-container">
-    <div style={{
-      background: '#0F172A',
-      borderRadius: '20px',
-      padding: '3rem 2.5rem',
-      color: '#FFFFFF',
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: '2rem',
-      border: '1px solid #1E293B',
-      boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
-    }}>
-      <div style={{ maxWidth: '600px' }}>
-        <span style={{ 
-          background: 'rgba(13, 148, 136, 0.2)', 
-          color: '#2DD4BF', 
-          padding: '0.4rem 1rem', 
-          borderRadius: '99px', 
-          fontSize: '0.8rem', 
-          fontWeight: 700, 
-          textTransform: 'uppercase', 
-          letterSpacing: '0.05em',
-          border: '1px solid rgba(45, 212, 191, 0.3)'
-        }}>
-          Authorized Faculty Only
-        </span>
-        <h2 style={{ fontSize: '1.85rem', fontWeight: 800, margin: '1rem 0 0.5rem 0', color: '#FFFFFF' }}>
-          Mobile Application
-        </h2>
-        <p style={{ color: '#94A3B8', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
-          This Android application is strictly for active HCT Academy instructors for geo-verified attendance tracking and scheduling. Please log in with your institutional credentials after installation.
-        </p>
-      </div>
-      <div>
-        <a 
-  href="https://github.com/univita2-0/UniVITA_Project2.0/releases/latest/download/UniVITA_Instructor_App.apk" 
-  download="UniVITA_Instructor_App.apk"
-          style={{
-            background: '#0D9488',
-            color: '#FFFFFF',
-            padding: '1rem 2rem',
-            borderRadius: '12px',
-            fontWeight: 700,
-            fontSize: '0.95rem',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            textDecoration: 'none',
-            boxShadow: '0 8px 20px rgba(13, 148, 136, 0.3)',
-            transition: 'all 0.2s ease'
-          }}
-        >
-          <Download size={18} /> Download APK
-        </a>
-      </div>
-    </div>
-  </div>
-</section>
-
-          {/* CONTACT SECTION */}
-          <section id="contact" className="ap-section ap-bg-gray">
-            <div className="ap-container">
-              <div className="ap-section-header">
-                <span className="ap-tag">Contact</span>
-                <h2>Get in Touch</h2>
-                <p>Have questions about training schedules or admissions? Reach out to our team directly.</p>
-              </div>
-
-              <div className="ap-modern-contact-grid">
-                <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble"><MapPin size={20} /></div>
-                  <h3 className="ap-card-contact-title">Campus Location</h3>
-                  <p className="ap-card-contact-desc">
-                    {contactInfo.address || 'Address not configured in CMS.'}
-                  </p>
-                  {contactInfo.address && (
-                    <a 
-                      href={`https://maps.google.com/?q=${encodeURIComponent(contactInfo.address)}`} 
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="ap-card-action-link"
-                    >
-                      <span>Get directions</span> <ExternalLink size={13} />
-                    </a>
-                  )}
-                </div>
-
-                <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble"><Phone size={20} /></div>
-                  <h3 className="ap-card-contact-title">Contact Number</h3>
-                  <p className="ap-card-contact-desc">
-                    {contactInfo.phone_secondary || 'Contact number not set'}
-                  </p>
-                  {contactInfo.phone_secondary && (
-                    <a 
-                      href={`tel:${contactInfo.phone_secondary.replace(/[^0-9+]/g, '')}`} 
-                      className="ap-card-action-link"
-                    >
-                      <span>Call mobile</span> <ArrowRight size={13} />
-                    </a>
-                  )}
-                </div>
-
-                <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble"><Mail size={20} /></div>
-                  <h3 className="ap-card-contact-title">Admissions Email</h3>
-                  <p className="ap-card-contact-desc">
-                    {contactInfo.email_admissions || 'Email not set'}
-                  </p>
-                  {contactInfo.email_admissions && (
-                    <a 
-                      href={`mailto:${contactInfo.email_admissions}`} 
-                      className="ap-card-action-link"
-                    >
-                      <span>Send message</span> <ArrowRight size={13} />
-                    </a>
-                  )}
-                </div>
-
-                <div className="ap-modern-contact-card">
-                  <div className="ap-card-icon-bubble"><Clock size={20} /></div>
-                  <div className={admissionsStatus.isOpen ? "ap-status-pill-open" : "ap-status-pill-closed"}>
-                    <span className={admissionsStatus.isOpen ? "status-ping" : "status-ping-closed"} />
-                    <span>{admissionsStatus.text}</span>
-                  </div>
-                  <h3 className="ap-card-contact-title">Hours</h3>
-                  <p className="ap-card-contact-desc">
-                    {contactInfo.hours_weekday}<br />
-                    {contactInfo.hours_weekend}<br />
-                    {contactInfo.hours_sunday || 'Sunday: Closed'}
-                  </p>
-                  <span className="ap-hours-subtext">{admissionsStatus.note}</span>
-                </div>
-              </div>
-            </div>
-          </section>
-        </>
-      )}
-
-      {/* CAREERS PAGE */}
-      {activePage === 'careers' && (
-        <div className="ap-careers-page-wrapper">
-          <section className="ap-careers-hero-clean">
-            <div className="ap-container">
-              <div className="ap-careers-header-box">
-                <span className="ap-tag">Careers at HCT Academy</span>
-                <h1>Join Our Faculty & Clinical Team</h1>
-                <p>Help educate and inspire the next generation of healthcare professionals with modern clinical simulation tools and institutional growth opportunities.</p>
-              </div>
-
-              
-            </div>
-          </section>
-
-          <section className="ap-section ap-bg-gray" style={{ paddingTop: '2.5rem' }}>
-            <div className="ap-container">
-              <div className="ap-clean-filter-bar">
-                <div className="ap-clean-search-input">
-                  <Search size={16} className="search-icon" />
-                  <input 
-                    type="text" 
-                    placeholder="Search roles, skills, or departments..."
-                    value={jobSearchTerm}
-                    onChange={(e) => setJobSearchTerm(e.target.value)}
-                  />
-                  {jobSearchTerm && (
-                    <button className="clear-btn" onClick={() => setJobSearchTerm('')} aria-label="Clear Search">
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-
-                <div className="ap-clean-dept-pills">
-                  {uniqueDepartments.map(dept => (
-                    <button
-                      key={dept}
-                      type="button"
-                      className={`ap-dept-chip ${jobDepartmentFilter === dept ? 'active' : ''}`}
-                      onClick={() => setJobDepartmentFilter(dept)}
-                    >
-                      {dept}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="ap-clean-count-label">
-                <span>{filteredJobs.length} available position{filteredJobs.length === 1 ? '' : 's'}</span>
-              </div>
-
-              <div className="ap-clean-jobs-grid">
-                {filteredJobs.length === 0 ? (
-                  <div className="ap-clean-empty-state">
-                    <Briefcase size={44} className="empty-icon" />
-                    <h4>No Openings Found</h4>
-                    <p>There are currently no job postings matching your selected filters.</p>
-                    <button 
-                      className="btn-ap-secondary"
-                      onClick={() => { setJobSearchTerm(''); setJobDepartmentFilter('All'); }}
-                    >
-                      Clear Search Filters
-                    </button>
-                  </div>
-                ) : (
-                  filteredJobs.map((job) => (
-                    <div key={job.id} className="ap-clean-job-card">
-                      <div className="ap-job-card-top">
-                        <span className="ap-job-dept-tag">{job.department || 'General'}</span>
-                        <span className="ap-job-worktype-tag">{job.employment_type || 'Full-time'}</span>
-                      </div>
-
-                      <h3 className="ap-clean-job-title">{job.title}</h3>
-
-                      <div className="ap-clean-job-details-row">
-                        <span className="ap-clean-meta-item">
-                          <MapPin size={13} /> {job.location_type || 'On-site'} • {job.location || 'Pasig City'}
-                        </span>
-                        {(job.salary_min || job.salary_max) && (
-                          <span className="ap-clean-meta-item salary">
-                            <DollarSign size={13} /> 
-                            ₱{Number(job.salary_min || 0).toLocaleString()}
-                            {job.salary_max ? ` - ₱${Number(job.salary_max).toLocaleString()}` : ''} / mo
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="ap-clean-job-desc">
-                        {job.description?.length > 130 ? `${job.description.substring(0, 130)}...` : job.description}
-                      </p>
-
-                      <div className="ap-clean-job-actions">
-                        <button 
-                          type="button" 
-                          className="btn-ap-clean-overview"
-                          onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}
-                        >
-                          View Details
-                        </button>
-                        <button 
-                          type="button" 
-                          className="btn-ap-clean-apply"
-                          onClick={() => openApplyModal(job)}
-                        >
-                          Apply Now
-                        </button>
-                      </div>
-                    </div>
-                  ))
                 )}
               </div>
+            </section>
 
-            </div>
-          </section>
-        </div>
-      )}
+            {/* FACILITIES */}
+            <section id="facilities" className="ap-section ap-bg-white">
+              <div className="ap-container">
+                <div className="ap-section-header">
+                  <span className="ap-tag">Campus</span>
+                  <h2>World-Class Facilities</h2>
+                  <p>Explore our modern learning environments specifically designed for hands-on healthcare education.</p>
+                </div>
+
+                <div className="ap-facilities-grid">
+                  {facilities.map((fac, idx) => {
+                    const hasImages = Array.isArray(fac.images) && fac.images.length > 0;
+                    const thumbnailSrc = fac.thumbnail || (hasImages ? fac.images[0] : '');
+                    const totalCount = hasImages ? fac.images.length : 0;
+
+                    return (
+                      <div key={idx} className={`ap-facility-card stagger-${idx + 1}`} onClick={() => setSelectedFacility(fac)}>
+                        <div className="ap-facility-img-wrapper">
+                          {thumbnailSrc ? (
+                            <img 
+                              src={thumbnailSrc} 
+                              alt={fac.name} 
+                              className="ap-facility-img" 
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="ap-facility-placeholder">
+                              <Camera size={36} />
+                              <span>No Photo Uploaded</span>
+                            </div>
+                          )}
+                          <div className="ap-facility-overlay">
+                            <Camera size={26} color="white" />
+                            <span>{totalCount > 0 ? `View ${totalCount} Photo${totalCount === 1 ? '' : 's'}` : 'View Gallery'}</span>
+                          </div>
+                        </div>
+                        <div className="ap-facility-name">
+                          <span>{fac.name}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
+            {/* EXCLUSIVE INSTRUCTOR MOBILE APP DOWNLOAD SECTION */}
+            <section className="ap-section ap-bg-white" style={{ padding: '4rem 0' }}>
+              <div className="ap-container">
+                <div style={{
+                  background: '#0F172A',
+                  borderRadius: '20px',
+                  padding: '3rem 2.5rem',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '2rem',
+                  border: '1px solid #1E293B',
+                  boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+                }}>
+                  <div style={{ maxWidth: '600px' }}>
+                    <span style={{ 
+                      background: 'rgba(13, 148, 136, 0.2)', 
+                      color: '#2DD4BF', 
+                      padding: '0.4rem 1rem', 
+                      borderRadius: '99px', 
+                      fontSize: '0.8rem', 
+                      fontWeight: 700, 
+                      textTransform: 'uppercase', 
+                      letterSpacing: '0.05em',
+                      border: '1px solid rgba(45, 212, 191, 0.3)'
+                    }}>
+                      Authorized Faculty Only
+                    </span>
+                    <h2 style={{ fontSize: '1.85rem', fontWeight: 800, margin: '1rem 0 0.5rem 0', color: '#FFFFFF' }}>
+                      Mobile Application
+                    </h2>
+                    <p style={{ color: '#94A3B8', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
+                      This Android application is strictly for active HCT Academy instructors for geo-verified attendance tracking and scheduling. Please log in with your institutional credentials after installation.
+                    </p>
+                  </div>
+                  <div>
+                    <a 
+                      href="https://github.com/univita2-0/UniVITA_Project2.0/releases/latest/download/UniVITA_Instructor_App.apk" 
+                      download="UniVITA_Instructor_App.apk"
+                      style={{
+                        background: '#0F766E',
+                        color: '#FFFFFF',
+                        padding: '1rem 2rem',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        fontSize: '0.95rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        textDecoration: 'none',
+                        boxShadow: '0 8px 20px rgba(13, 148, 136, 0.3)',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <Download size={18} /> Download APK
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* CONTACT SECTION */}
+            <section id="contact" className="ap-section ap-bg-gray">
+              <div className="ap-container">
+                <div className="ap-section-header">
+                  <span className="ap-tag">Contact</span>
+                  <h2>Get in Touch</h2>
+                  <p>Have questions about training schedules or admissions? Reach out to our team directly.</p>
+                </div>
+
+                <div className="ap-modern-contact-grid">
+                  <div className="ap-modern-contact-card">
+                    <div className="ap-card-icon-bubble"><MapPin size={20} /></div>
+                    <h3 className="ap-card-contact-title">Campus Location</h3>
+                    <p className="ap-card-contact-desc">
+                      {contactInfo.address || 'Address not configured in CMS.'}
+                    </p>
+                    {contactInfo.address && (
+                      <a 
+                        href={`https://maps.google.com/?q=${encodeURIComponent(contactInfo.address)}`} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="ap-card-action-link"
+                      >
+                        <span>Get directions</span> <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="ap-modern-contact-card">
+                    <div className="ap-card-icon-bubble"><Phone size={20} /></div>
+                    <h3 className="ap-card-contact-title">Contact Number</h3>
+                    <p className="ap-card-contact-desc">
+                      {contactInfo.phone_secondary || 'Contact number not set'}
+                    </p>
+                    {contactInfo.phone_secondary && (
+                      <a 
+                        href={`tel:${contactInfo.phone_secondary.replace(/[^0-9+]/g, '')}`} 
+                        className="ap-card-action-link"
+                      >
+                        <span>Call mobile</span> <ArrowRight size={13} />
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="ap-modern-contact-card">
+                    <div className="ap-card-icon-bubble"><Mail size={20} /></div>
+                    <h3 className="ap-card-contact-title">Admissions Email</h3>
+                    <p className="ap-card-contact-desc">
+                      {contactInfo.email_admissions || 'Email not set'}
+                    </p>
+                    {contactInfo.email_admissions && (
+                      <a 
+                        href={`mailto:${contactInfo.email_admissions}`} 
+                        className="ap-card-action-link"
+                      >
+                        <span>Send message</span> <ArrowRight size={13} />
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="ap-modern-contact-card">
+                    <div className="ap-card-icon-bubble"><Clock size={20} /></div>
+                    <div className={admissionsStatus.isOpen ? "ap-status-pill-open" : "ap-status-pill-closed"}>
+                      <span className={admissionsStatus.isOpen ? "status-ping" : "status-ping-closed"} />
+                      <span>{admissionsStatus.text}</span>
+                    </div>
+                    <h3 className="ap-card-contact-title">Hours</h3>
+                    <p className="ap-card-contact-desc">
+                      {contactInfo.hours_weekday}<br />
+                      {contactInfo.hours_weekend}<br />
+                      {contactInfo.hours_sunday || 'Sunday: Closed'}
+                    </p>
+                    <span className="ap-hours-subtext">{admissionsStatus.note}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
+        {/* CAREERS PAGE */}
+        {activePage === 'careers' && (
+          <div className="ap-careers-page-wrapper">
+            <section className="ap-careers-hero-clean">
+              <div className="ap-container">
+                <div className="ap-careers-header-box">
+                  <span className="ap-tag">Careers at HCT Academy</span>
+                  <h1>Join Our Faculty & Clinical Team</h1>
+                  <p>Help educate and inspire the next generation of healthcare professionals with modern clinical simulation tools and institutional growth opportunities.</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="ap-section ap-bg-gray" style={{ paddingTop: '2.5rem' }}>
+              <div className="ap-container">
+                <div className="ap-clean-filter-bar">
+                  <div className="ap-clean-search-input">
+                    <Search size={16} className="search-icon" />
+                    <input 
+                      type="text" 
+                      placeholder="Search roles, skills, or departments..."
+                      value={jobSearchTerm}
+                      onChange={(e) => setJobSearchTerm(e.target.value)}
+                    />
+                    {jobSearchTerm && (
+                      <button className="clear-btn" onClick={() => setJobSearchTerm('')} aria-label="Clear Search">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="ap-clean-dept-pills">
+                    {uniqueDepartments.map(dept => (
+                      <button
+                        key={dept}
+                        type="button"
+                        className={`ap-dept-chip ${jobDepartmentFilter === dept ? 'active' : ''}`}
+                        onClick={() => setJobDepartmentFilter(dept)}
+                      >
+                        {dept}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="ap-clean-count-label">
+                  <span>{filteredJobs.length} available position{filteredJobs.length === 1 ? '' : 's'}</span>
+                </div>
+
+                <div className="ap-clean-jobs-grid">
+                  {filteredJobs.length === 0 ? (
+                    <div className="ap-clean-empty-state">
+                      <Briefcase size={44} className="empty-icon" />
+                      <h4>No Openings Found</h4>
+                      <p>There are currently no job postings matching your selected filters.</p>
+                      <button 
+                        className="btn-ap-secondary"
+                        onClick={() => { setJobSearchTerm(''); setJobDepartmentFilter('All'); }}
+                      >
+                        Clear Search Filters
+                      </button>
+                    </div>
+                  ) : (
+                    filteredJobs.map((job) => (
+                      <div key={job.id} className="ap-clean-job-card">
+                        <div className="ap-job-card-top">
+                          <span className="ap-job-dept-tag">{job.department || 'General'}</span>
+                          <span className="ap-job-worktype-tag">{job.employment_type || 'Full-time'}</span>
+                        </div>
+
+                        <h3 className="ap-clean-job-title">{job.title}</h3>
+
+                        <div className="ap-clean-job-details-row">
+                          <span className="ap-clean-meta-item">
+                            <MapPin size={13} /> {job.location_type || 'On-site'} • {job.location || 'Pasig City'}
+                          </span>
+                          {(job.salary_min || job.salary_max) && (
+                            <span className="ap-clean-meta-item salary">
+                              <DollarSign size={13} /> 
+                              ₱{Number(job.salary_min || 0).toLocaleString()}
+                              {job.salary_max ? ` - ₱${Number(job.salary_max).toLocaleString()}` : ''} / mo
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="ap-clean-job-desc">
+                          {job.description?.length > 130 ? `${job.description.substring(0, 130)}...` : job.description}
+                        </p>
+
+                        <div className="ap-clean-job-actions">
+                          <button 
+                            type="button" 
+                            className="btn-ap-clean-overview"
+                            onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}
+                          >
+                            View Details
+                          </button>
+                          <button 
+                            type="button" 
+                            className="btn-ap-clean-apply"
+                            onClick={() => openApplyModal(job)}
+                          >
+                            Apply Now
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+              </div>
+            </section>
+          </div>
+        )}
+      </main>
 
       {/* FOOTER */}
       <footer className="ap-footer">
@@ -1160,21 +1158,21 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <p>Healthcare simulation and training academy providing accredited professional certifications and life-support education.</p>
           </div>
           <div className="ap-footer-links">
-            <h4>Quick Links</h4>
-            <a onClick={() => scrollToSection('home')}>Home</a>
-            <a onClick={() => scrollToSection('about')}>About</a>
-            <a onClick={() => scrollToSection('courses')}>Courses</a>
-            <a onClick={() => scrollToSection('facilities')}>Facilities</a>
+            <h3>Quick Links</h3>
+            <a href="#home" onClick={(e) => { e.preventDefault(); scrollToSection('home'); }}>Home</a>
+            <a href="#about" onClick={(e) => { e.preventDefault(); scrollToSection('about'); }}>About</a>
+            <a href="#courses" onClick={(e) => { e.preventDefault(); scrollToSection('courses'); }}>Courses</a>
+            <a href="#facilities" onClick={(e) => { e.preventDefault(); scrollToSection('facilities'); }}>Facilities</a>
           </div>
           <div className="ap-footer-links">
-            <h4>Portal & Info</h4>
-            <a onClick={() => setShowAppointmentModal(true)}>Book Appointment</a>
-            <a onClick={navigateToCareers}>Careers</a>
+            <h3>Portal & Info</h3>
+            <a href="#book" onClick={(e) => { e.preventDefault(); setShowAppointmentModal(true); }}>Book Appointment</a>
+            <a href="#careers" onClick={(e) => { e.preventDefault(); navigateToCareers(); }}>Careers</a>
             <a href="#">Privacy Policy</a>
             <a href="#">Terms of Service</a>
           </div>
           <div className="ap-footer-contact">
-            <h4>Connect With Us</h4>
+            <h3>Connect With Us</h3>
             <p><Mail size={15}/> {contactInfo.email_admissions || 'admissions@hct.ph'}</p>
             <p><Phone size={15}/> {contactInfo.phone_secondary || '+63 912 345 6789'}</p>
           </div>
@@ -1193,7 +1191,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 <h2>{selectedCourseModal.title}</h2>
                 <span className="ap-modal-badge">{selectedCourseModal.badge || 'Accredited Curriculum'}</span>
               </div>
-              <button className="ap-btn-close" onClick={() => setSelectedCourseModal(null)}><X size={20} /></button>
+              <button className="ap-btn-close" onClick={() => setSelectedCourseModal(null)} aria-label="Close modal">
+                <X size={20} />
+              </button>
             </div>
             <p className="ap-time-modal-subtitle">{selectedCourseModal.description}</p>
             
@@ -1225,7 +1225,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>Book a Campus Visit</h2>
-              <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)}><X size={20} /></button>
+              <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)} aria-label="Close modal">
+                <X size={20} />
+              </button>
             </div>
             <form className="ap-form" onSubmit={handleSubmit}>
               <div className="ap-form-row">
@@ -1254,7 +1256,6 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 </div>
               </div>
 
-              {/* DATE AND UNRESTRICTED 3-COLUMN TIME DROPDOWN */}
               <div className="ap-form-row">
                 <div className="ap-form-group">
                   <label>Preferred Date <span className="text-danger">*</span></label>
@@ -1404,6 +1405,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                             className="btn-ap-companion-delete" 
                             onClick={() => removeVisitorRow(idx)} 
                             title="Remove Companion"
+                            aria-label="Remove Companion"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -1456,7 +1458,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <span><Clock size={15}/> {selectedJobDetails.employment_type}</span>
                 </div>
               </div>
-              <button className="ap-btn-close-light" onClick={() => setShowJobDetailsModal(false)}><X size={22} /></button>
+              <button className="ap-btn-close-light" onClick={() => setShowJobDetailsModal(false)} aria-label="Close modal">
+                <X size={22} />
+              </button>
             </div>
 
             <div className="ap-job-modal-body">
@@ -1515,7 +1519,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>Apply: {selectedJob.title}</h2>
-              <button className="ap-btn-close" onClick={() => setShowApplyModal(false)}><X size={20} /></button>
+              <button className="ap-btn-close" onClick={() => setShowApplyModal(false)} aria-label="Close modal">
+                <X size={20} />
+              </button>
             </div>
             <form onSubmit={submitApplication} className="ap-form">
               <div className="ap-form-group">
@@ -1576,7 +1582,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
           <div className="ap-gallery-modal" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header">
               <h2>{selectedFacility.name} Gallery</h2>
-              <button className="ap-btn-close" onClick={() => setSelectedFacility(null)}><X size={20} /></button>
+              <button className="ap-btn-close" onClick={() => setSelectedFacility(null)} aria-label="Close modal">
+                <X size={20} />
+              </button>
             </div>
             <div className="ap-gallery-grid">
               {(selectedFacility.images && selectedFacility.images.length > 0) ? (
@@ -1585,6 +1593,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     <img 
                       src={img} 
                       alt={`${selectedFacility.name} ${idx + 1}`} 
+                      loading="lazy"
                       onError={(e) => {
                         e.currentTarget.style.display = 'none';
                       }}

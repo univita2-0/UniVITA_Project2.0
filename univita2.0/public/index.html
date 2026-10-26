@@ -3,22 +3,42 @@
   <head>
     <meta charset="utf-8" />
     
-    <!-- Updated Favicon Links (pointing directly to hctlogo.png) -->
-    <link rel="icon" type="image/jpg" href="%PUBLIC_URL%/hctlogo.jpg" />
+    <!-- Favicon -->
+    <link rel="icon" type="image/jpeg" href="%PUBLIC_URL%/hctlogo.jpg" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/hctlogo.jpg" />
     
+    <!-- 1. Preconnect to Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     
-    <!-- Theme color set to UniVITA Teal -->
+    <!-- 2. Combined Non-Blocking Font Load (Inter + Plus Jakarta Sans) -->
+    <link 
+      rel="preload" 
+      as="style" 
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" 
+      onload="this.onload=null;this.rel='stylesheet'" 
+    />
+    <noscript>
+      <link 
+        rel="stylesheet" 
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" 
+      />
+    </noscript>
+
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0D9488" />
     
     <meta
       name="description"
       content="UniVITA: An Information Security Management System with 2D Mapping for HCT Academy"
     />
+
+    <!-- Social Media Meta Tags -->
+    <meta property="og:title" content="UniVITA - HCT Academy" />
+    <meta property="og:description" content="An Information Security Management System with 2D Mapping for HCT Academy" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="%PUBLIC_URL%/hctlogo.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
     
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     

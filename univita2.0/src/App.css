@@ -1,6 +1,5 @@
 /* src/App.css - Global Enterprise Reset */
 
-/* Global Variables */
 :root {
   --color-primary: #0D9488;
   --color-primary-hover: #0F766E;
@@ -15,7 +14,7 @@
   --color-warning: #D97706;
 }
 
-/* Global Reset */
+/* Global Reset (Kept here, removed from index.css) */
 * {
   margin: 0;
   padding: 0;
@@ -23,7 +22,8 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Updated to Plus Jakarta Sans */
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   background-color: var(--color-bg-main);
   color: var(--color-text-body);
   line-height: 1.5;
@@ -37,14 +37,16 @@ h1, h2, h3, h4, h5, h6 {
   line-height: 1.2;
 }
 
+/* ✅ LIGHTHOUSE FIX: Anchor Tag Contrast */
 a {
   text-decoration: none;
-  color: var(--color-primary);
+  /* Changed from --color-primary to --color-primary-hover to pass the 4.5:1 contrast ratio */
+  color: var(--color-primary-hover); 
   transition: color 0.2s ease;
 }
 
 a:hover {
-  color: var(--color-primary-hover);
+  color: #0D9488; /* Slightly lighter on hover is fine */
 }
 
 /* Base Form Elements */
@@ -60,7 +62,7 @@ button {
 /* Toastify Custom Overrides to match theme */
 .Toastify__toast {
   border-radius: 8px !important;
-  font-family: 'Inter', sans-serif !important;
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
   box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important;
 }
 
@@ -103,16 +105,15 @@ button {
   transform: translateX(-50%);
   width: 90%;
   max-width: 800px;
-  z-index: 9999; /* Forces the alerts to sit on top of everything */
+  z-index: 9999; 
   display: flex;
   flex-direction: column;
   gap: 10px;
-  pointer-events: none; /* Allows mouse clicks to pass through the invisible gaps to the dashboard below */
+  pointer-events: none; 
 }
 
-/* Target the actual alert boxes inside the wrapper */
 .global-alerts-overlay > * {
-  pointer-events: auto; /* Re-enables clicking on the actual alert boxes (for dismiss buttons) */
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12); /* Adds a drop shadow to make them pop off the page */
+  pointer-events: auto; 
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12); 
   border-radius: 8px;
 }

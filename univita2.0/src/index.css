@@ -1,6 +1,5 @@
 /* src/index.css */
 :root {
-
   --primary-teal: #00897B;
   --primary-dark-teal: #00695C;
   --bg-light: #F3F5F7;
@@ -14,11 +13,11 @@
   --radius-lg: 16px;
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
   
-  
-  --font-main: 'Inter', sans-serif;
+  /* Changed to Plus Jakarta Sans for the rest of the app */
+  --font-main: 'Plus Jakarta Sans', -apple-system, sans-serif;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* The * reset is moved to App.css to avoid duplication */
 
 body { 
   font-family: var(--font-main); 
@@ -29,8 +28,6 @@ body {
   -webkit-font-smoothing: antialiased; 
 }
 
-
-
 .card {
   background: var(--white);
   border-radius: var(--radius-lg);
@@ -40,11 +37,11 @@ body {
   width: 100%;
 }
 
-
 button {
   font-family: inherit;
   cursor: pointer;
 }
+
 .btn-primary, .btn-submit, .btn-unlock {
   font-size: 1rem; 
   padding: 0.85rem 1.5rem; 
@@ -52,15 +49,14 @@ button {
   font-weight: 600;
 }
 
-
 input, select {
   padding: 0.85rem 1rem; 
   border-radius: 8px;
   font-size: 1rem; 
   border: 1px solid var(--border-color);
   outline: none;
+  font-family: inherit;
 }
-
 
 .table-container { width: 100%; overflow-x: auto; }
 .custom-table { width: 100%; border-collapse: collapse; min-width: 800px; }
@@ -84,7 +80,6 @@ input, select {
   vertical-align: middle;
   color: #1F2937;
 }
-
 
 .badge {
   padding: 0.5rem 1.2rem; 
