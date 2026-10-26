@@ -47,11 +47,11 @@ export default function MyPayrollScreen({ navigation }) {
   const currentMonthKey = getMonthKey(currentMonth);
 
   const currentMonthPayslip = allPayslips.find(
-  record => getMonthKey(record.month_year) === currentMonthKey
-);
-const pastPayslips = allPayslips.filter(
-  record => getMonthKey(record.month_year) !== currentMonthKey
-);
+    record => getMonthKey(record.month_year) === currentMonthKey
+  );
+  const pastPayslips = allPayslips.filter(
+    record => getMonthKey(record.month_year) !== currentMonthKey
+  );
 
   const loadData = useCallback(async () => {
     setError(false);
@@ -90,7 +90,8 @@ const pastPayslips = allPayslips.filter(
   const renderCurrentMonthCard = (record) => {
     const totalDeductions = Number(record.sss_deduction || 0) + Number(record.philhealth_deduction || 0) + 
                             Number(record.pagibig_deduction || 0) + Number(record.tax_deduction || 0) + 
-                            Number(record.loan_deduction || 0) + Number(record.other_deduction || 0);
+                            Number(record.loan_deduction || 0) + Number(record.other_deduction || 0) + 
+                            Number(record.late_deduction || 0);
 
     return (
       <View style={styles.primaryCard}>
@@ -161,8 +162,32 @@ const pastPayslips = allPayslips.filter(
   const renderDetailModal = () => {
     if (!selectedPayslip) return null;
     const p = selectedPayslip;
-    const totalDeductions = Number(p.sss_deduction || 0) + Number(p.philhealth_deduction || 0) + Number(p.pagibig_deduction || 0) +
-                            Number(p.tax_deduction || 0) + Number(p.loan_deduction || 0) + Number(p.other_deduction || 0);
+
+    // Calculate Itemized Values
+    const hourlyRate = Number(p.salary_rate || 0);
+    const totalHours = Number(p.total_hours || 0);
+    const basicPay = hourlyRate * totalHours;
+    
+    const transport = Number(p.transport_allowance || 0);
+    const meal = Number(p.meal_allowance || 0);
+    const housing = Number(p.housing_allowance || 0);
+    const otPay = Number(p.overtime_pay || 0);
+    const gross = Number(p.gross_pay || 0);
+
+    const tax = Number(p.tax_deduction || 0);
+    const sss = Number(p.sss_deduction || 0);
+    const philhealth = Number(p.philhealth_deduction || 0);
+    const pagibig = Number(p.pagibig_deduction || 0);
+    const loans = Number(p.loan_deduction || 0);
+    const other = Number(p.other_deduction || 0);
+    const netPay = Number(p.net_pay || 0);
+
+    // Reverse-engineer Late Deductions
+    // Gross - (All Deductions + Net Pay) = Late/Undertime Deduction
+    const calculatedLate = gross - (tax + sss + philhealth + pagibig + loans + other + netPay);
+    const lateDeduction = calculatedLate > 0.01 ? calculatedLate : 0;
+
+    const totalDeductions = tax + sss + philhealth + pagibig + loans + other + lateDeduction;
 
     return (
       <Modal visible={showDetailModal} animationType="fade" transparent onRequestClose={() => setShowDetailModal(false)}>
@@ -181,27 +206,51 @@ const pastPayslips = allPayslips.filter(
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
               
+              {/* EARNINGS SECTION */}
               <View style={styles.receiptSection}>
                 <Text style={styles.sectionTitle}>Earnings</Text>
                 
                 <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Base Pay & Allowances</Text>
-                  <Text style={styles.receiptValue}>{formatCurrency(Number(p.gross_pay) - Number(p.overtime_pay || 0))}</Text>
+                  <Text style={styles.receiptLabel}>Basic Pay ({totalHours.toFixed(1)} hrs @ {formatCurrency(hourlyRate)}/hr)</Text>
+                  <Text style={styles.receiptValue}>{formatCurrency(basicPay)}</Text>
                 </View>
-                {Number(p.overtime_pay) > 0 && (
+
+                {otPay > 0 && (
                   <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Overtime Pay</Text>
-                    <Text style={styles.receiptValue}>{formatCurrency(p.overtime_pay)}</Text>
+                    <Text style={styles.receiptLabel}>Overtime Pay ({Number(p.overtime_hours).toFixed(1)} hrs)</Text>
+                    <Text style={styles.receiptValue}>{formatCurrency(otPay)}</Text>
+                  </View>
+                )}
+
+                {transport > 0 && (
+                  <View style={styles.receiptRow}>
+                    <Text style={styles.receiptLabel}>Transport Allowance</Text>
+                    <Text style={styles.receiptValue}>{formatCurrency(transport)}</Text>
+                  </View>
+                )}
+
+                {meal > 0 && (
+                  <View style={styles.receiptRow}>
+                    <Text style={styles.receiptLabel}>Meal Allowance</Text>
+                    <Text style={styles.receiptValue}>{formatCurrency(meal)}</Text>
+                  </View>
+                )}
+
+                {housing > 0 && (
+                  <View style={styles.receiptRow}>
+                    <Text style={styles.receiptLabel}>Housing Allowance</Text>
+                    <Text style={styles.receiptValue}>{formatCurrency(housing)}</Text>
                   </View>
                 )}
                 
                 <View style={styles.receiptDivider} />
                 <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabelPremium}>Gross Pay</Text>
-                  <Text style={styles.receiptValuePremium}>{formatCurrency(p.gross_pay)}</Text>
+                  <Text style={styles.receiptLabelPremium}>Total Gross Pay</Text>
+                  <Text style={styles.receiptValuePremium}>{formatCurrency(gross)}</Text>
                 </View>
               </View>
 
+              {/* DEDUCTIONS SECTION */}
               <View style={styles.receiptSection}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                   <TrendingDown size={18} color={isLight ? "#EF4444" : "#F87171"} strokeWidth={1.5} />
@@ -210,30 +259,39 @@ const pastPayslips = allPayslips.filter(
                 
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>Withholding Tax</Text>
-                  <Text style={styles.receiptValueRed}>-{formatCurrency(p.tax_deduction)}</Text>
+                  <Text style={styles.receiptValueRed}>-{formatCurrency(tax)}</Text>
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>SSS Contribution</Text>
-                  <Text style={styles.receiptValueRed}>-{formatCurrency(p.sss_deduction)}</Text>
+                  <Text style={styles.receiptValueRed}>-{formatCurrency(sss)}</Text>
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>PhilHealth</Text>
-                  <Text style={styles.receiptValueRed}>-{formatCurrency(p.philhealth_deduction)}</Text>
+                  <Text style={styles.receiptValueRed}>-{formatCurrency(philhealth)}</Text>
                 </View>
                 <View style={styles.receiptRow}>
                   <Text style={styles.receiptLabel}>Pag-IBIG</Text>
-                  <Text style={styles.receiptValueRed}>-{formatCurrency(p.pagibig_deduction)}</Text>
+                  <Text style={styles.receiptValueRed}>-{formatCurrency(pagibig)}</Text>
                 </View>
-                {Number(p.loan_deduction) > 0 && (
+
+                {lateDeduction > 0 && (
                   <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Loan Deduction</Text>
-                    <Text style={styles.receiptValueRed}>-{formatCurrency(p.loan_deduction)}</Text>
+                    <Text style={styles.receiptLabel}>Late / Undertime</Text>
+                    <Text style={styles.receiptValueRed}>-{formatCurrency(lateDeduction)}</Text>
                   </View>
                 )}
-                {Number(p.other_deduction) > 0 && (
+
+                {loans > 0 && (
+                  <View style={styles.receiptRow}>
+                    <Text style={styles.receiptLabel}>Loans / Advances</Text>
+                    <Text style={styles.receiptValueRed}>-{formatCurrency(loans)}</Text>
+                  </View>
+                )}
+                
+                {other > 0 && (
                   <View style={styles.receiptRow}>
                     <Text style={styles.receiptLabel}>Other Deductions</Text>
-                    <Text style={styles.receiptValueRed}>-{formatCurrency(p.other_deduction)}</Text>
+                    <Text style={styles.receiptValueRed}>-{formatCurrency(other)}</Text>
                   </View>
                 )}
                 
@@ -244,9 +302,10 @@ const pastPayslips = allPayslips.filter(
                 </View>
               </View>
 
+              {/* NET PAY HIGHLIGHT */}
               <View style={styles.netPayHighlight}>
                 <Text style={styles.netPayHighlightLabel}>Net Take-Home Pay</Text>
-                <Text style={styles.netPayHighlightValue}>{formatCurrency(p.net_pay)}</Text>
+                <Text style={styles.netPayHighlightValue}>{formatCurrency(netPay)}</Text>
               </View>
             </ScrollView>
           </View>
@@ -366,7 +425,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   receiptSection: { backgroundColor: isLight ? '#F8FAFC' : colors.background, borderRadius: 24, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   sectionTitle: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 16 },
   receiptRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  receiptLabel: { fontFamily: 'Inter_18pt-Regular', fontSize: 14, color: isLight ? '#475569' : colors.textSecondary },
+  receiptLabel: { fontFamily: 'Inter_18pt-Regular', fontSize: 13, color: isLight ? '#475569' : colors.textSecondary, flex: 1, paddingRight: 10 },
   receiptValue: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },
   receiptValueRed: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#EF4444' : '#F87171' },
   receiptDivider: { height: 1, backgroundColor: isLight ? '#E2E8F0' : colors.border, marginVertical: 14 },

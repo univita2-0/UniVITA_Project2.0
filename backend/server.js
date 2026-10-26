@@ -4910,9 +4910,14 @@ app.delete('/api/visit-reasons/:id', authenticateToken, (req, res) => {
 });
 
 
-// ============================================
-// 10. EMERGENCY ALERTS, JOBS & POLICIES (Secured & Validated)
-// ============================================
+db.query("SHOW COLUMNS FROM emergency_alerts LIKE 'created_by'", (err, result) => {
+  if (!err && result.length === 0) {
+    db.query("ALTER TABLE emergency_alerts ADD COLUMN created_by INT", (alterErr) => {
+      if (alterErr) console.error("Failed to add created_by column:", alterErr);
+      else console.log("Added 'created_by' column to emergency_alerts.");
+    });
+  }
+});
 
 app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -4926,7 +4931,7 @@ app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Alert title, message, and severity level are required.' });
   }
 
-  // ✅ E3 — length caps
+  // E3 — length caps
   const cleanTitle = String(title).trim();
   const cleanMessage = String(message).trim();
   if (cleanTitle.length < 3) {
@@ -4946,7 +4951,7 @@ app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Invalid severity level. Must be info, warning, or critical.' });
   }
 
-  // ✅ E1 — require at least one target role
+  // E1 — require at least one target role
   if (!Array.isArray(target_roles) || target_roles.length === 0) {
     return res.status(400).json({ success: false, message: 'Select at least one target role for the alert.' });
   }
@@ -4958,7 +4963,7 @@ app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
     if (r.includes('hr')) return 'hr_admin';
     if (r.includes('instructor') || r.includes('faculty')) return 'instructor';
     return null;
-  }).filter(Boolean); // ✅ drop unrecognized roles
+  }).filter(Boolean); // drop unrecognized roles
 
   const uniqueRoles = [...new Set(safeRoles)];
   if (uniqueRoles.length === 0) {
@@ -4967,9 +4972,10 @@ app.post('/api/emergency-alerts', authenticateToken, async (req, res) => {
   const targetRolesJson = JSON.stringify(uniqueRoles);
 
   try {
+    // ✅ FIX: Save created_by to track the sender
     const [result] = await db.promise().query(
-      "INSERT INTO emergency_alerts (title, message, severity, target_roles) VALUES (?, ?, ?, ?)",
-      [cleanTitle, cleanMessage, severity, targetRolesJson]
+      "INSERT INTO emergency_alerts (title, message, severity, target_roles, created_by) VALUES (?, ?, ?, ?, ?)",
+      [cleanTitle, cleanMessage, severity, targetRolesJson, req.user.id]
     );
     const alertId = result.insertId;
 
@@ -5154,7 +5160,6 @@ app.get('/api/emergency-alerts/active', authenticateToken, async (req, res) => {
     if (userRows.length === 0) return res.status(404).json({ success: false, message: 'User not found' });
     const userRole = userRows[0].role.toLowerCase().trim();
 
-    
     const [activeAlerts] = await db.promise().query(`
       SELECT 
         ea.id, 
@@ -5165,6 +5170,7 @@ app.get('/api/emergency-alerts/active', authenticateToken, async (req, res) => {
         ea.target_roles, 
         ea.is_active, 
         ea.expires_at,
+        ea.created_by, -- ✅ Fetch sender ID
         ar.read_at
       FROM emergency_alerts ea
       LEFT JOIN alert_receipts ar ON ea.id = ar.alert_id AND ar.user_id = ?
@@ -5176,19 +5182,25 @@ app.get('/api/emergency-alerts/active', authenticateToken, async (req, res) => {
     const receiptsToInsert = [];
 
     for (const alert of activeAlerts) {
-      let targetRoles = [];
-      try {
-        targetRoles = JSON.parse(alert.target_roles || '[]');
-      } catch (e) {
-        targetRoles = ['instructor', 'admin', 'security', 'hr_admin'];
+      //  Skip the alert if the current user is the sender
+      if (alert.created_by === userId) {
+        continue;
       }
 
-      const isTargeted = targetRoles.map(r => r.toLowerCase().trim()).includes(userRole) || targetRoles.length === 0;
+      let targetRoles = [];
+      
+      
+      if (typeof alert.target_roles === 'string') {
+        try { targetRoles = JSON.parse(alert.target_roles); } catch(e) { targetRoles = []; }
+      } else if (Array.isArray(alert.target_roles)) {
+        targetRoles = alert.target_roles;
+      }
+
+      // Check if the current user's role is in the target list
+      const isTargeted = targetRoles.length === 0 || targetRoles.map(r => r.toLowerCase().trim()).includes(userRole);
 
       if (isTargeted) {
-        
         receiptsToInsert.push([alert.id, userId]);
-
         validAlerts.push({
           id: alert.id,
           title: alert.title,
@@ -5200,7 +5212,6 @@ app.get('/api/emergency-alerts/active', authenticateToken, async (req, res) => {
       }
     }
 
-    
     if (receiptsToInsert.length > 0) {
       await db.promise().query(
         `INSERT IGNORE INTO alert_receipts (alert_id, user_id) VALUES ?`,

@@ -1,133 +1,164 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-.ap-emergency-banner-container {
-  position: sticky;
-  top: 1rem;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 0 1.5rem;
-  background: transparent;
-  max-width: 900px;
-  margin: 0 auto;
-}
 
-.ap-emergency-banner {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  padding: 1rem 1.25rem;
-  border-radius: 12px;
-  font-family: 'Inter', system-ui, sans-serif;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-  animation: apSlideDownFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-@keyframes apSlideDownFade {
-  from { transform: translateY(-15px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-/* Severity Theme: Critical */
-.ap-severity-critical {
-  background-color: rgba(254, 242, 242, 0.95);
-  border: 1px solid #FECACA;
-}
-.ap-severity-critical .ap-banner-icon-wrapper { color: #DC2626; background: #FEE2E2; }
-.ap-severity-critical .ap-banner-title { color: #991B1B; }
-.ap-severity-critical .ap-banner-message { color: #7F1D1D; }
-.ap-severity-critical .ap-banner-dismiss-btn { color: #DC2626; background: rgba(220, 38, 38, 0.1); }
-
-/* Severity Theme: Warning */
-.ap-severity-warning {
-  background-color: rgba(255, 251, 235, 0.95);
-  border: 1px solid #FDE68A;
-}
-.ap-severity-warning .ap-banner-icon-wrapper { color: #D97706; background: #FEF3C7; }
-.ap-severity-warning .ap-banner-title { color: #92400E; }
-.ap-severity-warning .ap-banner-message { color: #78350F; }
-.ap-severity-warning .ap-banner-dismiss-btn { color: #D97706; background: rgba(217, 119, 6, 0.1); }
-
-/* Severity Theme: Info */
-.ap-severity-info {
-  background-color: rgba(239, 246, 255, 0.95);
-  border: 1px solid #BFDBFE;
-}
-.ap-severity-info .ap-banner-icon-wrapper { color: #2563EB; background: #DBEAFE; }
-.ap-severity-info .ap-banner-title { color: #1E40AF; }
-.ap-severity-info .ap-banner-message { color: #1E3A8A; }
-.ap-severity-info .ap-banner-dismiss-btn { color: #2563EB; background: rgba(37, 99, 235, 0.1); }
-
-/* Internal Layout Elements */
-.ap-banner-icon-wrapper {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
+.ap-emergency-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  padding: 1.5rem;
+  box-sizing: border-box;
 }
 
-.ap-banner-content-wrapper {
-  flex: 1;
+.ap-emergency-modal-container {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 1rem;
+  width: 100%;
+  max-width: 550px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.ap-emergency-banner {
+  background: #FFFFFF;
+  border-radius: 12px;
+  font-family: 'Inter', system-ui, sans-serif;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  animation: apPopIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  border-top: 6px solid;
+}
+
+@keyframes apPopIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Severity Themes (Applied to top border and icons) */
+.ap-severity-critical { border-top-color: #DC2626; }
+.ap-severity-critical .ap-banner-icon-wrapper { color: #DC2626; }
+.ap-severity-critical .ap-banner-title { color: #DC2626; }
+
+.ap-severity-warning { border-top-color: #D97706; }
+.ap-severity-warning .ap-banner-icon-wrapper { color: #D97706; }
+.ap-severity-warning .ap-banner-title { color: #D97706; }
+
+.ap-severity-info { border-top-color: #2563EB; }
+.ap-severity-info .ap-banner-icon-wrapper { color: #2563EB; }
+.ap-severity-info .ap-banner-title { color: #2563EB; }
+
+/* Internal Layout */
+.ap-banner-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem 0.5rem 1.5rem;
+}
+
+.ap-banner-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ap-banner-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ap-banner-title {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
+}
+
+.ap-banner-dismiss-btn {
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.ap-banner-dismiss-btn:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+.ap-banner-body {
+  padding: 0.5rem 1.5rem 1.25rem 1.5rem;
+}
+
+.ap-alert-subject {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0F172A;
 }
 
 .ap-banner-message {
   margin: 0;
-  font-size: 0.925rem;
-  font-weight: 500;
-  line-height: 1.4;
+  font-size: 0.95rem;
+  font-weight: 400;
+  color: #475569;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
-.ap-banner-dismiss-btn {
-  border: none;
-  cursor: pointer;
+.ap-banner-footer {
+  padding: 1rem 1.5rem;
+  background: #F8FAFC;
+  border-top: 1px solid #E2E8F0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
+  justify-content: flex-end;
 }
 
-.ap-banner-dismiss-btn:hover {
-  transform: scale(1.05);
-  filter: brightness(0.95);
+.ap-btn-acknowledge {
+  background: #0F172A;
+  color: #FFFFFF;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ap-btn-acknowledge:hover {
+  background: #334155;
 }
 
 /* Responsive */
 @media (max-width: 600px) {
-  .ap-emergency-banner-container {
-    padding: 0 1rem;
-    top: 0.75rem;
+  .ap-emergency-modal-overlay {
+    padding: 1rem;
   }
-  .ap-emergency-banner {
+  .ap-banner-header {
+    padding: 1rem 1rem 0.25rem 1rem;
+  }
+  .ap-banner-body {
+    padding: 0.5rem 1rem 1rem 1rem;
+  }
+  .ap-banner-footer {
     padding: 0.85rem 1rem;
-    gap: 1rem;
   }
-  .ap-banner-icon-wrapper {
-    width: 36px;
-    height: 36px;
-  }
-  .ap-banner-title {
-    font-size: 0.85rem;
+  .ap-alert-subject {
+    font-size: 1rem;
   }
   .ap-banner-message {
     font-size: 0.875rem;
