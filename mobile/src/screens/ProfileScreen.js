@@ -16,6 +16,7 @@ import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import { API_URL, updateProfile } from './api';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { OFFLINE_QUEUE_KEY } from './api';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -233,30 +234,48 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleUpdatePassword = async () => {
-    if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) return Alert.alert("Validation Error", "Please complete all password fields.");
-    if (!hasLength || !hasUppercase || !hasSpecial) return Alert.alert("Security Requirement", "New password must meet all security criteria.");
-    if (currentPassword === newPassword) return Alert.alert("Validation Error", "New password must differ from current.");
-    if (!passwordsMatch) return Alert.alert("Validation Error", "New passwords do not match.");
+  if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) return Alert.alert("Validation Error", "Please complete all password fields.");
+  if (!hasLength || !hasUppercase || !hasSpecial) return Alert.alert("Security Requirement", "New password must meet all security criteria.");
+  if (currentPassword === newPassword) return Alert.alert("Validation Error", "New password must differ from current.");
+  if (!passwordsMatch) return Alert.alert("Validation Error", "New passwords do not match.");
 
-    setLoadingPwd(true);
-    try {
-      const token = await AsyncStorage.getItem('auth_token');
-      const empIdentifier = (fullDetails.employee_id && fullDetails.employee_id !== '—') ? fullDetails.employee_id : userData.id;
-      
-      const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`, 
-        { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() }, 
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (res.data.success) {
-        setShowPasswordModal(false);
-        Alert.alert("Security Updated", "Your password has been changed.", [{ text: "Sign In", onPress: async () => { await AsyncStorage.clear(); navigation.replace('Login'); } }]);
-      } else { Alert.alert("Error", res.data.message || "Password update failed."); }
-    } catch (error) { 
-      Alert.alert("Error", error.response?.data?.message || "Network error occurred."); 
-    } finally { setLoadingPwd(false); }
-  };
+  setLoadingPwd(true);
+  try {
+    const token = await AsyncStorage.getItem('auth_token');
+    const empIdentifier = (fullDetails.employee_id && fullDetails.employee_id !== '—') ? fullDetails.employee_id : userData.id;
 
+    const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`,
+      { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (res.data.success) {
+      setShowPasswordModal(false);
+      Alert.alert("Security Updated", "Your password has been changed.", [
+        {
+          text: "Sign In",
+          onPress: async () => {
+            
+            await AsyncStorage.clear();
+            
+            try {
+              await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
+            } catch (e) {
+              console.warn('Failed to explicitly clear offline queue:', e);
+            }
+            navigation.replace('Login');
+          }
+        }
+      ]);
+    } else {
+      Alert.alert("Error", res.data.message || "Password update failed.");
+    }
+  } catch (error) {
+    Alert.alert("Error", error.response?.data?.message || "Network error occurred.");
+  } finally {
+    setLoadingPwd(false);
+  }
+};
   const MenuItem = ({ icon: Icon, title, subtitle, onPress }) => (
     <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.iconBox}><Icon size={20} color={isLight ? "#334155" : colors.primary} /></View>
@@ -345,18 +364,24 @@ export default function ProfileScreen({ navigation }) {
           <TouchableOpacity 
             style={styles.logoutBtn} 
             onPress={() => Alert.alert("Logout", "Are you sure you want to log out?", [
-              { text: "Cancel", style: "cancel" }, 
-              { 
-                text: "Logout", 
-                onPress: async () => { 
-                  const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
-                  await AsyncStorage.clear(); 
-                  if (rememberedEmail) await AsyncStorage.setItem('@remembered_email', rememberedEmail);
-                  navigation.replace('Login'); 
-                }, 
-                style: 'destructive' 
-              }
-            ])} 
+  { text: "Cancel", style: "cancel" },
+  {
+    text: "Logout",
+    onPress: async () => {
+      const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
+      await AsyncStorage.clear();
+      
+      try {
+        await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
+      } catch (e) {
+        console.warn('Failed to explicitly clear offline queue:', e);
+      }
+      if (rememberedEmail) await AsyncStorage.setItem('@remembered_email', rememberedEmail);
+      navigation.replace('Login');
+    },
+    style: 'destructive'
+  }
+])} 
             activeOpacity={0.8}
           >
             <LogOut size={18} color={isLight ? "#FFFFFF" : colors.buttonText} />

@@ -23,6 +23,7 @@ const bcrypt = require('bcrypt');
 
 const app = express();
 const GPS_GRACE_MS = 120000; 
+const SPOOF_BLOCK_SPEED_KMH = 1500;
 const gpsStates = new Map(); 
 const campusStates = new Map();
 const helmet = require('helmet');
@@ -185,6 +186,62 @@ const hasExistingRequest = async (employeeId, dateStr, type) => {
     [employeeId, dateStr]
   );
   return corrRows.length > 0;
+};
+
+const broadcastToAdminAndHR = (data) => {
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN && client.user && 
+        (client.user.role === 'admin' || client.user.role === 'hr_admin')) {
+      client.send(JSON.stringify(data));
+    }
+  });
+};
+
+const broadcastInstructorStatus = async (employeeId) => {
+  const { date: today } = getPHTime();
+  const phNow = getPHDateTime(); // ✅ ADDED THIS
+
+  const [rows] = await db.promise().query(`
+    SELECT 
+      u.employee_id, u.full_name, u.last_location_ping, u.location_tracking_enabled,
+      s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course, s.start_time, s.end_time,
+      (CASE 
+        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF'  -- ✅ [1] Replaced NOW()
+        WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
+        WHEN u.last_location_ping IS NULL THEN 'Unavailable'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'Signal Lost' -- ✅ [2, 3] Replaced NOW()
+        ELSE (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
+      END) AS last_position_name,
+      (CASE 
+        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN NULL -- ✅ [4] Replaced NOW()
+        WHEN u.location_tracking_enabled = 0 THEN NULL
+        WHEN u.last_location_ping IS NULL THEN NULL
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN NULL -- ✅ [5, 6] Replaced NOW()
+        ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
+      END) AS last_is_inside,
+      (CASE 
+        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF' -- ✅ [7] Replaced NOW()
+        WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
+        WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
+        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'GPS OFF' -- ✅ [8, 9] Replaced NOW()
+        ELSE 'GPS ON'
+      END) AS gps_status
+    FROM users u
+    LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND DATE(s.date) = ?
+    WHERE u.employee_id = ?
+  `, [
+    phNow,                        // [1]
+    phNow, GPS_STALE_SECONDS,     // [2, 3]
+    phNow,                        // [4]
+    phNow, GPS_STALE_SECONDS,     // [5, 6]
+    phNow,                        // [7]
+    phNow, GPS_STALE_SECONDS,     // [8, 9]
+    today,                        // [10] for DATE(s.date) = ?
+    employeeId                    // [11] for u.employee_id = ?
+  ]);
+
+  if (rows.length === 0) return;
+  broadcastToAdminAndHR({ type: 'instructor_status_update', instructor: rows[0] });
 };
 
 
@@ -477,6 +534,68 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
+
+
+
+const getRecentLocationPings = async (dbClient, employeeId, limit = 10) => {
+  const [rows] = await dbClient.query(
+    `SELECT latitude, longitude, ping_time
+     FROM instructor_location_tracking
+     WHERE employee_id = ?
+     ORDER BY id DESC
+     LIMIT ?`,
+    [employeeId, limit]
+  );
+  return rows;
+};
+
+const parsePHTMillis = (str) => {
+  if (!str) return NaN;
+  const s = String(str).includes('T') ? String(str) : String(str).replace(' ', 'T');
+  return new Date(`${s}+08:00`).getTime();
+};
+
+const checkLocationHeuristics = (recentPings, currentLat, currentLon, currentTimeStr) => {
+  const flags = [];
+
+  
+  const last = recentPings[0];
+  if (last) {
+    const lastMs = parsePHTMillis(last.ping_time);
+    const nowMs  = parsePHTMillis(currentTimeStr);
+    const hours  = (nowMs - lastMs) / 3.6e6;
+    if (hours > 0) {
+      const km = getDistanceFromLatLonInMeters(
+        last.latitude, last.longitude, currentLat, currentLon
+      ) / 1000;
+      const speedKmh = km / hours;
+      if (speedKmh > 900) {
+        flags.push({
+          reason: 'Impossible travel speed',
+          speed_kmh: Math.round(speedKmh),   
+          detail: `${Math.round(speedKmh)} km/h over ${Math.round(hours * 60)} min`
+        });
+      }
+    }
+  }
+
+  
+  if (recentPings.length >= 5) {
+    const identicalCount = recentPings.filter(p =>
+      Math.abs(Number(p.latitude)  - currentLat) < 0.000001 &&
+      Math.abs(Number(p.longitude) - currentLon) < 0.000001
+    ).length;
+    if (identicalCount >= 5) {
+      flags.push({
+        reason: 'Repeated identical coordinates',
+        detail: `${identicalCount} of ${recentPings.length} recent pings matched exactly`
+      });
+    }
+  }
+
+  return { suspicious: flags.length > 0, flags };
+};
+
 
 // --------------------------------------------------
 // MULTER SETUP & SECURITY FILTERS
@@ -1136,20 +1255,17 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
   const selfiePath = `/uploads/selfies/${req.file.filename}`;
   const { date: todayDate, time: currentTime } = getPHTime();
 
- 
   const connection = await db.promise().getConnection();
   
   try {
     await connection.beginTransaction();
 
-    
     const [userRows] = await connection.query(
       "SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active' FOR UPDATE",
       [userId]
     );
     if (userRows.length === 0) {
       await connection.rollback();
-      
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(403).json({ success: false, message: 'User inactive or not found.' });
     }
@@ -1238,6 +1354,55 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
     }
 
+    // ── LAYER 2: server-side spoofing heuristics ─────────────────────
+    try {
+      const recentPings = await getRecentLocationPings(connection, employee_id, 10);
+      const heuristic = checkLocationHeuristics(
+        recentPings, parsedLat, parsedLon, `${todayDate} ${currentTime}`
+      );
+
+      if (heuristic.suspicious) {
+  logAction(userId, 'SUSPICIOUS_LOCATION', 'attendance', null, req, null, {
+    event: 'clock_in',
+    flags: heuristic.flags,
+    lat: parsedLat,
+    lon: parsedLon
+  });
+
+  // ⚡ Push to any admin currently viewing the Location Tracking page
+  broadcastToAdminAndHR({
+    type: 'suspicious_location',
+    event: {
+      employee_id,
+      full_name: userRows[0].full_name,
+      event_type: 'clock_in',
+      flags: heuristic.flags,
+      lat: parsedLat,
+      lon: parsedLon,
+      created_at: getPHDateTime()
+    }
+  });
+
+  const severeFlag = heuristic.flags.some(f =>
+    f.reason === 'Impossible travel speed' &&
+    Number(f.speed_kmh) >= SPOOF_BLOCK_SPEED_KMH
+  );
+
+  if (severeFlag) {
+    await connection.rollback();
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    return res.status(403).json({
+      success: false,
+      message: 'Location verification failed. Please contact HR to clock in.'
+    });
+  }
+}
+    } catch (heuristicErr) {
+      // Never let the heuristic crash the clock-in — log and continue
+      console.warn('Spoofing heuristic check failed (non-blocking):', heuristicErr.message);
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     const [existing] = await connection.query(
       "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ? AND DATE(date) = ?", 
       [employee_id, schedule_id, todayDate]
@@ -1260,7 +1425,6 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
 
     const status = diffMinutes > 30 ? 'late' : 'present';
 
-    
     const [result] = await connection.query(
       `INSERT INTO attendance 
         (user_id, schedule_id, date, time_in, status, clock_in_selfie,
@@ -1283,17 +1447,14 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       [employee_id]
     );
 
-    
     await connection.commit();
 
-    
     logAction(req.user.id, 'CLOCK_IN', 'attendance', result.insertId, req);
     await broadcastInstructorStatus(employee_id);
 
     res.json({ success: true, message: `Clocked in successfully as ${status} at ${formatTo12Hour(currentTime)}.` });
 
   } catch (err) {
-    
     await connection.rollback();
     console.error("Clock-in error:", err);
     if (fs.existsSync(req.file.path)) {
@@ -1301,7 +1462,6 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     }
     res.status(500).json({ success: false, message: "A server error occurred during clock-in." });
   } finally {
-  
     connection.release();
   }
 });
@@ -1326,7 +1486,7 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
 
   try {
     const [userRows] = await db.promise().query(
-      "SELECT employee_id FROM users WHERE id = ? AND status = 'active'",
+      "SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active'",
       [userId]
     );
     if (userRows.length === 0) return res.status(403).json({ success: false, message: 'User inactive or not found.' });
@@ -1402,13 +1562,60 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
       return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
     }
 
+    // ── LAYER 2: server-side spoofing heuristics ─────────────────────
+    try {
+      const recentPings = await getRecentLocationPings(db.promise(), employee_id, 10);
+      const heuristic = checkLocationHeuristics(
+        recentPings, parsedLat, parsedLon, `${todayDate} ${currentTime}`
+      );
+
+      if (heuristic.suspicious) {
+  logAction(userId, 'SUSPICIOUS_LOCATION', 'attendance', null, req, null, {
+    event: 'clock_out',
+    flags: heuristic.flags,
+    lat: parsedLat,
+    lon: parsedLon
+  });
+
+  // ⚡ Push to any admin currently viewing the Location Tracking page
+  broadcastToAdminAndHR({
+    type: 'suspicious_location',
+    event: {
+      employee_id,
+      full_name: userRows[0].full_name,
+      event_type: 'clock_out',
+      flags: heuristic.flags,
+      lat: parsedLat,
+      lon: parsedLon,
+      created_at: getPHDateTime()
+    }
+  });
+
+  const severeFlag = heuristic.flags.some(f =>
+    f.reason === 'Impossible travel speed' &&
+    Number(f.speed_kmh) >= SPOOF_BLOCK_SPEED_KMH
+  );
+
+  if (severeFlag) {
+    
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    return res.status(403).json({
+  success: false,
+  message: 'Location verification failed. Please contact HR to clock out.'
+});
+  }
+}
+    } catch (heuristicErr) {
+      console.warn('Spoofing heuristic check failed (non-blocking):', heuristicErr.message);
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     const [existing] = await db.promise().query(
       "SELECT id, time_in FROM attendance WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
       [employee_id, schedule_id]
     );
     if (existing.length === 0) return res.status(400).json({ success: false, message: 'No active clock-in found for this schedule.' });
 
-    
     await db.promise().query(
       `UPDATE attendance SET 
         time_out = ?, 
@@ -2969,10 +3176,10 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
       
       -- Mobile Badge Status
       CASE 
-        WHEN (ac.id IS NOT NULL AND ac.status = 'pending') OR (a.correction_status = 'pending') THEN 'Pending'
-        WHEN (ap.id IS NOT NULL AND ap.status = 'pending') THEN 'Pending'
-        WHEN (lr_pending.id IS NOT NULL) THEN 'Pending'
-        WHEN (lr_approved.id IS NOT NULL) OR a.status = 'on leave' THEN 'On Leave'
+  WHEN (ac.id IS NOT NULL AND ac.status = 'pending') OR (a.correction_status = 'pending') THEN 'Pending Correction'
+  WHEN (ap.id IS NOT NULL AND ap.status = 'pending') THEN 'Pending Appeal'
+  WHEN (lr_pending.id IS NOT NULL) THEN 'Pending Leave'
+  WHEN (lr_approved.id IS NOT NULL) OR a.status = 'on leave' THEN 'On Leave'
         WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Completed'
         WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN
           CASE 
@@ -7297,52 +7504,61 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
   }
 });
 
-const broadcastInstructorStatus = async (employeeId) => {
-  const { date: today } = getPHTime();
-  const phNow = getPHDateTime(); // ✅ ADDED THIS
 
-  const [rows] = await db.promise().query(`
-    SELECT 
-      u.employee_id, u.full_name, u.last_location_ping, u.location_tracking_enabled,
-      s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course, s.start_time, s.end_time,
-      (CASE 
-        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF'  -- ✅ [1] Replaced NOW()
-        WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
-        WHEN u.last_location_ping IS NULL THEN 'Unavailable'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'Signal Lost' -- ✅ [2, 3] Replaced NOW()
-        ELSE (SELECT location_name FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
-      END) AS last_position_name,
-      (CASE 
-        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN NULL -- ✅ [4] Replaced NOW()
-        WHEN u.location_tracking_enabled = 0 THEN NULL
-        WHEN u.last_location_ping IS NULL THEN NULL
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN NULL -- ✅ [5, 6] Replaced NOW()
-        ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
-      END) AS last_is_inside,
-      (CASE 
-        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF' -- ✅ [7] Replaced NOW()
-        WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
-        WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'GPS OFF' -- ✅ [8, 9] Replaced NOW()
-        ELSE 'GPS ON'
-      END) AS gps_status
-    FROM users u
-    LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND DATE(s.date) = ?
-    WHERE u.employee_id = ?
-  `, [
-    phNow,                        // [1]
-    phNow, GPS_STALE_SECONDS,     // [2, 3]
-    phNow,                        // [4]
-    phNow, GPS_STALE_SECONDS,     // [5, 6]
-    phNow,                        // [7]
-    phNow, GPS_STALE_SECONDS,     // [8, 9]
-    today,                        // [10] for DATE(s.date) = ?
-    employeeId                    // [11] for u.employee_id = ?
-  ]);
 
-  if (rows.length === 0) return;
-  broadcastToAdminAndHR({ type: 'instructor_status_update', instructor: rows[0] });
-};
+app.get('/api/location-tracking/suspicious', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const targetDate = req.query.date || getPHTime().date;
+
+  try {
+    const [rows] = await db.promise().query(
+      `SELECT
+         al.id,
+         al.user_id,
+         u.employee_id,
+         u.full_name,
+         al.new_value,
+         DATE_FORMAT(al.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+       FROM audit_logs al
+       JOIN users u ON u.id = al.user_id
+       WHERE al.action = 'SUSPICIOUS_LOCATION'
+         AND DATE(al.created_at) = ?
+       ORDER BY al.id DESC
+       LIMIT 500`,
+      [targetDate]
+    );
+
+    const formatted = rows.map((r) => {
+      let parsed = {};
+      try {
+        parsed = typeof r.new_value === 'string'
+          ? JSON.parse(r.new_value)
+          : (r.new_value || {});
+      } catch (e) {
+        parsed = {};
+      }
+      return {
+        id: r.id,
+        user_id: r.user_id,
+        employee_id: r.employee_id,
+        full_name: r.full_name,
+        event: parsed.event || 'unknown',
+        flags: Array.isArray(parsed.flags) ? parsed.flags : [],
+        lat: parsed.lat ?? null,
+        lon: parsed.lon ?? null,
+        created_at: r.created_at,
+      };
+    });
+
+    res.json(formatted);
+  } catch (err) {
+    console.error('Suspicious locations fetch error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/location-tracking/status', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
@@ -9486,14 +9702,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 
 const wss = new WebSocket.Server({ server, maxPayload: 16 * 1024 });
 
-const broadcastToAdminAndHR = (data) => {
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN && client.user && 
-        (client.user.role === 'admin' || client.user.role === 'hr_admin')) {
-      client.send(JSON.stringify(data));
-    }
-  });
-};
+
 
 wss.on('connection', (ws, req) => {
   const params = url.parse(req.url, true).query;

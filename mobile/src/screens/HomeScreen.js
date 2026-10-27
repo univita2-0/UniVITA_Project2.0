@@ -12,12 +12,17 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import axios from 'axios';
 import {
-  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, checkLocationServicesEnabled, sendLocationPing, API_URL
+  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, checkLocationServicesEnabled, sendLocationPing, API_URL, OFFLINE_QUEUE_KEY
 } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import {
   Clock, MapPin, X, CheckCircle, XCircle, AlertCircle, TrendingUp, FileText, Calendar, ArrowUpRight, Eye, Filter, Bell, Inbox
 } from 'lucide-react-native';
+
+import { isMockingLocation } from 'react-native-turbo-mock-location-detector';
+
+
+
 
 
 const startBackgroundTracking = async (primaryColor) => {
@@ -50,6 +55,8 @@ const startBackgroundTracking = async (primaryColor) => {
 const LOCATION_TASK_NAME = 'background-location-task';
 
 const getTodayString = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+const EARLY_GRACE_MINUTES = 5;
+const LATE_GRACE_MINUTES  = 15; 
 
 const getInitialMonthString = () => {
   const now = new Date();
@@ -68,9 +75,30 @@ const parseDateOnly = (dateInput) => {
 
 const formatNotificationDate = (dateStr) => {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return String(dateStr).split('T')[0];
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const raw = String(dateStr).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-').map(Number);
+    const dObj = new Date(y, m - 1, d, 12, 0, 0); 
+    return dObj.toLocaleDateString('en-US', {
+      timeZone: 'Asia/Manila',
+      month: 'short',
+      day: 'numeric',
+    });
+  }
+
+  const iso = raw.replace(' ', 'T');
+  const hasTZ = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasTZ ? iso : `${iso}+08:00`);
+  if (isNaN(d.getTime())) return raw.split('T')[0];
+  return d.toLocaleString('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 };
 
 const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
@@ -146,12 +174,7 @@ export default function HomeScreen({ navigation }) {
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
 
-  const getGreeting = () => {
-    const hour = currentTime.getHours();
-    if (hour < 12) return "GOOD MORNING";
-    if (hour < 18) return "GOOD AFTERNOON";
-    return "GOOD EVENING";
-  };
+  
 
   const promptBatteryOptimizationOnce = async () => {
     if (Platform.OS !== 'android') return;
@@ -195,192 +218,290 @@ export default function HomeScreen({ navigation }) {
     return () => { isMounted = false; };
   }, []);
 
-  // --- REAL-TIME DERIVED TIME CALCULATIONS (Guarantees instant button disable past shift end) ---
-  const currentMinutes = useMemo(() => {
-    return currentTime.getHours() * 60 + currentTime.getMinutes();
-  }, [currentTime]);
+  const { currentMinutes, currentTimeStrPHT } = useMemo(() => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(currentTime);
+
+  const h = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10);
+  const m = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0', 10);
+
+  return {
+    currentMinutes: h * 60 + m,
+    currentTimeStrPHT: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`,
+  };
+}, [currentTime]);
+
+const greeting = useMemo(() => {
+  const h = parseInt(currentTimeStrPHT.split(':')[0], 10);
+  if (h < 12) return "GOOD MORNING";
+  if (h < 18) return "GOOD AFTERNOON";
+  return "GOOD EVENING";
+}, [currentTimeStrPHT]);
 
   const todayStr = getTodayString();
 
   const allTodaySchedules = useMemo(() => {
-    const parseMins = (ts) => {
-      if (!ts) return 0;
-      let cs = String(ts).split('.')[0].replace(',', ':');
-      const [h, m] = cs.split(':').map(Number);
-      return (h || 0) * 60 + (m || 0);
-    };
+  const parseMins = (ts) => {
+    if (!ts) return 0;
+    let cs = String(ts).split('.')[0].replace(',', ':');
+    const [h, m] = cs.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
 
-    return (rawSchedule || [])
-      .filter(s => String(s.date).startsWith(todayStr))
-      .map(s => {
-        const record = (rawHistory || []).find(r => r.schedule_id === s.id);
-        const startMins = parseMins(s.start_time);
-        const endMins = parseMins(s.end_time);
-        const isPassed = currentMinutes > endMins;
-        const isActive = currentMinutes >= (startMins - 30) && currentMinutes <= endMins;
+  return (rawSchedule || [])
+    .filter(s => String(s.date).startsWith(todayStr))
+    .map(s => {
+      const record = (rawHistory || []).find(r => r.schedule_id === s.id);
+      const startMins = parseMins(s.start_time);
+      const endMins = parseMins(s.end_time);
+      // Shift is past its clock-out grace window entirely
+      const isPastGrace = currentMinutes > (endMins + LATE_GRACE_MINUTES);
+      // Active window includes the grace period so status stays "IN PROGRESS" / "SCHEDULED" until grace expires
+      const isActive = currentMinutes >= (startMins - 30) &&
+                       currentMinutes <= (endMins + LATE_GRACE_MINUTES);
+      const isPassed = currentMinutes > endMins; 
+
+      const hasClockIn  = record && record.time_in  && record.time_in  !== '--:--' && record.time_in  !== null;
+      const hasClockOut = record && record.time_out && record.time_out !== '--:--' && record.time_out !== null;
+
+      let computedStatus = 'SCHEDULED';
+
+      if (hasClockOut) {
+        const outMins = parseMins(record.time_out);
+        const isEarlyByTime = endMins > 0 && outMins > 0 && outMins < endMins - 5;
+        computedStatus = isEarlyByTime ? 'COMPLETED - EARLY CLOCK OUT' : 'COMPLETED';
+      } else if (isPastGrace) {
         
-        const hasClockIn = record && record.time_in && record.time_in !== '--:--' && record.time_in !== null;
-        const hasClockOut = record && record.time_out && record.time_out !== '--:--' && record.time_out !== null;
+        if (hasClockIn && !hasClockOut) {
+          computedStatus = 'MISSING CLOCK-OUT';
+        } else if (!hasClockIn) {
+          computedStatus = 'MISSED SCHEDULE';
+        } else {
+          computedStatus = 'COMPLETED';
+        }
+      } else if (isActive) {
+        computedStatus = hasClockIn ? 'IN PROGRESS' : 'SCHEDULED';
+      } else {
+        computedStatus = 'SCHEDULED';
+      }
 
-        let computedStatus = 'SCHEDULED';
-
-if (hasClockOut) {
-  
-  const outMins = parseMins(record.time_out);
-  const isEarlyByTime = endMins > 0 && outMins > 0 && outMins < endMins - 5;
-
-  computedStatus = isEarlyByTime ? 'COMPLETED - EARLY CLOCK OUT' : 'COMPLETED';
-} else if (isPassed) {
-              if (hasClockIn && !hasClockOut) {
-                computedStatus = 'MISSING CLOCK-OUT';
-              } else if (hasClockIn && hasClockOut) {
-                computedStatus = 'COMPLETED';
-              } else {
-                computedStatus = 'MISSED SCHEDULE';
-              }
-            } else if (isActive) {
-              computedStatus = hasClockIn ? 'IN PROGRESS' : 'SCHEDULED';
-            } else {
-              computedStatus = 'SCHEDULED';
-            }
-
-        return {
-          ...s,
-          startMins,
-          endMins,
-          isClockedIn: hasClockIn,
-          isClockedOut: hasClockOut,
-          computedStatus,
-          record,
-          isPassed,
-        };
-      })
-      .sort((a, b) => a.startMins - b.startMins);
-  }, [rawSchedule, rawHistory, todayStr, currentMinutes]);
+      return {
+        ...s,
+        startMins,
+        endMins,
+        isClockedIn: hasClockIn,
+        isClockedOut: hasClockOut,
+        computedStatus,
+        record,
+        isPassed,
+        isPastGrace,
+      };
+    })
+    .sort((a, b) => a.startMins - b.startMins);
+}, [rawSchedule, rawHistory, todayStr, currentMinutes]);
 
   const todaySchedule = useMemo(() => {
-    let active = allTodaySchedules.find(s => currentMinutes >= (s.startMins - 30) && currentMinutes <= s.endMins);
-    if (!active) active = allTodaySchedules.find(s => s.startMins > currentMinutes);
-    if (!active && allTodaySchedules.length > 0) active = allTodaySchedules[allTodaySchedules.length - 1];
-    return active || null;
-  }, [allTodaySchedules, currentMinutes]);
+  if (!allTodaySchedules.length) return null;
+
+  // 1. Prefer the shift the user is actively clocked into (regardless of window)
+  const activeClockIn = allTodaySchedules.find(s => s.isClockedIn && !s.isClockedOut);
+  if (activeClockIn) return activeClockIn;
+
+  // 2. Otherwise, the shift currently in its active or grace window
+  //    (start − 30 min  →  end + LATE_GRACE_MINUTES)
+  const inActiveWindow = allTodaySchedules.find(s =>
+    currentMinutes >= (s.startMins - 30) &&
+    currentMinutes <= (s.endMins + LATE_GRACE_MINUTES)
+  );
+  if (inActiveWindow) return inActiveWindow;
+
+  // 3. Next upcoming shift
+  const nextUpcoming = allTodaySchedules.find(s => s.startMins > currentMinutes);
+  if (nextUpcoming) return nextUpcoming;
+
+  // 4. Fallback: last shift of the day
+  return allTodaySchedules[allTodaySchedules.length - 1] ?? null;
+}, [allTodaySchedules, currentMinutes]);
 
   const attendanceStatus = useMemo(() => {
-    if (!todaySchedule) return { canClockIn: false, canClockOut: false, todayRecord: null };
+  if (!todaySchedule) {
+    return {
+      canClockIn: false,
+      canClockOut: false,
+      clockOutReason: 'no-schedule',
+      graceEndStr: null,
+      earlyOpenStr: null,        // NEW
+      todayRecord: null,
+    };
+  }
 
-    const endMins = todaySchedule.endMins;
-    const isPassed = currentMinutes > endMins;
+  const endMins         = todaySchedule.endMins;
+  const isPassed        = currentMinutes > endMins;
+  const earlyWindowFrom = endMins - EARLY_GRACE_MINUTES;
+  const lateWindowTo    = endMins + LATE_GRACE_MINUTES;
 
-    const todayRecord = (rawHistory || []).find(record => record.schedule_id === todaySchedule.id);
-    if (todayRecord) {
-      const isClockedIn = !!todayRecord.time_in && todayRecord.time_in !== '--:--';
-      const isClockedOut = todayRecord.time_out && todayRecord.time_out !== '--:--';
-      
-      return { 
-        canClockIn: false, 
-        // CRITICAL VALIDATION: If shift is done (isPassed is true), canClockOut is strictly FALSE so button is unclickable
-        canClockOut: isClockedIn && !isClockedOut,
-        todayRecord: { ...todayRecord, time_in: todayRecord.time_in || '--:--', time_out: todayRecord.time_out || '--:--' } 
-      };
-    } else { 
-      return { canClockIn: !isPassed, canClockOut: false, todayRecord: null }; 
-    }
-  }, [todaySchedule, rawHistory, currentMinutes]);
+  // Late grace boundary (shift end + 15 min) as "HH:MM"
+  const graceEndH   = Math.floor(lateWindowTo / 60) % 24;
+  const graceEndM   = lateWindowTo % 60;
+  const graceEndStr = `${String(graceEndH).padStart(2, '0')}:${String(graceEndM).padStart(2, '0')}`;
 
-  // SMART GPS & PERMISSION TRACKING: Automatically stops tracking when shift end time is reached
+  // NEW: Early-open boundary (shift end − 5 min) as "HH:MM"
+  const earlyOpenH   = Math.floor(earlyWindowFrom / 60) % 24;
+  const earlyOpenM   = earlyWindowFrom % 60;
+  const earlyOpenStr = `${String(earlyOpenH).padStart(2, '0')}:${String(earlyOpenM).padStart(2, '0')}`;
+
+  let clockOutReason = null;
+  if (currentMinutes < earlyWindowFrom) clockOutReason = 'too-early';
+  else if (currentMinutes > lateWindowTo) clockOutReason = 'grace-expired';
+
+  const withinWindow = clockOutReason === null;
+
+  const todayRecord = (rawHistory || []).find(r => r.schedule_id === todaySchedule.id);
+
+  if (todayRecord) {
+    const isClockedIn  = !!todayRecord.time_in  && todayRecord.time_in  !== '--:--';
+    const isClockedOut = !!todayRecord.time_out && todayRecord.time_out !== '--:--';
+
+  
+    let reason;
+    if (isClockedOut)         reason = 'already-clocked-out';
+    else if (!isClockedIn)    reason = 'not-clocked-in';
+    else                      reason = clockOutReason;  
+
+    return {
+      canClockIn: false,
+      canClockOut: isClockedIn && !isClockedOut && withinWindow,
+      clockOutReason: reason,
+      graceEndStr,
+      earlyOpenStr,
+      todayRecord: {
+        ...todayRecord,
+        time_in:  todayRecord.time_in  || '--:--',
+        time_out: todayRecord.time_out || '--:--',
+      },
+    };
+  }
+
+  return {
+    canClockIn: !isPassed,
+    canClockOut: false,
+    clockOutReason: 'not-clocked-in',
+    graceEndStr,
+    earlyOpenStr,
+    todayRecord: null,
+  };
+}, [todaySchedule, rawHistory, currentMinutes]);
+
+  
+  const trackingRef = useRef({ allTodaySchedules, todaySchedule, currentMinutes });
+
+  const loadDataRef = useRef(null); 
   useEffect(() => {
-    let isCancelled = false;
+    trackingRef.current = { allTodaySchedules, todaySchedule, currentMinutes };
+  }, [allTodaySchedules, todaySchedule, currentMinutes]);
 
-    const checkAndManageTracking = async (forceRestart = false) => {
-      try {
-        const hasActiveOrUpcomingShift = allTodaySchedules.some(shift => {
-          const startMinutes = shift.startMins;
-          const endMinutes = shift.endMins;
-          const isClockedIn = shift.isClockedIn && !shift.isClockedOut;
-          const isShiftTimeValid = currentMinutes <= endMinutes;
+  
+  useEffect(() => {
+  let isCancelled = false;
 
-          return (isClockedIn && isShiftTimeValid) || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
-        });
+  const checkAndManageTracking = async (forceRestart = false) => {
+    const { allTodaySchedules, todaySchedule, currentMinutes } = trackingRef.current;
+    try {
+      const hasActiveOrUpcomingShift = allTodaySchedules.some(shift => {
+        const startMinutes = shift.startMins;
+        const endMinutes = shift.endMins;
+        const isClockedIn = shift.isClockedIn && !shift.isClockedOut;
+        const isShiftTimeValid = currentMinutes <= endMinutes;
 
-        if (hasActiveOrUpcomingShift) {
-          let isGpsFullyActive = false;
-          try {
-            const gpsHardwareOn = await Location.hasServicesEnabledAsync();
-            const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
-            isGpsFullyActive = gpsHardwareOn && fgStatus === 'granted';
-          } catch (permErr) {
-            isGpsFullyActive = false;
-          }
+        return (isClockedIn && isShiftTimeValid) || (currentMinutes >= (startMinutes - 30) && currentMinutes <= endMinutes);
+      });
 
-          if (!isGpsFullyActive) {
-            await setTrackingEnabled(false);
-            await sendLocationPing(0, 0, false, 'GPS Disabled');
-            const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-            if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-            return;
-          }
-
-          await setTrackingEnabled(true);
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          
-          if (!isCancelled && loc && loc.coords) {
-            await sendLocationPing(
-              loc.coords.latitude,
-              loc.coords.longitude,
-              true,
-              todaySchedule?.place || 'Campus'
-            );
-          }
-
-          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-          if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-          
-          if (!isRegistered || forceRestart) {
-            const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
-            if (bgStatus === 'granted') {
-              await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-                accuracy: Location.Accuracy.High, 
-                timeInterval: 15000, 
-                distanceInterval: 0,
-                showsBackgroundLocationIndicator: true,
-                foregroundService: {
-                  notificationTitle: "Tracking Active",
-                  notificationBody: "Monitoring location for active shift",
-                  notificationColor: colors.primary
-                },
-              });
-            }
-          }
-        } else {
-          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-          if (isRegistered) {
-            await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-          }
-          await setTrackingEnabled(false);
-          await sendLocationPing(0, 0, false, 'Shift Ended');
-        }
-      } catch (err) {
+      if (hasActiveOrUpcomingShift) {
+        let isGpsFullyActive = false;
         try {
+          const gpsHardwareOn = await Location.hasServicesEnabledAsync();
+          const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+          isGpsFullyActive = gpsHardwareOn && fgStatus === 'granted';
+        } catch (permErr) {
+          isGpsFullyActive = false;
+        }
+
+        if (!isGpsFullyActive) {
           await setTrackingEnabled(false);
           await sendLocationPing(0, 0, false, 'GPS Disabled');
-        } catch (e) {}
+          const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+          if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+          return;
+        }
+
+        await setTrackingEnabled(true);
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+
+        if (!isCancelled && loc && loc.coords) {
+          await sendLocationPing(
+            loc.coords.latitude,
+            loc.coords.longitude,
+            true,
+            todaySchedule?.place || 'Campus'
+          );
+        }
+
+        const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+        if (forceRestart && isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+
+        if (!isRegistered || forceRestart) {
+          const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+          if (bgStatus === 'granted') {
+            await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+              accuracy: Location.Accuracy.High,
+              timeInterval: 15000,
+              distanceInterval: 0,
+              showsBackgroundLocationIndicator: true,
+              foregroundService: {
+                notificationTitle: "Tracking Active",
+                notificationBody: "Monitoring location for active shift",
+                notificationColor: colors.primary
+              },
+            });
+          }
+        }
+      } else {
+        const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+        if (isRegistered) {
+          await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+        }
+        await setTrackingEnabled(false);
+        await sendLocationPing(0, 0, false, 'Shift Ended');
       }
-    };
+    } catch (err) {
+      try {
+        await setTrackingEnabled(false);
+        await sendLocationPing(0, 0, false, 'GPS Disabled');
+      } catch (e) {}
+    }
+  };
 
-    checkAndManageTracking();
+  checkAndManageTracking();
 
-    const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active') checkAndManageTracking(true);
-    });
+  const subscription = AppState.addEventListener('change', state => {
+    if (state === 'active') {
+      checkAndManageTracking(true);
+      loadDataRef.current?.();  
+    }
+  });
 
-    const interval = setInterval(() => checkAndManageTracking(false), 15000); 
+  const interval = setInterval(() => checkAndManageTracking(false), 15000);
 
-    return () => {
-      isCancelled = true;
-      subscription.remove();
-      clearInterval(interval);
-    };
-  }, [allTodaySchedules, todaySchedule, colors.primary, currentMinutes]);
+  return () => {
+    isCancelled = true;
+    subscription.remove();
+    clearInterval(interval);
+  };
+}, [colors.primary]);
 
   const captureSelfie = async () => {
   const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -495,8 +616,50 @@ if (hasClockOut) {
 
   useEffect(() => { computeMonthlyStats(rawHistory, rawSchedule, selectedMonth); }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
 
+  useEffect(() => {
+  loadDataRef.current = loadData;
+}, [loadData]);
+
   const handleClockIn = async () => {
   if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
+
+  // 🚨 NEW: offline-queue guard (mirror of clock-out)
+  try {
+    const rawQueue = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
+    if (rawQueue) {
+      const queued = JSON.parse(rawQueue) || [];
+      const alreadyQueued = queued.some(
+        q =>
+          q.action === 'clock-in' &&
+          String(q.payload?.schedule_id) === String(todaySchedule.id)
+      );
+      if (alreadyQueued) {
+        Alert.alert(
+          'Clock-In Already Saved',
+          'A clock-in for this shift is already saved and will sync automatically ' +
+          'when connection returns. Please wait for it to sync before tapping again.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('Queue read failed in clock-in guard:', e);
+  }
+
+  // Mock location check (defensive strict equality)
+  try {
+    const { isLocationMocked } = await isMockingLocation();
+    if (isLocationMocked === true) {
+      Alert.alert(
+        'Security Alert',
+        'Mock location detected. Please disable any fake GPS apps or developer "Allow mock locations" settings to clock in.'
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn('Mock location check failed (non-blocking):', e?.message || e);
+  }
 
   const isGpsReady = await checkLocationServicesEnabled();
   if (!isGpsReady) return;
@@ -513,59 +676,156 @@ if (hasClockOut) {
       longitude: String(location.coords.longitude),
       location_enabled: 'true',
       schedule_id: String(todaySchedule.id),
-      selfie: selfieUri
+      selfie: selfieUri,
     });
 
     if (result.success) {
       Alert.alert('Success', result.message);
-
-      
       try { await setTrackingEnabled(true); } catch (e) {}
-       await startBackgroundTracking(colors.primary);
-
+      await startBackgroundTracking(colors.primary);
+      await loadData();
+    } else if (result.queued) {
+      Alert.alert('Saved Offline', result.message);
+      try { await setTrackingEnabled(true); } catch (e) {}
+      await startBackgroundTracking(colors.primary);
       await loadData();
     } else {
       Alert.alert('Clock-In Error', result.message);
+    }
+  } catch (error) {
+    // 🚨 Was silent — now logged so failures are diagnosable
+    console.warn('Clock-in request threw unexpectedly:', error?.message || error);
+    Alert.alert('Network Error', 'Connection failed.');
+  }
+};
+
+  const handleClockOut = async () => {
+  if (!todaySchedule) return;
+
+  try {
+    const { isLocationMocked } = await isMockingLocation();
+    if (isLocationMocked === true) {
+      Alert.alert(
+        'Security Alert',
+        'Mock location detected. Please disable any fake GPS apps or developer "Allow mock locations" settings to clock out.'
+      );
+      return;
+    }
+  } catch (e) {
+    console.warn('Mock location check failed (non-blocking):', e?.message || e);
+  }
+
+ 
+try {
+  const rawQueue = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);  
+  if (rawQueue) {
+    const queued = JSON.parse(rawQueue) || [];
+    const alreadyQueued = queued.some(
+      q =>
+        q.action === 'clock-out' &&
+        String(q.payload?.schedule_id) === String(todaySchedule.id)
+    );
+    if (alreadyQueued) {
+      Alert.alert(
+        'Clock-Out Already Saved',
+        'A clock-out for this shift is already saved and will sync automatically ' +
+        'when connection returns. Please wait for it to sync before tapping again.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+  }
+} catch (e) {
+  console.warn('Queue read failed in clock-out guard:', e);
+}
+
+  const endMins         = todaySchedule.endMins;
+  const earlyWindowFrom = endMins - EARLY_GRACE_MINUTES;
+  const lateWindowTo    = endMins + LATE_GRACE_MINUTES;
+
+  if (currentMinutes < earlyWindowFrom) {
+    Alert.alert(
+      "Early Clock-Out",
+      `Clock-out opens ${EARLY_GRACE_MINUTES} minutes before your shift ends at ` +
+      `${formatTo12H(todaySchedule.end_time)}. Do you wish to request a correction ` +
+      `for an early departure?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Request",
+          onPress: () => navigation.navigate("Requests", {
+            prefillTab: "correction",
+            prefillDate: getTodayString(),
+            prefillType: "clock_out",
+            prefillTime: currentTimeStrPHT,
+            prefillReason: "Early departure requested",
+            prefillScheduleId: todaySchedule?.id,
+          }),
+        },
+      ]
+    );
+    return;
+  }
+
+  if (currentMinutes > lateWindowTo) {
+    Alert.alert(
+      "Grace Period Expired",
+      `The ${LATE_GRACE_MINUTES}-minute clock-out grace period ended at ` +
+      `${formatTo12H(attendanceStatus.graceEndStr)}. Please file an Overtime request ` +
+      `or an Attendance Correction for this shift.`,
+      [{ text: "OK" }]
+    );
+    return;
+  }
+
+  const selfieUri = await captureSelfie();
+  if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory.');
+  const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+
+  try {
+    const result = await clockOut({
+      employee_id: String(user.employeeId || ''),
+      latitude: String(location.coords.latitude),
+      longitude: String(location.coords.longitude),
+      location_enabled: 'false',
+      schedule_id: String(todaySchedule.id),
+      selfie: selfieUri,
+    });
+
+    if (result.success) {
+      Alert.alert('Success', result.message);
+      try {
+        const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+        if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      } catch (e) {}
+      await loadData();
+    } else if (result.queued) {
+      Alert.alert('Saved Offline', result.message);
+      await loadData();
+    } else {
+      Alert.alert('Clock-Out Error', result.message);
     }
   } catch (error) {
     Alert.alert('Network Error', 'Connection failed.');
   }
 };
 
-  const handleClockOut = async () => {
-    if (!todaySchedule) return;
-    const now = new Date();
-    const currentTimeStr = now.toTimeString().slice(0, 5); 
-    const scheduledEndTime = todaySchedule.end_time; 
-    
-    if (currentTimeStr < scheduledEndTime.slice(0, 5)) {
-      Alert.alert("Early Clock-Out", `Your shift ends at ${formatTo12H(scheduledEndTime)}. Do you wish to request a correction for an early clock-out?`, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Request", onPress: () => navigation.navigate("Requests", { prefillTab: "correction", prefillDate: getTodayString(), prefillType: "clock_out", prefillTime: currentTimeStr, prefillReason: "Early departure requested", prefillScheduleId: todaySchedule?.id }) }
-      ]);
-      return;
-    }
-    
-    const selfieUri = await captureSelfie();
-    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory.');
-    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-    
-    try {
-      const result = await clockOut({ employee_id: String(user.employeeId || ''), latitude: String(location.coords.latitude), longitude: String(location.coords.longitude), location_enabled: 'false', schedule_id: String(todaySchedule.id), selfie: selfieUri });
-      if (result.success) {
-        Alert.alert('Success', result.message);
-        try { const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME); if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME); } catch (e) {}
-        await loadData();
-      } else { Alert.alert('Clock-Out Error', result.message); }
-    } catch (error) { Alert.alert('Network Error', 'Connection failed.'); }
-  };
-
   useEffect(() => { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { loadData(); }, [loadData]);
   const onRefresh = async () => { setRefreshing(true); await loadData(); setRefreshing(false); };
   
-  const formattedDate = currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const formattedTime = currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const formattedDate = currentTime.toLocaleDateString('en-US', {
+  timeZone: 'Asia/Manila',
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+});
+  const formattedTime = currentTime.toLocaleTimeString('en-US', {
+  timeZone: 'Asia/Manila',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+});
   
   const formatNameForDisplay = (name) => {
     if (!name) return "";
@@ -640,13 +900,23 @@ if (hasClockOut) {
   const finalCanClockIn = todaySchedule !== null && attendanceStatus.canClockIn;
   const finalCanClockOut = todaySchedule !== null && attendanceStatus.canClockOut;
 
-    const isPendingCorrection = 
-    todaySchedule?.attendance_status === 'PENDING' || 
-    todaySchedule?.attendance_record_status === 'Pending' ||
-    attendanceStatus.todayRecord?.correction_status === 'pending';
+    const hasClockedInToday =
+  !!attendanceStatus.todayRecord?.time_in &&
+  attendanceStatus.todayRecord.time_in !== '--:--';
 
+const isPendingCorrection = attendanceStatus.todayRecord?.correction_status === 'pending';
 
-const canClockOutNow = finalCanClockOut && !isPendingCorrection;
+const isLeavePending =
+  todaySchedule?.attendance_record_status === 'Pending Leave' &&
+  !isPendingCorrection &&
+  !hasClockedInToday;
+
+const isAppealPending =
+  todaySchedule?.attendance_record_status === 'Pending Appeal' &&
+  !hasClockedInToday;
+
+const canClockOutNow =
+  finalCanClockOut && !isPendingCorrection && !isLeavePending && !isAppealPending;
 
   return (
     <>
@@ -655,7 +925,7 @@ const canClockOutNow = finalCanClockOut && !isPendingCorrection;
         <ScrollView contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />} showsVerticalScrollIndicator={false}>
           
           <View style={styles.heroHeaderRow}>
-            <Text style={styles.greeting}>{getGreeting()}</Text>
+            <Text style={styles.greeting}>{greeting}</Text>
             <View style={styles.liveBadgeContainer}><View style={styles.liveDot} /><Text style={styles.liveBadgeText}>ONLINE</Text></View>
           </View>
 
@@ -747,24 +1017,76 @@ const canClockOutNow = finalCanClockOut && !isPendingCorrection;
           </View>
 
           <View style={styles.actionContainer}>
-            <TouchableOpacity style={[styles.btnPillPrimary, !finalCanClockIn && styles.btnDisabled]} onPress={handleClockIn} disabled={!finalCanClockIn} activeOpacity={0.85}>
+            <TouchableOpacity
+  style={[styles.btnPillPrimary, !finalCanClockIn && styles.btnDisabled]}
+  onPress={() => {
+    if (!finalCanClockIn) {
+      if (!todaySchedule) return Alert.alert('No Schedule', 'No active shift was found for today.');
+      if (attendanceStatus.todayRecord?.time_in && attendanceStatus.todayRecord.time_in !== '--:--') {
+        return Alert.alert('Already Clocked In', 'You have already clocked in for this shift.');
+      }
+      return Alert.alert('Clock-In Unavailable', 'This shift is no longer open for clock-in.');
+    }
+    handleClockIn();
+  }}
+  activeOpacity={0.85}
+>
               <Clock size={18} color={!finalCanClockIn ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#FFFFFF" : colors.buttonText)} strokeWidth={2} />
               <Text style={[styles.btnPillPrimaryText, !finalCanClockIn && styles.btnDisabledText]}>CLOCK-IN</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
-  style={[styles.btnPillOutline, !canClockOutNow && styles.btnDisabledOutline]} 
-  onPress={handleClockOut} 
-  disabled={!canClockOutNow} 
+            <TouchableOpacity
+  style={[styles.btnPillOutline, !canClockOutNow && styles.btnDisabledOutline]}
+  onPress={() => {
+    if (!canClockOutNow) {
+      if (isPendingCorrection) return Alert.alert('Pending Review', 'Your correction request is being reviewed by HR.');
+      if (isLeavePending)      return Alert.alert('Leave Pending', 'Your leave request for today is still pending.');
+      if (isAppealPending)     return Alert.alert('Appeal Pending', 'Your attendance appeal is being reviewed.');
+
+      switch (attendanceStatus.clockOutReason) {
+        case 'too-early':
+          return Alert.alert(
+            'Too Early',
+            `Clock-out opens at ${formatTo12H(attendanceStatus.earlyOpenStr)} ` +
+            `(${EARLY_GRACE_MINUTES} minutes before your shift ends at ${formatTo12H(todaySchedule.end_time)}).`
+          );
+        case 'grace-expired':
+          return Alert.alert(
+            'Grace Expired',
+            `The ${LATE_GRACE_MINUTES}-minute grace window ended at ${formatTo12H(attendanceStatus.graceEndStr)}. ` +
+            `Please file an Attendance Correction for this shift.`
+          );
+        case 'not-clocked-in':
+          return Alert.alert('Not Clocked In', 'You have not clocked in yet for this shift. Please clock in first.');
+        case 'already-clocked-out':
+          return Alert.alert('Already Clocked Out', 'Your clock-out has already been recorded for this shift.');
+        case 'no-schedule':
+          return Alert.alert('No Schedule', 'No active shift was found for today.');
+        default:
+          return;
+      }
+    }
+    handleClockOut();
+  }}
   activeOpacity={0.85}
 >
-  <Clock 
-    size={18} 
-    color={!canClockOutNow ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#0F172A" : colors.textPrimary)} 
-    strokeWidth={2} 
+  <Clock
+    size={18}
+    color={!canClockOutNow ? (isLight ? "#94A3B8" : colors.textSecondary) : (isLight ? "#0F172A" : colors.textPrimary)}
+    strokeWidth={2}
   />
   <Text style={[styles.btnPillOutlineText, !canClockOutNow && styles.btnDisabledText]}>
-    {isPendingCorrection ? 'PENDING REVIEW' : 'CLOCK-OUT'}
+    {isPendingCorrection
+      ? 'PENDING REVIEW'
+      : isLeavePending
+        ? 'LEAVE PENDING'
+        : isAppealPending
+          ? 'APPEAL PENDING'
+          : attendanceStatus.clockOutReason === 'grace-expired'
+            ? 'GRACE EXPIRED'
+            : attendanceStatus.clockOutReason === 'already-clocked-out'
+              ? 'CLOCKED OUT'
+              : 'CLOCK-OUT'}
   </Text>
 </TouchableOpacity>
           </View>

@@ -17,13 +17,21 @@ const REMOTE_URL = "https://api.univitahct.tech";
 
 export const API_URL = USE_REMOTE ? `${REMOTE_URL}/api` : `http://${LOCAL_IP}:5000/api`;
 
-const OFFLINE_QUEUE_KEY = '@attendance_queue';
+export const OFFLINE_QUEUE_KEY = '@attendance_queue';
 
 // ==========================================
 // FIX B4: GLOBAL TIMEOUT & EXPONENTIAL BACKOFF
 // ==========================================
 const DEFAULT_TIMEOUT_MS = 15000;
 const UPLOAD_TIMEOUT_MS = 30000;
+
+const formatPHTime12h = (dateObj = new Date()) =>
+  dateObj.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Manila',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 
 const fetchWithTimeout = async (resource, options = {}) => {
   const { timeout = DEFAULT_TIMEOUT_MS } = options;
@@ -165,6 +173,13 @@ const queueOfflineAction = async (action, payload) => {
   try {
     const existing = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
     const queue = existing ? JSON.parse(existing) : [];
+
+   
+    if (queue.length >= 20) {
+      console.warn('Offline queue full — dropping oldest action');
+      queue.shift(); 
+    }
+
     queue.push({ action, payload, timestamp: Date.now() });
     await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
   } catch (e) {
@@ -179,43 +194,98 @@ export const syncOfflineQueue = async () => {
     const queue = JSON.parse(existing);
     if (queue.length === 0) return 0;
 
+    // 🚨 Guard 1: no auth token → bail, retry later
     const token = await AsyncStorage.getItem('auth_token');
-    let synced = 0;
-    const remaining = [];
-    
-    for (const item of queue) {
-      try {
-        const data = item.payload;
-        const endpoint = item.action === 'clock-in' ? '/attendance/clock-in' : '/attendance/clock-out';
-        const selfieUri = data.selfie ? (typeof data.selfie === 'string' ? data.selfie : data.selfie.uri) : null;
-
-        if (selfieUri) {
-          const uploadResult = await uploadWithTimeout(`${API_URL}${endpoint}`, selfieUri, {
-            httpMethod: 'POST',
-            uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-            fieldName: 'selfie',
-            mimeType: 'image/jpeg',
-            headers: { Authorization: `Bearer ${token || ''}`, Accept: 'application/json' },
-            parameters: {
-              employee_id: String(data.employee_id || ''),
-              latitude: String(data.latitude || ''),
-              longitude: String(data.longitude || ''),
-              schedule_id: String(data.schedule_id || '')
-            }
-          });
-          const res = parseUploadResult(uploadResult);
-          if (res.success) {
-            synced++;
-            continue;
-          }
-        }
-      } catch (err) {
-        console.error(`Sync failed for ${item.action}:`, err);
-      }
-      remaining.push(item);
+    if (!token) {
+      console.warn('Skipping offline queue sync — no auth token yet.');
+      return 0;
     }
-    
+
+    // 🚨 Guard 2: resolve current user for cross-user comparison
+    const rawUser = await AsyncStorage.getItem('user');
+    let currentEmpId = null;
+    if (rawUser) {
+      try {
+        const parsed = JSON.parse(rawUser);
+        currentEmpId = parsed?.employee_id ? String(parsed.employee_id) : null;
+      } catch (e) { /* ignore parse error, treat as unknown */ }
+    }
+
+    let synced = 0;
+    let dropped = 0;
+    let deferred = 0;
+    const remaining = [];
+
+    for (const item of queue) {
+      const data = item.payload || {};
+      const payloadEmpId = data.employee_id ? String(data.employee_id) : null;
+
+      // 🚨 Guard 3: cross-user items are DEFERRED, not dropped.
+      // They will sync when their original owner logs back in.
+      if (currentEmpId && payloadEmpId && payloadEmpId !== currentEmpId) {
+        console.warn(
+          `Deferring queued ${item.action} — belongs to ${payloadEmpId}, ` +
+          `current user is ${currentEmpId}. Will sync when ${payloadEmpId} logs in.`
+        );
+        remaining.push(item);
+        deferred++;
+        continue;
+      }
+
+      const endpoint = item.action === 'clock-in'
+        ? '/attendance/clock-in'
+        : '/attendance/clock-out';
+      const selfieUri = data.selfie
+        ? (typeof data.selfie === 'string' ? data.selfie : data.selfie.uri)
+        : null;
+
+      if (!selfieUri) {
+        console.warn(`Dropping queued ${item.action} — no selfie in payload`);
+        dropped++;
+        continue;
+      }
+
+      try {
+        const uploadResult = await uploadWithTimeout(`${API_URL}${endpoint}`, selfieUri, {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName: 'selfie',
+          mimeType: 'image/jpeg',
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          parameters: {
+            employee_id: String(data.employee_id || ''),
+            latitude: String(data.latitude || ''),
+            longitude: String(data.longitude || ''),
+            schedule_id: String(data.schedule_id || '')
+          }
+        });
+
+        const res = parseUploadResult(uploadResult);
+        if (res.success) { synced++; continue; }
+
+        const httpStatus = uploadResult?.status;
+        if (httpStatus && httpStatus >= 400 && httpStatus < 500) {
+          console.warn(
+            `Dropping queued ${item.action} (HTTP ${httpStatus}): ${res.message || 'server rejected'}`
+          );
+          dropped++;
+          continue;
+        }
+        remaining.push(item);
+      } catch (err) {
+        console.error(`Sync failed for ${item.action} (transient):`, err);
+        remaining.push(item);
+      }
+    }
+
     await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
+
+    if (dropped > 0 || deferred > 0) {
+      console.warn(
+        `Offline queue sync: ${synced} synced, ${dropped} dropped, ` +
+        `${deferred} deferred (different user), ${remaining.length} retained`
+      );
+    }
     return synced;
   } catch (e) {
     console.error("Sync error:", e);
@@ -525,9 +595,14 @@ export const clockIn = async (data) => {
       return await handleResponse(response);
     }
   } catch (error) {
-    await queueOfflineAction('clock-in', data);
-    return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
-  }
+  const tapTimeStr = formatPHTime12h();
+  await queueOfflineAction('clock-in', { ...data, queuedAtPHT: tapTimeStr });
+  return {
+    success: false,
+    queued: true,
+    message: `Network unavailable. Your ${tapTimeStr} clock-in was saved offline and will sync when connection is restored.`,
+  };
+}
 };
 
 export const clockOut = async (data) => {
@@ -547,8 +622,8 @@ export const clockOut = async (data) => {
           employee_id: String(data.employee_id || ''),
           latitude: String(data.latitude || ''),
           longitude: String(data.longitude || ''),
-          schedule_id: String(data.schedule_id || '')
-        }
+          schedule_id: String(data.schedule_id || ''),
+        },
       });
       return parseUploadResult(uploadResult);
     } else {
@@ -556,13 +631,19 @@ export const clockOut = async (data) => {
       const response = await apiFetch(`${API_URL}/attendance/clock-out`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(data)
-      }, 0); // 0 retries: fallback to offline queue
+        body: JSON.stringify(data),
+      }, 0); 
       return await handleResponse(response);
     }
   } catch (error) {
-    await queueOfflineAction('clock-out', data);
-    return { success: true, message: "Network unavailable. Saved offline and will sync when connection is restored." };
+   
+    const tapTimeStr = formatPHTime12h();
+    await queueOfflineAction('clock-out', { ...data, queuedAtPHT: tapTimeStr });
+    return {
+      success: false,
+      queued: true,
+      message: `Network unavailable. Your ${tapTimeStr} clock-out was saved offline and will sync when connection is restored.`,
+    };
   }
 };
 

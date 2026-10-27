@@ -20,7 +20,13 @@ import Constants from 'expo-constants';
 import axios from 'axios';
 import ErrorBoundary from './ErrorBoundary';
 
-import { API_URL, fetchEmergencyAlerts, markAlertAsRead, fetchUserSchedule } from './src/screens/api';
+import {
+  API_URL,
+  syncOfflineQueue,
+  fetchEmergencyAlerts,
+  markAlertAsRead,
+  fetchUserSchedule,
+} from './src/screens/api';
 import { ThemeProvider, ThemeContext, themeColors } from './src/context/ThemeContext'; 
 
 // Eagerly loaded screens (Needed immediately)
@@ -73,6 +79,8 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   } catch (err) {}
 });
 
+
+
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
@@ -96,6 +104,21 @@ function AppContent() {
   const alertSound = useRef(null);
   const activeAlertId = useRef(null);
   const gpsPromptShown = useRef(false);
+
+  
+useEffect(() => {
+  let cancelled = false;
+  const unsubscribe = NetInfo.addEventListener(state => {
+    if (!state.isConnected || cancelled) return;
+    AsyncStorage.getItem('auth_token').then(token => {
+      if (!token || cancelled) return;   // ← no token, no sync
+      syncOfflineQueue().then(count => {
+        if (count > 0 && !cancelled) setRefreshTrigger(prev => prev + 1);
+      });
+    });
+  });
+  return () => { cancelled = true; unsubscribe(); };
+}, []);
 
 
     useEffect(() => {

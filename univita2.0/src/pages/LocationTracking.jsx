@@ -1,4 +1,3 @@
-// src/pages/LocationTracking.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -16,12 +15,10 @@ const getAuthHeaders = () => ({
 
 const PAGE_SIZE = 25;
 const TIMELINE_PAGE_SIZE = 50;
-const GPS_DISPLAY_GRACE_MS = 60_000; 
+const GPS_DISPLAY_GRACE_MS = 60_000;
 
-const toLocalISODate = (d = new Date()) => {
-  
-  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
-};
+const toLocalISODate = (d = new Date()) =>
+  d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 
 const formatPHT = (dateStr) => {
   if (!dateStr) return '—';
@@ -32,53 +29,45 @@ const formatPHT = (dateStr) => {
   return new Date(s).toLocaleString('en-US', { timeZone: 'Asia/Manila' });
 };
 
-
 const formatTimePHT = (val) => {
   if (!val) return '—';
-  
-  
+
   if (val instanceof Date) {
     if (isNaN(val.getTime())) return '—';
-    return val.toLocaleTimeString('en-US', { 
-      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' 
+    return val.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila',
     });
   }
 
   const s = String(val).trim();
-  
-  
+
   if (/^\d{2}:\d{2}(:\d{2})?$/.test(s)) {
     const parts = s.split(':');
     const h = parseInt(parts[0], 10);
     const m = parseInt(parts[1], 10);
     const sec = parts[2] ? parseInt(parts[2], 10) : 0;
-    
-    
     const date = new Date(Date.UTC(1970, 0, 1, h, m, sec));
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' 
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila',
     });
   }
-  
- 
+
   if (s.includes('T') || s.includes('-')) {
     let dateStr = s;
     if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
-      dateStr = s.replace(' ', 'T') + 'Z'; // Force UTC
+      dateStr = s.replace(' ', 'T') + 'Z';
     } else if (s.includes('T') && !s.includes('Z') && !s.includes('+')) {
-      dateStr = s + 'Z'; // Force UTC
+      dateStr = s + 'Z';
     }
-    
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return '—';
-    return d.toLocaleTimeString('en-US', { 
-      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' 
+    return d.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila',
     });
   }
-  
+
   return '—';
 };
-
 
 const parseDateInput = (value) => {
   if (!value) return null;
@@ -109,7 +98,6 @@ const useDebouncedValue = (value, delay = 300) => {
   return debounced;
 };
 
-/* ---------------- small pagination control ---------------- */
 const Pagination = ({ page, totalPages, onChange, label }) => {
   if (totalPages <= 1) return null;
   return (
@@ -166,11 +154,22 @@ const LocationTracking = () => {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelinePage, setTimelinePage] = useState(1);
 
-  const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0); 
+  const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
 
   const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
 
-  // Ref used by the WebSocket handler so it doesn't need to reconnect on date change
+  const [suspiciousEvents, setSuspiciousEvents] = useState([]);
+  const [showSuspiciousModal, setShowSuspiciousModal] = useState(false);
+  const [suspiciousFilter, setSuspiciousFilter] = useState(null);
+
+  const suspiciousByEmployee = useMemo(() => {
+    const map = {};
+    suspiciousEvents.forEach((ev) => {
+      map[ev.employee_id] = (map[ev.employee_id] || 0) + 1;
+    });
+    return map;
+  }, [suspiciousEvents]);
+
   const selectedDateRef = useRef(selectedDate);
   useEffect(() => { selectedDateRef.current = selectedDate; }, [selectedDate]);
 
@@ -183,23 +182,25 @@ const LocationTracking = () => {
     return `${displayHours}:${minutes} ${ampm}`;
   };
 
-  /* ---------------- fetch ---------------- */
   const fetchData = useCallback(async (date = selectedDate, signal) => {
     setLoading(true);
     setError('');
     try {
-      const [statusRes, alertsRes] = await Promise.all([
+      const [statusRes, alertsRes, suspiciousRes] = await Promise.all([
         axios.get(`${API_BASE}/location-tracking/status?date=${date}`, { ...getAuthHeaders(), signal }),
         axios.get(`${API_BASE}/location-tracking/alerts?date=${date}`, { ...getAuthHeaders(), signal }),
+        axios.get(`${API_BASE}/location-tracking/suspicious?date=${date}`, { ...getAuthHeaders(), signal }),
       ]);
       if (signal?.aborted) return;
       setInstructors(Array.isArray(statusRes.data) ? statusRes.data : []);
       setAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : []);
+      setSuspiciousEvents(Array.isArray(suspiciousRes.data) ? suspiciousRes.data : []);
     } catch (err) {
       if (isAbortError(err, signal)) return;
       console.error('fetchData error:', err);
       setInstructors([]);
       setAlerts([]);
+      setSuspiciousEvents([]);
       setError('Failed to load tracking data.');
       toast.error('Failed to load tracking data.');
     } finally {
@@ -207,7 +208,18 @@ const LocationTracking = () => {
     }
   }, [selectedDate]);
 
-  // Keep latest fetchData available inside the WS handler without re-subscribing
+  const fetchSuspiciousRef = useRef(null);
+  useEffect(() => {
+    fetchSuspiciousRef.current = async (date) => {
+      try {
+        const res = await axios.get(`${API_BASE}/location-tracking/suspicious?date=${date}`, getAuthHeaders());
+        setSuspiciousEvents(Array.isArray(res.data) ? res.data : []);
+      } catch (err) {
+        console.warn('Suspicious refetch failed:', err?.message);
+      }
+    };
+  }, []);
+
   const fetchDataRef = useRef(fetchData);
   useEffect(() => { fetchDataRef.current = fetchData; }, [fetchData]);
 
@@ -255,14 +267,12 @@ const LocationTracking = () => {
     }
   }, [selectedDate]);
 
-  /* ---------------- effects ---------------- */
   useEffect(() => {
     const controller = new AbortController();
     fetchData(selectedDate, controller.signal);
     return () => controller.abort();
   }, [selectedDate, fetchData]);
 
-  // Single WebSocket for component lifetime
   useEffect(() => {
     let ws;
     const getWsUrl = () => {
@@ -301,16 +311,38 @@ const LocationTracking = () => {
           ));
         } else if (data.type === 'new_alert') {
           fetchDataRef.current(today);
+        } else if (data.type === 'suspicious_location') {
+          const ev = data.event || {};
+          const name = ev.full_name || ev.employee_id || 'Unknown';
+          const reason = ev.flags?.[0]?.reason || 'Suspicious location';
+          const detail = ev.flags?.[0]?.detail || '';
+
+          toast.error(
+  `⚠️ Suspicious location flagged: ${name} — ${reason}` + (detail ? ` (${detail})` : ''),
+  { toastId: 'suspicious-loc' }  
+);
+
+          // 400ms delay lets the server's audit_logs INSERT commit before we refetch.
+          const isSevere = ev.flags?.some(f =>
+            f.reason === 'Impossible travel speed' &&
+            Number(f.speed_kmh) >= 1500
+          );
+
+          setTimeout(() => {
+            if (selectedDateRef.current !== today) return;
+            fetchSuspiciousRef.current?.(today);
+            if (isSevere) fetchDataRef.current(today);
+          }, 400);
         }
       };
-            ws.onerror = () => { 
-        console.warn('WebSocket error encountered.'); 
+
+      ws.onerror = () => {
+        console.warn('WebSocket error encountered.');
       };
 
       ws.onclose = () => {
         console.log('WebSocket disconnected. Reconnecting in 5s...');
         setTimeout(() => {
-          // This forces the useEffect to re-run and reconnect
           setWsReconnectTrigger(prev => prev + 1);
         }, 5000);
       };
@@ -318,16 +350,14 @@ const LocationTracking = () => {
       console.error('WebSocket Error:', err);
     }
 
-        return () => {
+    return () => {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        
-        ws.onclose = null; 
+        ws.onclose = null;
         try { ws.close(); } catch { /* noop */ }
       }
     };
-  }, [wsReconnectTrigger]); 
+  }, [wsReconnectTrigger]);
 
-  
   useEffect(() => {
     if (!showHistoryModal) return undefined;
     const controller = new AbortController();
@@ -335,10 +365,8 @@ const LocationTracking = () => {
     return () => controller.abort();
   }, [showHistoryModal, historyDate, fetchAlertHistory]);
 
-  // Reset pagination when filters / date change
   useEffect(() => { setCurrentPage(1); }, [debouncedSearch, selectedDate]);
 
-  /* ---------------- filtering + pagination ---------------- */
   const filteredInstructors = useMemo(() => {
     const q = debouncedSearch.toLowerCase();
     if (!q) return instructors;
@@ -355,10 +383,9 @@ const LocationTracking = () => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
 
-    const pageStart = (safePage - 1) * PAGE_SIZE;
+  const pageStart = (safePage - 1) * PAGE_SIZE;
   const pageRows = filteredInstructors.slice(pageStart, pageStart + PAGE_SIZE);
 
- 
   const activeAlerts = useMemo(() => {
     const activeEmpIds = new Set(
       instructors
@@ -374,7 +401,7 @@ const LocationTracking = () => {
   const todayStr = toLocalISODate();
   const isToday = selectedDate === todayStr;
 
-    const toTimestamp = useCallback((timeStr) => {
+  const toTimestamp = useCallback((timeStr) => {
     if (!timeStr) return NaN;
     let s = String(timeStr);
     if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
@@ -384,9 +411,9 @@ const LocationTracking = () => {
     }
     const d = new Date(s);
     return d.getTime();
-  }, [selectedDate]);
+  }, []);
 
-    const unifiedEvents = useMemo(() => {
+  const unifiedEvents = useMemo(() => {
     const events = [];
     const timeline = timelineData.timeline || [];
     const shiftStart = timelineData.start_time;
@@ -413,15 +440,14 @@ const LocationTracking = () => {
     const validTimeline = timeline.filter(t => isWithinShiftTime(t.ping_time));
 
     if (validTimeline.length > 0) {
-      // 1. Group into segments of stable state
       let currentSegment = {
         location_enabled: validTimeline[0].location_enabled,
         is_inside_campus: validTimeline[0].is_inside_campus,
         location_name: validTimeline[0].location_name,
         startTime: validTimeline[0].ping_time,
-        endTime: validTimeline[0].ping_time
+        endTime: validTimeline[0].ping_time,
       };
-      
+
       const segments = [];
 
       for (let i = 1; i < validTimeline.length; i++) {
@@ -439,21 +465,20 @@ const LocationTracking = () => {
             is_inside_campus: curr.is_inside_campus,
             location_name: curr.location_name,
             startTime: curr.ping_time,
-            endTime: curr.ping_time
+            endTime: curr.ping_time,
           };
         }
       }
       segments.push(currentSegment);
 
-      // 2. Filter out segments shorter than 2 minutes (to remove GPS flickers)
-      const MIN_DURATION_MS = 120000; // 2 mins
+      // Drop flicker segments (<2 min) so only stable states show in the timeline.
+      const MIN_DURATION_MS = 120000;
       const stableSegments = segments.filter((seg, idx) => {
-        if (idx === segments.length - 1) return true; // Always keep the latest state
+        if (idx === segments.length - 1) return true;
         const duration = new Date(seg.endTime).getTime() - new Date(seg.startTime).getTime();
         return duration >= MIN_DURATION_MS || idx === 0;
       });
 
-      // 3. Push clean events
       stableSegments.forEach(seg => {
         events.push({
           time: seg.startTime,
@@ -472,7 +497,6 @@ const LocationTracking = () => {
       });
     }
 
-   
     (timelineData.alerts || []).forEach(alert => {
       events.push({
         time: alert.created_at,
@@ -485,8 +509,6 @@ const LocationTracking = () => {
     return events;
   }, [timelineData, toTimestamp]);
 
-    
-
   const totalTimelinePages = Math.max(1, Math.ceil(unifiedEvents.length / TIMELINE_PAGE_SIZE));
   const safeTimelinePage = Math.min(timelinePage, totalTimelinePages);
   useEffect(() => {
@@ -498,15 +520,14 @@ const LocationTracking = () => {
     return unifiedEvents.slice(start, start + TIMELINE_PAGE_SIZE);
   }, [unifiedEvents, safeTimelinePage]);
 
-    const renderEventTime = (time) => {
+  const renderEventTime = (time) => {
     const ts = toTimestamp(time);
     if (!Number.isFinite(ts)) return String(time ?? '—');
-    return new Date(ts).toLocaleTimeString('en-US', { 
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Asia/Manila'
+    return new Date(ts).toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'Asia/Manila',
     });
   };
 
-  /* ---------------- handlers ---------------- */
   const handleSelectedDateChange = (e) => {
     const v = e.target.value;
     const parsed = parseDateInput(v);
@@ -529,7 +550,6 @@ const LocationTracking = () => {
     setTimelinePage(1);
   };
 
-  /* ---------------- render ---------------- */
   return (
     <div className="lt-container">
       <div className="lt-header-row">
@@ -613,6 +633,7 @@ const LocationTracking = () => {
                 <span className="stat-value">{instructors.length}</span>
               </div>
             </div>
+
             <div className="lt-stat-card">
               <div className="stat-icon-wrapper success"><ShieldCheck size={20} /></div>
               <div className="stat-info">
@@ -622,7 +643,8 @@ const LocationTracking = () => {
                 </span>
               </div>
             </div>
-                        <div className="lt-stat-card alert">
+
+            <div className="lt-stat-card alert">
               <div className="stat-icon-wrapper danger"><AlertTriangle size={20} /></div>
               <div className="stat-info">
                 <span className="stat-label">
@@ -640,6 +662,41 @@ const LocationTracking = () => {
                   )}
                 </span>
                 <span className="stat-value">{activeAlerts.length}</span>
+              </div>
+            </div>
+
+            <div
+              className="lt-stat-card alert"
+              role="button"
+              tabIndex={0}
+              aria-label={`View ${suspiciousEvents.length} suspicious location events`}
+              onClick={() => { setSuspiciousFilter(null); setShowSuspiciousModal(true); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSuspiciousFilter(null);
+                  setShowSuspiciousModal(true);
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
+              <div className="stat-icon-wrapper danger"><AlertTriangle size={20} /></div>
+              <div className="stat-info">
+                <span className="stat-label">
+                  Suspicious
+                  {suspiciousEvents.length > 0 && (
+                    <span
+                      aria-label={`${suspiciousEvents.length} suspicious events`}
+                      style={{
+                        display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                        background: '#DC2626', marginLeft: 6, verticalAlign: 'middle',
+                        boxShadow: '0 0 0 0 rgba(220,38,38,0.7)',
+                        animation: 'ltAlertPulse 1.8s infinite',
+                      }}
+                    />
+                  )}
+                </span>
+                <span className="stat-value">{suspiciousEvents.length}</span>
               </div>
             </div>
           </div>
@@ -663,7 +720,7 @@ const LocationTracking = () => {
                       <td colSpan="6">No active shifts found matching your criteria.</td>
                     </tr>
                   ) : (
-                                        pageRows.map(inst => {
+                    pageRows.map(inst => {
                       const attStatus = inst.attendance_status || 'Unknown';
                       let attBadgeClass = 'gps-off';
 
@@ -675,7 +732,6 @@ const LocationTracking = () => {
                       else if (attStatus.toLowerCase().includes('present')) attBadgeClass = 'inside';
                       else if (attStatus.toLowerCase().includes('late')) attBadgeClass = 'warning';
 
-                      
                       const gpsLastPing = inst.last_ping_time
                         ? toTimestamp(inst.last_ping_time)
                         : null;
@@ -686,29 +742,47 @@ const LocationTracking = () => {
                       const displayGpsOn = isMissed ? false : (inst.gps_status === 'GPS ON' && !gpsIsStale);
                       const displayLocation = isMissed ? null : inst.last_is_inside;
 
-                      
                       const hasClockedIn =
-  inst.time_in !== null &&
-  inst.time_in !== '--:--' &&
-  inst.time_in !== undefined;
+                        inst.time_in !== null &&
+                        inst.time_in !== '--:--' &&
+                        inst.time_in !== undefined;
 
-const shiftIsOpen = inst.time_out === null || inst.time_out === '--:--';
+                      const shiftIsOpen = inst.time_out === null || inst.time_out === '--:--';
 
-const isAlert =
-  isToday &&
-  !isMissed &&
-  hasClockedIn &&       
-  !gpsIsStale &&
-  shiftIsOpen &&
-  (
-    inst.gps_status === 'GPS OFF' ||
-    inst.last_is_inside === 0
-  );
+                      const isAlert =
+                        isToday &&
+                        !isMissed &&
+                        hasClockedIn &&
+                        !gpsIsStale &&
+                        shiftIsOpen &&
+                        (
+                          inst.gps_status === 'GPS OFF' ||
+                          inst.last_is_inside === 0
+                        );
 
                       return (
                         <tr key={inst.employee_id} className={isAlert ? 'lt-alert-row' : ''}>
                           <td>
-                            <div className="lt-emp-name">{inst.full_name}</div>
+                            <div className="lt-emp-name">
+                              {inst.full_name}
+                              {suspiciousByEmployee[inst.employee_id] > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSuspiciousFilter(inst.employee_id);
+                                    setShowSuspiciousModal(true);
+                                  }}
+                                  title={`${suspiciousByEmployee[inst.employee_id]} suspicious event(s)`}
+                                  style={{
+                                    background: 'none', border: 'none', padding: 0, marginLeft: 6,
+                                    cursor: 'pointer', display: 'inline-flex', verticalAlign: 'middle'
+                                  }}
+                                  aria-label={`View suspicious events for ${inst.full_name || inst.employee_id}`}
+                                >
+                                  <AlertTriangle size={14} color="#DC2626" />
+                                </button>
+                              )}
+                            </div>
                             <div className="lt-emp-id">{inst.employee_id}</div>
                           </td>
 
@@ -794,7 +868,6 @@ const isAlert =
         </>
       )}
 
-      {/* Alert History Modal */}
       <FormalModal
         show={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
@@ -851,7 +924,6 @@ const isAlert =
         )}
       </FormalModal>
 
-      {/* Unified Timeline Modal */}
       <FormalModal
         show={showTimelineModal}
         onClose={closeTimelineModal}
@@ -895,7 +967,7 @@ const isAlert =
                 <span className="summary-label">Last Known Position</span>
                 <span className="summary-value">{selectedInstructor?.last_position_name || 'Unavailable'}</span>
               </div>
-                <div className="summary-item">
+              <div className="summary-item">
                 <span className="summary-label">Clock in Time</span>
                 <span className="summary-value">{formatTimePHT(selectedInstructor?.campus_entry_time)}</span>
               </div>
@@ -923,9 +995,9 @@ const isAlert =
                         key={idx}
                         className={
                           ev.type === 'Alert' ? 'bg-red-50'
-                          : ev.type === 'GPS' ? (ev.detail.includes('ON') ? 'bg-blue-50' : 'bg-gray-50')
-                          : ev.type === 'Campus' ? 'bg-yellow-50'
-                          : ''
+                            : ev.type === 'GPS' ? (ev.detail.includes('ON') ? 'bg-blue-50' : 'bg-gray-50')
+                              : ev.type === 'Campus' ? 'bg-yellow-50'
+                                : ''
                         }
                       >
                         <td className="lt-mono-text">{renderEventTime(ev.time)}</td>
@@ -950,7 +1022,88 @@ const isAlert =
         )}
       </FormalModal>
 
-      {/* Pulse animation for the alert badge (safe inline injection) */}
+      <FormalModal
+        show={showSuspiciousModal}
+        onClose={() => { setShowSuspiciousModal(false); setSuspiciousFilter(null); }}
+        title={
+          suspiciousFilter
+            ? `Suspicious Events — ${instructors.find(i => i.employee_id === suspiciousFilter)?.full_name || suspiciousFilter}`
+            : 'Suspicious Location Events'
+        }
+        wide
+        footer={
+          <button
+            className="btn-modal-cancel"
+            onClick={() => { setShowSuspiciousModal(false); setSuspiciousFilter(null); }}
+          >
+            Close Window
+          </button>
+        }
+      >
+        <div className="lt-modal-info">
+          Showing <strong>{
+            (suspiciousFilter
+              ? suspiciousEvents.filter(e => e.employee_id === suspiciousFilter)
+              : suspiciousEvents
+            ).length
+          }</strong> suspicious event(s) for <strong>{selectedDate}</strong>.
+        </div>
+
+        <div className="lt-table-wrapper" style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+          <table className="lt-table">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Instructor</th>
+                <th>Event</th>
+                <th>Flags Detected</th>
+                <th>Coordinates</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const rows = suspiciousFilter
+                  ? suspiciousEvents.filter(e => e.employee_id === suspiciousFilter)
+                  : suspiciousEvents;
+                if (rows.length === 0) {
+                  return <tr className="lt-empty-row"><td colSpan="5">No suspicious events recorded.</td></tr>;
+                }
+                return rows.map((ev) => (
+                  <tr key={ev.id}>
+                    <td className="lt-mono-text">{formatPHT(ev.created_at)}</td>
+                    <td>
+                      <div className="lt-emp-name">{ev.full_name || '—'}</div>
+                      <div className="lt-emp-id">{ev.employee_id || '—'}</div>
+                    </td>
+                    <td>
+                      <span className={`lt-status-badge ${ev.event === 'clock_in' ? 'inside' : 'warning'}`}>
+                        {ev.event === 'clock_in' ? 'CLOCK-IN' : ev.event === 'clock_out' ? 'CLOCK-OUT' : 'UNKNOWN'}
+                      </span>
+                    </td>
+                    <td className="text-red-600">
+                      {ev.flags && ev.flags.length > 0 ? (
+                        ev.flags.map((f, i) => (
+                          <div key={i} style={{ marginBottom: 4 }}>
+                            <strong>{f.reason}:</strong> {f.detail}
+                          </div>
+                        ))
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="lt-mono-text">
+                      {ev.lat != null && ev.lon != null
+                        ? `${Number(ev.lat).toFixed(6)}, ${Number(ev.lon).toFixed(6)}`
+                        : '—'}
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
+      </FormalModal>
+
       <style>{`@keyframes ltAlertPulse {
         0%   { box-shadow: 0 0 0 0 rgba(220,38,38,0.7); }
         70%  { box-shadow: 0 0 0 6px rgba(220,38,38,0); }
