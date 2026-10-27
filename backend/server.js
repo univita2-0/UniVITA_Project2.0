@@ -3683,66 +3683,54 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
     return res.status(400).json({ success: false, message: "A valid date or month parameter is required." });
   }
 
-    const sql = `
-      SELECT 
-          u.id AS user_db_id, u.full_name, u.employee_id, 
-          
-          -- ✅ Effective end time: time_out → geofence exit → scheduled end
-          COALESCE(
-            NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'),
-            ${GEO_EXIT_SUBQUERY},
-            s.end_time
-          ) AS effective_end_time,
+  const sql = `
+    SELECT 
+      u.id AS user_db_id, u.full_name, u.employee_id, 
+      
+      -- ✅ STATUS: Strict validation based on manual clock-out
+      CASE 
+          WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 'Pending'
+          WHEN ap.id IS NOT NULL AND ap.status = 'pending' THEN 'Pending'
+          WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
+          -- If clocked in, but shift has ended and no time_out -> Missing Clock-Out
+          WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
+          -- If clocked in, and shift hasn't ended yet -> In Progress
+          WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN 'In Progress'
+          -- If never clocked in and shift ended -> Absent
+          WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Absent'
+          ELSE COALESCE(a.status, 'Scheduled')
+      END AS status,
 
-          CASE 
-              WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 'Pending'
-              WHEN ap.id IS NOT NULL AND ap.status = 'pending' THEN 'Pending'
-              WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
-              -- ✅ Auto-completed via geofence exit (no clock-out)
-              WHEN a.time_in IS NOT NULL AND ${GEO_EXIT_SUBQUERY} IS NOT NULL THEN 'Auto Clock-Out (Geofence)'
-              -- ✅ Fallback: scheduled end passed, no exit, no clock-out
-              WHEN a.time_in IS NOT NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
-              WHEN a.time_in IS NOT NULL THEN 'In Progress'
-              WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Absent'
-              ELSE COALESCE(a.status, 'Scheduled')
-          END AS status,
+      -- ✅ TIME IN: Show --:-- if not clocked in
+      COALESCE(a.time_in, '--:--') AS time_in, 
+      
+      -- ✅ TIME OUT: Strictly manual clock-out only. Show --:-- if not clocked out.
+      COALESCE(NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'), '--:--') AS time_out,
+      
+      a.location, a.clock_in_latitude, a.clock_in_longitude,
+      a.clock_out_latitude, a.clock_out_longitude,
+      a.clock_in_selfie, a.clock_out_selfie,
+      s.id AS schedule_id, s.start_time AS scheduled_start, s.end_time AS scheduled_end, s.course,
+      DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
 
-              COALESCE(a.time_in, '--:--') AS time_in, 
-          CASE 
-            WHEN a.time_in IS NULL THEN '--:--'
-            WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN a.time_out
-            WHEN ${GEO_EXIT_SUBQUERY} IS NOT NULL THEN ${GEO_EXIT_SUBQUERY}
-            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN s.end_time
-            ELSE '--:--'
-          END AS time_out,
-          
-          a.location, a.clock_in_latitude, a.clock_in_longitude,
-          a.clock_out_latitude, a.clock_out_longitude,
-          a.clock_in_selfie, a.clock_out_selfie,
-          s.id AS schedule_id, s.start_time AS scheduled_start, s.end_time AS scheduled_end, s.course,
-          DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
+      -- ✅ TOTAL HOURS: Only compute if there is a manual time_out
+      CASE 
+        WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
+        WHEN a.time_in IS NULL OR a.time_out IS NULL OR a.time_out = '--:--' THEN 0
+        ELSE GREATEST(0, ROUND(
+          TIME_TO_SEC(TIMEDIFF(a.time_out, a.time_in)) / 3600, 2
+        ))
+      END AS total_hours
 
-          -- ✅ total_hours computed from effective end, guarded to avoid negatives
-          CASE 
-            WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
-            WHEN a.time_in IS NULL THEN 0
-            ELSE GREATEST(0, ROUND(
-              TIME_TO_SEC(TIMEDIFF(
-                COALESCE(NULLIF(NULLIF(a.time_out,'--:--'),'00:00:00'), ${GEO_EXIT_SUBQUERY}, s.end_time),
-                a.time_in
-              )) / 3600, 2
-            ))
-          END AS total_hours
-
-      FROM users u
-      INNER JOIN schedules s ON u.employee_id = s.user_id 
-      LEFT JOIN attendance a ON s.id = a.schedule_id
-      LEFT JOIN attendance_corrections ac ON s.id = ac.schedule_id AND ac.status = 'pending'
-      LEFT JOIN attendance_appeals ap ON s.id = ap.schedule_id AND ap.status = 'pending'
-      WHERE LOWER(u.role) = 'instructor' 
-        AND u.status IN ('active', 'deactivated') -- ✅ Includes Deactivated (e.g. for Leave reports), excludes Archived/Deleted
-        AND ${dateCondition}
-      ORDER BY u.full_name ASC, s.start_time ASC
+    FROM users u
+    INNER JOIN schedules s ON u.employee_id = s.user_id 
+    LEFT JOIN attendance a ON s.id = a.schedule_id
+    LEFT JOIN attendance_corrections ac ON s.id = ac.schedule_id AND ac.status = 'pending'
+    LEFT JOIN attendance_appeals ap ON s.id = ap.schedule_id AND ap.status = 'pending'
+    WHERE LOWER(u.role) = 'instructor' 
+      AND u.status IN ('active', 'deactivated') 
+      AND ${dateCondition}
+    ORDER BY u.full_name ASC, s.start_time ASC
   `;
 
   db.query(sql, [queryParam], (err, result) => {
@@ -7388,8 +7376,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         
         COALESCE(
           a.time_out, 
-          ${GEO_EXIT_SUBQUERY},
-          s.end_time
+          ${GEO_EXIT_SUBQUERY} 
         ) AS campus_exit_time
 
       FROM users u
