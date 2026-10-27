@@ -1179,6 +1179,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
         <div className="ap-footer-bottom">
           <p>© {new Date().getFullYear()} HCT Academy. All rights reserved.</p>
+          <a href="/privacy" style={{ color: '#94A3B8', textDecoration: 'underline', marginTop: '10px', display: 'inline-block' }}>
+            Privacy Policy & Terms
+          </a>
         </div>
       </footer>
 

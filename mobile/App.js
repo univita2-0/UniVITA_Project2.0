@@ -29,6 +29,7 @@ import HomeScreen from './src/screens/HomeScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import HelpAndTermsScreen from './src/screens/HelpAndTermsScreen';
 
 // Lazy-loaded screens (Downloaded on-demand)
 const AppealHistoryScreen = React.lazy(() => import('./src/screens/AppealHistoryScreen'));
@@ -318,6 +319,7 @@ function AppContent() {
         <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
         {/* AlertsScreen is lazy-loaded, so it needs to be wrapped here or handled by top-level Suspense */}
         <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Emergency Alerts' }} />
+        <Stack.Screen name="HelpAndTerms" component={HelpAndTermsScreen} options={{ title: 'Help & Terms' }} />
       </Stack.Navigator>
     );
   }

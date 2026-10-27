@@ -34,6 +34,7 @@ import PinChangeModal from './pages/PinChangeModal';
 import PayrollHistoryModal from './pages/PayrollHistoryModal';
 import useInactivityTimer from './hooks/useInactivityTimer';
 import JobPostings from './pages/JobPostings';
+import PrivacyPolicy from './pages/PrivacyPolicy'; 
 
 import ToastNotification from './components/ToastNotification';
 import { NotificationProvider } from './contexts/NotificationContext';
@@ -269,6 +270,9 @@ function App() {
   };
 
   const { title } = getHeaderTitle();
+  if (window.location.pathname === '/privacy' || window.location.pathname === '/privacy/') {
+    return <PrivacyPolicy />;
+  }
 
   if (!isAuthenticated && !isLoggingIn) {
     return <AppointmentPage onAdminLogin={() => setIsLoggingIn(true)} />;

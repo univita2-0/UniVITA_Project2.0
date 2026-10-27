@@ -1,0 +1,145 @@
+/* PrivacyPolicy.css */
+
+.privacy-wrapper {
+  background-color: #F8FAFC;
+  min-height: 100vh;
+  padding: 40px 20px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #334155;
+}
+
+.privacy-container {
+  max-width: 850px;
+  margin: 0 auto;
+  background-color: #FFFFFF;
+  padding: 60px 80px;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  border: 1px solid #E2E8F0;
+}
+
+.privacy-header {
+  text-align: center;
+  margin-bottom: 40px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #E2E8F0;
+}
+
+.privacy-header h1 {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #0F172A;
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.last-updated {
+  font-size: 0.9rem;
+  color: #64748B;
+  font-weight: 500;
+}
+
+.privacy-section {
+  margin-bottom: 35px;
+}
+
+.privacy-section h2 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #0F766E;
+  margin-bottom: 15px;
+  margin-top: 30px;
+}
+
+.privacy-section p {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #475569;
+  margin-bottom: 15px;
+  text-align: justify;
+}
+
+.privacy-section ul {
+  margin-top: 10px;
+  margin-bottom: 20px;
+  padding-left: 24px;
+}
+
+.privacy-section li {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #475569;
+  margin-bottom: 10px;
+}
+
+.privacy-section strong {
+  color: #1E293B;
+  font-weight: 600;
+}
+
+.contact-box {
+  background-color: #F1F5F9;
+  padding: 20px;
+  border-radius: 8px;
+  border-left: 4px solid #0D9488;
+  margin-top: 15px;
+}
+
+.contact-box p {
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.contact-box a {
+  color: #0D9488;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.contact-box a:hover {
+  text-decoration: underline;
+}
+
+.privacy-footer {
+  margin-top: 50px;
+  padding-top: 30px;
+  border-top: 1px solid #E2E8F0;
+  text-align: center;
+}
+
+.back-link {
+  display: inline-block;
+  color: #0F172A;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 12px 24px;
+  background-color: #F1F5F9;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.back-link:hover {
+  background-color: #E2E8F0;
+  transform: translateY(-1px);
+}
+
+
+@media (max-width: 768px) {
+  .privacy-container {
+    padding: 40px 24px;
+  }
+  
+  .privacy-header h1 {
+    font-size: 1.8rem;
+  }
+  
+  .privacy-section h2 {
+    font-size: 1.2rem;
+  }
+  
+  .privacy-section p, 
+  .privacy-section li {
+    font-size: 0.95rem;
+    text-align: left; 
+  }
+}

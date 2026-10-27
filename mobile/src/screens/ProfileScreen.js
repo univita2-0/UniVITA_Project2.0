@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useContext, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, 
-  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform, Image
+  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform, Image, HelpCircle 
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -319,7 +319,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
           </View>
 
-          <View style={styles.menuSection}>
+            <View style={styles.menuSection}>
             <Text style={styles.sectionHeader}>ACCOUNT</Text>
             <View style={styles.menuCard}>
               <MenuItem icon={FileText} title="Personal & Employment Details" subtitle="Official HR records, statutory IDs & address" onPress={() => setShowDetailsModal(true)} />
@@ -329,6 +329,16 @@ export default function ProfileScreen({ navigation }) {
               <MenuItem icon={Shield} title="Change Password" subtitle="Update your login credentials" onPress={() => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setShowPasswordModal(true); }} />
               <View style={styles.divider} />
               <MenuItem icon={Bell} title="Emergency Alerts" subtitle="View active broadcasts" onPress={() => navigation.navigate('Alerts')} />
+              
+              {/* 🚨 ADDED HELP BUTTON HERE 🚨 */}
+              <View style={styles.divider} />
+              <MenuItem 
+                icon={HelpCircle} 
+                title="Help Center & Terms" 
+                subtitle="Read app instructions and privacy policy" 
+                onPress={() => navigation.navigate('HelpAndTerms')} 
+              />
+              
             </View>
           </View>
 
