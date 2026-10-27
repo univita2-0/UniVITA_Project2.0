@@ -3707,12 +3707,14 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
               ELSE COALESCE(a.status, 'Scheduled')
           END AS status,
 
-          COALESCE(a.time_in, '--:--') AS time_in, 
-          COALESCE(
-            NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'),
-            ${GEO_EXIT_SUBQUERY},
-            s.end_time
-          ) AS time_out, -- ✅ display the effective end
+              COALESCE(a.time_in, '--:--') AS time_in, 
+          CASE 
+            WHEN a.time_in IS NULL THEN '--:--'
+            WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN a.time_out
+            WHEN ${GEO_EXIT_SUBQUERY} IS NOT NULL THEN ${GEO_EXIT_SUBQUERY}
+            WHEN CONCAT(s.date, ' ', s.end_time) < NOW() THEN s.end_time
+            ELSE '--:--'
+          END AS time_out,
           
           a.location, a.clock_in_latitude, a.clock_in_longitude,
           a.clock_out_latitude, a.clock_out_longitude,
