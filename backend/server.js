@@ -1361,11 +1361,33 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'Schedule not found.' });
     const { place: schedulePlace, end_time: scheduledEndTime } = schedRows[0];
 
-   
-    if (currentTime < scheduledEndTime) {
-      return res.status(403).json({ success: false, message: `Shift incomplete. You must stay until ${formatTo12Hour(scheduledEndTime)} to clock out.` });
+    // ✅ GRACE PERIOD VALIDATION
+    const timeToMinutes = (timeStr) => {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return (hours * 60) + minutes;
+    };
+
+    const endMin = timeToMinutes(scheduledEndTime);
+    const currentMin = timeToMinutes(currentTime);
+    
+    const EARLY_GRACE_MINUTES = 5;
+    const LATE_GRACE_MINUTES = 15;
+
+    // 1. Check if clocking out too early
+    if (currentMin < (endMin - EARLY_GRACE_MINUTES)) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `Too early to clock out. You may only clock out starting 5 minutes before your shift ends (${formatTo12Hour(scheduledEndTime)}).` 
+      });
     }
-   
+
+    // 2. Check if clocking out too late
+    if (currentMin > (endMin + LATE_GRACE_MINUTES)) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `Clock-out is too late. The 15-minute grace period has expired. Please file an Overtime request or an Attendance Correction for this shift.` 
+      });
+    }
 
     const [locRows] = await db.promise().query(
       "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
@@ -1386,6 +1408,7 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     );
     if (existing.length === 0) return res.status(400).json({ success: false, message: 'No active clock-in found for this schedule.' });
 
+    
     await db.promise().query(
       `UPDATE attendance SET 
         time_out = ?, 
@@ -3687,24 +3710,21 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
     SELECT 
       u.id AS user_db_id, u.full_name, u.employee_id, 
       
-      -- ✅ STATUS: Strict validation based on manual clock-out
+      -- ✅ STATUS
       CASE 
           WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 'Pending'
           WHEN ap.id IS NOT NULL AND ap.status = 'pending' THEN 'Pending'
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
-          -- If clocked in, but shift has ended and no time_out -> Missing Clock-Out
           WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
-          -- If clocked in, and shift hasn't ended yet -> In Progress
           WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN 'In Progress'
-          -- If never clocked in and shift ended -> Absent
           WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Absent'
           ELSE COALESCE(a.status, 'Scheduled')
       END AS status,
 
-      -- ✅ TIME IN: Show --:-- if not clocked in
+      -- ✅ TIME IN (Actual)
       COALESCE(a.time_in, '--:--') AS time_in, 
       
-      -- ✅ TIME OUT: Strictly manual clock-out only. Show --:-- if not clocked out.
+      -- ✅ TIME OUT (Displays the ACTUAL time tapped by the instructor)
       COALESCE(NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'), '--:--') AS time_out,
       
       a.location, a.clock_in_latitude, a.clock_in_longitude,
@@ -3713,12 +3733,21 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
       s.id AS schedule_id, s.start_time AS scheduled_start, s.end_time AS scheduled_end, s.course,
       DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
 
-      -- ✅ TOTAL HOURS: Only compute if there is a manual time_out
+      -- ✅ TOTAL HOURS (With Grace Period Cap)
       CASE 
         WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
         WHEN a.time_in IS NULL OR a.time_out IS NULL OR a.time_out = '--:--' THEN 0
         ELSE GREATEST(0, ROUND(
-          TIME_TO_SEC(TIMEDIFF(a.time_out, a.time_in)) / 3600, 2
+          TIME_TO_SEC(TIMEDIFF(
+            -- The Calculation Cap Logic
+            CASE 
+              -- If they clocked out within the grace period (-5 mins to +15 mins), use the scheduled end time
+              WHEN TIME_TO_SEC(TIMEDIFF(a.time_out, s.end_time)) BETWEEN -300 AND 900 THEN s.end_time
+              -- Otherwise (e.g., approved correction for a much later time), use their actual time out
+              ELSE a.time_out
+            END,
+            a.time_in
+          )) / 3600, 2
         ))
       END AS total_hours
 
