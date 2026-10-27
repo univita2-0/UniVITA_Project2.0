@@ -5212,11 +5212,23 @@ app.get('/api/emergency-alerts/active', authenticateToken, async (req, res) => {
       }
     }
 
-    if (receiptsToInsert.length > 0) {
-      await db.promise().query(
-        `INSERT IGNORE INTO alert_receipts (alert_id, user_id) VALUES ?`,
-        [receiptsToInsert]
-      );
+        if (receiptsToInsert.length > 0) {
+      
+      receiptsToInsert.sort((a, b) => a[0] - b[0]);
+
+      try {
+        await db.promise().query(
+          `INSERT IGNORE INTO alert_receipts (alert_id, user_id) VALUES ?`,
+          [receiptsToInsert]
+        );
+      } catch (insertErr) {
+        
+        if (insertErr.code === 'ER_LOCK_DEADLOCK') {
+          console.warn(`Deadlock ignored on alert_receipts for user ${userId}. Will retry on next fetch.`);
+        } else {
+          throw insertErr; 
+        }
+      }
     }
 
     res.json(validAlerts);

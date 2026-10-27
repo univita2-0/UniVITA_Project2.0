@@ -128,33 +128,43 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const saveSession = async (user, token) => {
-    if (token) {
-      await AsyncStorage.setItem('auth_token', token);
-      await registerDeviceForPushNotifications(token);
-    }
-    await AsyncStorage.setItem('user', JSON.stringify({
-      id: user.id,
-      employee_id: user.employee_id,
-      full_name: user.full_name,
-      email: user.email,
-      role: user.role,
-      monthly_salary: user.monthly_salary || 0,
-      work_days_per_month: user.work_days_per_month || 22,
-      biometric_enabled: false
-    }));
-    await AsyncStorage.setItem('user_id', String(user.id));
-    await AsyncStorage.setItem('user_email', user.email);
-    if (user.employee_id) await AsyncStorage.setItem('employee_id', user.employee_id);
-    if (user.full_name) await AsyncStorage.setItem('user_name', user.full_name);
+    const saveSession = async (user, token) => {
+    const storagePromises = [
+      AsyncStorage.setItem('user', JSON.stringify({
+        id: user.id,
+        employee_id: user.employee_id,
+        full_name: user.full_name,
+        email: user.email,
+        role: user.role,
+        monthly_salary: user.monthly_salary || 0,
+        work_days_per_month: user.work_days_per_month || 22,
+        biometric_enabled: false
+      })),
+      AsyncStorage.setItem('user_id', String(user.id)),
+      AsyncStorage.setItem('user_email', user.email)
+    ];
 
-    // Save or clear persistence flags based on user choice
+    if (user.employee_id) storagePromises.push(AsyncStorage.setItem('employee_id', user.employee_id));
+    if (user.full_name) storagePromises.push(AsyncStorage.setItem('user_name', user.full_name));
+
     if (stayLoggedIn) {
-      await AsyncStorage.setItem('@stay_logged_in', 'true');
-      await AsyncStorage.setItem('@remembered_email', user.email);
+      storagePromises.push(AsyncStorage.setItem('@stay_logged_in', 'true'));
+      storagePromises.push(AsyncStorage.setItem('@remembered_email', user.email));
     } else {
-      await AsyncStorage.setItem('@stay_logged_in', 'false');
-      await AsyncStorage.removeItem('@remembered_email');
+      storagePromises.push(AsyncStorage.setItem('@stay_logged_in', 'false'));
+      storagePromises.push(AsyncStorage.removeItem('@remembered_email'));
+    }
+
+    if (token) {
+      storagePromises.push(AsyncStorage.setItem('auth_token', token));
+    }
+
+   
+    await Promise.all(storagePromises);
+
+   
+    if (token) {
+      registerDeviceForPushNotifications(token).catch(err => console.log(err));
     }
   };
 
@@ -217,7 +227,7 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const handleVerifyOtp = async () => {
+    const handleVerifyOtp = async () => {
     if (!otp || otp.length !== 6) {
       showToast('Please enter the 6-digit OTP', 'error');
       return;
@@ -233,9 +243,13 @@ export default function LoginScreen({ navigation }) {
           return;
         }
 
-        await saveSession(result.user, result.token);
+        
         setShowOtpModal(false);
         navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+
+        
+        saveSession(result.user, result.token).catch(err => console.log('Session save error:', err));
+        
       } else {
         showToast(result.message || 'Invalid OTP', 'error');
       }

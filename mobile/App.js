@@ -1,6 +1,6 @@
 // App.js
-import React, { useEffect, useState, useRef, useContext } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar, Alert } from 'react-native';
+import React, { useEffect, useState, useRef, useContext, Suspense, useCallback  } from 'react';
+import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar, Alert, AppState  } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -23,22 +23,24 @@ import ErrorBoundary from './ErrorBoundary';
 import { API_URL, fetchEmergencyAlerts, markAlertAsRead, fetchUserSchedule } from './src/screens/api';
 import { ThemeProvider, ThemeContext, themeColors } from './src/context/ThemeContext'; 
 
+// Eagerly loaded screens (Needed immediately)
 import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ScheduleScreen from './src/screens/ScheduleScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import AlertsScreen from './src/screens/AlertsScreen';
-import RequestsScreen from './src/screens/RequestsScreen';
-import MyPayrollScreen from './src/screens/MyPayrollScreen';
-import LeaveHistoryScreen from './src/screens/LeaveHistoryScreen';
 
-import AppealHistoryScreen from './src/screens/AppealHistoryScreen';
-import OvertimeHistoryScreen from './src/screens/OvertimeHistoryScreen';
-import CorrectionHistoryScreen from './src/screens/CorrectionHistoryScreen'; 
-import ChatScreen from './src/screens/ChatScreen';
-import AttendanceHistoryScreen from './src/screens/AttendanceHistoryScreen';
-import NotificationsScreen from './src/screens/NotificationsScreen';
+// Lazy-loaded screens (Downloaded on-demand)
+const AppealHistoryScreen = React.lazy(() => import('./src/screens/AppealHistoryScreen'));
+const OvertimeHistoryScreen = React.lazy(() => import('./src/screens/OvertimeHistoryScreen'));
+const CorrectionHistoryScreen = React.lazy(() => import('./src/screens/CorrectionHistoryScreen'));
+const ChatScreen = React.lazy(() => import('./src/screens/ChatScreen'));
+const AlertsScreen = React.lazy(() => import('./src/screens/AlertsScreen'));
+const RequestsScreen = React.lazy(() => import('./src/screens/RequestsScreen'));
+const MyPayrollScreen = React.lazy(() => import('./src/screens/MyPayrollScreen'));
+const LeaveHistoryScreen = React.lazy(() => import('./src/screens/LeaveHistoryScreen'));
+const AttendanceHistoryScreen = React.lazy(() => import('./src/screens/AttendanceHistoryScreen'));
+const NotificationsScreen = React.lazy(() => import('./src/screens/NotificationsScreen'));
 
 SplashScreen.preventAutoHideAsync();
 
@@ -85,12 +87,29 @@ function AppContent() {
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   const [userId, setUserId] = useState(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const appState = useRef(AppState.currentState);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [currentAlert, setCurrentAlert] = useState(null);
   const [alertQueue, setAlertQueue] = useState([]);
   const alertSound = useRef(null);
   const activeAlertId = useRef(null);
   const gpsPromptShown = useRef(false);
+
+
+    useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        console.log('App has come back to the foreground! Refreshing data...');
+        setRefreshTrigger(prev => prev + 1); 
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     async function prepare() {
@@ -102,33 +121,53 @@ function AppContent() {
           'Inter_18pt-Black': require('./assets/fonts/Inter_18pt-Black.ttf'),
           'Sora_700Bold': Sora_700Bold, 
         });
-
-        const { status } = await Location.requestBackgroundPermissionsAsync();
-        if (status !== 'granted') console.warn('Background location permission not granted');
-        
-        await new Promise(resolve => setTimeout(resolve, 300));
       } catch (e) { 
         console.warn(e); 
       } finally { 
         setAppIsReady(true);
       }
     }
+    
     prepare();
+
+    const timer = setTimeout(async () => {
+      try {
+        const { status } = await Location.requestBackgroundPermissionsAsync();
+        if (status !== 'granted') {
+          console.warn('Background location permission not granted');
+        }
+      } catch (err) {
+        console.warn('Location permission error:', err);
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
+      useEffect(() => {
     if (appIsReady) {
       SplashScreen.hideAsync();
-      Animated.timing(progressAnim, { toValue: 100, duration: 1500, useNativeDriver: false }).start(() => {
-        Animated.timing(splashFadeAnim, { toValue: 0, duration: 500, useNativeDriver: true, delay: 150 }).start(() => {
+      
+      
+      Animated.timing(progressAnim, { toValue: 100, duration: 100, useNativeDriver: false }).start(() => {
+        
+        
+        Animated.timing(splashFadeAnim, { toValue: 0, duration: 100, useNativeDriver: true }).start(() => {
           setShowCustomSplash(false);
         });
       });
     }
   }, [appIsReady, progressAnim, splashFadeAnim]);
 
-  useEffect(() => {
+      useEffect(() => {
+    let isFetching = false; 
+
     const checkUserAndLocation = async () => {
+    
+      if (appState.current !== 'active' || isFetching) return;
+      
+      isFetching = true;
+
       try {
         const rawUser = await AsyncStorage.getItem('user');
         if (rawUser) {
@@ -160,12 +199,24 @@ function AppContent() {
         } else {
           setUserId(null);
         }
-      } catch (e) {}
+      } catch (e) {
+        
+      } finally {
+        isFetching = false; 
+      }
     };
     
-    checkUserAndLocation();
+    
+    const initialDelay = setTimeout(() => {
+      checkUserAndLocation();
+    }, 1500);
+
     const interval = setInterval(checkUserAndLocation, 5000);
-    return () => clearInterval(interval);
+    
+    return () => {
+      clearTimeout(initialDelay);
+      clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
@@ -181,26 +232,7 @@ function AppContent() {
     registerPushToken();
   }, [userId]);
 
-  useEffect(() => {
-    if (!userId) return;
-    const loadAlerts = async () => {
-      try {
-        const alerts = await fetchEmergencyAlerts(userId);
-        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const unreadAlerts = alerts.filter(a => !a.read_at && new Date(a.sent_at) > oneDayAgo);
-        
-        if (unreadAlerts.length > 0 && activeAlertId.current !== unreadAlerts[0].id) {
-          setAlertQueue(unreadAlerts);
-          showNextAlert(unreadAlerts[0]);
-        }
-      } catch (err) {}
-    };
-    loadAlerts();
-    const intervalId = setInterval(loadAlerts, 10000);
-    return () => clearInterval(intervalId);
-  }, [userId]);
-
-  const showNextAlert = async (alert) => {
+  const showNextAlert = useCallback(async (alert) => {
     activeAlertId.current = alert.id;
     setCurrentAlert(alert);
     setShowAlertModal(true);
@@ -225,7 +257,38 @@ function AppContent() {
       sound.loop = true;
       sound.play();
     } catch (error) {}
-  };
+  }, []);
+
+      useEffect(() => {
+    if (!userId) return;
+    let isFetching = false;
+
+    const loadAlerts = async () => {
+      if (appState.current !== 'active') return; 
+      if (isFetching) return;
+      isFetching = true;
+
+      try {
+        const alerts = await fetchEmergencyAlerts(userId);
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const unreadAlerts = alerts.filter(a => !a.read_at && new Date(a.sent_at) > oneDayAgo);
+        
+        if (unreadAlerts.length > 0 && activeAlertId.current !== unreadAlerts[0].id) {
+          setAlertQueue(unreadAlerts);
+          showNextAlert(unreadAlerts[0]);
+        }
+      } catch (err) {
+      } finally {
+        isFetching = false;
+      }
+    };
+    
+    loadAlerts();
+    const intervalId = setInterval(loadAlerts, 10000);
+    return () => clearInterval(intervalId);
+  }, [userId, showNextAlert, refreshTrigger]); 
+
+   
 
   const dismissAlert = async () => {
     if (alertSound.current) {
@@ -253,17 +316,25 @@ function AppContent() {
         }}
       >
         <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
+        {/* AlertsScreen is lazy-loaded, so it needs to be wrapped here or handled by top-level Suspense */}
         <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Emergency Alerts' }} />
       </Stack.Navigator>
     );
   }
 
-  function MainTabs() {
+    function MainTabs() {
     const [isChatVisible, setIsChatVisible] = useState(false);
     const [unreadChatCount, setUnreadChatCount] = useState(0);
 
     useEffect(() => {
+      let isFetching = false; 
+
       const fetchUnread = async () => {
+        
+        if (appState.current !== 'active' || isFetching) return;
+        
+        isFetching = true;
+
         try {
           const token = await AsyncStorage.getItem('auth_token');
           if (!token) return;
@@ -272,12 +343,19 @@ function AppContent() {
           let total = 0;
           (Array.isArray(data) ? data : []).forEach(r => { total += (r.unread || 0); });
           setUnreadChatCount(total);
-        } catch (err) {}
+        } catch (err) {
+        } finally {
+          isFetching = false; 
+        }
       };
-      fetchUnread();
+      
+      const initialFetch = setTimeout(fetchUnread, 1000);
       const interval = setInterval(fetchUnread, 10000);
-      return () => clearInterval(interval);
-    }, []);
+      return () => {
+        clearTimeout(initialFetch);
+        clearInterval(interval);
+      };
+    }, [refreshTrigger]);
 
     return (
       <View style={{ flex: 1 }}>
@@ -308,7 +386,15 @@ function AppContent() {
         </TouchableOpacity>
 
         <Modal visible={isChatVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setIsChatVisible(false)}>
-          <ChatScreen onClose={() => setIsChatVisible(false)} />
+          <Suspense 
+            fallback={
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+              </View>
+            }
+          >
+            <ChatScreen onClose={() => setIsChatVisible(false)} />
+          </Suspense>
         </Modal>
       </View>
     );
@@ -321,21 +407,30 @@ function AppContent() {
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
       
       <ErrorBoundary>
-        <NavigationContainer>
-          <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="Main" component={MainTabs} />
-            <Stack.Screen name="Requests" component={RequestsScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="MyPayroll" component={MyPayrollScreen} options={{ headerShown: true, title: 'My Payroll', headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
-            <Stack.Screen name="LeaveHistory" component={LeaveHistoryScreen} options={{ headerShown: false }} />
-            
-            <Stack.Screen name="AppealHistory" component={AppealHistoryScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="CorrectionHistory" component={CorrectionHistoryScreen} options={{ headerShown: false }} /> 
-            <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} options={{ headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
-            <Stack.Screen name="AttendanceHistory" component={AttendanceHistoryScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
-          </Stack.Navigator>
-        </NavigationContainer>
+        {/* ✅ ADDED TOP-LEVEL SUSPENSE: Required for the lazy-loaded Stack screens */}
+        <Suspense 
+          fallback={
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          }
+        >
+          <NavigationContainer>
+            <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Main" component={MainTabs} />
+              <Stack.Screen name="Requests" component={RequestsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="MyPayroll" component={MyPayrollScreen} options={{ headerShown: true, title: 'My Payroll', headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
+              <Stack.Screen name="LeaveHistory" component={LeaveHistoryScreen} options={{ headerShown: false }} />
+              
+              <Stack.Screen name="AppealHistory" component={AppealHistoryScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="CorrectionHistory" component={CorrectionHistoryScreen} options={{ headerShown: false }} /> 
+              <Stack.Screen name="OvertimeHistory" component={OvertimeHistoryScreen} options={{ headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold' }, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false }} />
+              <Stack.Screen name="AttendanceHistory" component={AttendanceHistoryScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </Suspense>
       </ErrorBoundary>
 
       <Modal visible={showAlertModal} transparent animationType="fade">
