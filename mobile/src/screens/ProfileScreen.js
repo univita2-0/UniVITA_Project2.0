@@ -2,13 +2,13 @@
 import React, { useState, useMemo, useContext, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, 
-  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform, Image, HelpCircle 
+  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform, Image 
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { 
   User, Shield, ChevronRight, LogOut, ArrowLeft, Bell, Sun, Moon, Lock, Check, X, 
-  Eye, EyeOff, Camera, FileText, CreditCard, Briefcase, MapPin, ShieldCheck
+  Eye, EyeOff, Camera, FileText, CreditCard, Briefcase, MapPin, ShieldCheck, HelpCircle
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';

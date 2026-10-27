@@ -1,75 +1,89 @@
 /* PrivacyPolicy.css */
 
 .privacy-wrapper {
-  background-color: #F8FAFC;
+  background-color: #F8FAFC; /* Very light, clean gray */
   min-height: 100vh;
   padding: 40px 20px;
+  /* 🚨 Explicitly using Inter as requested */
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: #334155;
 }
 
 .privacy-container {
-  max-width: 850px;
+  max-width: 760px; /* Narrower width for better reading */
   margin: 0 auto;
   background-color: #FFFFFF;
-  padding: 60px 80px;
+  padding: 50px 60px;
   border-radius: 12px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
   border: 1px solid #E2E8F0;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
 }
 
+/* Header */
 .privacy-header {
   text-align: center;
   margin-bottom: 40px;
-  padding-bottom: 20px;
-  border-bottom: 2px solid #E2E8F0;
+  padding-bottom: 30px;
+  border-bottom: 1px solid #E2E8F0;
 }
 
 .privacy-header h1 {
-  font-size: 2.2rem;
+  font-size: 1.8rem;
   font-weight: 800;
   color: #0F172A;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   letter-spacing: -0.02em;
 }
 
-.last-updated {
+.privacy-header p {
   font-size: 0.9rem;
   color: #64748B;
   font-weight: 500;
 }
 
+/* Sections */
 .privacy-section {
   margin-bottom: 35px;
 }
 
 .privacy-section h2 {
-  font-size: 1.3rem;
+  font-size: 1.25rem;
   font-weight: 700;
-  color: #0F766E;
-  margin-bottom: 15px;
-  margin-top: 30px;
+  color: #0F766E; /* Teal color matching your app */
+  margin-bottom: 12px;
+}
+
+.privacy-section h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin-top: 24px;
+  margin-bottom: 10px;
 }
 
 .privacy-section p {
-  font-size: 1rem;
-  line-height: 1.7;
+  font-size: 0.95rem;
+  line-height: 1.6;
   color: #475569;
-  margin-bottom: 15px;
-  text-align: justify;
+  margin-bottom: 12px;
 }
 
+/* Lists */
 .privacy-section ul {
-  margin-top: 10px;
-  margin-bottom: 20px;
-  padding-left: 24px;
+  margin-top: 8px;
+  margin-bottom: 16px;
+  padding-left: 20px;
 }
 
 .privacy-section li {
-  font-size: 1rem;
-  line-height: 1.7;
+  font-size: 0.95rem;
+  line-height: 1.6;
   color: #475569;
   margin-bottom: 10px;
+}
+
+.privacy-section li::marker {
+  color: #0F766E; /* Matches the heading color */
 }
 
 .privacy-section strong {
@@ -77,21 +91,34 @@
   font-weight: 600;
 }
 
+/* Highlight Box (Location & Camera) */
+.highlight-box {
+  background-color: #F8FAFC;
+  padding: 24px;
+  border-radius: 10px;
+  border: 1px solid #E2E8F0;
+}
+
+.highlight-box h2 {
+  margin-top: 0;
+}
+
+/* Contact Box */
 .contact-box {
-  background-color: #F1F5F9;
+  background-color: #F8FAFC;
   padding: 20px;
-  border-radius: 8px;
-  border-left: 4px solid #0D9488;
-  margin-top: 15px;
+  border-radius: 10px;
+  border: 1px solid #E2E8F0;
+  margin-top: 12px;
 }
 
 .contact-box p {
-  margin-bottom: 8px;
-  font-size: 0.95rem;
+  margin-bottom: 6px;
+  font-size: 0.9rem;
 }
 
 .contact-box a {
-  color: #0D9488;
+  color: #0F766E;
   text-decoration: none;
   font-weight: 600;
 }
@@ -100,10 +127,9 @@
   text-decoration: underline;
 }
 
+/* Footer */
 .privacy-footer {
   margin-top: 50px;
-  padding-top: 30px;
-  border-top: 1px solid #E2E8F0;
   text-align: center;
 }
 
@@ -115,31 +141,21 @@
   padding: 12px 24px;
   background-color: #F1F5F9;
   border-radius: 8px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease;
+  font-size: 0.9rem;
 }
 
 .back-link:hover {
   background-color: #E2E8F0;
-  transform: translateY(-1px);
 }
 
-
+/* Mobile Responsive */
 @media (max-width: 768px) {
   .privacy-container {
-    padding: 40px 24px;
+    padding: 30px 24px;
   }
   
   .privacy-header h1 {
-    font-size: 1.8rem;
-  }
-  
-  .privacy-section h2 {
-    font-size: 1.2rem;
-  }
-  
-  .privacy-section p, 
-  .privacy-section li {
-    font-size: 0.95rem;
-    text-align: left; 
+    font-size: 1.5rem;
   }
 }
