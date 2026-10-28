@@ -199,6 +199,37 @@ const Schedule = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+     const isCompletelyEmpty = !formData.user_id && !formData.date && !formData.place && !formData.course;
+    if (isCompletelyEmpty) {
+      toast.warning("All fields are required!");
+      return;
+    }
+
+    if (!formData.user_id) {
+      toast.warning("Instructor is required!");
+      return;
+    }
+    if (!formData.date) {
+      toast.warning("Date is required!");
+      return;
+    }
+    if (!formData.place) {
+      toast.warning("School Location is required!");
+      return;
+    }
+    if (!formData.course) {
+      toast.warning("Course / Subject is required!");
+      return;
+    }
+    if (!formData.start_time) {
+      toast.warning("Start Time is required!");
+      return;
+    }
+    if (!formData.end_time) {
+      toast.warning("End Time is required!");
+      return;
+    }
+
     const userSchedules = schedules.filter(s => String(s.employee_id).trim() === String(formData.user_id).trim() && String(s.schedule_date).split('T')[0] === formData.date);
     const isOnLeave = userSchedules.some(s => s.course === 'On Leave' || s.place === 'Remote/Leave');
     
@@ -226,10 +257,6 @@ const Schedule = () => {
       return;
     }
 
-    if (!formData.place) {
-      toast.warning("Please select a school location.");
-      return;
-    }
     if (formData.start_time >= formData.end_time) {
       toast.warning("End time must be after start time.");
       return;
@@ -249,7 +276,7 @@ const Schedule = () => {
         await loadData();
       }
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Error saving schedule.');
+      toast.error(error.response?.data?.message || 'Error saving schedule.');
     }
   };
 
@@ -306,10 +333,28 @@ const Schedule = () => {
   };
 
   const submitInteractiveBulk = async () => {
-    const validRows = manualBulkRows.filter(r => r.employee_id && r.date && r.place && r.course && r.start_time && r.end_time);
+    for (let i = 0; i < manualBulkRows.length; i++) {
+      const r = manualBulkRows[i];
+      
+      
+      const isRowEmpty = !r.employee_id && !r.date && !r.place && !r.course;
+      if (isRowEmpty) {
+        return toast.warning(`Row ${i + 1}: All fields are required!`);
+      }
+
+     
+      if (!r.employee_id) return toast.warning(`Row ${i + 1}: Instructor is required!`);
+      if (!r.date) return toast.warning(`Row ${i + 1}: Date is required!`);
+      if (!r.place) return toast.warning(`Row ${i + 1}: Location is required!`);
+      if (!r.course) return toast.warning(`Row ${i + 1}: Course is required!`);
+      if (!r.start_time) return toast.warning(`Row ${i + 1}: Start Time is required!`);
+      if (!r.end_time) return toast.warning(`Row ${i + 1}: End Time is required!`);
+    }
+
+    const validRows = manualBulkRows; 
     
     if (validRows.length === 0) {
-      return toast.warning("Please fill out all fields in at least one row.");
+      return toast.warning("Please add at least one row.");
     }
 
     setIsUploadingBulk(true);

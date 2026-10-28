@@ -3335,7 +3335,7 @@ app.post('/api/schedules', authenticateToken, async (req, res) => {
   const { user_id, date, place, course, start_time, end_time } = req.body;
   const { date: today } = getPHTime();
 
-  if (!user_id || !date || !place || !start_time || !end_time) {
+  if (!user_id || !date || !place || !course || !start_time || !end_time) {
     return res.status(400).json({ success: false, message: 'All schedule fields are required.' });
   }
   if (date < today) {
@@ -3391,7 +3391,7 @@ app.put('/api/schedules/:id', authenticateToken, async (req, res) => {
   const scheduleId = req.params.id;
   const { date: today } = getPHTime();
 
-  if (!date || !place || !start_time || !end_time) {
+  if (!date || !place || !course || !start_time || !end_time) {
     return res.status(400).json({ success: false, message: 'All schedule fields are required.' });
   }
   if (date < today) return res.status(400).json({ success: false, message: "Cannot update schedule to a past date." });
