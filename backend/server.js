@@ -7652,7 +7652,7 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         COALESCE(a.status, 
           CASE 
             WHEN CONCAT(s.date, ' ', s.end_time) < ? AND a.time_in IS NULL THEN 'Missed Schedule' -- ✅ [1]
-            WHEN CONCAT(s.date, ' ', s.start_time) <= ? AND CONCAT(s.date, ' ', s.end_time) >= ? AND a.time_in IS NULL THEN 'Absent' -- ✅ [2, 3]
+            WHEN CONCAT(s.date, ' ', s.start_time) <= ? AND CONCAT(s.date, ' ', s.end_time) >= ? AND a.time_in IS NULL THEN 'Not Clocked In' -- ✅ [2, 3]
             ELSE 'Scheduled'
           END
         ) AS attendance_status,

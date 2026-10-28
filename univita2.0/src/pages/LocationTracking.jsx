@@ -727,12 +727,22 @@ const LocationTracking = () => {
                       let attBadgeClass = 'gps-off';
 
                       const isMissed =
-                        attStatus.toLowerCase().includes('miss') ||
-                        attStatus.toLowerCase().includes('absent');
+  attStatus.toLowerCase().includes('miss') ||
+  attStatus.toLowerCase().includes('absent') ||
+  attStatus.toLowerCase().includes('not clocked in'); // Add this
 
-                      if (isMissed) attBadgeClass = 'outside';
-                      else if (attStatus.toLowerCase().includes('present')) attBadgeClass = 'inside';
-                      else if (attStatus.toLowerCase().includes('late')) attBadgeClass = 'warning';
+if (attStatus.toLowerCase().includes('absent') || attStatus.toLowerCase().includes('miss')) {
+  attBadgeClass = 'outside'; // Red for actual misses/absences
+} 
+else if (attStatus.toLowerCase().includes('not clocked in')) {
+  attBadgeClass = 'warning'; // Orange/Yellow for ongoing shifts without clock-in
+}
+else if (attStatus.toLowerCase().includes('present')) {
+  attBadgeClass = 'inside';
+}
+else if (attStatus.toLowerCase().includes('late')) {
+  attBadgeClass = 'warning';
+}
 
                       const gpsLastPing = inst.last_ping_time
                         ? toTimestamp(inst.last_ping_time)
