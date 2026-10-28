@@ -7733,13 +7733,20 @@ app.get('/api/location-tracking/instructor-timeline/:employeeId', authenticateTo
   const targetDate = req.query.date || getPHTime().date;
   
   try {
+    
     const [rows] = await db.promise().query(`
-      SELECT id, ping_time, location_enabled, is_inside_campus, location_name, latitude, longitude
-      FROM instructor_location_tracking
-      WHERE (employee_id = ? OR employee_id = (SELECT id FROM users WHERE employee_id = ?))
-        AND (DATE(ping_time) = ? OR DATE(CONVERT_TZ(ping_time, '+00:00', '+08:00')) = ?)
-      ORDER BY id ASC
-    `, [employeeId, employeeId, targetDate, targetDate]);
+  SELECT t.id, t.ping_time, t.location_enabled, t.is_inside_campus, t.location_name, t.latitude, t.longitude
+  FROM instructor_location_tracking t
+  INNER JOIN schedules s ON t.schedule_id = s.id
+  WHERE (t.employee_id = ? OR t.employee_id = (SELECT id FROM users WHERE employee_id = ?))
+    AND (DATE(t.ping_time) = ? OR DATE(CONVERT_TZ(t.ping_time, '+00:00', '+08:00')) = ?)
+    AND (
+      -- 🚨 ROBUST FIX: Use DATE_SUB / DATE_ADD to handle midnight rollovers safely
+      t.ping_time BETWEEN DATE_SUB(CONCAT(s.date, ' ', s.start_time), INTERVAL 30 MINUTE)
+                      AND DATE_ADD(CONCAT(s.date, ' ', s.end_time), INTERVAL 30 MINUTE)
+    )
+  ORDER BY t.id ASC
+`, [employeeId, employeeId, targetDate, targetDate]);
 
     const [alerts] = await db.promise().query(`
       SELECT id, alert_message, created_at

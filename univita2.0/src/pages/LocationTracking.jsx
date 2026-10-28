@@ -420,7 +420,7 @@ const LocationTracking = () => {
     const shiftEnd = timelineData.end_time;
 
     const isWithinShiftTime = (timeStr) => {
-      if (!shiftStart || !shiftEnd) return true;
+      if (!shiftStart || !shiftEnd) return false;
       try {
         const safeStr = String(timeStr).includes('T')
           ? String(timeStr).split('T')[1]
@@ -498,12 +498,14 @@ const LocationTracking = () => {
     }
 
     (timelineData.alerts || []).forEach(alert => {
-      events.push({
-        time: alert.created_at,
-        type: 'Alert',
-        detail: alert.alert_message || 'Geofence compliance alert',
-      });
+  if (isWithinShiftTime(alert.created_at)) { 
+    events.push({
+      time: alert.created_at,
+      type: 'Alert',
+      detail: alert.alert_message || 'Geofence compliance alert',
     });
+  }
+});
 
     events.sort((a, b) => toTimestamp(a.time) - toTimestamp(b.time));
     return events;
