@@ -2702,14 +2702,11 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       const reqDuration = reqItem.duration || 'Whole Day';
       const reqDate = reqItem.date;
 
-      // Conflict Check — one leave per date, no exceptions.
-// Any Pending or Approved leave on the same date blocks the new request,
-// regardless of duration (1st Half, 2nd Half, or Whole Day).
-const [existingReq] = await connection.query(
+     const [existingReq] = await connection.query(
   `SELECT id, duration, status FROM leave_requests
     WHERE (user_id = ? OR user_id = ?)
       AND request_date = ?
-      AND status IN ('Pending', 'Approved')`,
+      AND status IN ('Pending', 'Approved') FOR UPDATE`,
   [employee_id, userId, reqDate]
 );
 
