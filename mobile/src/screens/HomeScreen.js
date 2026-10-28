@@ -173,6 +173,7 @@ export default function HomeScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
+  
 
   
 
@@ -623,7 +624,22 @@ const greeting = useMemo(() => {
   const handleClockIn = async () => {
   if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
 
-  // 🚨 NEW: offline-queue guard (mirror of clock-out)
+  // 🚨 NEW: Defensive Guard for Approved Leave (Whole Day or Half Day)
+  // The UI button is already disabled, but this prevents any edge-case bypasses.
+  if (isBlockedByLeave) {
+    if (leaveDuration === 'Whole Day') {
+      return Alert.alert('On Approved Leave', 'You have an approved Whole Day leave for today. Please contact HR if you wish to cancel your leave and work.');
+    }
+    if (leaveDuration === '1st Half') {
+      return Alert.alert('On Approved Leave (1st Half)', 'You are on leave this morning. Clock-in will become available at 12:00 PM.');
+    }
+    if (leaveDuration === '2nd Half') {
+      return Alert.alert('On Approved Leave (2nd Half)', 'You are on leave this afternoon. Clock-in is only available before 12:00 PM.');
+    }
+    return; // Failsafe
+  }
+
+  // 🚨 1. Offline-queue guard
   try {
     const rawQueue = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
     if (rawQueue) {
@@ -647,55 +663,75 @@ const greeting = useMemo(() => {
     console.warn('Queue read failed in clock-in guard:', e);
   }
 
-  // Mock location check (defensive strict equality)
-  try {
-    const { isLocationMocked } = await isMockingLocation();
-    if (isLocationMocked === true) {
-      Alert.alert(
-        'Security Alert',
-        'Mock location detected. Please disable any fake GPS apps or developer "Allow mock locations" settings to clock in.'
-      );
-      return;
-    }
-  } catch (e) {
-    console.warn('Mock location check failed (non-blocking):', e?.message || e);
+  // 🚨 2. Pending Leave Guard (Warn and Auto-Cancel)
+  if (isLeavePending) {
+    Alert.alert(
+      'Pending Leave Found',
+      'You have a pending leave request for today. If you clock in, your leave request will be automatically cancelled. Do you want to proceed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Clock In', 
+          style: 'destructive', 
+          onPress: () => executeClockIn() 
+        },
+      ]
+    );
+    return;
   }
 
-  const isGpsReady = await checkLocationServicesEnabled();
-  if (!isGpsReady) return;
+  // 3. If no pending or approved leave, proceed normally
+  executeClockIn();
 
-  const selfieUri = await captureSelfie();
-  if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for clock-in.');
-
-  const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-
-  try {
-    const result = await clockIn({
-      employee_id: String(user.employeeId || ''),
-      latitude: String(location.coords.latitude),
-      longitude: String(location.coords.longitude),
-      location_enabled: 'true',
-      schedule_id: String(todaySchedule.id),
-      selfie: selfieUri,
-    });
-
-    if (result.success) {
-      Alert.alert('Success', result.message);
-      try { await setTrackingEnabled(true); } catch (e) {}
-      await startBackgroundTracking(colors.primary);
-      await loadData();
-    } else if (result.queued) {
-      Alert.alert('Saved Offline', result.message);
-      try { await setTrackingEnabled(true); } catch (e) {}
-      await startBackgroundTracking(colors.primary);
-      await loadData();
-    } else {
-      Alert.alert('Clock-In Error', result.message);
+  async function executeClockIn() {
+    try {
+      const { isLocationMocked } = await isMockingLocation();
+      if (isLocationMocked === true) {
+        Alert.alert(
+          'Security Alert',
+          'Mock location detected. Please disable any fake GPS apps or developer "Allow mock locations" settings to clock in.'
+        );
+        return;
+      }
+    } catch (e) {
+      console.warn('Mock location check failed (non-blocking):', e?.message || e);
     }
-  } catch (error) {
-    // 🚨 Was silent — now logged so failures are diagnosable
-    console.warn('Clock-in request threw unexpectedly:', error?.message || error);
-    Alert.alert('Network Error', 'Connection failed.');
+
+    const isGpsReady = await checkLocationServicesEnabled();
+    if (!isGpsReady) return;
+
+    const selfieUri = await captureSelfie();
+    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for clock-in.');
+
+    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+
+    try {
+      const result = await clockIn({
+        employee_id: String(user.employeeId || ''),
+        latitude: String(location.coords.latitude),
+        longitude: String(location.coords.longitude),
+        location_enabled: 'true',
+        schedule_id: String(todaySchedule.id),
+        selfie: selfieUri,
+      });
+
+      if (result.success) {
+        Alert.alert('Success', result.message);
+        try { await setTrackingEnabled(true); } catch (e) {}
+        await startBackgroundTracking(colors.primary);
+        await loadData();
+      } else if (result.queued) {
+        Alert.alert('Saved Offline', result.message);
+        try { await setTrackingEnabled(true); } catch (e) {}
+        await startBackgroundTracking(colors.primary);
+        await loadData();
+      } else {
+        Alert.alert('Clock-In Error', result.message);
+      }
+    } catch (error) {
+      console.warn('Clock-in request threw unexpectedly:', error?.message || error);
+      Alert.alert('Network Error', 'Connection failed.');
+    }
   }
 };
 
@@ -897,10 +933,27 @@ try {
   }
 };
 
-  const finalCanClockIn = todaySchedule !== null && attendanceStatus.canClockIn;
-  const finalCanClockOut = todaySchedule !== null && attendanceStatus.canClockOut;
+  // Defensive fallback: if the API only reported status (no duration), treat it as Whole Day
+const leaveDuration =
+  todaySchedule?.leave_duration ||
+  (todaySchedule?.attendance_record_status === 'On Leave' ? 'Whole Day' : null);
 
-    const hasClockedInToday =
+const currentHour = parseInt(currentTimeStrPHT.split(':')[0], 10);
+const isPastNoon = currentHour >= 12;
+
+let isBlockedByLeave = false;
+if (leaveDuration === 'Whole Day') {
+  isBlockedByLeave = true;
+} else if (leaveDuration === '1st Half' && !isPastNoon) {
+  isBlockedByLeave = true; // Blocked before 12 PM
+} else if (leaveDuration === '2nd Half' && isPastNoon) {
+  isBlockedByLeave = true; // Blocked after 12 PM
+}
+
+const finalCanClockIn = todaySchedule !== null && attendanceStatus.canClockIn && !isBlockedByLeave;
+const finalCanClockOut = todaySchedule !== null && attendanceStatus.canClockOut;
+
+const hasClockedInToday =
   !!attendanceStatus.todayRecord?.time_in &&
   attendanceStatus.todayRecord.time_in !== '--:--';
 
@@ -1019,9 +1072,23 @@ const canClockOutNow =
           <View style={styles.actionContainer}>
             <TouchableOpacity
   style={[styles.btnPillPrimary, !finalCanClockIn && styles.btnDisabled]}
-  onPress={() => {
+    onPress={() => {
     if (!finalCanClockIn) {
       if (!todaySchedule) return Alert.alert('No Schedule', 'No active shift was found for today.');
+      
+      // 🚨 NEW: Explicit Half-Day Messages
+      if (isBlockedByLeave) {
+        if (leaveDuration === 'Whole Day') {
+          return Alert.alert('On Approved Leave', 'You have an approved Whole Day leave for today. Please contact HR if you wish to cancel your leave and work.');
+        }
+        if (leaveDuration === '1st Half') {
+          return Alert.alert('On Approved Leave (1st Half)', 'You are on leave this morning. Clock-in will become available at 12:00 PM.');
+        }
+        if (leaveDuration === '2nd Half') {
+          return Alert.alert('On Approved Leave (2nd Half)', 'You are on leave this afternoon. Clock-in is only available before 12:00 PM.');
+        }
+      }
+
       if (attendanceStatus.todayRecord?.time_in && attendanceStatus.todayRecord.time_in !== '--:--') {
         return Alert.alert('Already Clocked In', 'You have already clocked in for this shift.');
       }

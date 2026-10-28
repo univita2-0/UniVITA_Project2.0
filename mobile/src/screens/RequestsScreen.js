@@ -505,7 +505,7 @@ export default function RequestsScreen({ navigation, route }) {
   // ============================================================
   // LEAVE
   // ============================================================
-    const handleNextLeave = () => {
+    const handleNextLeave = async () => {
     if (!leaveDateFrom) { Alert.alert('Validation Error', 'Please select a start date.'); return; }
     if (isRange && !leaveDateTo) { Alert.alert('Validation Error', 'Please select an end date.'); return; }
 
@@ -570,6 +570,44 @@ export default function RequestsScreen({ navigation, route }) {
       item.isPaid = runningBalance >= cost;
       runningBalance -= cost;
     });
+
+    // ── NEW: Pre-check for existing leaves on any selected date ──
+    // Surfaces conflicts BEFORE the user proceeds to steps 2 and 3.
+    // Lists every conflicting date at once (not just the first one).
+    // Fails open — if the network call fails, the backend still holds the guard.
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const userStr = await AsyncStorage.getItem('user');
+      let empId = null;
+      if (userStr) { try { empId = JSON.parse(userStr).employee_id; } catch {} }
+
+      if (empId) {
+        const res = await fetch(`${API_URL}/leave-requests/user/${empId}`, {
+          headers: { Authorization: `Bearer ${token || ''}` },
+        });
+        const allLeaves = await res.json();
+
+        const conflicts = (Array.isArray(allLeaves) ? allLeaves : []).filter(lv => {
+          const st = String(lv.status || '').toLowerCase();
+          if (st !== 'pending' && st !== 'approved') return false;
+          const lvDate = String(lv.request_date || '').substring(0, 10);
+          return dates.some(d => d.date === lvDate);
+        });
+
+        if (conflicts.length > 0) {
+          const dateList = conflicts.map(c => `• ${c.request_date} (${c.status})`).join('\n');
+          Alert.alert(
+            'Existing Leave Found',
+            `You already have ${conflicts.length} leave on the selected date(s):\n\n${dateList}\n\nPlease exclude these dates before submitting, or contact HR if you need to modify the existing leave.`
+          );
+          return;
+        }
+      }
+    } catch (e) {
+      
+      console.warn('Leave pre-check failed (non-blocking):', e);
+    }
+    // ─────────────────────────────────────────────────────────────
 
     setLeaveBreakdown(dates);
     setLeaveStep(2);

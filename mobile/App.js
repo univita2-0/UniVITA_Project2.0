@@ -79,15 +79,161 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   } catch (err) {}
 });
 
-
-
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+
+// ─────────────────────────────────────────────────────────────
+// MODULE-SCOPE NAVIGATOR COMPONENTS
+//
+// These were previously defined INSIDE AppContent. Because React
+// Navigation compares component references, defining them inside a
+// re-rendering parent caused the entire Tab.Navigator (and every
+// screen mounted underneath) to unmount and remount whenever any
+// AppContent state changed — most visibly on every background→
+// foreground transition (refreshTrigger bump), losing scroll
+// position, tab selection, and any in-flight form state.
+//
+// Hoisting them to module scope gives them stable references.
+// They read the theme from ThemeContext directly (instead of via
+// props), so they don't need to be re-created when colors change.
+// ─────────────────────────────────────────────────────────────
+
+function ProfileStack() {
+  const { isDark } = useContext(ThemeContext);
+  const colors = isDark ? themeColors.dark : themeColors.light;
+
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: true,
+        headerTintColor: colors.textPrimary,
+        headerTitleStyle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16 },
+        headerTitleAlign: 'center',
+        headerBackTitleVisible: false,
+        headerStyle: { backgroundColor: colors.surface },
+        headerShadowVisible: false,
+      }}
+    >
+      <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Emergency Alerts' }} />
+      <Stack.Screen name="HelpAndTerms" component={HelpAndTermsScreen} options={{ title: 'Help & Terms' }} />
+    </Stack.Navigator>
+  );
+}
+
+function MainTabs() {
+  const { isDark } = useContext(ThemeContext);
+  const colors = isDark ? themeColors.dark : themeColors.light;
+  const isLight = !isDark;
+
+  const [isChatVisible, setIsChatVisible] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [localRefresh, setLocalRefresh] = useState(0);
+  const appStateRef = useRef(AppState.currentState);
+
+  // Local AppState tracking — refreshes the chat badge when the app
+  // returns to the foreground. Kept inside MainTabs so the component
+  // remains self-contained and doesn't need AppContent's appState ref.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        setLocalRefresh(prev => prev + 1);
+      }
+      appStateRef.current = next;
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    let isFetching = false;
+
+    const fetchUnread = async () => {
+      if (appStateRef.current !== 'active' || isFetching) return;
+      isFetching = true;
+
+      try {
+        const token = await AsyncStorage.getItem('auth_token');
+        if (!token) return;
+        const res = await fetch(`${API_URL}/chat/unread-counts`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        let total = 0;
+        (Array.isArray(data) ? data : []).forEach(r => { total += (r.unread || 0); });
+        setUnreadChatCount(total);
+      } catch (err) {
+      } finally {
+        isFetching = false;
+      }
+    };
+
+    const initialFetch = setTimeout(fetchUnread, 1000);
+    const interval = setInterval(fetchUnread, 10000);
+    return () => {
+      clearTimeout(initialFetch);
+      clearInterval(interval);
+    };
+  }, [localRefresh]);
+
+  return (
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: colors.textPrimary,
+          tabBarInactiveTintColor: colors.textSecondary,
+          tabBarStyle: {
+            height: Platform.OS === 'ios' ? 85 : 65,
+            paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+            paddingTop: 8,
+            backgroundColor: colors.surface,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            elevation: 0,
+            shadowOpacity: 0,
+          },
+          tabBarLabelStyle: { fontFamily: 'Inter_18pt-Medium', fontSize: 11 },
+        }}
+      >
+        <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarIcon: ({ color }) => <Home size={22} color={color} /> }} />
+        <Tab.Screen name="Calendar" component={CalendarScreen} options={{ tabBarIcon: ({ color }) => <Calendar size={22} color={color} /> }} />
+        <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ tabBarIcon: ({ color }) => <Clock size={22} color={color} /> }} />
+        <Tab.Screen name="ProfileTab" component={ProfileStack} options={{ title: 'Profile', tabBarIcon: ({ color }) => <User size={22} color={color} /> }} />
+      </Tab.Navigator>
+
+      <TouchableOpacity
+        style={[styles.globalFab, { backgroundColor: isLight ? '#0F172A' : colors.primary }]}
+        onPress={() => setIsChatVisible(true)}
+        activeOpacity={0.85}
+      >
+        <MessageCircle size={26} color="#FFFFFF" />
+        {unreadChatCount > 0 && (
+          <View style={[styles.fabBadge, { borderColor: isLight ? '#0F172A' : colors.primary }]}>
+            <Text style={styles.fabBadgeText}>{unreadChatCount > 99 ? '99+' : unreadChatCount}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <Modal visible={isChatVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setIsChatVisible(false)}>
+        <Suspense
+          fallback={
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          }
+        >
+          <ChatScreen onClose={() => setIsChatVisible(false)} />
+        </Suspense>
+      </Modal>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// APP CONTENT
+// ─────────────────────────────────────────────────────────────
 
 function AppContent() {
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
-  const isLight = !isDark;
 
   const [appIsReady, setAppIsReady] = useState(false);
   
@@ -105,23 +251,21 @@ function AppContent() {
   const activeAlertId = useRef(null);
   const gpsPromptShown = useRef(false);
 
-  
-useEffect(() => {
-  let cancelled = false;
-  const unsubscribe = NetInfo.addEventListener(state => {
-    if (!state.isConnected || cancelled) return;
-    AsyncStorage.getItem('auth_token').then(token => {
-      if (!token || cancelled) return;   // ← no token, no sync
-      syncOfflineQueue().then(count => {
-        if (count > 0 && !cancelled) setRefreshTrigger(prev => prev + 1);
+  useEffect(() => {
+    let cancelled = false;
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (!state.isConnected || cancelled) return;
+      AsyncStorage.getItem('auth_token').then(token => {
+        if (!token || cancelled) return;
+        syncOfflineQueue().then(count => {
+          if (count > 0 && !cancelled) setRefreshTrigger(prev => prev + 1);
+        });
       });
     });
-  });
-  return () => { cancelled = true; unsubscribe(); };
-}, []);
+    return () => { cancelled = true; unsubscribe(); };
+  }, []);
 
-
-    useEffect(() => {
+  useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         console.log('App has come back to the foreground! Refreshing data...');
@@ -168,14 +312,11 @@ useEffect(() => {
     return () => clearTimeout(timer);
   }, []);
 
-      useEffect(() => {
+  useEffect(() => {
     if (appIsReady) {
       SplashScreen.hideAsync();
       
-      
       Animated.timing(progressAnim, { toValue: 100, duration: 100, useNativeDriver: false }).start(() => {
-        
-        
         Animated.timing(splashFadeAnim, { toValue: 0, duration: 100, useNativeDriver: true }).start(() => {
           setShowCustomSplash(false);
         });
@@ -183,11 +324,10 @@ useEffect(() => {
     }
   }, [appIsReady, progressAnim, splashFadeAnim]);
 
-      useEffect(() => {
+  useEffect(() => {
     let isFetching = false; 
 
     const checkUserAndLocation = async () => {
-    
       if (appState.current !== 'active' || isFetching) return;
       
       isFetching = true;
@@ -229,7 +369,6 @@ useEffect(() => {
         isFetching = false; 
       }
     };
-    
     
     const initialDelay = setTimeout(() => {
       checkUserAndLocation();
@@ -283,7 +422,7 @@ useEffect(() => {
     } catch (error) {}
   }, []);
 
-      useEffect(() => {
+  useEffect(() => {
     if (!userId) return;
     let isFetching = false;
 
@@ -312,8 +451,6 @@ useEffect(() => {
     return () => clearInterval(intervalId);
   }, [userId, showNextAlert, refreshTrigger]); 
 
-   
-
   const dismissAlert = async () => {
     if (alertSound.current) {
       try { alertSound.current.pause(); alertSound.current.release(); alertSound.current = null; } catch (error) {}
@@ -331,100 +468,6 @@ useEffect(() => {
     }
   };
 
-  function ProfileStack() {
-    return (
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: true, headerTintColor: colors.textPrimary, headerTitleStyle: { fontFamily: 'Inter_18pt-Bold', fontSize: 16 },
-          headerTitleAlign: 'center', headerBackTitleVisible: false, headerStyle: { backgroundColor: colors.surface }, headerShadowVisible: false,
-        }}
-      >
-        <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
-        {/* AlertsScreen is lazy-loaded, so it needs to be wrapped here or handled by top-level Suspense */}
-        <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Emergency Alerts' }} />
-        <Stack.Screen name="HelpAndTerms" component={HelpAndTermsScreen} options={{ title: 'Help & Terms' }} />
-      </Stack.Navigator>
-    );
-  }
-
-    function MainTabs() {
-    const [isChatVisible, setIsChatVisible] = useState(false);
-    const [unreadChatCount, setUnreadChatCount] = useState(0);
-
-    useEffect(() => {
-      let isFetching = false; 
-
-      const fetchUnread = async () => {
-        
-        if (appState.current !== 'active' || isFetching) return;
-        
-        isFetching = true;
-
-        try {
-          const token = await AsyncStorage.getItem('auth_token');
-          if (!token) return;
-          const res = await fetch(`${API_URL}/chat/unread-counts`, { headers: { Authorization: `Bearer ${token}` } });
-          const data = await res.json();
-          let total = 0;
-          (Array.isArray(data) ? data : []).forEach(r => { total += (r.unread || 0); });
-          setUnreadChatCount(total);
-        } catch (err) {
-        } finally {
-          isFetching = false; 
-        }
-      };
-      
-      const initialFetch = setTimeout(fetchUnread, 1000);
-      const interval = setInterval(fetchUnread, 10000);
-      return () => {
-        clearTimeout(initialFetch);
-        clearInterval(interval);
-      };
-    }, [refreshTrigger]);
-
-    return (
-      <View style={{ flex: 1 }}>
-        <Tab.Navigator
-          screenOptions={{
-            headerShown: false, tabBarActiveTintColor: colors.textPrimary, tabBarInactiveTintColor: colors.textSecondary,
-            tabBarStyle: { height: Platform.OS === 'ios' ? 85 : 65, paddingBottom: Platform.OS === 'ios' ? 24 : 10, paddingTop: 8, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, elevation: 0, shadowOpacity: 0 },
-            tabBarLabelStyle: { fontFamily: 'Inter_18pt-Medium', fontSize: 11 },
-          }}
-        >
-          <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarIcon: ({ color }) => <Home size={22} color={color} /> }} />
-          <Tab.Screen name="Calendar" component={CalendarScreen} options={{ tabBarIcon: ({ color }) => <Calendar size={22} color={color} /> }} />
-          <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ tabBarIcon: ({ color }) => <Clock size={22} color={color} /> }} />
-          <Tab.Screen name="ProfileTab" component={ProfileStack} options={{ title: 'Profile', tabBarIcon: ({ color }) => <User size={22} color={color} /> }} />
-        </Tab.Navigator>
-
-        <TouchableOpacity 
-          style={[styles.globalFab, { backgroundColor: isLight ? '#0F172A' : colors.primary }]} 
-          onPress={() => setIsChatVisible(true)}
-          activeOpacity={0.85}
-        >
-          <MessageCircle size={26} color="#FFFFFF" />
-          {unreadChatCount > 0 && (
-            <View style={[styles.fabBadge, { borderColor: isLight ? '#0F172A' : colors.primary }]}>
-              <Text style={styles.fabBadgeText}>{unreadChatCount > 99 ? '99+' : unreadChatCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-
-        <Modal visible={isChatVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setIsChatVisible(false)}>
-          <Suspense 
-            fallback={
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-                <ActivityIndicator size="large" color={colors.primary} />
-              </View>
-            }
-          >
-            <ChatScreen onClose={() => setIsChatVisible(false)} />
-          </Suspense>
-        </Modal>
-      </View>
-    );
-  }
-
   if (!appIsReady) return null; 
 
   return (
@@ -432,7 +475,7 @@ useEffect(() => {
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
       
       <ErrorBoundary>
-        {/* ✅ ADDED TOP-LEVEL SUSPENSE: Required for the lazy-loaded Stack screens */}
+        {/* Top-level Suspense is required for the lazy-loaded Stack screens below */}
         <Suspense 
           fallback={
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>

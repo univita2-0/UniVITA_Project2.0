@@ -1300,6 +1300,42 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     }
     const { place: schedulePlace, start_time: scheduledStartTime, end_time: scheduledEndTime } = schedRows[0];
 
+    // 🚨 STEP 2 & 3: Explicit Approved Leave Check & Half-Day Logic
+    const [leaveCheck] = await connection.query(
+      "SELECT duration FROM leave_requests WHERE (user_id = ? OR user_id = ?) AND request_date = ? AND status = 'Approved'",
+      [employee_id, userId, todayDate]
+    );
+
+    if (leaveCheck.length > 0) {
+      // Convert current PHT time (HH:mm:ss) to total minutes once
+      const [currentHour, currentMinute] = currentTime.split(':').map(Number);
+      const currentTotalMins = (currentHour * 60) + currentMinute;
+      const NOON_MINS = 12 * 60; // 12:00 PM
+
+      // Evaluate EVERY approved leave for the day, not just the first one.
+      // This correctly handles the (rare) case where both a 1st Half and a
+      // 2nd Half leave are approved — the combined rule becomes a Whole Day block.
+      for (const row of leaveCheck) {
+        const duration = row.duration;
+        let blockReason = null;
+
+        if (duration === 'Whole Day') {
+          blockReason = 'You are on an approved leave for today (Whole Day). Please contact HR if you need to cancel your leave.';
+        } else if (duration === '1st Half' && currentTotalMins < NOON_MINS) {
+          blockReason = 'You are on an approved leave for the 1st Half of today. Clock-in will be available after 12:00 PM.';
+        } else if (duration === '2nd Half' && currentTotalMins >= NOON_MINS) {
+          blockReason = 'You are on an approved leave for the 2nd Half of today. Clock-in is only available before 12:00 PM.';
+        }
+
+        if (blockReason) {
+          await connection.rollback();
+          if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+          return res.status(403).json({ success: false, message: blockReason });
+        }
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     if (currentTime > scheduledEndTime) {
       const [existingAtt] = await connection.query(
         "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ? AND date = ?", 
@@ -1362,41 +1398,41 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       );
 
       if (heuristic.suspicious) {
-  logAction(userId, 'SUSPICIOUS_LOCATION', 'attendance', null, req, null, {
-    event: 'clock_in',
-    flags: heuristic.flags,
-    lat: parsedLat,
-    lon: parsedLon
-  });
+        logAction(userId, 'SUSPICIOUS_LOCATION', 'attendance', null, req, null, {
+          event: 'clock_in',
+          flags: heuristic.flags,
+          lat: parsedLat,
+          lon: parsedLon
+        });
 
-  // ⚡ Push to any admin currently viewing the Location Tracking page
-  broadcastToAdminAndHR({
-    type: 'suspicious_location',
-    event: {
-      employee_id,
-      full_name: userRows[0].full_name,
-      event_type: 'clock_in',
-      flags: heuristic.flags,
-      lat: parsedLat,
-      lon: parsedLon,
-      created_at: getPHDateTime()
-    }
-  });
+        // ⚡ Push to any admin currently viewing the Location Tracking page
+        broadcastToAdminAndHR({
+          type: 'suspicious_location',
+          event: {
+            employee_id,
+            full_name: userRows[0].full_name,
+            event_type: 'clock_in',
+            flags: heuristic.flags,
+            lat: parsedLat,
+            lon: parsedLon,
+            created_at: getPHDateTime()
+          }
+        });
 
-  const severeFlag = heuristic.flags.some(f =>
-    f.reason === 'Impossible travel speed' &&
-    Number(f.speed_kmh) >= SPOOF_BLOCK_SPEED_KMH
-  );
+        const severeFlag = heuristic.flags.some(f =>
+          f.reason === 'Impossible travel speed' &&
+          Number(f.speed_kmh) >= SPOOF_BLOCK_SPEED_KMH
+        );
 
-  if (severeFlag) {
-    await connection.rollback();
-    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    return res.status(403).json({
-      success: false,
-      message: 'Location verification failed. Please contact HR to clock in.'
-    });
-  }
-}
+        if (severeFlag) {
+          await connection.rollback();
+          if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+          return res.status(403).json({
+            success: false,
+            message: 'Location verification failed. Please contact HR to clock in.'
+          });
+        }
+      }
     } catch (heuristicErr) {
       // Never let the heuristic crash the clock-in — log and continue
       console.warn('Spoofing heuristic check failed (non-blocking):', heuristicErr.message);
@@ -1433,6 +1469,16 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       [employee_id, schedule_id, todayDate, currentTime, status,
        selfiePath, parsedLat, parsedLon,
        `${schedulePlace} (${parsedLat.toFixed(6)}, ${parsedLon.toFixed(6)})`]
+    );
+
+    // 🚨 Auto-cancel pending leave if they clock in
+    await connection.query(
+      `UPDATE leave_requests 
+       SET status = 'Cancelled', 
+           admin_remarks = '[Auto-cancelled by system: Employee clocked in]',
+           reviewed_at = ?
+       WHERE (user_id = ? OR user_id = ?) AND request_date = ? AND status = 'Pending'`,
+      [getPHDateTime(), employee_id, userId, todayDate]
     );
 
     await connection.query(
@@ -2656,31 +2702,25 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       const reqDuration = reqItem.duration || 'Whole Day';
       const reqDate = reqItem.date;
 
-      // Conflict Check
-      const [existingReq] = await connection.query(
-        `SELECT id, duration FROM leave_requests
-          WHERE (user_id = ? OR user_id = ?)
-            AND request_date = ?
-            AND status IN ('Pending', 'Approved')`,
-        [employee_id, userId, reqDate]
-      );
+      // Conflict Check — one leave per date, no exceptions.
+// Any Pending or Approved leave on the same date blocks the new request,
+// regardless of duration (1st Half, 2nd Half, or Whole Day).
+const [existingReq] = await connection.query(
+  `SELECT id, duration, status FROM leave_requests
+    WHERE (user_id = ? OR user_id = ?)
+      AND request_date = ?
+      AND status IN ('Pending', 'Approved')`,
+  [employee_id, userId, reqDate]
+);
 
-      if (existingReq.length > 0) {
-        const isHalf = (d) => d === '1st Half' || d === '2nd Half';
-        const existingIsFull = existingReq.some(r => !isHalf(r.duration));
-        const newIsFull      = !isHalf(reqDuration);
-        const sameHalf       = existingReq.some(r => r.duration === reqDuration);
-
-        if (existingIsFull || newIsFull || sameHalf) {
-          await connection.rollback();
-          return res.status(409).json({
-            success: false,
-            message: sameHalf
-              ? `A ${reqDuration} request already exists for ${reqDate}.`
-              : `A full-day request already exists for ${reqDate}.`
-          });
-        }
-      }
+if (existingReq.length > 0) {
+  const existing = existingReq[0];
+  await connection.rollback();
+  return res.status(409).json({
+    success: false,
+    message: `A ${existing.status.toLowerCase()} leave already exists for ${reqDate}. Only one leave per date is allowed.`
+  });
+}
 
       // Insert Row
       const [result] = await connection.query(
@@ -2848,6 +2888,43 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
     );
 
     if (status === 'Approved') {
+      // 🚨 NEW: Prevent HR from approving leave if they already clocked in that day
+      const [existingAtt] = await connection.query(
+        "SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND date = ? AND time_in IS NOT NULL",
+        [employee_id, internalUserId, request_date]
+      );
+      
+      if (existingAtt.length > 0) {
+        await connection.rollback();
+        return res.status(400).json({ 
+          success: false, 
+          message: "Cannot approve leave: Employee has already clocked in and worked on this date." 
+        });
+      }
+
+      // 🚨 NEW (Defense-in-depth): Enforce "one leave per date, no exceptions".
+      // Blocks approval if ANY other Pending or Approved leave exists for this
+      // employee on the same date. Catches legacy duplicates created before the
+      // submission-time conflict check was deployed.
+      const [otherLeaves] = await connection.query(
+        `SELECT id, status FROM leave_requests
+          WHERE (user_id = ? OR user_id = ?)
+            AND request_date = ?
+            AND status IN ('Pending', 'Approved')
+            AND id <> ?
+          LIMIT 1`,
+        [employee_id, internalUserId, request_date, requestId]
+      );
+
+      if (otherLeaves.length > 0) {
+        await connection.rollback();
+        const other = otherLeaves[0];
+        return res.status(409).json({
+          success: false,
+          message: `Cannot approve: another ${other.status.toLowerCase()} leave already exists for ${request_date}. Only one leave per date is allowed. Please resolve the other request first.`
+        });
+      }
+
       const leaveYear = parseInt(String(request_date).split('-')[0], 10) || new Date().getFullYear();
       const [typeRows] = await connection.query(`SELECT id FROM leave_types WHERE name = ?`, [type]);
       if (typeRows.length === 0) {
@@ -3173,6 +3250,7 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
       a.time_in,
       a.time_out,
       DATE_FORMAT(s.date, '%Y-%m-%d') as date,
+      lr_approved.duration AS leave_duration,
       
       -- Mobile Badge Status
       CASE 
@@ -8698,6 +8776,36 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
       );
 
       if (status === 'Approved') {
+        
+        const [existingAtt] = await connection.query(
+          "SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND date = ? AND time_in IS NOT NULL",
+          [employee_id, internalUserId, request_date]
+        );
+        
+        if (existingAtt.length > 0) {
+          throw new Error(`Cannot approve leave for ${employee_id}: Employee has already clocked in on ${request_date}.`);
+        }
+
+        // 🚨 NEW (Defense-in-depth): Enforce "one leave per date, no exceptions".
+        // Throws if ANY other Pending or Approved leave exists on the same date
+        // for the same employee. The batch handler catches and rolls back.
+        const [otherLeaves] = await connection.query(
+          `SELECT id, status FROM leave_requests
+            WHERE (user_id = ? OR user_id = ?)
+              AND request_date = ?
+              AND status IN ('Pending', 'Approved')
+              AND id <> ?
+            LIMIT 1`,
+          [employee_id, internalUserId, request_date, reqId]
+        );
+
+        if (otherLeaves.length > 0) {
+          const other = otherLeaves[0];
+          throw new Error(
+            `Cannot approve leave for ${employee_id} on ${request_date}: another ${other.status.toLowerCase()} leave already exists for this date. Only one leave per date is allowed. Please reject the duplicate first.`
+          );
+        }
+
         const leaveYear = new Date(request_date).getFullYear();
         const [typeRows] = await connection.query(`SELECT id FROM leave_types WHERE name = ?`, [type]);
         
@@ -8751,7 +8859,6 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
     
     logAction(req.user.id, `BATCH_${status.toUpperCase()}_LEAVE`, 'leave_request', `Batch IDs: ${ids.join(',')}`, req);
     
-    // Updated response message to notify user of skipped requests
     const processedCount = ids.length - skippedCount;
     const msg = skippedCount > 0 
       ? `Successfully ${status.toLowerCase()} ${processedCount} leave requests. (${skippedCount} skipped as already processed).`
