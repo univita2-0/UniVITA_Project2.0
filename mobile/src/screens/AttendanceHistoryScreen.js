@@ -1,13 +1,14 @@
 // src/screens/AttendanceHistoryScreen.js
-import React, { useState, useCallback, useContext } from 'react';
+import React, { useState, useCallback, useContext, useMemo } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, ActivityIndicator, StatusBar, Platform
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, CalendarDays, Clock, MapPin, BookOpen, AlertCircle, CheckCircle, XCircle } from 'lucide-react-native';
+import { ArrowLeft, CalendarDays, Clock, MapPin, BookOpen, AlertCircle, CheckCircle, XCircle, Calendar, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import DateTimePicker from '@react-native-community/datetimepicker'; // 👈 Native Date Picker
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 import { fetchUserSchedule, fetchAttendanceHistory } from './api';
 
@@ -43,6 +44,23 @@ export default function AttendanceHistoryScreen({ navigation }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Date Filter States
+  const [selectedDate, setSelectedDate] = useState(null); // Stores a Date object
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Filter logic based on the selected specific date
+  const filteredHistory = useMemo(() => {
+    if (!selectedDate) return history;
+    
+    // Convert selected Date object to 'YYYY-MM-DD' format for comparison
+    const y = selectedDate.getFullYear();
+    const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
+    const d = String(selectedDate.getDate()).padStart(2, '0');
+    const dateString = `${y}-${m}-${d}`;
+
+    return history.filter(item => String(item.date || '').startsWith(dateString));
+  }, [history, selectedDate]);
+
   useFocusEffect(
     useCallback(() => {
       const loadHistory = async () => {
@@ -65,7 +83,6 @@ export default function AttendanceHistoryScreen({ navigation }) {
             return;
           }
 
-          // Use the exact API helper functions that power HomeScreen
           const [schedulesData, attendanceData] = await Promise.all([
             fetchUserSchedule(employeeId).catch(() => []),
             fetchAttendanceHistory(employeeId).catch(() => [])
@@ -79,7 +96,6 @@ export default function AttendanceHistoryScreen({ navigation }) {
           const computedShifts = rawSchedules.map((sched) => {
             const schedDateStr = String(sched.date || '').split('T')[0];
             
-            // Match attendance by schedule_id first, then by date
             let record = rawAttendance.find(a => a.schedule_id && a.schedule_id === sched.id);
             if (!record) {
               record = rawAttendance.find(a => {
@@ -93,7 +109,6 @@ export default function AttendanceHistoryScreen({ navigation }) {
             const hasValidTimeIn = timeIn && timeIn !== '--:--' && !String(timeIn).includes('null');
             const hasValidTimeOut = timeOut && timeOut !== '--:--' && !String(timeOut).includes('null');
 
-            // Shift end comparison
             const [endH, endM] = (sched.end_time || '23:59:00').substring(0, 5).split(':').map(Number);
             const [sY, sM, sD] = schedDateStr.split('-').map(Number);
             const shiftEndDateTime = new Date(sY, sM - 1, sD, endH || 23, endM || 59, 0);
@@ -185,7 +200,6 @@ export default function AttendanceHistoryScreen({ navigation }) {
       if (item.hasValidTimeOut) {
         return <Text style={styles.timeVal}>{clockIn} – {formatTime(item.time_out)}</Text>;
       }
-      // Clocked in but missed clock-out: Displays "5:30 PM - ---"
       return <Text style={[styles.timeVal, { color: '#DC2626' }]}>{clockIn} – ---</Text>;
     }
     return <Text style={[styles.timeVal, { color: colors.textSecondary }]}>No logs recorded</Text>;
@@ -212,17 +226,75 @@ export default function AttendanceHistoryScreen({ navigation }) {
         <View style={styles.headerSpacer} />
       </View>
 
+      {/* Date Filter Section */}
+      {!loading && history.length > 0 && (
+        <View style={styles.filterWrapper}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
+            
+            {/* All Time Pill */}
+            <TouchableOpacity 
+              style={[styles.filterPill, !selectedDate && styles.filterPillActive]} 
+              onPress={() => setSelectedDate(null)}
+            >
+              <Text style={[styles.filterText, !selectedDate && styles.filterTextActive]}>All Time</Text>
+            </TouchableOpacity>
+
+            {/* Pick Date Pill */}
+            <TouchableOpacity 
+              style={[styles.filterPill, selectedDate && styles.filterPillActive]} 
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Calendar size={14} color={selectedDate ? '#FFFFFF' : (isLight ? '#64748B' : colors.textSecondary)} style={{ marginRight: 6 }} />
+              <Text style={[styles.filterText, selectedDate && styles.filterTextActive]}>
+                {selectedDate ? formatDate(selectedDate.toISOString()) : 'Select Date'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Clear Date Button (Only shows if a date is selected) */}
+            {selectedDate && (
+              <TouchableOpacity 
+                style={[styles.filterPill, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]} 
+                onPress={() => setSelectedDate(null)}
+              >
+                <X size={14} color="#DC2626" style={{ marginRight: 6 }} />
+                <Text style={[styles.filterText, { color: '#DC2626', fontFamily: 'Inter_18pt-Bold' }]}>Clear</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* 👈 Native Date Picker Logic */}
+      {showDatePicker && (
+        <DateTimePicker
+          value={selectedDate || new Date()}
+          mode="date"
+          display="default"
+          maximumDate={new Date()} // Prevents picking future dates
+          onChange={(event, date) => {
+            setShowDatePicker(false); // Close picker on selection or dismiss
+            if (event.type === 'set' && date) {
+              setSelectedDate(date);
+            }
+          }}
+        />
+      )}
+
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {loading ? (
           <ActivityIndicator size="large" color="#0D9488" style={{ marginTop: 40 }} />
-        ) : history.length === 0 ? (
+        ) : filteredHistory.length === 0 ? ( 
           <View style={styles.emptyState}>
             <CalendarDays size={48} color={colors.textSecondary} opacity={0.5} />
             <Text style={styles.emptyTitle}>No Shift History</Text>
-            <Text style={styles.emptySub}>You have no recorded shift assignments yet.</Text>
+            <Text style={styles.emptySub}>
+              {selectedDate 
+                ? "No shifts found for the selected date." 
+                : "You have no recorded shift assignments yet."}
+            </Text>
           </View>
         ) : (
-          history.map((item, index) => (
+          filteredHistory.map((item, index) => ( 
             <View key={item.id || index} style={styles.card}>
               <View style={styles.cardHeader}>
                 <View style={styles.dateWrap}>
@@ -235,7 +307,9 @@ export default function AttendanceHistoryScreen({ navigation }) {
               <View style={styles.cardBody}>
                 <View style={styles.infoRow}>
                   <BookOpen size={16} color={colors.textSecondary} />
-                  <Text style={styles.infoText}>{item.course || 'General Shift'}</Text>
+                  <Text style={styles.infoText}>{item.course || 'General Shift'}
+                    {item.program_name ? ` (${item.program_name})` : ''}
+                  </Text>
                 </View>
                 <View style={styles.infoRow}>
                   <MapPin size={16} color={colors.textSecondary} />
@@ -277,8 +351,45 @@ const getStyles = (colors, isLight) => StyleSheet.create({
   backBtn: { padding: 6 },
   headerTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: colors.textPrimary },
   headerSpacer: { width: 36 },
+
+  /* FILTER STYLES */
+  filterWrapper: { 
+    paddingVertical: 12, 
+    borderBottomWidth: 1, 
+    borderBottomColor: isLight ? '#E2E8F0' : colors.border 
+  },
+  filterScroll: { 
+    paddingHorizontal: 20, 
+    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  filterPill: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16, 
+    paddingVertical: 8, 
+    borderRadius: 20, 
+    backgroundColor: isLight ? '#FFFFFF' : colors.surface, 
+    borderWidth: 1, 
+    borderColor: isLight ? '#E2E8F0' : colors.border 
+  },
+  filterPillActive: { 
+    backgroundColor: colors.primary, 
+    borderColor: colors.primary 
+  },
+  filterText: { 
+    fontFamily: 'Inter_18pt-Medium', 
+    fontSize: 13, 
+    color: isLight ? '#64748B' : colors.textSecondary 
+  },
+  filterTextActive: { 
+    fontFamily: 'Inter_18pt-Bold', 
+    color: '#FFFFFF' 
+  },
+
+  /* LIST STYLES */
   scrollContent: { paddingHorizontal: 20, paddingBottom: 40, paddingTop: 16 },
-  
   card: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: isLight ? '#F1F5F9' : colors.border },
   dateWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },

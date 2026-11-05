@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, 
   LayoutAnimation, Platform, UIManager 
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { ChevronDown, ChevronUp, HelpCircle, FileText, Info } from 'lucide-react-native';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -136,7 +136,8 @@ export default function HelpAndTermsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    // 👈 Changed from <SafeAreaView> to <View>
+    <View style={styles.safeArea}>
       {/* Tab Switcher */}
       <View style={styles.tabContainer}>
         <TouchableOpacity 
@@ -156,7 +157,7 @@ export default function HelpAndTermsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {activeTab === 'help' ? (
           <View>
             {HELP_DATA.map((category, catIndex) => (
@@ -238,13 +239,20 @@ export default function HelpAndTermsScreen() {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
+    // 👈 Changed closing tag from </SafeAreaView> to </View>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#060913' },
-  tabContainer: { flexDirection: 'row', padding: 16, gap: 12 },
+  tabContainer: { 
+    flexDirection: 'row', 
+    paddingHorizontal: 16, 
+    paddingTop: 16, 
+    paddingBottom: 8, // 👈 Adjusted for better spacing below tabs
+    gap: 12 
+  },
   tabButton: { 
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', 
     gap: 8, paddingVertical: 12, borderRadius: 10, backgroundColor: '#0B132B', 
@@ -254,7 +262,11 @@ const styles = StyleSheet.create({
   tabText: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: '#64748B' },
   tabTextActive: { color: '#0EA5E9', fontFamily: 'Inter_18pt-Bold' },
   
-  scrollContent: { padding: 16, paddingBottom: 40 },
+  scrollContent: { 
+    paddingHorizontal: 16, 
+    paddingTop: 8, 
+    paddingBottom: 100 // 👈 Increased to ensure the floating chat button doesn't block the last item
+  },
   
   categoryContainer: { marginBottom: 24 },
   categoryTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: '#0EA5E9', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },

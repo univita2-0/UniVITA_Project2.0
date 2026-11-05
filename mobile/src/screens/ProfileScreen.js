@@ -1,9 +1,10 @@
 // src/screens/ProfileScreen.js
-import React, { useState, useMemo, useContext, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, 
-  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform, Image 
+  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform 
 } from 'react-native';
+import { Image } from 'expo-image'; // 👈 Using expo-image for better rendering
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { 
@@ -34,7 +35,7 @@ export default function ProfileScreen({ navigation }) {
   // Profile Picture States
   const [profileImage, setProfileImage] = useState(null);
   const [localFallback, setLocalFallback] = useState(null); 
-  const [imageError, setImageError] = useState(false); // NEW: Tracks if remote image fails
+  const [imageError, setImageError] = useState(false); 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   // Modals
@@ -71,11 +72,20 @@ export default function ProfileScreen({ navigation }) {
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword;
   const hasProfileChanges = editName.trim() !== userData.name || editEmail.trim() !== userData.email;
 
-  // Helper: Safely build the image URL (handles if backend sends full URL or relative path)
+  // Reset imageError whenever profileImage changes
+  useEffect(() => {
+    if (profileImage) {
+      setImageError(false);
+    }
+  }, [profileImage]);
+
+  // Helper: Safely build the image URL
   const getFullImageUrl = (path) => {
     if (!path) return null;
     if (path.startsWith('http')) return `${path}?t=${Date.now()}`;
-    const baseUrl = API_URL.replace('/api', '').replace(/\/$/, '');
+    
+    // Safely remove /api from the end of the URL if it exists
+    const baseUrl = API_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     return `${baseUrl}${cleanPath}?t=${Date.now()}`;
   };
@@ -91,6 +101,7 @@ export default function ProfileScreen({ navigation }) {
           const savedImage = await AsyncStorage.getItem(`@profile_picture_${userId}`);
           if (savedImage && savedImage !== 'null' && savedImage !== 'undefined') {
             setProfileImage(savedImage);
+            setImageError(false);
           }
 
           const response = await axios.get(`${API_URL}/employees/${userId}`, {
@@ -132,7 +143,9 @@ export default function ProfileScreen({ navigation }) {
 
           if (freshUser.profile_picture) {
             const fullUrl = getFullImageUrl(freshUser.profile_picture);
+            console.log("🖼️ FETCHED PROFILE URL:", fullUrl); // 👈 CHECK YOUR TERMINAL FOR THIS
             setProfileImage(fullUrl);
+            setImageError(false);
             await AsyncStorage.setItem(`@profile_picture_${userId}`, fullUrl);
           }
 
@@ -145,6 +158,7 @@ export default function ProfileScreen({ navigation }) {
             setDaysRemaining(Math.max(0, 365 - diffDays));
           } else { setDaysRemaining(365); }
         } catch (error) {
+          console.log("Profile fetch error:", error);
           const id = await AsyncStorage.getItem('user_id');
           const name = await AsyncStorage.getItem('user_name');
           const email = await AsyncStorage.getItem('user_email');
@@ -177,7 +191,7 @@ export default function ProfileScreen({ navigation }) {
 
     const previousImage = profileImage;
     setProfileImage(asset.uri); 
-    setImageError(false); // Reset error state for the new image
+    setImageError(false); 
     setIsUploadingImage(true);
 
     try {
@@ -197,7 +211,9 @@ export default function ProfileScreen({ navigation }) {
 
       if (res.profile_picture) {
         const fullUrl = getFullImageUrl(res.profile_picture);
+        console.log("🖼️ UPLOADED PROFILE URL:", fullUrl); // 👈 CHECK YOUR TERMINAL FOR THIS
         setProfileImage(fullUrl);
+        setImageError(false);
         await AsyncStorage.setItem(`@profile_picture_${userData.id}`, fullUrl);
       }
       
@@ -234,48 +250,45 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleUpdatePassword = async () => {
-  if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) return Alert.alert("Validation Error", "Please complete all password fields.");
-  if (!hasLength || !hasUppercase || !hasSpecial) return Alert.alert("Security Requirement", "New password must meet all security criteria.");
-  if (currentPassword === newPassword) return Alert.alert("Validation Error", "New password must differ from current.");
-  if (!passwordsMatch) return Alert.alert("Validation Error", "New passwords do not match.");
+    if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) return Alert.alert("Validation Error", "Please complete all password fields.");
+    if (!hasLength || !hasUppercase || !hasSpecial) return Alert.alert("Security Requirement", "New password must meet all security criteria.");
+    if (currentPassword === newPassword) return Alert.alert("Validation Error", "New password must differ from current.");
+    if (!passwordsMatch) return Alert.alert("Validation Error", "New passwords do not match.");
 
-  setLoadingPwd(true);
-  try {
-    const token = await AsyncStorage.getItem('auth_token');
-    const empIdentifier = (fullDetails.employee_id && fullDetails.employee_id !== '—') ? fullDetails.employee_id : userData.id;
+    setLoadingPwd(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const empIdentifier = (fullDetails.employee_id && fullDetails.employee_id !== '—') ? fullDetails.employee_id : userData.id;
 
-    const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`,
-      { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+      const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`,
+        { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
 
-    if (res.data.success) {
-      setShowPasswordModal(false);
-      Alert.alert("Security Updated", "Your password has been changed.", [
-        {
-          text: "Sign In",
-          onPress: async () => {
-            
-            await AsyncStorage.clear();
-            
-            try {
-              await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
-            } catch (e) {
-              console.warn('Failed to explicitly clear offline queue:', e);
+      if (res.data.success) {
+        setShowPasswordModal(false);
+        Alert.alert("Security Updated", "Your password has been changed.", [
+          {
+            text: "Sign In",
+            onPress: async () => {
+              await AsyncStorage.clear();
+              try {
+                await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
+              } catch (e) {}
+              navigation.replace('Login');
             }
-            navigation.replace('Login');
           }
-        }
-      ]);
-    } else {
-      Alert.alert("Error", res.data.message || "Password update failed.");
+        ]);
+      } else {
+        Alert.alert("Error", res.data.message || "Password update failed.");
+      }
+    } catch (error) {
+      Alert.alert("Error", error.response?.data?.message || "Network error occurred.");
+    } finally {
+      setLoadingPwd(false);
     }
-  } catch (error) {
-    Alert.alert("Error", error.response?.data?.message || "Network error occurred.");
-  } finally {
-    setLoadingPwd(false);
-  }
-};
+  };
+
   const MenuItem = ({ icon: Icon, title, subtitle, onPress }) => (
     <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.iconBox}><Icon size={20} color={isLight ? "#334155" : colors.primary} /></View>
@@ -302,20 +315,24 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.headerSection}>
             <View style={styles.avatarContainer}>
               <View style={styles.avatar}>
-                {/* FIX: Fallback Logic Hierarchy (Remote -> Local -> Icon) */}
+                {/* 👈 Using expo-image for better rendering */}
                 {profileImage && !imageError ? (
                   <Image 
                     key={profileImage}
                     source={{ uri: profileImage }} 
                     style={styles.avatarImage} 
-                    resizeMode="cover"
-                    onError={() => setImageError(true)} // If URL fails, trigger fallback
+                    contentFit="cover"
+                    transition={200}
+                    onError={(e) => {
+                      console.log("Image Load Error:", e);
+                      setImageError(true);
+                    }} 
                   />
                 ) : localFallback ? (
                   <Image 
                     source={{ uri: localFallback }} 
                     style={styles.avatarImage} 
-                    resizeMode="cover"
+                    contentFit="cover"
                   />
                 ) : (
                   <User size={44} color={isLight ? "#FFFFFF" : colors.primary} />
@@ -338,7 +355,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
           </View>
 
-            <View style={styles.menuSection}>
+          <View style={styles.menuSection}>
             <Text style={styles.sectionHeader}>ACCOUNT</Text>
             <View style={styles.menuCard}>
               <MenuItem icon={FileText} title="Personal & Employment Details" subtitle="Official HR records, statutory IDs & address" onPress={() => setShowDetailsModal(true)} />
@@ -348,40 +365,29 @@ export default function ProfileScreen({ navigation }) {
               <MenuItem icon={Shield} title="Change Password" subtitle="Update your login credentials" onPress={() => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setShowPasswordModal(true); }} />
               <View style={styles.divider} />
               <MenuItem icon={Bell} title="Emergency Alerts" subtitle="View active broadcasts" onPress={() => navigation.navigate('Alerts')} />
-              
-              {/* 🚨 ADDED HELP BUTTON HERE 🚨 */}
               <View style={styles.divider} />
-              <MenuItem 
-                icon={HelpCircle} 
-                title="Help Center & Terms" 
-                subtitle="Read app instructions and privacy policy" 
-                onPress={() => navigation.navigate('HelpAndTerms')} 
-              />
-              
+              <MenuItem icon={HelpCircle} title="Help Center & Terms" subtitle="Read app instructions and privacy policy" onPress={() => navigation.navigate('HelpAndTerms')} />
             </View>
           </View>
 
           <TouchableOpacity 
             style={styles.logoutBtn} 
             onPress={() => Alert.alert("Logout", "Are you sure you want to log out?", [
-  { text: "Cancel", style: "cancel" },
-  {
-    text: "Logout",
-    onPress: async () => {
-      const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
-      await AsyncStorage.clear();
-      
-      try {
-        await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
-      } catch (e) {
-        console.warn('Failed to explicitly clear offline queue:', e);
-      }
-      if (rememberedEmail) await AsyncStorage.setItem('@remembered_email', rememberedEmail);
-      navigation.replace('Login');
-    },
-    style: 'destructive'
-  }
-])} 
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Logout",
+                onPress: async () => {
+                  const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
+                  await AsyncStorage.clear();
+                  try {
+                    await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
+                  } catch (e) {}
+                  if (rememberedEmail) await AsyncStorage.setItem('@remembered_email', rememberedEmail);
+                  navigation.replace('Login');
+                },
+                style: 'destructive'
+              }
+            ])} 
             activeOpacity={0.8}
           >
             <LogOut size={18} color={isLight ? "#FFFFFF" : colors.buttonText} />
@@ -389,7 +395,7 @@ export default function ProfileScreen({ navigation }) {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Modals... (Unchanged) */}
+        {/* --- MODALS --- */}
         <Modal visible={showDetailsModal} animationType="slide" transparent={false} onRequestClose={() => setShowDetailsModal(false)}>
           <SafeAreaView style={[styles.detailModalSafeArea, { paddingTop: insets.top }]}>
             <View style={styles.detailModalHeader}>

@@ -34,7 +34,11 @@ const Schedule = () => {
   const [schedules, setSchedules] = useState([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [schoolLocations, setSchoolLocations] = useState([]);
+  
+  // NEW: Programs and Courses States
+  const [programs, setPrograms] = useState([]);
   const [courses, setCourses] = useState([]);
+  
   const [loading, setLoading] = useState(true);
 
   const [conflicts, setConflicts] = useState([]);
@@ -50,8 +54,10 @@ const Schedule = () => {
   const [manualBulkRows, setManualBulkRows] = useState([]);
   const [isUploadingBulk, setIsUploadingBulk] = useState(false);
 
+  // NEW: Added program_id to formData
   const [formData, setFormData] = useState({
-    user_id: '', date: '', place: '', course: '',
+    user_id: '', date: '', place: '', 
+    program_id: '', course: '',
     start_time: '08:00', end_time: '17:00', status: 'Scheduled'
   });
 
@@ -88,11 +94,13 @@ const Schedule = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [empRes, schedRes, locRes, courseRes] = await Promise.all([
+      // NEW: Added fetch for /programs
+      const [empRes, schedRes, locRes, courseRes, progRes] = await Promise.all([
         axios.get(`${API_BASE}/employees`, getAuthHeaders()),
         axios.get(`${API_BASE}/schedules`, getAuthHeaders()),
         axios.get(`${API_BASE}/school-locations`, getAuthHeaders()),
-        axios.get(`${API_BASE}/courses`, getAuthHeaders())
+        axios.get(`${API_BASE}/courses`, getAuthHeaders()),
+        axios.get(`${API_BASE}/programs`, getAuthHeaders()) 
       ]);
       const instList = empRes.data.filter(u => u.role.toLowerCase() === 'instructor' && u.status === 'active');
       setInstructors(instList);
@@ -104,6 +112,7 @@ const Schedule = () => {
       setSchedules(cleaned);
       setSchoolLocations(locRes.data);
       setCourses(courseRes.data);
+      setPrograms(progRes.data || []);
     } catch (err) {
       toast.error('Failed to load schedule data');
     } finally {
@@ -142,7 +151,12 @@ const Schedule = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    // If Program changes, reset the Course
+    if (name === 'program_id') {
+      setFormData(prev => ({ ...prev, program_id: value, course: '' }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleEditClick = (session) => {
@@ -157,10 +171,14 @@ const Schedule = () => {
        return;
     }
 
+    // Find the program_id based on the existing course name
+    const matchedCourse = courses.find(c => c.name === session.course);
+
     setFormData({
       user_id: session.employee_id,
       date: session.schedule_date,
       place: session.place || '',
+      program_id: matchedCourse ? matchedCourse.program_id : '',
       course: session.course || '',
       start_time: session.start_time ? session.start_time.substring(0, 5) : '08:00',
       end_time: session.end_time ? session.end_time.substring(0, 5) : '17:00',
@@ -176,6 +194,7 @@ const Schedule = () => {
       user_id: instructor.employee_id,
       date: dateStr,
       place: schoolLocations[0]?.name || '',
+      program_id: '',
       course: '',
       start_time: '08:00',
       end_time: '17:00',
@@ -188,7 +207,7 @@ const Schedule = () => {
   const resetForm = () => {
     setFormData({
       user_id: '', date: '', place: schoolLocations[0]?.name || '',
-      course: '', start_time: '08:00', end_time: '17:00', status: 'Scheduled'
+      program_id: '', course: '', start_time: '08:00', end_time: '17:00', status: 'Scheduled'
     });
     setIsEditing(false);
     setCurrentScheduleId(null);
@@ -199,76 +218,44 @@ const Schedule = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-     const isCompletelyEmpty = !formData.user_id && !formData.date && !formData.place && !formData.course;
-    if (isCompletelyEmpty) {
-      toast.warning("All fields are required!");
-      return;
-    }
-
-    if (!formData.user_id) {
-      toast.warning("Instructor is required!");
-      return;
-    }
-    if (!formData.date) {
-      toast.warning("Date is required!");
-      return;
-    }
-    if (!formData.place) {
-      toast.warning("School Location is required!");
-      return;
-    }
-    if (!formData.course) {
-      toast.warning("Course / Subject is required!");
-      return;
-    }
-    if (!formData.start_time) {
-      toast.warning("Start Time is required!");
-      return;
-    }
-    if (!formData.end_time) {
-      toast.warning("End Time is required!");
-      return;
-    }
+    const isCompletelyEmpty = !formData.user_id && !formData.date && !formData.place && !formData.course;
+    if (isCompletelyEmpty) return toast.warning("All fields are required!");
+    if (!formData.user_id) return toast.warning("Instructor is required!");
+    if (!formData.date) return toast.warning("Date is required!");
+    if (!formData.place) return toast.warning("School Location is required!");
+    if (!formData.program_id) return toast.warning("Program is required!");
+    if (!formData.course) return toast.warning("Course / Subject is required!");
+    if (!formData.start_time) return toast.warning("Start Time is required!");
+    if (!formData.end_time) return toast.warning("End Time is required!");
 
     const userSchedules = schedules.filter(s => String(s.employee_id).trim() === String(formData.user_id).trim() && String(s.schedule_date).split('T')[0] === formData.date);
     const isOnLeave = userSchedules.some(s => s.course === 'On Leave' || s.place === 'Remote/Leave');
     
-    if (isOnLeave) {
-      toast.error("Cannot assign a schedule. The employee is on leave on this date.");
-      return;
-    }
-
-    if (hasConflict) {
-      toast.warning("Time conflict – please adjust.");
-      return;
-    }
+    if (isOnLeave) return toast.error("Cannot assign a schedule. The employee is on leave on this date.");
+    if (hasConflict) return toast.warning("Time conflict – please adjust.");
 
     const now = new Date();
     const currentLocalDate = now.toLocaleDateString('en-CA');
     const currentTimeStr = now.toTimeString().substring(0, 5); 
 
-    if (formData.date < currentLocalDate) {
-      toast.warning("Cannot schedule for a past date.");
-      return;
-    }
-
-    if (formData.date === currentLocalDate && formData.start_time < currentTimeStr) {
-      toast.warning("Cannot schedule a start time that has already passed today.");
-      return;
-    }
-
-    if (formData.start_time >= formData.end_time) {
-      toast.warning("End time must be after start time.");
-      return;
-    }
+    if (formData.date < currentLocalDate) return toast.warning("Cannot schedule for a past date.");
+    if (formData.date === currentLocalDate && formData.start_time < currentTimeStr) return toast.warning("Cannot schedule a start time that has already passed today.");
+    if (formData.start_time >= formData.end_time) return toast.warning("End time must be after start time.");
 
     try {
-      const url = isEditing
-        ? `${API_BASE}/schedules/${currentScheduleId}`
-        : `${API_BASE}/schedules`;
-      const res = await (isEditing
-        ? axios.put(url, formData, getAuthHeaders())
-        : axios.post(url, formData, getAuthHeaders()));
+      const url = isEditing ? `${API_BASE}/schedules/${currentScheduleId}` : `${API_BASE}/schedules`;
+      
+      // Clean payload (backend doesn't need program_id, just the course name)
+      const payload = {
+        user_id: formData.user_id,
+        date: formData.date,
+        place: formData.place,
+        course: formData.course,
+        start_time: formData.start_time,
+        end_time: formData.end_time
+      };
+
+      const res = await (isEditing ? axios.put(url, payload, getAuthHeaders()) : axios.post(url, payload, getAuthHeaders()));
       if (res.data.success) {
         toast.success(isEditing ? 'Schedule updated' : 'Schedule added');
         setShowModal(false);
@@ -310,12 +297,14 @@ const Schedule = () => {
     }
   };
 
+  // --- BULK ROW LOGIC ---
   const addManualBulkRow = () => {
     setManualBulkRows([...manualBulkRows, {
       id: Date.now() + Math.random(),
       employee_id: '',
       date: '',
       place: schoolLocations[0]?.name || '',
+      program_id: '', // NEW
       course: '',
       start_time: '08:00',
       end_time: '17:00'
@@ -327,35 +316,44 @@ const Schedule = () => {
   };
 
   const updateManualBulkRow = (id, field, value) => {
-    setManualBulkRows(manualBulkRows.map(row => 
-      row.id === id ? { ...row, [field]: value } : row
-    ));
+    setManualBulkRows(manualBulkRows.map(row => {
+      if (row.id === id) {
+        // If program changes, clear the course
+        if (field === 'program_id') {
+          return { ...row, program_id: value, course: '' };
+        }
+        return { ...row, [field]: value };
+      }
+      return row;
+    }));
   };
 
   const submitInteractiveBulk = async () => {
     for (let i = 0; i < manualBulkRows.length; i++) {
       const r = manualBulkRows[i];
-      
-      
       const isRowEmpty = !r.employee_id && !r.date && !r.place && !r.course;
-      if (isRowEmpty) {
-        return toast.warning(`Row ${i + 1}: All fields are required!`);
-      }
-
-     
+      
+      if (isRowEmpty) return toast.warning(`Row ${i + 1}: All fields are required!`);
       if (!r.employee_id) return toast.warning(`Row ${i + 1}: Instructor is required!`);
       if (!r.date) return toast.warning(`Row ${i + 1}: Date is required!`);
       if (!r.place) return toast.warning(`Row ${i + 1}: Location is required!`);
+      if (!r.program_id) return toast.warning(`Row ${i + 1}: Program is required!`); // NEW
       if (!r.course) return toast.warning(`Row ${i + 1}: Course is required!`);
       if (!r.start_time) return toast.warning(`Row ${i + 1}: Start Time is required!`);
       if (!r.end_time) return toast.warning(`Row ${i + 1}: End Time is required!`);
     }
 
-    const validRows = manualBulkRows; 
+    // Clean the payload to only send what the backend expects
+    const validRows = manualBulkRows.map(r => ({
+      employee_id: r.employee_id,
+      date: r.date,
+      place: r.place,
+      course: r.course,
+      start_time: r.start_time,
+      end_time: r.end_time
+    }));
     
-    if (validRows.length === 0) {
-      return toast.warning("Please add at least one row.");
-    }
+    if (validRows.length === 0) return toast.warning("Please add at least one row.");
 
     setIsUploadingBulk(true);
     try {
@@ -381,6 +379,7 @@ const Schedule = () => {
       employee_id: '',
       date: '',
       place: schoolLocations[0]?.name || '',
+      program_id: '', // NEW
       course: '',
       start_time: '08:00',
       end_time: '17:00'
@@ -392,7 +391,6 @@ const Schedule = () => {
     <div className="sch-container">
       <div className="sch-header">
         <div className="sch-title-area">
-          
           <p className="sch-subtitle">Manage instructor class schedules, physical locations, and course assignments.</p>
         </div>
         
@@ -578,14 +576,27 @@ const Schedule = () => {
               </div>
             </div>
 
-            <div className="sch-form-group">
-              <label>Course / Subject</label>
-              <select name="course" className="sch-input" value={formData.course} onChange={handleInputChange} required>
-                <option value="">Select Course</option>
-                {courses.map(c => (
-                  <option key={c.id} value={c.name}>{c.name}</option>
-                ))}
-              </select>
+            {/* NEW: Cascading Program and Course */}
+            <div className="sch-form-row">
+              <div className="sch-form-group">
+                <label>Program</label>
+                <select name="program_id" className="sch-input" value={formData.program_id} onChange={handleInputChange} required>
+                  <option value="">Select Program</option>
+                  {programs.map(p => (
+                    <option key={p.id} value={p.id}>{p.program_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="sch-form-group">
+                <label>Course / Subject</label>
+                <select name="course" className="sch-input" value={formData.course} onChange={handleInputChange} required disabled={!formData.program_id}>
+                  <option value="">{formData.program_id ? 'Select Course' : 'Select Program First'}</option>
+                  {/* Filter courses by selected program */}
+                  {courses.filter(c => String(c.program_id) === String(formData.program_id)).map(c => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="sch-form-row">
@@ -609,6 +620,7 @@ const Schedule = () => {
         </FormalModal>
       )}
 
+      {/* BULK MODAL */}
       {canEdit && (
         <FormalModal
           show={showBulkModal}
@@ -642,6 +654,7 @@ const Schedule = () => {
                       <th>Instructor</th>
                       <th>Date</th>
                       <th>Location</th>
+                      <th>Program</th> {/* NEW */}
                       <th>Course</th>
                       <th>Start</th>
                       <th>End</th>
@@ -666,12 +679,23 @@ const Schedule = () => {
                             {schoolLocations.map(loc => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
                           </select>
                         </td>
+                        
+                        {/* NEW: Bulk Program Dropdown */}
                         <td>
-                          <select className="sch-input-small" value={row.course} onChange={(e) => updateManualBulkRow(row.id, 'course', e.target.value)}>
+                          <select className="sch-input-small" value={row.program_id} onChange={(e) => updateManualBulkRow(row.id, 'program_id', e.target.value)}>
                             <option value="">Select...</option>
-                            {courses.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                            {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
                           </select>
                         </td>
+
+                        {/* NEW: Bulk Course Dropdown (Filtered) */}
+                        <td>
+                          <select className="sch-input-small" value={row.course} onChange={(e) => updateManualBulkRow(row.id, 'course', e.target.value)} disabled={!row.program_id}>
+                            <option value="">{row.program_id ? 'Select...' : 'Pick Program First'}</option>
+                            {courses.filter(c => String(c.program_id) === String(row.program_id)).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          </select>
+                        </td>
+
                         <td>
                           <input type="time" className="sch-input-small" value={row.start_time} onChange={(e) => updateManualBulkRow(row.id, 'start_time', e.target.value)} />
                         </td>

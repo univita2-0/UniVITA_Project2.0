@@ -4,7 +4,7 @@ import './Reports.css';
 import {
   Download, Users, Calendar, DollarSign, PieChart,
   Clock, FileText, TrendingUp, AlertCircle, CheckCircle, XCircle,
-  ClipboardList, ShieldCheck, Printer, Award, Info
+  ClipboardList, ShieldCheck, Printer, Award, Info, Layers, BookOpen
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -24,6 +24,12 @@ const Reports = () => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // NEW: Program and Course Filter States
+  const [programs, setPrograms] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [programId, setProgramId] = useState('');
+  const [courseName, setCourseName] = useState('');
 
   const [attendanceData, setAttendanceData] = useState([]);
   const [payrollData, setPayrollData] = useState([]);
@@ -49,6 +55,24 @@ const Reports = () => {
   const lastDayOfMonth = new Date(parseInt(currentYear, 10), parseInt(currentMonthNum, 10), 0).getDate();
   const lastDayStr = String(lastDayOfMonth).padStart(2, '0');
 
+  // NEW: Fetch Programs and Courses for the dropdowns
+  useEffect(() => {
+    const fetchFilterData = async () => {
+      try {
+        const [progRes, courseRes] = await Promise.all([
+          axios.get(`${API_BASE}/programs`, getAuthHeaders()),
+          axios.get(`${API_BASE}/courses`, getAuthHeaders())
+        ]);
+        setPrograms(progRes.data || []);
+        setCourses(courseRes.data || []);
+      } catch (err) { 
+        console.error("Failed to load filter data", err); 
+      }
+    };
+    fetchFilterData();
+  }, []);
+
+  // Updated dependency array to include programId and courseName
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -71,11 +95,14 @@ const Reports = () => {
       }
     };
     fetchData();
-  }, [selectedReport, selectedMonth]);
+  }, [selectedReport, selectedMonth, programId, courseName]);
 
   const fetchAttendanceData = async () => {
     const [year, month] = selectedMonth.split('-');
-    const res = await axios.get(`${API_BASE}/attendance-monthly`, { params: { month, year }, ...getAuthHeaders() });
+    const res = await axios.get(`${API_BASE}/attendance-monthly`, { 
+      params: { month, year, program_id: programId, course: courseName }, // NEW params
+      ...getAuthHeaders() 
+    });
     const data = res.data || [];
     setAttendanceData(data.map(e => ({
       ...e,
@@ -92,6 +119,7 @@ const Reports = () => {
     const res = await axios.get(`${API_BASE}/payroll/history`, getAuthHeaders());
     const all = res.data || [];
     const target = new Date(selectedMonth + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+    // Payroll is filtered by month, global program/course filter doesn't directly apply to finalized payroll batches in this view
     setPayrollData(all.filter(p => p.month_year === target));
   };
 
@@ -120,8 +148,18 @@ const Reports = () => {
 
   const fetchSchedulingData = async () => {
     const res = await axios.get(`${API_BASE}/schedules`, getAuthHeaders());
-    const all = res.data || [];
-    setScheduleData(all.filter(s => s.schedule_date && s.schedule_date.startsWith(selectedMonth)));
+    let all = res.data || [];
+    all = all.filter(s => s.schedule_date && s.schedule_date.startsWith(selectedMonth));
+    
+    // NEW: Filter schedules locally by Program/Course
+    if (courseName) {
+      all = all.filter(s => s.course === courseName);
+    } else if (programId) {
+      const validCourses = courses.filter(c => String(c.program_id) === String(programId)).map(c => c.name);
+      all = all.filter(s => validCourses.includes(s.course));
+    }
+    
+    setScheduleData(all);
   };
 
   const fetchRequestsData = async () => {
@@ -518,10 +556,43 @@ const Reports = () => {
     <div className="formal-rep-container">
       <div className="formal-rep-header">
         <div className="formal-rep-title-block">
-          
+          {/* Empty block maintained from original */}
         </div>
 
         <div className="formal-rep-controls">
+          
+          {/* NEW: Program Filter */}
+          <div className="formal-rep-input-wrapper">
+            <Layers size={16} className="formal-rep-icon" />
+            <select 
+              className="formal-rep-select" 
+              style={{ minWidth: '160px' }} 
+              value={programId} 
+              onChange={e => { setProgramId(e.target.value); setCourseName(''); }} 
+              disabled={loading}
+            >
+              <option value="">All Programs</option>
+              {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
+            </select>
+          </div>
+
+          {/* NEW: Course Filter */}
+          <div className="formal-rep-input-wrapper">
+            <BookOpen size={16} className="formal-rep-icon" />
+            <select 
+              className="formal-rep-select" 
+              style={{ minWidth: '160px' }} 
+              value={courseName} 
+              onChange={e => setCourseName(e.target.value)} 
+              disabled={loading}
+            >
+              <option value="">All Courses</option>
+              {courses.filter(c => !programId || String(c.program_id) === String(programId)).map(c => (
+                <option key={c.id} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="formal-rep-input-wrapper">
             <Calendar size={16} className="formal-rep-icon" />
             <select className="formal-rep-select" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} disabled={loading}>

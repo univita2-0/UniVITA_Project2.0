@@ -3244,6 +3244,7 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
   const sql = `
     SELECT 
       s.*, 
+      p.program_name,  -- 👈 NEW: Fetches the Program Name
       a.time_in,
       a.time_out,
       DATE_FORMAT(s.date, '%Y-%m-%d') as date,
@@ -3251,10 +3252,10 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
       
       -- Mobile Badge Status
       CASE 
-  WHEN (ac.id IS NOT NULL AND ac.status = 'pending') OR (a.correction_status = 'pending') THEN 'Pending Correction'
-  WHEN (ap.id IS NOT NULL AND ap.status = 'pending') THEN 'Pending Appeal'
-  WHEN (lr_pending.id IS NOT NULL) THEN 'Pending Leave'
-  WHEN (lr_approved.id IS NOT NULL) OR a.status = 'on leave' THEN 'On Leave'
+        WHEN (ac.id IS NOT NULL AND ac.status = 'pending') OR (a.correction_status = 'pending') THEN 'Pending Correction'
+        WHEN (ap.id IS NOT NULL AND ap.status = 'pending') THEN 'Pending Appeal'
+        WHEN (lr_pending.id IS NOT NULL) THEN 'Pending Leave'
+        WHEN (lr_approved.id IS NOT NULL) OR a.status = 'on leave' THEN 'On Leave'
         WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Completed'
         WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN
           CASE 
@@ -3281,6 +3282,8 @@ app.get('/api/schedules/:employeeId', authenticateToken, verifyOwnership, (req, 
       END AS attendance_status
 
     FROM schedules s
+    LEFT JOIN courses c ON s.course = c.name       -- 👈 NEW: Joins Courses
+    LEFT JOIN programs p ON c.program_id = p.id    -- 👈 NEW: Joins Programs
     LEFT JOIN attendance a ON s.id = a.schedule_id
     LEFT JOIN attendance_corrections ac ON s.id = ac.schedule_id AND ac.status = 'pending'
     LEFT JOIN attendance_appeals ap ON s.id = ap.schedule_id AND ap.status = 'pending'
@@ -5336,118 +5339,185 @@ app.put('/api/users/save-push-token', authenticateToken, async (req, res) => {
 });
 
 // ============================================
-// COURSE MANAGEMENT
+// PROGRAM & COURSE MANAGEMENT
 // ============================================
 
+// 1. Get all programs
+app.get('/api/programs', authenticateToken, (req, res) => {
+  db.query("SELECT * FROM programs ORDER BY program_name ASC", (err, results) => {
+    if (err) return res.status(500).json({ success: false, message: 'Failed to load programs.' });
+    res.json(results || []);
+  });
+});
+
+// 2. Create a new program
+app.post('/api/programs', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  const { program_name, badge, subtitle, description } = req.body;
+  if (!program_name || !program_name.trim()) {
+    return res.status(400).json({ success: false, message: 'Program name is required.' });
+  }
+  
+  db.query(
+    "INSERT INTO programs (program_name, badge, subtitle, description) VALUES (?, ?, ?, ?)",
+    [program_name.trim(), badge || null, subtitle || null, description || null],
+    (err, result) => {
+      if (err) {
+        if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Program name already exists.' });
+        return res.status(500).json({ success: false, message: 'Failed to create program.' });
+      }
+      logAction(req.user.id, 'CREATE_PROGRAM', 'program', result.insertId, req);
+      res.status(201).json({ success: true, message: 'Program created successfully.', id: result.insertId });
+    }
+  );
+});
+
+// 3. Update an existing program
+app.put('/api/programs/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  const { program_name, badge, subtitle, description, status } = req.body;
+  const programId = req.params.id;
+
+  if (!program_name || !program_name.trim()) {
+    return res.status(400).json({ success: false, message: 'Program name is required.' });
+  }
+
+  try {
+    const [oldRecord] = await db.promise().query("SELECT * FROM programs WHERE id = ?", [programId]);
+    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Program not found.' });
+
+    db.query(
+      "UPDATE programs SET program_name=?, badge=?, subtitle=?, description=?, status=? WHERE id=?",
+      [program_name.trim(), badge || null, subtitle || null, description || null, status || 'active', programId],
+      (err, result) => {
+        if (err) {
+          if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Another program with this name exists.' });
+          return res.status(500).json({ success: false, message: 'Failed to update program.' });
+        }
+        logAction(req.user.id, 'UPDATE_PROGRAM', 'program', programId, req, oldRecord[0], req.body);
+        res.json({ success: true, message: 'Program updated successfully.' });
+      }
+    );
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// 4. Delete a program
+app.delete('/api/programs/:id', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  }
+  const programId = req.params.id;
+
+  try {
+    // Prevent deletion if courses are linked to it
+    const [courses] = await db.promise().query("SELECT id FROM courses WHERE program_id = ? LIMIT 1", [programId]);
+    if (courses.length > 0) {
+      return res.status(400).json({ success: false, message: 'Cannot delete program. It still has courses assigned to it.' });
+    }
+
+    await db.promise().query("DELETE FROM programs WHERE id = ?", [programId]);
+    logAction(req.user.id, 'DELETE_PROGRAM', 'program', programId, req);
+    res.json({ success: true, message: 'Program deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to delete program.' });
+  }
+});
+
+
+// --- COURSES CRUD (Updated to include Program ID) ---
+
+// 1. Get all courses (Now includes the Program Name via JOIN)
 app.get('/api/courses', authenticateToken, (req, res) => {
-  db.query("SELECT id, name FROM courses ORDER BY name ASC", (err, results) => {
+  const sql = `
+    SELECT c.id, c.name, c.program_id, p.program_name 
+    FROM courses c
+    LEFT JOIN programs p ON c.program_id = p.id
+    ORDER BY c.name ASC
+  `;
+  db.query(sql, (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Failed to load courses.' });
     res.json(results || []);
   });
 });
 
+// 2. Create a new course (Now requires program_id)
 app.post('/api/courses', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
   
-  const { name } = req.body;
-  if (!name || !name.trim()) {
-    return res.status(400).json({ success: false, message: 'Course name is required.' });
-  }
- 
-  if (name.trim().length > 100) {
-    return res.status(400).json({ success: false, message: 'Course name must be 100 characters or fewer.' });
-  }
+  const { name, program_id } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Course name is required.' });
+  if (!program_id) return res.status(400).json({ success: false, message: 'Program ID is required.' });
   
-  db.query("INSERT INTO courses (name) VALUES (?)", [name.trim()], (err, result) => {
+  db.query("INSERT INTO courses (name, program_id) VALUES (?, ?)", [name.trim(), program_id], (err, result) => {
     if (err) {
-      if (err.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({ success: false, message: 'A course with this name already exists.' });
-      }
-      console.error("Create course error:", err);
+      if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'A course with this name already exists.' });
       return res.status(500).json({ success: false, message: 'Failed to create course.' });
     }
-    
     logAction(req.user.id, 'CREATE_COURSE', 'course', result.insertId, req);
     res.status(201).json({ success: true, message: 'Course created successfully.', id: result.insertId });
   });
 });
 
+// 3. Update a course
 app.put('/api/courses/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
   
-  const { name } = req.body;
+  const { name, program_id } = req.body;
   const courseId = req.params.id;
   
-  if (!name || !name.trim()) {
-    return res.status(400).json({ success: false, message: 'Course name is required.' });
-  }
-  // ✅ NEW: cap name length
-  if (name.trim().length > 100) {
-    return res.status(400).json({ success: false, message: 'Course name must be 100 characters or fewer.' });
-  }
+  if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Course name is required.' });
+  if (!program_id) return res.status(400).json({ success: false, message: 'Program ID is required.' });
   
   try {
     const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
-    if (oldRecord.length === 0) {
-      return res.status(404).json({ success: false, message: 'Course not found.' });
-    }
+    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Course not found.' });
     
-    db.query("UPDATE courses SET name = ? WHERE id = ?", [name.trim(), courseId], (err, result) => {
+    db.query("UPDATE courses SET name = ?, program_id = ? WHERE id = ?", [name.trim(), program_id, courseId], (err, result) => {
       if (err) {
-        if (err.code === 'ER_DUP_ENTRY') {
-          return res.status(409).json({ success: false, message: 'Another course with this name already exists.' });
-        }
-        console.error("Update course error:", err);
+        if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Another course with this name already exists.' });
         return res.status(500).json({ success: false, message: 'Failed to update course.' });
       }
-      
-      logAction(req.user.id, 'UPDATE_COURSE', 'course', courseId, req, oldRecord[0], { name: name.trim() });
+      logAction(req.user.id, 'UPDATE_COURSE', 'course', courseId, req, oldRecord[0], { name: name.trim(), program_id });
       res.json({ success: true, message: 'Course updated successfully.' });
     });
   } catch (err) {
-    console.error("Update course server error:", err);
     res.status(500).json({ success: false, message: 'Server error while updating course.' });
   }
 });
 
+// 4. Delete a course
 app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
   
   const courseId = req.params.id;
   
   try {
     const [oldRecord] = await db.promise().query("SELECT * FROM courses WHERE id = ?", [courseId]);
-    if (oldRecord.length === 0) {
-      return res.status(404).json({ success: false, message: 'Course not found.' });
-    }
+    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Course not found.' });
     
     db.query("SELECT id FROM schedules WHERE course = ? LIMIT 1", [oldRecord[0].name], (err, rows) => {
-      if (err) {
-        console.error("Check course schedule dependency error:", err);
-        return res.status(500).json({ success: false, message: 'Database error checking dependencies.' });
-      }
-      if (rows.length > 0) {
-        return res.status(400).json({ success: false, message: 'Cannot delete course as it is assigned to existing schedules.' });
-      }
+      if (err) return res.status(500).json({ success: false, message: 'Database error.' });
+      if (rows.length > 0) return res.status(400).json({ success: false, message: 'Cannot delete course as it is assigned to existing schedules.' });
       
       db.query("DELETE FROM courses WHERE id = ?", [courseId], (err, result) => {
-        if (err) {
-          console.error("Delete course error:", err);
-          return res.status(500).json({ success: false, message: 'Failed to delete course.' });
-        }
-        
+        if (err) return res.status(500).json({ success: false, message: 'Failed to delete course.' });
         logAction(req.user.id, 'DELETE_COURSE', 'course', courseId, req, oldRecord[0], null);
         res.json({ success: true, message: 'Course deleted successfully.' });
       });
     });
   } catch (err) {
-    console.error("Delete course server error:", err);
     res.status(500).json({ success: false, message: 'Server error while deleting course.' });
   }
 });
@@ -6078,7 +6148,6 @@ app.get('/api/attendance-monthly', authenticateToken, async (req, res) => {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
 
-  
   const period = parseReportPeriod(req.query.month, req.query.year);
   if (period.error) {
     return res.status(400).json({ success: false, message: period.error });
@@ -6088,6 +6157,19 @@ app.get('/api/attendance-monthly', authenticateToken, async (req, res) => {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
+
+  
+  const { program_id, course } = req.query;
+  let filterSql = "";
+  let queryParams = [startDate, endDate];
+
+  if (course) {
+    filterSql += " AND s.course = ?";
+    queryParams.push(course);
+  } else if (program_id) {
+    filterSql += " AND c.program_id = ?";
+    queryParams.push(program_id);
+  }
 
   const sql = `
     SELECT 
@@ -6110,11 +6192,12 @@ app.get('/api/attendance-monthly', authenticateToken, async (req, res) => {
       AND a.date BETWEEN ? AND ? 
       AND a.status NOT IN ('on leave', 'absent')
     LEFT JOIN schedules s ON a.schedule_id = s.id
-    WHERE u.role = 'instructor' AND u.status = 'active'
+    LEFT JOIN courses c ON s.course = c.name   -- 🚨 NEW JOIN
+    WHERE u.role = 'instructor' AND u.status = 'active' ${filterSql} -- 🚨 NEW FILTER
     GROUP BY u.id
   `;
 
-  db.query(sql, [startDate, endDate], (err, results) => {
+  db.query(sql, queryParams, (err, results) => {
     if (err) {
       console.error("Attendance monthly error:", err);
       return res.status(500).json({ error: err.message });
@@ -6314,6 +6397,20 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
+  const { program_id, course } = req.query;
+  let filterSql = "";
+  
+  
+  let queryParams = [startDate, endDate, startDate, endDate, startDate, endDate];
+
+  if (course) {
+    filterSql += " AND s.course = ?";
+    queryParams.push(course);
+  } else if (program_id) {
+    filterSql += " AND c.program_id = ?";
+    queryParams.push(program_id);
+  }
+
   try {
     const [rows] = await db.promise().query(`
       SELECT 
@@ -6333,7 +6430,6 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
             ELSE 0
           END
         ), 0) AS rendered_hours,
-        -- ✅ Undertime calculation
         COALESCE(SUM(
           CASE 
             WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' AND a.time_out < s.end_time
@@ -6372,10 +6468,11 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
       FROM users u
       LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND s.date BETWEEN ? AND ?
       LEFT JOIN attendance a ON s.id = a.schedule_id
-      WHERE LOWER(u.role) = 'instructor' AND u.status = 'active'
+      LEFT JOIN courses c ON s.course = c.name   -- 🚨 NEW JOIN
+      WHERE LOWER(u.role) = 'instructor' AND u.status = 'active' ${filterSql} -- 🚨 NEW FILTER
       GROUP BY u.id
       ORDER BY u.full_name ASC
-    `, [startDate, endDate, startDate, endDate, startDate, endDate]);
+    `, queryParams);
 
     if (rows.length === 0) {
       return res.status(404).json({ success: false, message: 'No active instructors found for the selected period.' });

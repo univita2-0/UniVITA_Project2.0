@@ -244,7 +244,9 @@ export default function ScheduleScreen() {
                     <View style={styles.scheduleItem}>
                       <View style={styles.courseHeader}>
                         <BookOpen size={16} color={colors.primary} />
-                        <Text style={styles.courseText}>{primarySchedule.course}</Text>
+                        <Text style={styles.courseText}>{primarySchedule.course} 
+                          {primarySchedule.program_name ? ` (${primarySchedule.program_name})` : ''}
+                        </Text>
                       </View>
                       <View style={styles.detailsGrid}>
                         <View style={styles.infoRow}>
@@ -301,7 +303,9 @@ export default function ScheduleScreen() {
                     <View key={item.id || idx} style={styles.modalScheduleItem}>
                       <View style={styles.courseHeader}>
                         <BookOpen size={16} color={colors.primary} />
-                        <Text style={styles.courseText}>{item.course}</Text>
+                        <Text style={styles.courseText}>{item.course}
+                          {item.program_name ? ` (${item.program_name})` : ''}
+                        </Text>
                       </View>
                       <View style={styles.detailsGrid}>
                         <View style={styles.infoRow}>

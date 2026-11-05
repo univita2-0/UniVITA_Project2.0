@@ -1058,10 +1058,17 @@ const canClockOutNow =
                         <View style={styles.iconBox}><MapPin size={16} color={isLight ? "#64748B" : colors.textSecondary} /></View>
                         <View><Text style={styles.scheduleSubLabel}>Location / Room</Text><Text style={styles.scheduleDataText}>{todaySchedule.place}</Text></View>
                       </View>
+                      
                       <View style={styles.scheduleRow}>
-                        <View style={styles.iconBox}><FileText size={16} color={isLight ? "#64748B" : colors.textSecondary} /></View>
-                        <View><Text style={styles.scheduleSubLabel}>Course / Department</Text><Text style={styles.scheduleDataText}>{todaySchedule.course || "General Assignment"}</Text></View>
-                      </View>
+  <View style={styles.iconBox}><FileText size={16} color={isLight ? "#64748B" : colors.textSecondary} /></View>
+  <View>
+    <Text style={styles.scheduleSubLabel}>Course / Department</Text>
+    <Text style={styles.scheduleDataText}>
+      {todaySchedule.course || "General Assignment"}
+      {todaySchedule.program_name ? ` (${todaySchedule.program_name})` : ''}
+    </Text>
+  </View>
+</View>
                     </>
                   );
                 })()}
@@ -1293,7 +1300,10 @@ const canClockOutNow =
                   return (
                     <View key={index} style={styles.schedItem}>
                       <View style={styles.schedItemTop}>
-                        <Text style={styles.schedItemTitle}>{sched.course || "General Assignment"}</Text>
+                        <Text style={styles.schedItemTitle}>
+  {sched.course || "General Assignment"}
+  {sched.program_name ? ` (${sched.program_name})` : ''}
+</Text>
                         <View style={[styles.statusBadge, { backgroundColor: statusData.bg }]}><Text style={[styles.statusBadgeText, { color: statusData.text }]}>{statusData.label}</Text></View>
                       </View>
                       <View style={styles.schedItemBottom}>

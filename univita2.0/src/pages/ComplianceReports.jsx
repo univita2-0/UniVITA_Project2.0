@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Download, Calendar, FileText, CheckCircle, Clock, ShieldCheck, Award, Users, ShieldAlert } from 'lucide-react';
+import { Download, Calendar, FileText, CheckCircle, Clock, ShieldCheck, Award, Users, ShieldAlert, Layers, BookOpen } from 'lucide-react';
 import './ComplianceReports.css';
 import { API_BASE } from '../api';
 
@@ -30,9 +30,32 @@ const ComplianceReports = () => {
   const [loading, setLoading] = useState(false);
   const [lastGenerated, setLastGenerated] = useState(null);
 
+  // NEW: Program and Course States
+  const [programs, setPrograms] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [programId, setProgramId] = useState('');
+  const [courseName, setCourseName] = useState('');
+
   useEffect(() => {
     const saved = localStorage.getItem('last_compliance_report');
     if (saved) setLastGenerated(new Date(parseInt(saved, 10)));
+  }, []);
+
+  // NEW: Fetch Programs and Courses on load
+  useEffect(() => {
+    const fetchFilterData = async () => {
+      try {
+        const [progRes, courseRes] = await Promise.all([
+          axios.get(`${API_BASE}/programs`, getAuthHeaders()),
+          axios.get(`${API_BASE}/courses`, getAuthHeaders())
+        ]);
+        setPrograms(progRes.data || []);
+        setCourses(courseRes.data || []);
+      } catch (err) {
+        console.error("Failed to load filter data", err);
+      }
+    };
+    fetchFilterData();
   }, []);
 
   const generateReport = async () => {
@@ -52,7 +75,12 @@ const ComplianceReports = () => {
     setLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/reports/compliance/attendance-compliance`, {
-        params: { month, year },
+        params: { 
+          month, 
+          year, 
+          program_id: programId, // NEW
+          course: courseName     // NEW
+        },
         responseType: 'blob',
         ...getAuthHeaders()
       });
@@ -73,22 +101,16 @@ const ComplianceReports = () => {
       toast.success('Attendance & Timekeeping Report downloaded.');
     } catch (err) {
       console.error(err);
-
       let errorMsg = 'Failed to generate attendance report.';
       const status = err.response?.status;
 
-      if (status === 401) {
-        errorMsg = 'Session expired. Please log in again.';
-      } else if (status === 403) {
-        errorMsg = 'You do not have permission to generate compliance reports.';
-      } else if (status === 404) {
-        errorMsg = 'No active instructor records found for this period.';
-      } else if (status === 400) {
+      if (status === 401) errorMsg = 'Session expired. Please log in again.';
+      else if (status === 403) errorMsg = 'You do not have permission to generate compliance reports.';
+      else if (status === 404) errorMsg = 'No active instructor records found for this period.';
+      else if (status === 400) {
         const backendMsg = await readBlobError(err);
         errorMsg = backendMsg || 'Invalid report parameters.';
-      } else if (!err.response) {
-        errorMsg = 'Network error. Please check your connection and try again.';
-      }
+      } else if (!err.response) errorMsg = 'Network error. Please check your connection and try again.';
 
       toast.error(errorMsg);
     } finally {
@@ -102,12 +124,12 @@ const ComplianceReports = () => {
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
+  const filteredCourses = courses.filter(c => !programId || String(c.program_id) === String(programId));
+
   return (
     <div className="formal-cr-container">
       <div className="formal-cr-header">
-        <div className="formal-cr-title-block">
-          
-        </div>
+        <div className="formal-cr-title-block"></div>
         <div className="formal-cr-security-badge">
           <ShieldCheck size={16} />
           <span>DOLE & NPC Data Compliant</span>
@@ -121,16 +143,38 @@ const ComplianceReports = () => {
             <h3>Report Scope Parameters</h3>
           </div>
           <div className="formal-cr-card-body">
+            
+            {/* NEW: Program & Course Row */}
+            <div className="formal-cr-form-row">
+              <div className="formal-cr-form-group">
+                <label>Program Filter (Optional)</label>
+                <div className="formal-cr-input-wrapper">
+                  <Layers size={16} className="formal-cr-icon" />
+                  <select value={programId} onChange={e => { setProgramId(e.target.value); setCourseName(''); }} disabled={loading}>
+                    <option value="">All Programs</option>
+                    {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="formal-cr-form-group">
+                <label>Course Filter (Optional)</label>
+                <div className="formal-cr-input-wrapper">
+                  <BookOpen size={16} className="formal-cr-icon" />
+                  <select value={courseName} onChange={e => setCourseName(e.target.value)} disabled={loading}>
+                    <option value="">All Courses</option>
+                    {filteredCourses.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div className="formal-cr-form-row">
               <div className="formal-cr-form-group">
                 <label>Target Month</label>
                 <div className="formal-cr-input-wrapper">
                   <Calendar size={16} className="formal-cr-icon" />
-                  <select
-                    value={month}
-                    onChange={e => setMonth(parseInt(e.target.value, 10))}
-                    disabled={loading}
-                  >
+                  <select value={month} onChange={e => setMonth(parseInt(e.target.value, 10))} disabled={loading}>
                     {monthNames.map((name, idx) => (
                       <option key={idx + 1} value={idx + 1}>{name}</option>
                     ))}
@@ -142,11 +186,7 @@ const ComplianceReports = () => {
                 <label>Fiscal Year</label>
                 <div className="formal-cr-input-wrapper">
                   <Calendar size={16} className="formal-cr-icon" />
-                  <select
-                    value={year}
-                    onChange={e => setYear(parseInt(e.target.value, 10))}
-                    disabled={loading}
-                  >
+                  <select value={year} onChange={e => setYear(parseInt(e.target.value, 10))} disabled={loading}>
                     {years.map(y => (
                       <option key={y} value={y}>{y}</option>
                     ))}
@@ -172,13 +212,9 @@ const ComplianceReports = () => {
 
               <button className="formal-cr-btn-primary" onClick={generateReport} disabled={loading}>
                 {loading ? (
-                  <>
-                    <span className="formal-cr-spinner"></span> Compiling DTR Report...
-                  </>
+                  <><span className="formal-cr-spinner"></span> Compiling DTR Report...</>
                 ) : (
-                  <>
-                    <Download size={16} /> Export Monthly Report (PDF)
-                  </>
+                  <><Download size={16} /> Export Monthly Report (PDF)</>
                 )}
               </button>
             </div>

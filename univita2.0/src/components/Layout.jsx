@@ -51,6 +51,7 @@ const menuConfig = [
     id: 'facilities', label: 'Facilities', icon: <Building size={18} />,
     submenu: [
       { id: 'locations', label: 'Locations', path: 'locations', roles: ['admin'] },
+      { id: 'programs', label: 'Programs', path: 'programs', roles: ['admin'] },
       { id: 'courses', label: 'Courses', path: 'courses', roles: ['admin'] }
     ],
     roles: ['admin']
