@@ -346,6 +346,20 @@
   animation: rep-spin 0.6s linear infinite;
 }
 
+.formal-rep-readonly-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  background: #F0FDFA;
+  border: 1px solid #99F6E4;
+  border-radius: var(--radius-md);
+  color: #0F766E;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 1.25rem;
+}
+
 @keyframes rep-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1024px) {
@@ -508,4 +522,92 @@
     line-height: 1.4;
   }
   .print-privacy-banner strong { color: #334155; font-size: 6.5pt; }
+}
+
+/* ================================================
+   UniVITA Enterprise Reports | Screen redesign
+   Preserves existing @media print document layouts.
+   ================================================ */
+@media screen {
+  .formal-rep-container {
+    padding: 5px 10px 10px;
+    min-height: 0;
+    background: transparent;
+    --primary: #0B3B40;
+    --primary-hover: #0C5053;
+    --radius-lg: 7px;
+    --radius-md: 5px;
+    --radius-sm: 4px;
+  }
+  .formal-rep-header {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #E2E8F0;
+    border-radius: 7px;
+    padding: 17px 18px;
+    margin: 0 0 12px;
+    gap: 16px;
+  }
+  .formal-rep-title-block { flex: 1 1 300px; }
+  .formal-rep-eyebrow {
+    display: flex; align-items: center; gap: 6px;
+    color: #0D9488; font-size: 10px; font-weight: 800;
+    letter-spacing: .11em; margin-bottom: 5px;
+  }
+  .formal-rep-title { font: 700 22px/1.2 Inter, sans-serif; letter-spacing: -.035em; margin-bottom: 5px; }
+  .formal-rep-title-block p { font-size: 12px; line-height: 1.5; max-width: 520px; }
+  .formal-rep-controls { justify-content: flex-end; gap: 7px; flex: 2 1 520px; }
+  .formal-rep-select { min-width: 135px; max-width: 220px; height: 36px; font-size: 12px; font-weight: 500; border-radius: 5px; padding-left: 33px; }
+  .formal-rep-controls .formal-rep-select[style] { min-width: 145px !important; }
+  .formal-rep-icon { left: 10px; width: 14px; }
+  .formal-rep-btn-primary, .formal-rep-btn-outline { height: 36px; font-size: 12px; padding: 0 12px; border-radius: 5px; }
+  .formal-rep-btn-primary { background: #0B3B40; border-color: #0B3B40; }
+  .formal-rep-btn-primary:hover:not(:disabled) { background: #0D5557; }
+  .formal-rep-readonly-banner { margin-bottom: 12px; font-size: 12px; border-radius: 5px; }
+  .formal-rep-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; padding: 7px 2px 9px; }
+  .formal-rep-section-kicker { font-size: 10px; font-weight: 800; letter-spacing: .1em; color: #0D9488; }
+  .formal-rep-section-heading h2 { margin: 3px 0 0; color: #173042; font-size: 15px; letter-spacing: -.02em; }
+  .formal-rep-period-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #64748B; }
+  .formal-rep-tabs { flex-wrap: nowrap; overflow-x: auto; border: 1px solid #E2E8F0; border-radius: 6px; background: #fff; padding: 5px; gap: 4px; margin-bottom: 12px; }
+  .formal-rep-tab-btn { flex: 0 0 auto; border: 1px solid transparent; height: 34px; border-radius: 4px; font-size: 11.5px; font-weight: 600; padding: 0 12px; }
+  .formal-rep-tab-btn.active { background: #E5F5F2; color: #0F766E; border-color: #BCE9E1; }
+  .formal-rep-tab-btn:hover:not(.active) { border-color: #E2E8F0; }
+  .formal-rep-screen { gap: 12px; }
+  .formal-rep-stats-grid { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; }
+  .formal-rep-stat-box { border-radius: 6px; min-width: 0; padding: 14px; gap: 11px; box-shadow: none; }
+  .formal-rep-stat-icon { width: 36px; height: 36px; border-radius: 5px; }
+  .formal-rep-stat-value { font-size: 23px; letter-spacing: -.04em; }
+  .formal-rep-stat-label { font-size: 11px; }
+  .formal-rep-card { border-radius: 6px; box-shadow: none; min-width: 0; }
+  .formal-rep-card-header { padding: 12px 15px; }
+  .formal-rep-card-header h3 { font: 700 12px/1.4 Inter,sans-serif; letter-spacing: 0; text-transform: none; }
+  .formal-rep-card-body { padding: 12px 15px; }
+  .formal-rep-chart-grid { gap: 10px; }
+  .formal-rep-table { font-size: 12px; }
+  .formal-rep-table th { font-size: 10px; letter-spacing: .03em; }
+  .formal-rep-container :is(button, select):focus-visible { outline: 2px solid #0D9488; outline-offset: 2px; }
+}
+@media screen and (max-width: 1200px) {
+  .formal-rep-header { align-items: stretch; }
+  .formal-rep-controls { flex: 1 1 100%; justify-content: flex-start; }
+  .formal-rep-stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media screen and (max-width: 620px) {
+  .formal-rep-header { padding: 13px; }
+  .formal-rep-title { font-size: 19px; }
+  .formal-rep-controls .formal-rep-input-wrapper { flex: 1 1 calc(50% - 8px); }
+  .formal-rep-controls .formal-rep-select { width: 100%; max-width: none; }
+  .formal-rep-stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .formal-rep-stat-box { padding: 10px; }
+  .formal-rep-stat-value { font-size: 18px; }
+  .formal-rep-section-heading { align-items: flex-start; }
+}
+
+/* Print clarifications: source limitations and authorized signatories. */
+@media print {
+  .print-legend { margin: 2px 0 13px; font-size: 7pt; line-height: 1.45; color: #475569; }
+  .formal-print-table thead { display: table-header-group; }
+  .formal-print-table tfoot { display: table-footer-group; }
+  .print-only { page-break-after: auto; }
+  .formal-print-footer { break-inside: avoid; }
 }

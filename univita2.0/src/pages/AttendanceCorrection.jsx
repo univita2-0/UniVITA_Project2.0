@@ -1,10 +1,11 @@
 // src/pages/AttendanceCorrection.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import FormalModal from '../components/FormalModal';
 import { Search, Edit3, ClipboardList, Eye, X, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
-import { API_BASE } from '../api';
+import { API_BASE, getWebApiErrorMessage } from '../api';
+import { useRole } from '../permissions';
 import './AttendanceCorrection.css';
 
 const getAuthHeaders = () => ({
@@ -62,6 +63,10 @@ const STATUS_TABS = [
 const ALLOWED_STATUSES = ['present', 'late', 'absent', 'on leave'];
 
 const AttendanceCorrection = () => {
+  const { can, isAdmin } = useRole();
+  const canEditAttendance = can('attendance:update');
+  const canReviewCorrections = can('corrections:review');
+
   const [employeeId, setEmployeeId] = useState('');
   const [searchDate, setSearchDate] = useState('');
 
@@ -80,14 +85,28 @@ const AttendanceCorrection = () => {
 
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingCorrections, setPendingCorrections] = useState([]);
+  const [c15FocusedId, setC15FocusedId] = useState(null);
   const [loadingPending, setLoadingPending] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingTypeFilter, setPendingTypeFilter] = useState('all');
+  // C11: block overlapping HR decisions (the backend remains authoritative).
+  const reviewingCorrectionRef = useRef(null);
+  const [reviewingCorrectionId, setReviewingCorrectionId] = useState(null);
 
   const [previewImage, setPreviewImage] = useState(null);
   const [viewingRecord, setViewingRecord] = useState(null);
 
   const [activeStatusTab, setActiveStatusTab] = useState('all');
+  // C14.4: Bring HR pending status up to date when returning to browser tab.
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetchPendingCount?.();
+    };
+    document.addEventListener('visibilitychange', onFocus);
+    return () => document.removeEventListener('visibilitychange', onFocus);
+  }, []);
+
 
   const debouncedEmployeeId = useDebounce(employeeId);
 
@@ -160,6 +179,11 @@ const AttendanceCorrection = () => {
   };
 
   const openEditor = (record) => {
+    // FIX 10.3 — defense-in-depth: only HR can open the edit modal
+    if (!canEditAttendance) {
+      toast.error('You do not have permission to edit attendance records.');
+      return;
+    }
     setEditing(record);
     setSaveError('');
     setForm({
@@ -171,6 +195,11 @@ const AttendanceCorrection = () => {
   };
 
   const handleSave = async () => {
+    // FIX 10.3 — defense-in-depth: reject API call if role lacks permission
+    if (!canEditAttendance) {
+      toast.error('You do not have permission to edit attendance records.');
+      return;
+    }
     setSaveError('');
 
     if (form.status) {
@@ -246,18 +275,30 @@ const AttendanceCorrection = () => {
   };
 
   const handleCorrectionAction = async (id, status) => {
+    // Permission checks remain client-side convenience; the backend enforces RBAC.
+    if (!canReviewCorrections) {
+      toast.error('You do not have permission to review correction requests.');
+      return;
+    }
+    // A ref blocks a second submission immediately, before React re-renders.
+    if (reviewingCorrectionRef.current !== null) return;
     const verb = status === 'approved' ? 'approve' : 'reject';
     if (!window.confirm(`Are you sure you want to ${verb} this correction request?`)) return;
-
+    reviewingCorrectionRef.current = id;
+    setReviewingCorrectionId(id);
     try {
       await axios.put(`${API_BASE}/attendance/corrections/${id}/review`, { status }, getAuthHeaders());
       toast.success(`Correction request ${status}`);
-      fetchPendingCorrections();
-      fetchDefaultRecords();
-      fetchPendingCount();
-      if (searchDone) fetchRecords();
+      await Promise.all([fetchPendingCorrections(), fetchDefaultRecords(), fetchPendingCount(), ...(searchDone ? [fetchRecords()] : [])]);
     } catch (err) {
-      toast.error(err.response?.data?.error || `Failed to ${status} correction`);
+      toast.error(getWebApiErrorMessage(err, `Failed to ${verb} correction.`));
+      // A conflict may mean another HR reviewer has already processed the request.
+      if (err?.response?.status === 409) {
+        await Promise.all([fetchPendingCorrections(), fetchPendingCount()]);
+      }
+    } finally {
+      reviewingCorrectionRef.current = null;
+      setReviewingCorrectionId(null);
     }
   };
 
@@ -286,6 +327,30 @@ const AttendanceCorrection = () => {
   const totalPages = Math.ceil(filteredRecords.length / itemsPerPage);
   const currentRecords = filteredRecords.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  // C15: Focus the exact pending correction from an HR/Admin notification.
+  // Requests no longer pending remain accessible through the existing history UI.
+  useEffect(() => {
+    const raw = sessionStorage.getItem('c15_request_focus');
+    if (!raw) return;
+    let intent;
+    try { intent = JSON.parse(raw); } catch (_) { sessionStorage.removeItem('c15_request_focus'); return; }
+    if (intent?.kind !== 'correction') return;
+    sessionStorage.removeItem('c15_request_focus');
+    if (!Number.isSafeInteger(intent.id) || intent.id <= 0) return;
+    setC15FocusedId(intent.id);
+    setPendingTypeFilter('all');
+    setPendingPage(1);
+    setShowPendingModal(true);
+    fetchPendingCorrections();
+  }, []);
+
+  useEffect(() => {
+    if (!c15FocusedId || loadingPending) return;
+    const index = pendingCorrections.findIndex(c => Number(c.id) === c15FocusedId);
+    if (index >= 0) setPendingPage(Math.floor(index / itemsPerPage) + 1);
+    else if (pendingCorrections.length) toast.info('This correction is no longer in the pending queue. Check request history.');
+  }, [c15FocusedId, pendingCorrections, loadingPending]);
+
   const filteredPendingAll = useMemo(() => {
     return pendingCorrections.filter(c => {
       if (pendingTypeFilter === 'in') return !!c.requested_clock_in;
@@ -299,18 +364,45 @@ const AttendanceCorrection = () => {
 
   return (
     <div className="ac-container">
-      <div className="ac-header">
-        <div className="ac-title-group">
-          <div>
-            <p className="ac-subtitle">Manually adjust records and review employee correction requests.</p>
-          </div>
+      {/* FIX 10.3 — read-only banner for Admin */}
+      {isAdmin && (
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: '20px',
+          background: '#F0FDFA',
+          border: '1px solid #99F6E4',
+          borderRadius: '5px',
+          color: '#0F766E',
+          fontSize: '12px',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
+          <span><strong>Read-only view.</strong> Attendance edits and correction reviews are handled by HR.</span>
         </div>
-        <button className="ac-pending-btn" onClick={fetchPendingCorrections}>
-          <ClipboardList size={18} />
-          <span>Pending Requests</span>
+      )}
+
+      <header className="ac-header">
+        <div className="ac-title-group">
+         
+          <p className="ac-subtitle">Review time-record adjustments, supporting evidence, and correction requests.</p>
+        </div>
+        <button type="button" className="ac-pending-btn ac-review-cta" onClick={fetchPendingCorrections}>
+          
+          <span>Pending requests</span>
           {pendingCount > 0 && <span className="ac-badge-count">{pendingCount}</span>}
         </button>
-      </div>
+      </header>
+
+      <section className="ac-summary" aria-label="Attendance correction overview">
+        <div className="ac-summary-item"><span>Records available</span><strong>{baseRecords.length}</strong><small>{searchDone ? 'Employee search' : 'Recent attendance'}</small></div>
+        <div className="ac-summary-item"><span>Pending review</span><strong>{pendingCount}</strong><small>Awaiting HR decision</small></div>
+        <div className="ac-summary-item"><span>Approved</span><strong>{baseRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'approved').length}</strong><small>Visible records</small></div>
+        <div className="ac-summary-item"><span>Rejected</span><strong>{baseRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'rejected').length}</strong><small>Visible records</small></div>
+      </section>
+      <div className="ac-section-intro"><div><p>Search records and inspect adjustments made to time entries.</p></div><span>{filteredRecords.length} records</span></div>
 
       {/* STATUS TABS */}
       <div className="ac-tabs" role="tablist" aria-label="Correction audit status filter">
@@ -340,7 +432,7 @@ const AttendanceCorrection = () => {
               onChange={e => { setEmployeeId(e.target.value); setCurrentPage(1); }}
               className="ac-input-search"
             />
-            {employeeId && <X size={16} className="ac-clear-icon" onClick={() => setEmployeeId('')} />}
+            {employeeId && <button type="button" className="ac-input-clear" aria-label="Clear employee search" onClick={() => setEmployeeId('')}><X size={16}/></button>}
           </div>
           <div className="ac-search-input-wrapper date-picker">
             <Calendar size={16} className="ac-search-icon" />
@@ -352,11 +444,9 @@ const AttendanceCorrection = () => {
               className="ac-input-search"
               style={{ color: searchDate ? '#0F172A' : '#94A3B8' }}
             />
-            {searchDate && <X size={16} className="ac-clear-icon" onClick={() => setSearchDate('')} />}
+            {searchDate && <button type="button" className="ac-input-clear" aria-label="Clear date filter" onClick={() => setSearchDate('')}><X size={16}/></button>}
           </div>
-          <button className="ac-search-btn" onClick={fetchRecords}>
-            Search Records
-          </button>
+          
         </div>
       </div>
 
@@ -406,12 +496,16 @@ const AttendanceCorrection = () => {
                           </td>
                           <td className="text-center whitespace-nowrap">
                             <div className="ac-action-group" style={{ justifyContent: 'center' }}>
+                              {/* View Details — read-only, always visible */}
                               <button onClick={() => setViewingRecord(rec)} className="ac-edit-btn" title="View Full Details">
                                 <Eye size={16} color="#475569" />
                               </button>
-                              <button onClick={() => openEditor(rec)} className="ac-edit-btn" title="Edit Record">
-                                <Edit3 size={16} color="#475569" />
-                              </button>
+                              {/* FIX 10.3 — Edit button hidden for non-HR */}
+                              {canEditAttendance && (
+                                <button onClick={() => openEditor(rec)} className="ac-edit-btn" title="Edit Record">
+                                  <Edit3 size={16} color="#475569" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -436,7 +530,7 @@ const AttendanceCorrection = () => {
         )}
       </div>
 
-      {/* VIEW DETAILS MODAL */}
+      {/* VIEW DETAILS MODAL — read-only, always available */}
       <FormalModal show={!!viewingRecord} onClose={() => setViewingRecord(null)} title="Attendance Record Details" footer={<button className="btn-modal-cancel" onClick={() => setViewingRecord(null)}>Close Window</button>}>
         {viewingRecord && (() => {
           const audit = getAuditStatus(viewingRecord);
@@ -494,7 +588,7 @@ const AttendanceCorrection = () => {
         })()}
       </FormalModal>
 
-      {/* EDIT MODAL */}
+      {/* EDIT MODAL — only reachable via HR-gated openEditor */}
       <FormalModal show={!!editing} onClose={() => setEditing(null)} title="Edit Attendance Record" footer={
         <>
           <button className="btn-modal-cancel" onClick={() => setEditing(null)}>Cancel</button>
@@ -534,7 +628,7 @@ const AttendanceCorrection = () => {
         )}
       </FormalModal>
 
-      {/* PENDING CORRECTIONS MODAL */}
+      {/* PENDING CORRECTIONS MODAL — read-only for Admin */}
       {showPendingModal && (
         <div className="ac-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="ac-custom-modal" onClick={e => e.stopPropagation()}>
@@ -577,7 +671,7 @@ const AttendanceCorrection = () => {
               ) : (
                 <div className="ac-minimal-list">
                   {currentPending.map(c => (
-                    <div key={c.id} className="ac-minimal-card">
+                    <div key={c.id} className="ac-minimal-card" style={Number(c.id) === c15FocusedId ? { outline: '2px solid #0D9488', outlineOffset: -2 } : undefined}>
                       <div className="ac-minimal-header">
                         <div className="ac-minimal-user">
                           <div className="ac-minimal-avatar">
@@ -619,10 +713,17 @@ const AttendanceCorrection = () => {
                         )}
                       </div>
 
-                      <div className="ac-minimal-footer">
-                        <button className="ac-btn-min-reject" onClick={() => handleCorrectionAction(c.id, 'rejected')}>Reject</button>
-                        <button className="ac-btn-min-approve" onClick={() => handleCorrectionAction(c.id, 'approved')}>Approve</button>
-                      </div>
+                      {/* FIX 10.3 — Approve/Reject only for HR; read-only hint for Admin */}
+                      {canReviewCorrections ? (
+                        <div className="ac-minimal-footer">
+                          <button className="ac-btn-min-reject" disabled={reviewingCorrectionId !== null} onClick={() => handleCorrectionAction(c.id, 'rejected')}>{reviewingCorrectionId === c.id ? 'Processing…' : 'Reject'}</button>
+                          <button className="ac-btn-min-approve" disabled={reviewingCorrectionId !== null} onClick={() => handleCorrectionAction(c.id, 'approved')}>{reviewingCorrectionId === c.id ? 'Processing…' : 'Approve'}</button>
+                        </div>
+                      ) : (
+                        <div className="ac-minimal-footer" style={{ justifyContent: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B', fontStyle: 'italic' }}>Read-only — awaiting HR review</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

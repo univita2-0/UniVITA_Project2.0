@@ -4,6 +4,7 @@ import { Plus, Edit3, Trash2, Search, X, ChevronLeft, ChevronRight, AlertCircle,
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { API_BASE } from '../api';
+import { useRole } from '../permissions';
 import './CoursesManagement.css';
 
 const getAuthHeaders = () => ({
@@ -11,6 +12,9 @@ const getAuthHeaders = () => ({
 });
 
 const CoursesManagement = () => {
+  const { can, isAdmin } = useRole();
+  const canWrite = can('courses:write');
+
   const [courses, setCourses] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,7 +28,6 @@ const CoursesManagement = () => {
   const [editingCourse, setEditingCourse] = useState(null);
   const [courseName, setCourseName] = useState('');
 
-  // NEW: State for Programs
   const [programs, setPrograms] = useState([]);
   const [selectedProgramId, setSelectedProgramId] = useState('');
 
@@ -33,7 +36,6 @@ const CoursesManagement = () => {
 
   useEffect(() => { setCurrentPage(1); }, [searchQuery]);
 
-  // Load Courses
   const loadCourses = useCallback(async () => {
     setLoading(true);
     try {
@@ -48,12 +50,10 @@ const CoursesManagement = () => {
     }
   }, []);
 
-  // NEW: Load Programs for the dropdown
   const loadPrograms = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE}/programs`, getAuthHeaders());
       setPrograms(res.data || []);
-      // Automatically select the first program as default if adding new
       if (res.data && res.data.length > 0) {
         setSelectedProgramId(res.data[0].id);
       }
@@ -65,30 +65,44 @@ const CoursesManagement = () => {
 
   useEffect(() => { 
     loadCourses(); 
-    loadPrograms(); // Fetch programs on mount
+    loadPrograms();
   }, [loadCourses, loadPrograms]);
 
   const resetForm = () => {
     setCourseName('');
     setEditingCourse(null);
-    // Reset to the first program if available
     if (programs.length > 0) setSelectedProgramId(programs[0].id);
   };
 
   const handleEdit = (course) => {
+    // FIX 10.8 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to edit courses.');
+      return;
+    }
     setEditingCourse(course);
     setCourseName(course.name);
-    setSelectedProgramId(course.program_id); // Set the current program
+    setSelectedProgramId(course.program_id);
     setShowModal(true);
   };
 
   const handleDeleteClick = (id, name) => {
+    // FIX 10.8 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to delete courses.');
+      return;
+    }
     setDeleteTargetId(id);
     setDeleteTargetName(name);
     setShowConfirm(true);
   };
 
   const confirmDelete = async () => {
+    // FIX 10.8 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to delete courses.');
+      return;
+    }
     if (!deleteTargetId) return;
     setProcessing(true);
     try {
@@ -107,6 +121,11 @@ const CoursesManagement = () => {
   };
 
   const handleSave = async () => {
+    // FIX 10.8 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to save courses.');
+      return;
+    }
     const trimmed = courseName.trim();
     if (!trimmed) {
       toast.warning("Course name required");
@@ -118,7 +137,6 @@ const CoursesManagement = () => {
       return;
     }
 
-    // NEW: Ensure a program is selected
     if (!selectedProgramId) {
       toast.warning("Please select a program for this course");
       return;
@@ -126,7 +144,6 @@ const CoursesManagement = () => {
 
     setProcessing(true);
     try {
-      // NEW: Include program_id in the payload
       const payload = { 
         name: trimmed, 
         program_id: selectedProgramId 
@@ -159,15 +176,39 @@ const CoursesManagement = () => {
   const currentCourses = filteredCourses.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
-    <div className="cm-container">
+    <div className="cm-container facility-courses">
+      {/* FIX 10.8 — read-only banner for Admin */}
+      {isAdmin && (
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: '20px',
+          background: '#F0FDFA',
+          border: '1px solid #99F6E4',
+          borderRadius: '5px',
+          color: '#0F766E',
+          fontSize: '12px',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
+          <span><strong>Read-only view.</strong> Course management is handled by HR.</span>
+        </div>
+      )}
+
+      <div className="facility-page-intro"><p>Manage the courses used for program organization and instructor scheduling.</p></div>
+      <div className="facility-stat-strip" aria-label="Course inventory summary"><div><span>Total courses</span><strong>{courses.length}</strong></div><div><span>Matching courses</span><strong>{filteredCourses.length}</strong></div><div><span>Available programs</span><strong>{programs.length}</strong></div></div>
       {/* Header Area */}
       <div className="cm-header">
         <div className="cm-header-left">
           <p className="cm-subtitle">Manage academic courses and subjects for instructor assignment.</p>
         </div>
-        <button className="cm-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-          <Plus size={18} /> Add New Course
-        </button>
+        {canWrite && (
+          <button className="cm-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
+            <Plus size={18} /> Add New Course
+          </button>
+        )}
       </div>
 
       {/* Main Content Card */}
@@ -191,7 +232,7 @@ const CoursesManagement = () => {
             )}
           </div>
           <div className="cm-total-count">
-            Total Courses <span>{courses.length}</span>
+            Showing <span>{filteredCourses.length} of {courses.length}</span>
           </div>
         </div>
 
@@ -207,9 +248,9 @@ const CoursesManagement = () => {
             <p>
               {searchQuery 
                 ? "We couldn't find any courses matching your search." 
-                : "Get started by adding your first academic course."}
+                : (canWrite ? "Get started by adding your first academic course." : "No courses configured yet.")}
             </p>
-            {!searchQuery && (
+            {!searchQuery && canWrite && (
               <button className="cm-btn-outline mt-4" onClick={() => { resetForm(); setShowModal(true); }}>
                 <Plus size={16} /> Add First Course
               </button>
@@ -221,16 +262,15 @@ const CoursesManagement = () => {
               <table className="cm-table">
                 <thead>
                   <tr>
-                    <th>Program</th> {/* NEW COLUMN */}
+                    <th>Program</th>
                     <th>Course Name</th>
-                    <th className="text-right">Actions</th>
+                    {canWrite && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {currentCourses.map(course => (
                     <tr key={course.id}>
                       <td>
-                        {/* NEW: Display the Program Name */}
                         <span style={{ color: '#64748B', fontSize: '0.875rem', fontWeight: '500' }}>
                           {course.program_name || 'Unassigned'}
                         </span>
@@ -238,23 +278,24 @@ const CoursesManagement = () => {
                       <td>
                         <span className="cm-course-name">{course.name}</span>
                       </td>
-                      <td>
-                        <div className="cm-action-group">
-                          <button className="cm-action-btn edit" onClick={() => handleEdit(course)} title="Edit Course">
-                            <Edit3 size={14} /> Edit
-                          </button>
-                          <button className="cm-action-btn delete" onClick={() => handleDeleteClick(course.id, course.name)} title="Delete Course">
-                            <Trash2 size={14} /> Delete
-                          </button>
-                        </div>
-                      </td>
+                      {canWrite && (
+                        <td>
+                          <div className="cm-action-group">
+                            <button className="cm-action-btn edit" onClick={() => handleEdit(course)} title="Edit Course">
+                              <Edit3 size={14} /> Edit
+                            </button>
+                            <button className="cm-action-btn delete" onClick={() => handleDeleteClick(course.id, course.name)} title="Delete Course">
+                              <Trash2 size={14} /> Delete
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div className="cm-pagination">
                 <span className="cm-page-info">
@@ -283,7 +324,7 @@ const CoursesManagement = () => {
         )}
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* Add/Edit Modal — reachable only via HR-gated openers */}
       {showModal && (
         <div className="cm-custom-modal-backdrop" onClick={() => { setShowModal(false); resetForm(); }}>
           <div className="cm-custom-modal small" onClick={e => e.stopPropagation()}>
@@ -296,7 +337,6 @@ const CoursesManagement = () => {
 
             <div className="cm-custom-modal-body">
               
-              {/* NEW: Program Dropdown */}
               <div className="cm-form-group" style={{ marginBottom: '1rem' }}>
                 <label>Belongs to Program <span className="text-danger">*</span></label>
                 <select
@@ -312,7 +352,6 @@ const CoursesManagement = () => {
                 </select>
               </div>
 
-              {/* Existing Course Name Input */}
               <div className="cm-form-group">
                 <label>Course Name <span className="text-danger">*</span></label>
                 <input

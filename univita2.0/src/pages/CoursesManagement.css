@@ -590,3 +590,28 @@ select.cm-clean-input.border {
 
   .cm-pagination { flex-direction: column; gap: 1rem; align-items: center; text-align: center; }
 }
+
+/* UniVITA Facilities — enterprise workspace additions */
+.facility-page-intro { padding: 3px 0 12px; }
+.facility-page-intro .facility-kicker { color: #0f766e; font-size: 10px; font-weight: 800; letter-spacing: .11em; margin-bottom: 5px; }
+.facility-page-intro h1 { margin: 0; font-size: clamp(19px, 2vw, 24px); line-height: 1.35; font-weight: 750; letter-spacing: -.035em; color: #102a3a; }
+.facility-page-intro p { margin: 4px 0 0; color: #64748b; font-size: 12.5px; }
+.facility-stat-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin: 0 0 13px; }
+.facility-stat-strip > div { background: white; border: 1px solid #e0e7ee; border-radius: 6px; min-height: 66px; padding: 10px 13px; display: flex; flex-direction: column; gap: 4px; }
+.facility-stat-strip span { font-size: 11px; color: #64748b; font-weight: 550; }
+.facility-stat-strip strong { color: #142f3e; font-size: 23px; font-weight: 750; line-height: 1.1; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .facility-stat-strip { grid-template-columns: 1fr; } .facility-stat-strip > div { min-height: 56px; } }
+
+/* Shared Courses / Programs presentation: both import this stylesheet */
+.cm-container.facility-courses, .cm-container.facility-programs { padding: 5px 10px 10px; min-height: 0; background: #f7f9fb; }
+.cm-container.facility-courses .cm-header, .cm-container.facility-programs .cm-header { align-items: center; margin: 0 0 12px; gap: 10px; }
+.cm-container.facility-courses .cm-subtitle, .cm-container.facility-programs .cm-subtitle { font-size: 12px; }
+.cm-container.facility-courses .cm-content-card, .cm-container.facility-programs .cm-content-card { border: 1px solid #e0e7ee; border-radius: 6px; box-shadow: 0 1px 2px rgba(15,23,42,.03); overflow: hidden; }
+.cm-container.facility-courses .cm-btn-primary, .cm-container.facility-programs .cm-btn-primary { background: #0d746f; border-color: #0d746f; border-radius: 5px; height: 35px; padding: 7px 12px; font-size: 12px; }
+.cm-container.facility-courses .cm-btn-primary:hover, .cm-container.facility-programs .cm-btn-primary:hover { background: #095e5a; }
+.cm-container.facility-courses .cm-toolbar, .cm-container.facility-programs .cm-toolbar { gap: 12px; padding: 11px 13px; }
+.cm-container.facility-courses .cm-table th, .cm-container.facility-programs .cm-table th { background: #f5f8fa; color: #526576; font-size: 11px; letter-spacing: .035em; text-transform: uppercase; }
+.cm-container.facility-courses .cm-table td, .cm-container.facility-programs .cm-table td { font-size: 12px; }
+.cm-container.facility-courses .cm-table th, .cm-container.facility-courses .cm-table td, .cm-container.facility-programs .cm-table th, .cm-container.facility-programs .cm-table td { padding-top: 11px; padding-bottom: 11px; }
+.cm-container.facility-courses .cm-action-btn, .cm-container.facility-programs .cm-action-btn { border-radius: 4px; }
+.cm-container.facility-courses .cm-page-btn, .cm-container.facility-programs .cm-page-btn { border-radius: 4px; }

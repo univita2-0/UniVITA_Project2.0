@@ -27,6 +27,7 @@ export default function LoginScreen({ navigation }) {
 
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState('');
+  const [pendingLoginToken, setPendingLoginToken] = useState('');
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
   const [sendingOtpResend, setSendingOtpResend] = useState(false);
@@ -42,6 +43,31 @@ export default function LoginScreen({ navigation }) {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetTimer, setResetTimer] = useState(0);
 
+  
+const isStoredTokenUnexpired = (token) => {
+  try {
+    const parts = String(token).split('.');
+    if (parts.length !== 3) return false;
+
+    const base64 = parts[1]
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const payload = JSON.parse(
+      require('base-64').decode(base64)
+    );
+
+    return (
+      payload.purpose === 'session' &&
+      typeof payload.exp === 'number' &&
+      payload.exp * 1000 > Date.now()
+    );
+  } catch {
+    return false;
+  }
+};
+
+
   // ========================================================
   // AUTO-LOGIN & SESSION VERIFICATION ON APP LAUNCH
   // ========================================================
@@ -53,10 +79,15 @@ export default function LoginScreen({ navigation }) {
         const userStr = await AsyncStorage.getItem('user');
 
         // If user enabled "Stay logged in" and token exists, jump straight to Main
-        if (stay === 'true' && token && userStr) {
-          navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
-          return;
-        }
+        if (
+  stay === 'true' &&
+  token &&
+  userStr &&
+  isStoredTokenUnexpired(token)
+) {
+  navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+  return;
+}
 
         // Restore remembered email if available
         const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
@@ -168,109 +199,274 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const handleLogin = async () => {
-    Keyboard.dismiss();
+  
+const handleLogin = async () => {
+  Keyboard.dismiss();
+
+  const emailClean = email.trim().toLowerCase();
+
+  // 1. Validate email and password
+  if (!emailClean || !password) {
+    showToast('Please enter both email and password', 'error');
+    return;
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!emailRegex.test(emailClean)) {
+    showToast('Please enter a valid email address', 'error');
+    return;
+  }
+
+  if (password.length < 6) {
+    showToast('Password must be at least 6 characters long', 'error');
+    return;
+  }
+
+  setLoading(true);
+  setPendingLoginToken('');
+
+  try {
+    // 2. Verify email and password
+    const result = await loginUser(emailClean, password);
+
+    if (!result || !result.success) {
+      showToast(
+        result?.message || 'Invalid email or password',
+        'error'
+      );
+      return;
+    }
+
+    // 3. Preserve existing password-expiration handling
     
-    if (!email.trim() || !password) {
-      showToast('Please enter both email and password', 'error');
+if (result.requiresPasswordReset) {
+  Alert.alert(
+    'Password Expired',
+    'Your password has expired. Please reset it using the email verification process.',
+    [
+      {
+        text: 'Reset Password',
+        onPress: () => {
+          setResetEmail(emailClean);
+          setResetStep('email');
+          setResetOtp('');
+          setResetNewPassword('');
+          setResetConfirmPassword('');
+          setShowForgotModal(true);
+        }
+      },
+      {
+        text: 'Cancel',
+        style: 'cancel'
+      }
+    ]
+  );
+
+  return;
+}
+
+
+    // 4. C04: Require a temporary token from backend
+    if (!result.tempToken) {
+      showToast(
+        'Unable to start security verification. Please log in again.',
+        'error'
+      );
       return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
-      showToast('Please enter a valid email address', 'error');
-      return;
+    // 5. Request OTP using temporary login token
+    const otpRes = await sendOtp(
+      emailClean,
+      result.tempToken
+    );
+
+    if (otpRes?.success) {
+      // Save temporary token for OTP verification and resend
+      setPendingLoginToken(result.tempToken);
+
+      setEmail(emailClean);
+      setOtp('');
+      setShowOtpModal(true);
+
+      startResendTimer(setResendTimer);
+
+      showToast(
+        'OTP verification code sent to your email',
+        'success'
+      );
+
+    } else {
+      showToast(
+        otpRes?.message || 'Failed to send OTP verification code',
+        'error'
+      );
     }
 
-    if (password.length < 6) {
-      showToast('Password must be at least 6 characters long', 'error');
-      return;
-    }
+  } catch (error) {
+    console.error('Mobile login error:', error);
 
-    setLoading(true);
-    const result = await loginUser(email.trim(), password);
+    showToast(
+      'Connection error. Please check your internet connection and try again.',
+      'error'
+    );
+
+  } finally {
     setLoading(false);
+  }
+};
 
-    if (result.success) {
-      if (result.requiresPasswordReset) {
-        Alert.alert(
-          'Password Expired',
-          'Your password is over 365 days old. You must change it now.',
-          [{
-            text: 'Change Now',
-            onPress: async () => {
-              await saveSession(result.user, null);
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'Main', params: { screen: 'Profile', params: { screen: 'Security' } } }]
-              });
-            }
-          }]
+
+    
+const handleVerifyOtp = async () => {
+  const cleanOtp = String(otp || '').trim();
+
+  if (!/^\d{6}$/.test(cleanOtp)) {
+    showToast('Please enter a valid 6-digit OTP', 'error');
+    return;
+  }
+
+  if (!pendingLoginToken) {
+    showToast(
+      'Verification session missing. Please log in again.',
+      'error'
+    );
+    setShowOtpModal(false);
+    setOtp('');
+    return;
+  }
+
+  Keyboard.dismiss();
+  setVerifyingOtp(true);
+
+  try {
+    const result = await verifyOtp(
+      email.trim().toLowerCase(),
+      cleanOtp,
+      pendingLoginToken
+    );
+
+    if (result?.success && result?.user && result?.token) {
+      if (result.user.role !== 'instructor') {
+        showToast(
+          'Mobile access is restricted to instructors.',
+          'error'
         );
+        setPendingLoginToken('');
+        setOtp('');
+        setShowOtpModal(false);
         return;
       }
 
-      const emailClean = email.trim().toLowerCase();
-      setEmail(emailClean);
+      // Save the authenticated session BEFORE navigation.
+      await saveSession(result.user, result.token);
 
-      const otpRes = await sendOtp(emailClean);
-      if (otpRes.success) {
+      // Remove temporary verification information.
+      setPendingLoginToken('');
+      setOtp('');
+      setPassword('');
+      setShowOtpModal(false);
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Main' }]
+      });
+
+    } else {
+      showToast(
+        result?.message || 'Invalid OTP',
+        'error'
+      );
+
+      const message = String(result?.message || '').toLowerCase();
+
+      if (
+        message.includes('expired') ||
+        message.includes('verification session') ||
+        message.includes('login verification')
+      ) {
+        setPendingLoginToken('');
         setOtp('');
-        setShowOtpModal(true);
-        startResendTimer(setResendTimer);
-        showToast('OTP sent to your email', 'success');
-      } else {
-        showToast(otpRes.message || 'Failed to send OTP', 'error');
-      }
-    } else {
-      showToast(result.message || 'Invalid credentials', 'error');
-    }
-  };
-
-    const handleVerifyOtp = async () => {
-    if (!otp || otp.length !== 6) {
-      showToast('Please enter the 6-digit OTP', 'error');
-      return;
-    }
-    Keyboard.dismiss();
-    setVerifyingOtp(true);
-    try {
-      const result = await verifyOtp(email, otp);
-      if (result.success && result.user) {
-        if (result.user.role !== 'instructor') {
-          showToast('Mobile access is restricted to instructors only. Admin accounts are for web access only.', 'error');
-          setVerifyingOtp(false);
-          return;
-        }
-
-        
         setShowOtpModal(false);
-        navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
 
-        
-        saveSession(result.user, result.token).catch(err => console.log('Session save error:', err));
-        
-      } else {
-        showToast(result.message || 'Invalid OTP', 'error');
+        showToast(
+          'Please enter your password again.',
+          'error'
+        );
       }
-    } catch (error) {
-      showToast('Connection failed. Please try again.', 'error');
-    } finally {
-      setVerifyingOtp(false);
     }
-  };
 
-  const handleResendOtp = async () => {
-    setSendingOtpResend(true);
-    const result = await sendOtp(email);
-    setSendingOtpResend(false);
-    if (result.success) {
+  } catch (error) {
+    console.error('OTP verification error:', error);
+
+    showToast(
+      'Connection failed. Please try again.',
+      'error'
+    );
+
+  } finally {
+    setVerifyingOtp(false);
+  }
+};
+
+
+  
+const handleResendOtp = async () => {
+  if (!pendingLoginToken) {
+    showToast(
+      'Verification session expired. Please log in again.',
+      'error'
+    );
+    setOtp('');
+    setShowOtpModal(false);
+    return;
+  }
+
+  if (sendingOtpResend || resendTimer > 0) {
+    return;
+  }
+
+  setSendingOtpResend(true);
+
+  try {
+    const result = await sendOtp(
+      email.trim().toLowerCase(),
+      pendingLoginToken
+    );
+
+    if (result?.success) {
+      setOtp('');
       startResendTimer(setResendTimer);
-      showToast(`A new code has been sent`, 'success');
+      showToast('A new code has been sent', 'success');
     } else {
-      showToast(result.message || 'Failed to resend OTP', 'error');
+      showToast(
+        result?.message || 'Failed to resend OTP',
+        'error'
+      );
+
+      const message = String(result?.message || '').toLowerCase();
+
+      if (
+        message.includes('expired') ||
+        message.includes('verification session') ||
+        message.includes('login verification')
+      ) {
+        setPendingLoginToken('');
+        setOtp('');
+        setShowOtpModal(false);
+      }
     }
-  };
+
+  } catch (error) {
+    console.error('OTP resend error:', error);
+    showToast('Connection error. Please try again.', 'error');
+
+  } finally {
+    setSendingOtpResend(false);
+  }
+};
+
 
   const handleForgotPassword = async () => {
     if (!resetEmail.trim()) {

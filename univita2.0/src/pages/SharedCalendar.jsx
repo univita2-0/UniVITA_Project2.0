@@ -9,14 +9,15 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
 const SharedCalendar = () => {
-  const userRole = localStorage.getItem('user_role') || 'admin';
-  const isReadOnly = userRole === 'security';
+  const userRole = getUserRole();
+  const isReadOnly = !['admin', 'hr_admin'].includes(userRole);
 
   const [events, setEvents] = useState([]);
   const [activeDate, setActiveDate] = useState(new Date().getDate());
@@ -315,6 +316,19 @@ const SharedCalendar = () => {
 
   return (
     <div className="calendar-layout">
+      <div className="cal-page-heading">
+        <div>
+          
+          <p>Coordinate events, meetings, holidays, and leave requests from a single calendar.</p>
+        </div>
+        <button type="button" className="cal-today-btn" onClick={() => { setCurrentDate(new Date()); setActiveDate(new Date().getDate()); }}>Today</button>
+      </div>
+      <div className="cal-overview" aria-label="Calendar overview">
+        <div><span>Upcoming events</span><strong>{schoolEvents.length}</strong></div>
+        <div><span>Pending leaves</span><strong>{leaveRequests.length}</strong></div>
+        <div><span>Holidays ahead</span><strong>{phHolidaysList.length}</strong></div>
+      </div>
+      <div className="cal-workspace">
       <div className="calendar-main">
         <div className="cal-header">
           <button className="cal-nav-btn" onClick={() => {
@@ -399,6 +413,8 @@ const SharedCalendar = () => {
           <div className="sidebar-btn-content"><CalendarDays size={16} /> PH Holidays</div>
           <span className="badge">{phHolidaysList.length}</span>
         </button>
+      </div>
+
       </div>
 
       {/* Hover Tooltip (Only shows if modal is NOT open) */}

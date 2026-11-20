@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { ClipboardList, ChevronLeft, ChevronRight, Paperclip, Search, X, Eye } from 'lucide-react';
+import { ClipboardList, ChevronLeft, ChevronRight, Paperclip, Search, X, Eye, Clock3, CheckCircle2, XCircle, RefreshCw, FileClock } from 'lucide-react';
 import { API_BASE } from '../api';
+import { useRole } from '../permissions';
 import './OvertimeRequests.css';
 
 const getAuthHeaders = () => ({
@@ -52,6 +53,10 @@ const TABS = [
 ];
 
 const OvertimeRequests = () => {
+  const { can, isAdmin } = useRole();
+  // Both permissions travel together on this page (a single batch action confirms one or the other)
+  const canDecide = can('overtime:approve') && can('overtime:reject');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [historyRequests, setHistoryRequests] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -71,7 +76,7 @@ const OvertimeRequests = () => {
 
   const [historyPage, setHistoryPage] = useState(1);
   const [pendingPage, setPendingPage] = useState(1);
-  const itemsPerPage = 20;
+  const itemsPerPage = 10;
 
   useEffect(() => { setHistoryPage(1); }, [searchQuery, activeTab]);
   useEffect(() => { setPendingPage(1); }, [pendingSearch]);
@@ -109,12 +114,22 @@ const OvertimeRequests = () => {
   };
 
   const openReview = (req, action) => {
+    // FIX 10.5 — defense-in-depth: only HR can open the review modal
+    if (!canDecide) {
+      toast.error('You do not have permission to review overtime requests.');
+      return;
+    }
     setReviewingRequest(req);
     setReviewAction(action);
     setReviewRemarks('');
   };
 
   const handleAction = async (id, status, remarks) => {
+    // FIX 10.5 — defense-in-depth: reject API call if role lacks permission
+    if (!canDecide) {
+      toast.error('You do not have permission to review overtime requests.');
+      return;
+    }
     setProcessing(true);
     try {
       await axios.put(
@@ -171,6 +186,17 @@ const OvertimeRequests = () => {
   const pendingTotalPages = Math.ceil(filteredPending.length / itemsPerPage);
   const currentPending = filteredPending.slice((pendingPage - 1) * itemsPerPage, pendingPage * itemsPerPage);
 
+  const recordSummary = {
+    total: historyRequests.length,
+    approved: historyRequests.filter(r => normalizeStatus(r.status) === 'approved').length,
+    rejected: historyRequests.filter(r => normalizeStatus(r.status) === 'rejected').length,
+  };
+
+  const refreshAll = () => {
+    fetchAllHistory();
+    fetchPending();
+  };
+
   const emptyMessage = (() => {
     const tabLabel = activeTab === 'all' ? '' : `${activeTab} `;
     if (searchQuery) return `No ${tabLabel}overtime records match your search.`;
@@ -179,18 +205,40 @@ const OvertimeRequests = () => {
 
   return (
     <div className="ot-container">
-      <div className="ot-header">
-        <div className="ot-title-group">
-          <div>
-            <p className="ot-subtitle">Review historical and processed overtime records.</p>
-          </div>
+      <div className="ot-page-heading">
+        <div>
+         
         </div>
-        <button className="ot-btn-secondary" onClick={() => setShowPendingModal(true)}>
-          <ClipboardList size={16} /> Pending Requests
-          {pendingCount > 0 && <span className="ot-badge-count">{pendingCount}</span>}
-        </button>
+        <div className="ot-heading-actions">
+          <button className="ot-btn-secondary" onClick={refreshAll} disabled={loadingHistory || loadingPending}>
+            <RefreshCw size={15} className={loadingHistory || loadingPending ? 'ot-spin' : ''} /> Refresh
+          </button>
+          <button className="ot-btn-primary" onClick={() => setShowPendingModal(true)}>
+            Pending Requests
+            {pendingCount > 0 && <span className="ot-badge-count">{pendingCount}</span>}
+          </button>
+        </div>
       </div>
 
+      {isAdmin && (
+        <div className="ot-readonly-notice" role="note">
+          <span className="ot-readonly-icon">i</span>
+          <span><strong>Read-only access.</strong> HR personnel are responsible for approving or rejecting overtime requests.</span>
+        </div>
+      )}
+
+      <div className="ot-summary-grid" aria-label="Overtime request summary">
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Total Requests</span><ClipboardList size={17} /></div><strong>{recordSummary.total}</strong><small>Recorded overtime submissions</small></div>
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Pending Review</span><Clock3 size={17} /></div><strong>{pendingCount}</strong><small>Awaiting HR decision</small></div>
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Approved</span><CheckCircle2 size={17} /></div><strong>{recordSummary.approved}</strong><small>Successfully approved</small></div>
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Rejected</span><XCircle size={17} /></div><strong>{recordSummary.rejected}</strong><small>Declined submissions</small></div>
+      </div>
+
+      <section className="ot-records-section" aria-label="Overtime request records">
+        <div className="ot-section-header">
+          <div><p>Browse and filter previously submitted requests.</p></div>
+          <span className="ot-record-count">{filteredHistory.length} record{filteredHistory.length !== 1 ? 's' : ''}</span>
+        </div>
       {/* STATUS TABS */}
       <div className="ot-tabs" role="tablist" aria-label="Overtime status filter">
         {TABS.map(tab => (
@@ -218,7 +266,7 @@ const OvertimeRequests = () => {
             onChange={e => setSearchQuery(e.target.value)}
             className="ot-clean-input"
           />
-          {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+          {searchQuery && <button type="button" className="ot-clear-search" aria-label="Clear search" onClick={() => setSearchQuery('')}><X size={16} /></button>}
         </div>
       </div>
 
@@ -288,13 +336,15 @@ const OvertimeRequests = () => {
         )}
       </div>
 
+      </section>
+
       {/* VIEW DETAILS MODAL */}
       {viewingRequest && (
         <div className="ot-custom-modal-backdrop" onClick={() => setViewingRequest(null)}>
-          <div className="ot-custom-modal" onClick={e => e.stopPropagation()}>
+          <div className="ot-custom-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="ot-custom-modal-header">
-              <h3>Overtime Request Details</h3>
-              <button className="ot-custom-close-btn" onClick={() => setViewingRequest(null)}>
+              <div className="ot-modal-title-block"><h3>Overtime Request Details</h3><p>Complete information for this overtime submission.</p></div>
+              <button className="ot-custom-close-btn" aria-label="Close dialog" onClick={() => setViewingRequest(null)}>
                 <X size={18} />
               </button>
             </div>
@@ -366,7 +416,8 @@ const OvertimeRequests = () => {
                   )}
                 </div>
 
-                {normalizeStatus(viewingRequest.status) === 'pending' && (
+                {/* FIX 10.5 — inline action section hidden for non-HR; read-only hint for Admin */}
+                {normalizeStatus(viewingRequest.status) === 'pending' && canDecide && (
                   <div style={{ marginTop: '0.75rem', borderTop: '1px solid #F1F5F9', paddingTop: '0.75rem' }}>
                     <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.02em', display: 'block', marginBottom: '0.35rem' }}>
                       Admin Remarks (Optional)
@@ -405,6 +456,15 @@ const OvertimeRequests = () => {
                     </div>
                   </div>
                 )}
+
+                {normalizeStatus(viewingRequest.status) === 'pending' && !canDecide && (
+                  <div style={{
+                    marginTop: '0.75rem', borderTop: '1px solid #F1F5F9', paddingTop: '0.75rem',
+                    textAlign: 'center', fontSize: '0.8rem', color: '#64748B', fontStyle: 'italic'
+                  }}>
+                    Read-only — awaiting HR review
+                  </div>
+                )}
               </div>
             </div>
 
@@ -418,10 +478,10 @@ const OvertimeRequests = () => {
       {/* PENDING OVERTIME REQUESTS MODAL */}
       {showPendingModal && (
         <div className="ot-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
-          <div className="ot-custom-modal" onClick={e => e.stopPropagation()}>
+          <div className="ot-custom-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="ot-custom-modal-header">
-              <h3>Pending Overtime Requests</h3>
-              <button className="ot-custom-close-btn" onClick={() => setShowPendingModal(false)}>
+              <div className="ot-modal-title-block"><h3>Pending Overtime Requests</h3><p>Review submitted requests and record your decision.</p></div>
+              <button className="ot-custom-close-btn" aria-label="Close dialog" onClick={() => setShowPendingModal(false)}>
                 <X size={18} />
               </button>
             </div>
@@ -436,7 +496,7 @@ const OvertimeRequests = () => {
                   onChange={e => setPendingSearch(e.target.value)}
                   className="ot-clean-input"
                 />
-                {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+                {pendingSearch && <button type="button" className="ot-clear-search" aria-label="Clear pending search" onClick={() => setPendingSearch('')}><X size={16} /></button>}
               </div>
 
               {loadingPending ? (
@@ -497,10 +557,17 @@ const OvertimeRequests = () => {
                         )}
                       </div>
 
-                      <div className="ot-minimal-footer">
-                        <button className="ot-btn-min-reject" onClick={() => openReview(req, 'rejected')}>Reject</button>
-                        <button className="ot-btn-min-approve" onClick={() => openReview(req, 'approved')}>Approve</button>
-                      </div>
+                      {/* FIX 10.5 — Approve/Reject only for HR */}
+                      {canDecide ? (
+                        <div className="ot-minimal-footer">
+                          <button className="ot-btn-min-reject" onClick={() => openReview(req, 'rejected')}>Reject</button>
+                          <button className="ot-btn-min-approve" onClick={() => openReview(req, 'approved')}>Approve</button>
+                        </div>
+                      ) : (
+                        <div className="ot-minimal-footer" style={{ justifyContent: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B', fontStyle: 'italic' }}>Read-only — awaiting HR review</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -514,13 +581,13 @@ const OvertimeRequests = () => {
         </div>
       )}
 
-      {/* REVIEW CONFIRMATION MODAL */}
+      {/* REVIEW CONFIRMATION MODAL — only reachable via HR-gated openReview */}
       {reviewingRequest && (
         <div className="ot-custom-modal-backdrop" onClick={() => setReviewingRequest(null)}>
-          <div className="ot-custom-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+          <div className="ot-custom-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="ot-custom-modal-header">
-              <h3>{reviewAction === 'approved' ? 'Approve' : 'Reject'} Overtime Request</h3>
-              <button className="ot-custom-close-btn" onClick={() => setReviewingRequest(null)}>
+<div className="ot-modal-title-block"><h3>{reviewAction === 'approved' ? 'Approve' : 'Reject'} Overtime Request</h3><p>Confirm the decision before updating this request.</p></div>
+              <button className="ot-custom-close-btn" aria-label="Close dialog" onClick={() => setReviewingRequest(null)}>
                 <X size={18} />
               </button>
             </div>

@@ -346,8 +346,11 @@ const BuildingVisitorTracking = () => {
   return (
     <div className="visitor-tracking-container">
       <div className="tracking-header">
-        
-        <p className="subtitle">Real-time blueprint tracking and security monitoring.</p>
+        <div>
+          
+          <p className="subtitle">Live BLE visitor positions, floor overview, and movement alerts.</p>
+        </div>
+        <div className="uv-tracking-indicator" role="status"><span className="uv-tracking-dot" /> BLE tracking workspace</div>
       </div>
 
       <div className="stats-row">
@@ -360,8 +363,8 @@ const BuildingVisitorTracking = () => {
           <div className="stat-label">ACTIVE ON FLOOR {currentFloor}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-number">{floor3Count + floor5Count}</div>
-          <div className="stat-label">CHECKED IN</div>
+          <div className="stat-number">{disconnectedVisitors.length}</div>
+          <div className="stat-label">DISCONNECTED</div>
         </div>
       </div>
 

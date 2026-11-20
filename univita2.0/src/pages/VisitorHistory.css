@@ -304,3 +304,32 @@
     gap: 1.25rem; 
   }
 }
+/* UniVITA enterprise visitor archive — scoped page foundation */
+.vh-container {padding:5px 10px 10px;min-height:100%;background:#f8fafc;color:#142435;font-family:Inter,system-ui,sans-serif;box-sizing:border-box}
+.vh-header-section {align-items:center;margin-bottom:15px;gap:12px}
+.vh-title {font-size:21px;font-weight:700;line-height:1.3;letter-spacing:-.02em;color:#142435}
+.vh-subtitle {font-size:12.5px;color:#64748b;line-height:1.6}
+.vh-actions {gap:8px;flex-wrap:wrap}
+.vh-container .btn-vh-outline {padding:8px 12px;min-height:35px;border-radius:5px;font-size:12px;font-weight:600;transition:background .15s,border-color .15s}
+.vh-container .btn-vh-outline:last-child {background:#0b3b40;color:#fff;border-color:#0b3b40}
+.vh-container .btn-vh-outline:last-child:hover {background:#12525a}
+.vh-overview {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:13px}
+.vh-overview-item {display:flex;flex-direction:column;gap:5px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:13px 15px;min-width:0}
+.vh-overview-item>span {font-size:11px;color:#64748b;font-weight:650;text-transform:uppercase;letter-spacing:.04em}
+.vh-overview-item>strong {font-size:24px;line-height:1.2;color:#142435;font-variant-numeric:tabular-nums}
+.vh-overview-item>small {font-size:11px;color:#94a3b8}
+.vh-card {border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 1px 2px rgba(15,23,42,.03);overflow:hidden}
+.vh-toolbar {border-radius:0;padding:11px 14px;background:#fff}
+.vh-toolbar-controls {gap:9px}
+.vh-search-box {max-width:355px}
+.vh-container .vh-search-input,.vh-container .vh-date-input,.vh-container .vh-select {min-height:36px;border-radius:5px;font-size:12px}
+.vh-table-wrapper {overflow-x:auto}
+.vh-table {min-width:760px}
+.vh-table th {background:#f8fafc;color:#536477;font-size:10.5px;letter-spacing:.045em;text-transform:uppercase;font-weight:700}
+.vh-table td {font-size:12px;color:#344256}
+.vh-table th,.vh-table td {padding:11px 13px;border-bottom:1px solid #edf1f5}
+.vh-table tbody tr:hover {background:#fafcfd}
+.vh-pagination-footer {background:#fff;border-top:1px solid #e2e8f0;padding:11px 14px}
+.vh-container .vh-page-btn {border-radius:5px}
+.vh-container button:focus-visible,.vh-container input:focus-visible,.vh-container select:focus-visible {outline:2px solid #0d9488;outline-offset:2px}
+@media(max-width:640px){.vh-overview{grid-template-columns:1fr}.vh-header-section{align-items:flex-start}.vh-actions{width:100%}.vh-container .btn-vh-outline{justify-content:center;flex:1}.vh-search-box{max-width:none}}

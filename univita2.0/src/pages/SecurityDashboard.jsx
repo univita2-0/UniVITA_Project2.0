@@ -1,499 +1,117 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import {
-  UserCheck, ShieldCheck, CheckCircle, AlertCircle,
-  ChevronRight, ChevronLeft, X, Radio, Bell,
-  PieChart, Activity, RefreshCw, UserX
+  ShieldCheck, UserCheck, Radio, Users, RefreshCw, CalendarDays,
+  AlertCircle, Activity, Bell, CheckCircle2, ChevronLeft, ChevronRight,
+  ArrowUpRight, X, MapPin, BatteryWarning, WifiOff, ClipboardList
 } from 'lucide-react';
 import { API_BASE, fetchRecentActivity } from '../api';
-import './Dashboard.css';
+import './RoleDashboard.css';
 
-const getAuthHeaders = () => ({
-  headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
-});
-
-const isToday = (dateStr) => {
-  if (!dateStr) return false;
-  const d = new Date(dateStr);
-  const today = new Date();
-  return d.getFullYear() === today.getFullYear() &&
-         d.getMonth() === today.getMonth() &&
-         d.getDate() === today.getDate();
+const headers = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } });
+const phDate = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const arrayResult = r => r.status === 'fulfilled' && Array.isArray(r.value?.data) ? r.value.data : [];
+const flag = v => v === true || v === 1 || v === '1';
+const isToday = (value, today) => {
+  if (!value) return false;
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10) === today;
+  const d = new Date(value);
+  return !Number.isNaN(d.getTime()) && new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Manila'}).format(d) === today;
+};
+const timeLabel = value => {
+  if (!value) return 'Recently';
+  const s = String(value);
+  const m = s.match(/^\d{4}-\d{2}-\d{2} (\d{2}):(\d{2})/);
+  if (m) return `${String(Number(m[1])%12 || 12).padStart(2,'0')}:${m[2]} ${Number(m[1])>=12?'PM':'AM'}`;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? 'Recently' : d.toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit'});
 };
 
-// 🟢 NEW: Visitor-specific Pie Chart
-const VisitorPieChart = ({ active, pending, completed, noShow, total }) => {
-  const sum = active + pending + completed + noShow;
-
-  if (!total || total === 0 || sum === 0) {
-    return (
-      <div className="expert-empty-chart">
-        <PieChart size={32} className="text-muted" />
-        <p>No visitors scheduled today</p>
-      </div>
-    );
-  }
-
-  const aPct = Math.round((active / sum) * 100);
-  const pPct = Math.round((pending / sum) * 100);
-  const cPct = Math.round((completed / sum) * 100);
-  const nPct = Math.max(0, 100 - aPct - pPct - cPct);
-
-  const radius = 40;
-  const circumference = 2 * Math.PI * radius;
-
-  const activeStroke = (active / sum) * circumference;
-  const pendingStroke = (pending / sum) * circumference;
-  const completedStroke = (completed / sum) * circumference;
-  const noShowStroke = (noShow / sum) * circumference;
-
-  const activeOffset = 0;
-  const pendingOffset = -activeStroke;
-  const completedOffset = -(activeStroke + pendingStroke);
-  const noShowOffset = -(activeStroke + pendingStroke + completedStroke);
-
-  return (
-    <div className="expert-pie-container">
-      <div className="expert-pie-graphic">
-        <svg viewBox="0 0 100 100" className="expert-donut-svg">
-          <circle cx="50" cy="50" r={radius} className="donut-bg" />
-          {active > 0 && (
-            <circle cx="50" cy="50" r={radius} className="donut-segment donut-present"
-              strokeDasharray={`${activeStroke} ${circumference}`} strokeDashoffset={activeOffset} />
-          )}
-          {pending > 0 && (
-            <circle cx="50" cy="50" r={radius} className="donut-segment donut-late"
-              strokeDasharray={`${pendingStroke} ${circumference}`} strokeDashoffset={pendingOffset} />
-          )}
-          {completed > 0 && (
-            <circle cx="50" cy="50" r={radius} className="donut-segment" stroke="#3B82F6"
-              strokeDasharray={`${completedStroke} ${circumference}`} strokeDashoffset={completedOffset} />
-          )}
-          {noShow > 0 && (
-            <circle cx="50" cy="50" r={radius} className="donut-segment donut-absent"
-              strokeDasharray={`${noShowStroke} ${circumference}`} strokeDashoffset={noShowOffset} />
-          )}
-        </svg>
-        <div className="expert-donut-center">
-          <span className="expert-donut-total">{total}</span>
-          <span className="expert-donut-sub">Total</span>
-        </div>
-      </div>
-
-      <div className="expert-pie-legend">
-        <div className="legend-item">
-          <div className="legend-indicator bg-present" />
-          <div className="legend-label">
-            <span className="legend-title">Active on Campus</span>
-            <span className="legend-val">{active} ({aPct}%)</span>
-          </div>
-        </div>
-        <div className="legend-item">
-          <div className="legend-indicator bg-late" />
-          <div className="legend-label">
-            <span className="legend-title">Pending Approval</span>
-            <span className="legend-val">{pending} ({pPct}%)</span>
-          </div>
-        </div>
-        <div className="legend-item">
-          <div className="legend-indicator" style={{ backgroundColor: '#3B82F6' }} />
-          <div className="legend-label">
-            <span className="legend-title">Completed Visits</span>
-            <span className="legend-val">{completed} ({cPct}%)</span>
-          </div>
-        </div>
-        <div className="legend-item">
-          <div className="legend-indicator bg-absent" />
-          <div className="legend-label">
-            <span className="legend-title">No Show / Rejected</span>
-            <span className="legend-val">{noShow} ({nPct}%)</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+const Metric = ({icon:Icon,label,value,hint,onClick}) => <button type="button" className="uv-role-metric" onClick={onClick}><span className="uv-role-metric-head"><span>{label}</span><Icon size={18}/></span><strong>{value}</strong><span className="uv-role-metric-bottom">{hint}<ArrowUpRight size={15}/></span></button>;
 
 const SecurityDashboard = ({ setView }) => {
-  const [stats, setStats] = useState({
-    approvedToday: 0,
-    totalVisitorsToday: 0,
-    activeBleTags: 0
-  });
-  
-  // 🟢 NEW: Visitor Pie Chart State
-  const [visitorStats, setVisitorStats] = useState({
-    active: 0, pending: 0, completed: 0, noShow: 0, total: 0
-  });
+  const [data,setData] = useState({all:[], active:[], approved:0, tags:0, scanners:0, distribution:[]});
+  const [alerts,setAlerts] = useState([]);
+  const [dismissed,setDismissed] = useState(new Set());
+  const [activities,setActivities] = useState([]);
+  const [tab,setTab] = useState('visitors');
+  const [page,setPage] = useState(1);
+  const [loading,setLoading] = useState(true);
+  const [refreshing,setRefreshing] = useState(false);
+  const [warning,setWarning] = useState('');
+  const [updated,setUpdated] = useState(null);
+  const today = phDate();
+  const navigate = route => setView?.(route);
 
-  const [todayVisitors, setTodayVisitors] = useState([]);
-  const [systemAlerts, setSystemAlerts] = useState([]);
-  const [dismissedAlerts, setDismissedAlerts] = useState(new Set());
-  const [activeTab, setActiveTab] = useState('visitors');
-  
-  const [recentActivities, setRecentActivities] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 5;
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const today = new Date().toISOString().split('T')[0];
-
-  useEffect(() => {
-    loadDashboardData();
-    const interval = setInterval(loadDashboardData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadDashboardData = async () => {
-    setError(null);
-    try {
-      const [res, tagsRes, scannersRes, activityRes] = await Promise.all([
-        // 🟢 FIX: Fetch ALL visitor requests for today (not just approved) to populate the pie chart
-        axios.get(`${API_BASE}/visitor-requests`, {
-          params: { date: today },
-          ...getAuthHeaders()
-        }),
-        axios.get(`${API_BASE}/ble-tags`, getAuthHeaders()),
-        axios.get(`${API_BASE}/scanners`, getAuthHeaders()),
-        fetchRecentActivity(50)
-      ]);
-
-      const allRequests = res.data || [];
-      
-      // Calculate Pie Chart Data
-      let activeCount = 0;
-      let pendingCount = 0;
-      let completedCount = 0;
-      let noShowCount = 0;
-
-      const currentVisitors = allRequests.filter(v => {
-        const isActive = v.arrived === 1 && v.returned !== 1 && v.no_show !== 1;
-        const isPending = v.status === 'PENDING';
-        const isCompleted = v.returned === 1;
-        const isNoShow = v.no_show === 1 || v.status === 'REJECTED';
-
-        if (isActive) activeCount++;
-        else if (isPending) pendingCount++;
-        else if (isCompleted) completedCount++;
-        else if (isNoShow) noShowCount++;
-
-        return isActive;
-      });
-
-      setTodayVisitors(currentVisitors);
-      
-      setVisitorStats({
-        active: activeCount,
-        pending: pendingCount,
-        completed: completedCount,
-        noShow: noShowCount,
-        total: allRequests.length
-      });
-
-      const activeBleTags = (tagsRes.data || []).filter(t => t.current_status === 'IN USE').length;
-
-      setStats({
-        approvedToday: allRequests.filter(v => v.status === 'APPROVED').length, 
-        totalVisitorsToday: allRequests.length,
-        activeBleTags
-      });
-
-      // Process Alerts
-      const newAlerts = [];
-      const now = new Date();
-
-      (tagsRes.data || []).forEach(tag => {
-        if (tag.battery_level > 0 && tag.battery_level < 2600) {
-          newAlerts.push({
-            id: `batt_${tag.ble_id}`,
-            type: 'battery',
-            title: `Low Battery: ${tag.label || tag.ble_id}`,
-            message: `Tag battery is critically low (${tag.battery_level}mV). Replace CR2032 cell.`
-          });
-        }
-      });
-
-      (scannersRes.data || []).forEach(scanner => {
-        if (scanner.last_ping) {
-          const lastPing = new Date(scanner.last_ping);
-          const diffMinutes = (now - lastPing) / 60000;
-          if (diffMinutes > 5) {
-            newAlerts.push({
-              id: `scan_${scanner.scanner_id}`,
-              type: 'offline',
-              title: `Scanner Offline: ${scanner.assigned_room || scanner.location}`,
-              message: `Scanner ${scanner.scanner_id} lost heartbeat ${Math.round(diffMinutes)} mins ago.`
-            });
-          }
-        }
-      });
-      setSystemAlerts(newAlerts);
-
-      // Process Activities (Filter for VISITOR actions only)
-      let activities = [];
-      if (activityRes.status === 'fulfilled' && activityRes.value?.success && Array.isArray(activityRes.value?.data)) {
-        activities = activityRes.value.data;
-      }
-      
-      const visitorKeywords = ['VISITOR', 'APPOINTMENT', 'VISIT_REASON'];
-      activities = activities.filter(act => {
-        const typeStr = (act.type || act.action || act.title || '').toUpperCase();
-        return visitorKeywords.some(kw => typeStr.includes(kw));
-      });
-      
-      setRecentActivities(activities);
-      setCurrentPage(1);
-
-    } catch (err) {
-      console.error('Security Dashboard error:', err);
-      setError('Failed to load security monitoring data.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const dismissAlert = (alertId) => {
-    setDismissedAlerts(prev => {
-      const newSet = new Set(prev);
-      newSet.add(alertId);
-      return newSet;
+  const load = useCallback(async (initial=false) => {
+    if(initial) setLoading(true); else setRefreshing(true);
+    const results = await Promise.allSettled([
+      axios.get(`${API_BASE}/visitor-requests`, {...headers(), params:{date:phDate()}}),
+      axios.get(`${API_BASE}/ble-tags`, headers()),
+      axios.get(`${API_BASE}/scanners`, headers()),
+      fetchRecentActivity(100)
+    ]);
+    const [visitorsResult,tagsResult,scannersResult,activityResult] = results;
+    const all = arrayResult(visitorsResult);
+    const tags = arrayResult(tagsResult);
+    const scanners = arrayResult(scannersResult);
+    const groups = {active:0, pending:0, completed:0, noShow:0, upcoming:0};
+    const active = [];
+    all.forEach(v => {
+      const checkedIn = flag(v.arrived) && !flag(v.returned) && !flag(v.no_show);
+      if (checkedIn) {groups.active++;active.push(v);}
+      else if(flag(v.returned)) groups.completed++;
+      else if(flag(v.no_show) || String(v.status).toUpperCase()==='REJECTED') groups.noShow++;
+      else if(String(v.status).toUpperCase()==='PENDING') groups.pending++;
+      else groups.upcoming++;
     });
-  };
+    setData({all,active,approved:all.filter(v=>String(v.status).toUpperCase()==='APPROVED').length,tags:tags.filter(t=>String(t.current_status).toUpperCase()==='IN USE').length,scanners:scanners.length,distribution:[
+      ['On campus',groups.active,'#0D9488'],['Pending approval',groups.pending,'#E8A23A'],['Completed',groups.completed,'#4777C7'],['No show / rejected',groups.noShow,'#D45A60'],['Expected / upcoming',groups.upcoming,'#94A3B8']
+    ]});
+    const incidents = [];
+    tags.forEach(t=>{const battery=Number(t.battery_level);if(Number.isFinite(battery) && battery>0 && battery<2600) incidents.push({id:`battery-${t.ble_id}`,title:`Low battery · ${t.label||t.ble_id}`,detail:`Battery reading ${battery} mV. Check and recharge or replace the tag battery as appropriate.`,icon:BatteryWarning});});
+    scanners.forEach(s=>{
+      const last = s.last_ping ? new Date(s.last_ping) : null;
+      const minutes = last && !Number.isNaN(last.getTime()) ? (Date.now()-last.getTime())/60000 : null;
+      if(String(s.status).toUpperCase()==='OFFLINE' || (minutes!==null && minutes>5)) incidents.push({id:`scanner-${s.scanner_id}`,title:`Scanner offline · ${s.assigned_room||s.scanner_id}`,detail:`${s.scanner_id} · ${minutes!==null&&minutes>0?`Last heartbeat about ${Math.round(minutes)} minutes ago.`:'No current heartbeat available.'}`,icon:WifiOff});
+    });
+    setAlerts(incidents);
+    const activityData = activityResult.status==='fulfilled' && activityResult.value?.success && Array.isArray(activityResult.value.data) ? activityResult.value.data : [];
+    const keys=['VISITOR','APPOINTMENT','VISIT_REASON'];
+    setActivities(activityData.filter(a=>keys.some(key=>`${a.type||''} ${a.action||''} ${a.title||''}`.toUpperCase().includes(key))));
+    setPage(1);
+    const fails=results.filter((r,i)=>i<3?r.status==='rejected':r.status==='rejected'||!r.value?.success).length;
+    setWarning(fails?`Some security data could not be loaded (${fails} source${fails===1?'':'s'}). Displayed counts may be incomplete.`:'');
+    setUpdated(new Date());setLoading(false);setRefreshing(false);
+  },[]);
 
-  const handleNavigate = (view) => {
-    if (setView) setView(view);
-  };
+  useEffect(()=>{load(true);const id=setInterval(()=>load(false),30000);return()=>clearInterval(id);},[load]);
+  const visibleAlerts=alerts.filter(a=>!dismissed.has(a.id));
+  const todayActivities=useMemo(()=>activities.filter(a=>isToday(a.occurred_at||a.created_at||a.timestamp,today)),[activities,today]);
+  const totalPages=Math.max(1,Math.ceil(todayActivities.length/5));
+  const display=todayActivities.slice((page-1)*5,page*5);
+  const dismissAlert=id=>setDismissed(prev=>new Set([...prev,id]));
+  if(loading) return <div className="uv-role-state" role="status"><RefreshCw size={23} className="uv-role-spin"/> Loading security overview…</div>;
 
-  const formatActionText = (act) => {
-    if (act.type) return act.type.replace(/_/g, ' ').toUpperCase();
-    if (act.title) return act.title.toUpperCase();
-    return 'ACTION RECORDED';
-  };
-
-  const todayActivities = recentActivities.filter(act => isToday(act.occurred_at || act.created_at || act.timestamp));
-  const totalPages = Math.ceil(todayActivities.length / ITEMS_PER_PAGE) || 1;
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const displayedActivities = todayActivities.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-
-  if (loading && todayVisitors.length === 0) {
-    return (
-      <div className="expert-loading">
-        <ShieldCheck size={44} className="text-muted" style={{ marginBottom: '1rem', animation: 'pulse 2s infinite' }} />
-        <p>Loading Security Monitoring Data...</p>
-      </div>
-    );
-  }
-
-  const visibleAlerts = systemAlerts.filter(alert => !dismissedAlerts.has(alert.id));
-
-  return (
-    <div className="expert-container">
-      <section className="expert-banner">
-        <div className="expert-banner-item">
-          <ShieldCheck size={16} color="#0D9488" />
-          <span>Security Protocol: <strong>Active</strong></span>
-        </div>
-        <div className="expert-banner-item">
-          <Radio size={16} color="#0EA5E9" />
-          <span>Active BLE Tags: <strong>{stats.activeBleTags}</strong></span>
-        </div>
-        <div className="expert-banner-item">
-          <UserCheck size={16} className="text-muted" />
-          <span>Total Daily Visitors: <strong>{stats.totalVisitorsToday}</strong></span>
-        </div>
-      </section>
-
-      <section className="expert-stats-grid grid-3">
-        <div className="expert-stat-card" onClick={() => handleNavigate('manage-request')}>
-          <div className="expert-stat-header">
-            <UserCheck size={18} className="text-muted" />
-            <span className="expert-stat-label">Scheduled Today</span>
-          </div>
-          <div className="expert-stat-value">{stats.approvedToday}</div>
-        </div>
-
-        <div className="expert-stat-card" onClick={() => handleNavigate('completed-visits')}>
-          <div className="expert-stat-header">
-            <ShieldCheck size={18} className="text-muted" />
-            <span className="expert-stat-label">Total Visitors</span>
-          </div>
-          <div className="expert-stat-value">{stats.totalVisitorsToday}</div>
-        </div>
-
-        <div className="expert-stat-card" onClick={() => handleNavigate('manage-ble')}>
-          <div className="expert-stat-header">
-            <Radio size={18} className="text-muted" />
-            <span className="expert-stat-label">Active BLE Tags</span>
-          </div>
-          <div className="expert-stat-value">{stats.activeBleTags}</div>
-        </div>
-      </section>
-
-      <section className="expert-dashboard-panels">
-        <div className="expert-panel flex-2">
-          <div className="expert-panel-header" style={{ padding: 0 }}>
-            <div className="expert-sec-tabs">
-              <button 
-                onClick={() => setActiveTab('visitors')}
-                className={`expert-sec-tab ${activeTab === 'visitors' ? 'active' : ''}`}
-              >
-                <UserCheck size={16} /> Current Visitors
-              </button>
-              <button 
-                onClick={() => setActiveTab('alerts')}
-                className={`expert-sec-tab ${activeTab === 'alerts' ? 'active-alert' : ''}`}
-              >
-                <Bell size={16} /> System Alerts 
-                {visibleAlerts.length > 0 && (
-                  <span className="expert-alert-badge">{visibleAlerts.length}</span>
-                )}
-              </button>
-            </div>
-          </div>
-
-          <div className="expert-task-list">
-            {activeTab === 'visitors' ? (
-              todayVisitors.length === 0 ? (
-                <div className="expert-empty-state">
-                  <CheckCircle size={28} className="text-muted" />
-                  <p>No active visitors currently on campus.</p>
-                </div>
-              ) : (
-                todayVisitors.map(visitor => (
-                  <div key={visitor.id} className="expert-task-item">
-                    <div className="expert-task-info">
-                      <UserCheck size={18} className="text-muted" />
-                      <div>
-                        <p className="expert-task-text">
-                          <strong>{visitor.first_name} {visitor.last_name}</strong>
-                        </p>
-                        <p className="expert-task-subtext">
-                          {visitor.visit_time ? visitor.visit_time.substring(0,5) : 'No time'}
-                          {visitor.reason && ` · ${visitor.reason.substring(0,40)}${visitor.reason.length > 40 ? '…' : ''}`}
-                        </p>
-                      </div>
-                    </div>
-                    <button className="expert-btn-outline-small" onClick={() => handleNavigate('track-visitor')}>Track</button>
-                  </div>
-                ))
-              )
-            ) : (
-              visibleAlerts.length === 0 ? (
-                <div className="expert-empty-state">
-                  <CheckCircle size={28} color="#0D9488" />
-                  <p>All hardware scanners are online and tag batteries are healthy.</p>
-                </div>
-              ) : (
-                visibleAlerts.map(alert => (
-                  <div key={alert.id} className="expert-task-item alert-item">
-                    <div className="expert-task-info">
-                      <AlertCircle size={18} color="#DC2626" />
-                      <div>
-                        <p className="expert-task-text" style={{ color: '#991B1B' }}>
-                          <strong>{alert.title}</strong>
-                        </p>
-                        <p className="expert-task-subtext" style={{ color: '#B91C1C' }}>{alert.message}</p>
-                      </div>
-                    </div>
-                    <button onClick={() => dismissAlert(alert.id)} className="expert-btn-dismiss">
-                      <X size={14} /> Dismiss
-                    </button>
-                  </div>
-                ))
-              )
-            )}
-          </div>
-        </div>
-
-        {/* 🟢 NEW: Visitor Pie Chart Panel */}
-        <div className="expert-panel flex-1">
-          <div className="expert-panel-header">
-            <div className="expert-ph-title">
-              <PieChart size={18} />
-              <span>Today's Visitor Breakdown</span>
-            </div>
-          </div>
-          <div className="expert-panel-body expert-att-body">
-            <VisitorPieChart
-              active={visitorStats.active}
-              pending={visitorStats.pending}
-              completed={visitorStats.completed}
-              noShow={visitorStats.noShow}
-              total={visitorStats.total}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="expert-panel full-width" style={{ marginTop: '1rem' }}>
-        <div className="expert-panel-header">
-          <div className="expert-ph-title">
-            <Activity size={18} />
-            <span>Recent Visitor Activity</span>
-          </div>
-          <button className="expert-btn-text" onClick={loadDashboardData}>
-            <RefreshCw size={14} />
-            <span>Refresh</span>
-          </button>
-        </div>
-        <div className="expert-activity-list">
-          {displayedActivities.length === 0 ? (
-            <div className="expert-empty-state">
-              <Activity size={28} className="text-muted" />
-              <p>No visitor activity recorded today.</p>
-            </div>
-          ) : (
-            displayedActivities.map((act, index) => {
-              const actionLabel = formatActionText(act);
-              return (
-                <div key={act.id || act._id || index} className="expert-activity-item">
-                  <div className="expert-act-avatar">
-                    {(act.actor || act.user_name || act.employee_name || 'V').charAt(0).toUpperCase()}
-                  </div>
-                  <div className="expert-act-details">
-                    <div className="expert-act-top">
-                      <span className="expert-act-actor">{act.actor || act.user_name || act.employee_name || 'Visitor'}</span>
-                      {act.description && <span className="expert-act-desc" style={{ marginLeft: '8px', opacity: 0.8 }}>- {act.description}</span>}
-                    </div>
-                    <div className="expert-act-time">
-                      {act.occurred_at || act.created_at || act.timestamp ? new Date(act.occurred_at || act.created_at || act.timestamp).toLocaleTimeString('en-US', {
-                        hour: '2-digit', minute: '2-digit'
-                      }) : 'Recently'}
-                    </div>
-                  </div>
-                  <span className="expert-act-simple-text">{actionLabel}</span>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {todayActivities.length > ITEMS_PER_PAGE && (
-          <div className="expert-pagination">
-            <button
-              className="expert-btn-outline-small"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-            >
-              <ChevronLeft size={14} style={{ marginRight: '2px' }} /> Previous
-            </button>
-            <span className="expert-pagination-info">
-              Page {currentPage} of {totalPages}
-            </span>
-            <button
-              className="expert-btn-outline-small"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-            >
-              Next <ChevronRight size={14} style={{ marginLeft: '2px' }} />
-            </button>
-          </div>
-        )}
-      </section>
-    </div>
-  );
+  return <main className="uv-role-dashboard" aria-label="Security overview">
+    <header className="uv-role-intro"><div><p>Today's visitors, access activity, and BLE monitoring in one workspace.</p></div><button className="uv-role-button" type="button" disabled={refreshing} onClick={()=>load(false)}><RefreshCw size={15} className={refreshing?'uv-role-spin':''}/> Refresh data</button></header>
+    <div className="uv-role-status"><span><CalendarDays size={15}/>{new Date(`${today}T12:00:00`).toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</span><span><ShieldCheck size={15}/> Visitor operations monitoring</span><span>Updated {updated?timeLabel(updated.toISOString()):'—'}</span></div>
+    {warning&&<div className="uv-role-warning" role="alert"><AlertCircle size={16}/>{warning}</div>}
+    <section className="uv-role-metrics uv-role-metrics-3" aria-label="Security key metrics">
+      <Metric icon={UserCheck} label="Approved visits today" value={data.approved} hint="Visit schedules" onClick={()=>navigate('today-visitors')}/>
+      <Metric icon={Users} label="Today's visitor requests" value={data.all.length} hint="Daily visitor list" onClick={()=>navigate('today-visitors')}/>
+      <Metric icon={Radio} label="BLE tags in use" value={data.tags} hint="Tag inventory" onClick={()=>navigate('manage-ble')}/>
+    </section>
+    <section className="uv-role-columns">
+      <article className="uv-role-card"><header className="uv-role-card-header"><div><p>Checked-in visitors and hardware alerts.</p></div><span className="uv-role-count">{data.active.length} on campus</span></header>
+        <div className="uv-role-tabs" role="tablist" aria-label="Security desk views"><button type="button" role="tab" aria-selected={tab==='visitors'} className={tab==='visitors'?'active':''} onClick={()=>setTab('visitors')}><UserCheck size={15}/> Current visitors</button><button type="button" role="tab" aria-selected={tab==='alerts'} className={tab==='alerts'?'active':''} onClick={()=>setTab('alerts')}><Bell size={15}/> Hardware alerts {visibleAlerts.length>0&&<span className="uv-role-tab-badge">{visibleAlerts.length}</span>}</button></div>
+        <div className="uv-role-queue uv-role-security-queue" role="tabpanel">{tab==='visitors'?(data.active.length?data.active.map(v=><div className="uv-role-queue-row" key={v.id}><span className="uv-role-queue-icon"><MapPin size={16}/></span><div><strong>{`${v.first_name||''} ${v.last_name||''}`.trim()||'Visitor'}</strong><small>{v.destination||v.reason||'Destination not assigned'} · {v.visit_time?String(v.visit_time).slice(0,5):'Time unavailable'}</small></div><button className="uv-role-mini-button" type="button" onClick={()=>navigate('track-visitor')}>Track <ChevronRight size={14}/></button></div>):<div className="uv-role-empty"><CheckCircle2 size={24}/><span>No visitors currently checked in.</span></div>):(visibleAlerts.length?visibleAlerts.map(a=><div className="uv-role-queue-row uv-role-incident" key={a.id}><span className="uv-role-queue-icon"><a.icon size={16}/></span><div><strong>{a.title}</strong><small>{a.detail}</small></div><button type="button" className="uv-role-mini-button" onClick={()=>dismissAlert(a.id)} aria-label={`Dismiss ${a.title}`}><X size={14}/> Dismiss</button></div>):<div className="uv-role-empty"><CheckCircle2 size={24}/><span>No hardware alerts detected in the loaded records.</span></div>)}</div>
+      </article>
+      <article className="uv-role-card"><header className="uv-role-card-header"><div><h2>Today's visit breakdown</h2></div><ClipboardList size={18} className="uv-role-accent"/></header><div className="uv-role-chart"><div className="uv-role-chart-summary"><div><strong>{data.active.length}</strong><small>Visitors on campus now</small></div><div className="uv-role-chart-total"><strong>{data.all.length}</strong><small>Total requests</small></div></div><div className="uv-role-stacked" role="img" aria-label="Distribution of today's visitor requests">{data.all.length?data.distribution.map(([name,count,color])=><span key={name} style={{width:`${count/data.all.length*100}%`,background:color}}/>):<span style={{width:'100%',background:'#E2E8F0'}}/>}</div>{data.distribution.map(([name,count,color])=><div className="uv-role-legend" key={name}><span className="uv-role-legend-dot" style={{background:color}}/>{name}<strong>{count}</strong><small>{data.all.length?`${Math.round(count/data.all.length*100)}%`:'—'}</small></div>)}<button type="button" className="uv-role-link" onClick={()=>navigate('today-visitors')}>View today's visitors <ArrowUpRight size={15}/></button></div></article>
+    </section>
+    <section className="uv-role-card uv-role-activities"><header className="uv-role-card-header"><div><h2>Recent visitor activity</h2><p>Latest relevant visitor and appointment events.</p></div><Activity size={18} className="uv-role-accent"/></header>{display.length?display.map((a,i)=><div className="uv-role-activity" key={`${a.id||i}-${i}`}><span className="uv-role-avatar">{String(a.actor||'V').charAt(0).toUpperCase()}</span><div><strong>{a.actor||'Visitor'}</strong><small>{a.reference||'Visitor operation'}</small></div><span className="uv-role-activity-label">{String(a.title||a.type||'Visitor event').replace(/_/g,' ')}</span><time>{timeLabel(a.occurred_at||a.created_at||a.timestamp)}</time></div>):<div className="uv-role-empty"><Activity size={24}/><span>No visitor activity recorded today.</span></div>}{todayActivities.length>5&&<footer className="uv-role-pagination"><button type="button" disabled={page===1} onClick={()=>setPage(p=>Math.max(1,p-1))}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {totalPages}</span><button type="button" disabled={page===totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next <ChevronRight size={15}/></button></footer>}</section>
+  </main>;
 };
 
 export default SecurityDashboard;

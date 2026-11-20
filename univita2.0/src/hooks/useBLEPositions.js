@@ -69,7 +69,9 @@ export default function useBLEPositions() {
   useEffect(() => {
     fetchInitialPositions();
 
+    let disposed = false;
     const connectWebSocket = () => {
+      if (disposed) return;
       const token = localStorage.getItem('auth_token');
       if (!token) return;
 
@@ -120,8 +122,13 @@ export default function useBLEPositions() {
       };
 
       ws.onclose = () => {
+        if (disposed) return;
         console.log('🔴 Live Tracking WebSocket disconnected. Reconnecting...');
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
+        if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectTimeoutRef.current = null;
+          connectWebSocket();
+        }, 5000);
       };
 
       ws.onerror = (err) => {
@@ -133,25 +140,34 @@ export default function useBLEPositions() {
     connectWebSocket();
 
     return () => {
-      if (wsRef.current) wsRef.current.close();
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      disposed = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
   }, [fetchInitialPositions]);
 
   const setVisitorDestination = useCallback(async (visitorId, newDest) => {
     try {
-      setVisitorMeta(prev => {
-        if (!prev[visitorId]) return prev;
-        return { ...prev, [visitorId]: { ...prev[visitorId], destination: newDest } };
-      });
-
       await axios.put(
         `${API_BASE}/visitor-requests/${visitorId}/destination`,
         { destination: newDest, ble_id: visitorId },
         getAuthHeaders()
       );
+      setVisitorMeta(prev => {
+        if (!prev[visitorId]) return prev;
+        return { ...prev, [visitorId]: { ...prev[visitorId], destination: newDest } };
+      });
+      return true;
     } catch (err) {
       console.error('Failed to update visitor destination:', err);
+      return false;
     }
   }, []);
 

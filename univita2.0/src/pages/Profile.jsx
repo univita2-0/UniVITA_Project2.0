@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import './Profile.css';
 import axios from 'axios';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
@@ -13,11 +14,11 @@ const Profile = () => {
     id: localStorage.getItem('user_id') || '',
     name: localStorage.getItem('user_name') || '',
     email: localStorage.getItem('user_email') || '',
-    role: localStorage.getItem('user_role') || '',
+    role: getUserRole() || '',
     employeeId: localStorage.getItem('employee_id') || '',
     phone: '',
     position: '',
-    lastLogin: localStorage.getItem('last_login') || 'Today'
+    lastLogin: localStorage.getItem('last_login') || 'Not available'
   });
 
   const fetchUserDetails = useCallback(async () => {
@@ -63,17 +64,18 @@ const Profile = () => {
       {/* Page Header */}
       <header className="pro-header">
         <div>
-          
+         
+          <p className="pro-subtitle">Account identity, contact information, and access details.</p>
         </div>
         <div className="pro-status-badge">
           <span className="pro-dot"></span>
-          Verified Account
+          Account Profile
         </div>
       </header>
 
       {/* Identity Hero */}
       <section className="pro-hero">
-        <div className="pro-avatar">
+        <div className="pro-avatar" aria-hidden="true">
           {user.name ? user.name.charAt(0).toUpperCase() : '?'}
         </div>
         <div className="pro-hero-info">
@@ -83,7 +85,7 @@ const Profile = () => {
       </section>
 
       {/* Detailed Information Grid */}
-      <div className="pro-grid">
+      <div className="pro-grid" aria-label="Account information">
         
         {/* Personal Information */}
         <article className="pro-card">
@@ -128,8 +130,8 @@ const Profile = () => {
               <span className="pro-value">{user.lastLogin}</span>
             </div>
             <div className="pro-row">
-              <span className="pro-label">Session Status</span>
-              <span className="pro-value text-success">Encrypted & Secure</span>
+              <span className="pro-label">Session</span>
+              <span className="pro-value text-success">Signed in</span>
             </div>
           </div>
         </article>

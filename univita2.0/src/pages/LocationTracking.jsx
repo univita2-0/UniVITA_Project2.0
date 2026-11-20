@@ -20,53 +20,41 @@ const GPS_DISPLAY_GRACE_MS = 60_000;
 const toLocalISODate = (d = new Date()) =>
   d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 
-const formatPHT = (dateStr) => {
-  if (!dateStr) return '—';
-  let s = String(dateStr);
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
-    s = s.replace(' ', 'T') + '+08:00';
+// Bare MySQL DATETIME values in this workflow are Philippine wall-clock times.
+// Explicit Z/offset timestamps are absolute instants and retain their timezone.
+const parseVisitorTimestamp = (value) => {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const input = String(value).trim();
+  let normalized = input;
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/.test(input)) {
+    normalized = input.replace(' ', 'T') + '+08:00';
   }
-  return new Date(s).toLocaleString('en-US', { timeZone: 'Asia/Manila' });
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatPHT = (dateStr) => {
+  const date = parseVisitorTimestamp(dateStr);
+  return date ? date.toLocaleString('en-US', { timeZone: 'Asia/Manila' }) : '—';
 };
 
 const formatTimePHT = (val) => {
-  if (!val) return '—';
-
-  if (val instanceof Date) {
-    if (isNaN(val.getTime())) return '—';
-    return val.toLocaleTimeString('en-US', {
-      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila',
-    });
-  }
-
+  if (val == null || val === '') return '—';
   const s = String(val).trim();
-
-  if (/^\d{2}:\d{2}(:\d{2})?$/.test(s)) {
-    const parts = s.split(':');
-    const h = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10);
-    const sec = parts[2] ? parseInt(parts[2], 10) : 0;
-    const date = new Date(Date.UTC(1970, 0, 1, h, m, sec));
+  // SQL TIME is a local clock reading, not a UTC instant.
+  if (/^\d{2}:\d{2}(?::\d{2})?$/.test(s)) {
+    const [h, m, sec = 0] = s.split(':').map(Number);
+    if (h > 23 || m > 59 || sec > 59) return '—';
+    const date = new Date(Date.UTC(2020, 0, 1, h, m, sec));
     return date.toLocaleTimeString('en-US', {
-      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila',
+      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'UTC',
     });
   }
-
-  if (s.includes('T') || s.includes('-')) {
-    let dateStr = s;
-    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
-      dateStr = s.replace(' ', 'T') + 'Z';
-    } else if (s.includes('T') && !s.includes('Z') && !s.includes('+')) {
-      dateStr = s + 'Z';
-    }
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return '—';
-    return d.toLocaleTimeString('en-US', {
-      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila',
-    });
-  }
-
-  return '—';
+  const date = parseVisitorTimestamp(val);
+  return date ? date.toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila',
+  }) : '—';
 };
 
 const parseDateInput = (value) => {
@@ -402,15 +390,8 @@ const LocationTracking = () => {
   const isToday = selectedDate === todayStr;
 
   const toTimestamp = useCallback((timeStr) => {
-    if (!timeStr) return NaN;
-    let s = String(timeStr);
-    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
-      s = s.replace(' ', 'T') + '+08:00';
-    } else if (s.includes('T') && !s.includes('Z') && !s.includes('+')) {
-      s += '+08:00';
-    }
-    const d = new Date(s);
-    return d.getTime();
+    const date = parseVisitorTimestamp(timeStr);
+    return date ? date.getTime() : NaN;
   }, []);
 
   const unifiedEvents = useMemo(() => {

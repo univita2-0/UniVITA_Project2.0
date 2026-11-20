@@ -8,6 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
+import { useRole } from '../permissions';
 import './LocationsManagement.css';
 
 const customMarker = new L.Icon({
@@ -46,6 +47,9 @@ const MapUpdater = ({ center }) => {
 };
 
 const LocationsManagement = () => {
+  const { can, isAdmin } = useRole();
+  const canWrite = can('locations:write');
+
   const [locations, setLocations] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -91,6 +95,11 @@ const LocationsManagement = () => {
   };
 
   const handleEdit = (loc) => {
+    // FIX 10.9 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to edit locations.');
+      return;
+    }
     setEditingLocation(loc);
     setLocationForm({ name: loc.name, latitude: loc.latitude, longitude: loc.longitude, radius: loc.radius });
     setMapSearchQuery('');
@@ -98,12 +107,22 @@ const LocationsManagement = () => {
   };
 
   const handleDeleteClick = (id, name) => {
+    // FIX 10.9 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to delete locations.');
+      return;
+    }
     setDeleteTargetId(id);
     setDeleteTargetName(name);
     setShowConfirm(true);
   };
 
   const confirmDelete = async () => {
+    // FIX 10.9 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to delete locations.');
+      return;
+    }
     if (!deleteTargetId) return;
     setProcessing(true);
     try {
@@ -111,7 +130,6 @@ const LocationsManagement = () => {
       toast.success("Location deleted successfully");
       loadLocations();
     } catch (err) {
-      // ✅ KEY SWAP: error → message
       toast.error(err.response?.data?.message || "Failed to delete location");
     } finally {
       setProcessing(false);
@@ -122,6 +140,11 @@ const LocationsManagement = () => {
   };
 
   const handleSave = async () => {
+    // FIX 10.9 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to save locations.');
+      return;
+    }
     if (!locationForm.name.trim()) return toast.warning("Location name required");
     if (locationForm.latitude === 0 || locationForm.longitude === 0) return toast.warning("Please pin a valid location on the map.");
 
@@ -138,7 +161,6 @@ const LocationsManagement = () => {
       resetForm();
       loadLocations();
     } catch (err) {
-      // ✅ KEY SWAP: error → message
       toast.error(err.response?.data?.message || "Error saving location");
     } finally {
       setProcessing(false);
@@ -181,17 +203,40 @@ const LocationsManagement = () => {
     : defaultCenter;
 
   return (
-    <div className="expert-container">
+    <div className="expert-container facility-locations">
+      {/* FIX 10.9 — read-only banner for Admin */}
+      {isAdmin && (
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: '20px',
+          background: '#F0FDFA',
+          border: '1px solid #99F6E4',
+          borderRadius: '5px',
+          color: '#0F766E',
+          fontSize: '12px',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
+          <span><strong>Read-only view.</strong> School location management is handled by HR.</span>
+        </div>
+      )}
+
+      <div className="facility-page-intro"><p>Maintain approved campus coordinates and attendance geofences.</p></div>
+      <div className="facility-stat-strip" aria-label="Location inventory summary"><div><span>Registered locations</span><strong>{locations.length}</strong></div><div><span>Matching records</span><strong>{filteredLocations.length}</strong></div><div><span>Geofence coverage</span><strong>{locations.filter(loc => Number(loc.radius) > 0).length}</strong></div></div>
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            
             <p className="expert-subtitle">Manage approved campus boundaries for location tracking and attendance.</p>
           </div>
         </div>
-        <button className="expert-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-          <Plus size={16} /> Register New Location
-        </button>
+        {canWrite && (
+          <button className="expert-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
+            <Plus size={16} /> Register New Location
+          </button>
+        )}
       </div>
 
       <div className="expert-search-card">
@@ -205,10 +250,10 @@ const LocationsManagement = () => {
               onChange={e => setSearchQuery(e.target.value)}
               className="expert-clean-input"
             />
-            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+            {searchQuery && <button type="button" className="facility-clear-search" aria-label="Clear location search" onClick={() => setSearchQuery('')}><X size={16} /></button>}
           </div>
           <div className="expert-stats-badge">
-            Total Locations: <strong>{locations.length}</strong>
+            Showing <strong>{filteredLocations.length}</strong> of {locations.length}
           </div>
         </div>
       </div>
@@ -220,7 +265,11 @@ const LocationsManagement = () => {
           <div className="expert-empty">
             <AlertCircle size={48} className="text-muted" />
             <p>No locations found.</p>
-            {searchQuery ? <span>Try adjusting your search criteria.</span> : <span>Click "Register New Location" to configure options.</span>}
+            {searchQuery
+              ? <span>Try adjusting your search criteria.</span>
+              : (canWrite
+                  ? <span>Click "Register New Location" to configure options.</span>
+                  : <span>No locations configured yet.</span>)}
           </div>
         ) : (
           <>
@@ -232,7 +281,7 @@ const LocationsManagement = () => {
                     <th className="text-center">Latitude</th>
                     <th className="text-center">Longitude</th>
                     <th className="text-center">Radius (m)</th>
-                    <th className="text-right">Actions</th>
+                    {canWrite && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -246,16 +295,18 @@ const LocationsManagement = () => {
                       <td className="text-center">
                         <span className="expert-chip default">{loc.radius}m</span>
                       </td>
-                      <td>
-                        <div className="expert-action-group right">
-                          <button className="expert-btn-icon" onClick={() => handleEdit(loc)} title="Edit Location">
-                            <Edit3 size={18} color="#475569" />
-                          </button>
-                          <button className="expert-btn-icon danger" onClick={() => handleDeleteClick(loc.id, loc.name)} title="Delete Location">
-                            <Trash2 size={18} color="#EF4444" />
-                          </button>
-                        </div>
-                      </td>
+                      {canWrite && (
+                        <td>
+                          <div className="expert-action-group right">
+                            <button className="expert-btn-icon" onClick={() => handleEdit(loc)} title="Edit Location">
+                              <Edit3 size={18} color="#475569" />
+                            </button>
+                            <button className="expert-btn-icon danger" onClick={() => handleDeleteClick(loc.id, loc.name)} title="Delete Location">
+                              <Trash2 size={18} color="#EF4444" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -276,6 +327,7 @@ const LocationsManagement = () => {
         )}
       </div>
 
+      {/* Add/Edit Modal — reachable only via HR-gated openers */}
       <FormalModal
         show={showModal}
         onClose={() => { setShowModal(false); resetForm(); }}
@@ -416,9 +468,7 @@ const LocationsManagement = () => {
             Are you sure you want to permanently delete <strong>"{deleteTargetName}"</strong>?
           </p>
           <div className="expert-confirm-note danger">
-            <p>
-              Warning: This may affect existing instructor schedules and attendance routing logic.
-            </p>
+            <p>Warning: This may affect existing instructor schedules and attendance routing logic.</p>
           </div>
         </div>
       </FormalModal>

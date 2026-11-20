@@ -114,6 +114,7 @@ const TodayVisitors = () => {
         axios.get(`${API_BASE}/ble-tags`, getAuthHeaders()),
         axios.get(`${API_BASE}/ble-tags/in-use`, getAuthHeaders())
       ]);
+      setTagsCurrentPage(1);
       const allTags = tagsRes.data.map(tag => ({
         ...tag,
         inUse: inUseRes.data.includes(tag.ble_id) || tag.current_status === 'IN USE'
@@ -306,7 +307,7 @@ const TodayVisitors = () => {
             <RefreshCw size={14} color="#0F172A" /> {tagsLoading ? 'Refreshing...' : 'Refresh Status'}
           </button>
         </div>
-        <div className="tv-table-wrapper" style={{ minHeight: '400px' }}>
+        <div className="tv-table-wrapper" style={{ minHeight: '300px' }}>
           {tagsLoading && allBleTags.length === 0 ? <div className="tv-state-box">Loading tags...</div> : (
             <table className="tv-table">
               <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
@@ -338,6 +339,16 @@ const TodayVisitors = () => {
             </table>
           )}
         </div>
+        {totalTagsPages > 1 && (
+          <div className="tv-pagination" aria-label="BLE inventory pagination">
+            <span className="tv-page-info">Showing {(tagsCurrentPage - 1) * tagsPerPage + 1}–{Math.min(tagsCurrentPage * tagsPerPage, allBleTags.length)} of {allBleTags.length} tags</span>
+            <div className="tv-page-controls">
+              <button type="button" className="tv-page-btn" disabled={tagsCurrentPage === 1} onClick={() => setTagsCurrentPage(p => Math.max(1, p - 1))}><ChevronLeft size={15} /> Previous</button>
+              <span className="tv-page-current">{tagsCurrentPage} / {totalTagsPages}</span>
+              <button type="button" className="tv-page-btn" disabled={tagsCurrentPage === totalTagsPages} onClick={() => setTagsCurrentPage(p => Math.min(totalTagsPages, p + 1))}>Next <ChevronRight size={15} /></button>
+            </div>
+          </div>
+        )}
       </FormalModal>
       
       <FormalModal show={showNoShowModal} onClose={() => setShowNoShowModal(false)} title="Confirm No Show" footer={<><button className="btn-tv-cancel" onClick={() => setShowNoShowModal(false)}>Cancel</button><button className="btn-tv-danger" onClick={markNoShow}>Yes, Mark No Show</button></>}>

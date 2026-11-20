@@ -103,7 +103,7 @@ export default function MyPayrollScreen({ navigation }) {
             <Text style={styles.primaryCardTitle}>{record.month_year}</Text>
           </View>
           <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>FINALIZED</Text>
+            <Text style={styles.statusText}>{String(record.status).toLowerCase() === 'paid' ? 'PAID' : 'FINALIZED · AWAITING PAYMENT'}</Text>
           </View>
         </View>
 
@@ -182,10 +182,8 @@ export default function MyPayrollScreen({ navigation }) {
     const other = Number(p.other_deduction || 0);
     const netPay = Number(p.net_pay || 0);
 
-    // Reverse-engineer Late Deductions
-    // Gross - (All Deductions + Net Pay) = Late/Undertime Deduction
-    const calculatedLate = gross - (tax + sss + philhealth + pagibig + loans + other + netPay);
-    const lateDeduction = calculatedLate > 0.01 ? calculatedLate : 0;
+    // ✅ FIX: Use the direct value from the backend instead of reverse-engineering it
+    const lateDeduction = Number(p.late_deduction || 0);
 
     const totalDeductions = tax + sss + philhealth + pagibig + loans + other + lateDeduction;
 

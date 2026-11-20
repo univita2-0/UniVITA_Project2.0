@@ -20,6 +20,8 @@ const rateLimit = require('express-rate-limit');
 const WebSocket = require('ws');
 const url = require('url');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
+const { allowRoles, requireAction } = require('./rbacPolicy');
 
 const app = express();
 const GPS_GRACE_MS = 120000; 
@@ -28,6 +30,8 @@ const gpsStates = new Map();
 const campusStates = new Map();
 const helmet = require('helmet');
 app.set('trust proxy', 1);
+
+const { validateEmailForAccount, normalize: normalizeEmail } = require('./emailValidation');
 
 
 const envOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [];
@@ -54,6 +58,42 @@ setInterval(() => {
     }
   }
 }, 15 * 60 * 1000).unref();
+
+
+const PAYROLL_PIN_PATTERN = /^\d{4,6}$/;
+const BCRYPT_HASH_PATTERN = /^\$2[aby]\$\d{2}\$/;
+
+async function verifyStoredPayrollPin(userId, storedPin, enteredPin) {
+  if (typeof enteredPin !== 'string' || !PAYROLL_PIN_PATTERN.test(enteredPin)) {
+    return false;
+  }
+
+  if (!storedPin || typeof storedPin !== 'string') {
+    return false;
+  }
+
+  
+  if (BCRYPT_HASH_PATTERN.test(storedPin)) {
+    return bcrypt.compare(enteredPin, storedPin);
+  }
+
+
+  if (storedPin === enteredPin) {
+    const newHash = await bcrypt.hash(enteredPin, 12);
+
+    await db.promise().query(
+      `UPDATE users
+       SET payroll_pin = ?
+       WHERE id = ? AND payroll_pin = ?`,
+      [newHash, userId, storedPin]
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
 
 async function getSystemConfig() {
   try {
@@ -151,6 +191,149 @@ const PAYROLL_JWT_SECRET = process.env.PAYROLL_JWT_SECRET;
 const OTP_STORE = {};          // email -> { otp, expiresAt }
 const PIN_ATTEMPTS = new Map(); // email -> { count, lastAttempt }
 const wsClients = new Map();    // userId -> WebSocket
+
+
+const OTP_MAX_ATTEMPTS = 5;
+
+const otpStorageKey = (email, purpose) =>
+  `${purpose}:${String(email).trim().toLowerCase()}`;
+
+function createOtpChallenge(email, purpose, expiryMinutes) {
+  const otp = String(crypto.randomInt(100000, 1000000));
+
+  const digest = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${purpose}:${email.toLowerCase()}:${otp}`)
+    .digest('hex');
+
+  const minutes = Math.min(
+    Math.max(Number(expiryMinutes) || 5, 1),
+    15
+  );
+
+  return {
+    otp,
+    record: {
+      digest,
+      expiresAt: Date.now() + minutes * 60 * 1000,
+      attempts: 0
+    }
+  };
+}
+
+function checkOtpChallenge(email, purpose, otp, consume = false) {
+  const key = otpStorageKey(email, purpose);
+  const record = OTP_STORE[key];
+
+  if (!record) {
+    return { valid: false, reason: 'missing' };
+  }
+
+  if (Date.now() >= record.expiresAt) {
+    delete OTP_STORE[key];
+    return { valid: false, reason: 'expired' };
+  }
+
+  if (record.attempts >= OTP_MAX_ATTEMPTS) {
+    delete OTP_STORE[key];
+    return { valid: false, reason: 'locked' };
+  }
+
+  if (!/^\d{6}$/.test(String(otp || ''))) {
+    record.attempts += 1;
+    if (record.attempts >= OTP_MAX_ATTEMPTS) {
+      delete OTP_STORE[key];
+    }
+    return { valid: false, reason: 'invalid' };
+  }
+
+  const suppliedDigest = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${purpose}:${email.toLowerCase()}:${String(otp)}`)
+    .digest();
+
+  const storedDigest = Buffer.from(record.digest, 'hex');
+
+  const valid =
+    storedDigest.length === suppliedDigest.length &&
+    crypto.timingSafeEqual(storedDigest, suppliedDigest);
+
+  if (!valid) {
+    record.attempts += 1;
+
+    if (record.attempts >= OTP_MAX_ATTEMPTS) {
+      delete OTP_STORE[key];
+      return { valid: false, reason: 'locked' };
+    }
+
+    return { valid: false, reason: 'invalid' };
+  }
+
+  if (consume) {
+    delete OTP_STORE[key];
+  }
+
+  return { valid: true };
+}
+
+function requirePendingLogin(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ')
+    ? header.slice(7)
+    : null;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: 'Please enter your password before requesting an OTP.'
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (
+      decoded.purpose !== 'otp-pending' ||
+      !decoded.id ||
+      !decoded.email ||
+      !['web', 'mobile'].includes(decoded.client)
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Invalid OTP verification session.'
+      });
+    }
+
+    const requestedEmail = String(
+      req.body?.email || ''
+    ).trim().toLowerCase();
+
+    if (requestedEmail !== decoded.email.toLowerCase()) {
+      return res.status(403).json({
+        success: false,
+        message: 'OTP email does not match the login account.'
+      });
+    }
+
+    req.pendingLogin = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: 'Login verification expired. Please sign in again.'
+    });
+  }
+}
+
+
+// R06: Reject impossible dates (for example, 2026-02-30) without timezone coercion.
+const isValidISOCalendarDate = (value) => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  if (year < 1000 || month < 1 || month > 12 || day < 1) return false;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day <= daysInMonth;
+};
 
 // Helper: check if a date is within allowed range (max 30 days ago)
 const isDateWithinAllowedRange = (dateStr) => {
@@ -335,6 +518,12 @@ const otpLimiter = rateLimit({
   message: { success: false, message: 'Too many OTP requests. Please wait.' }
 });
 
+const clockLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 6,
+  message: { success: false, message: 'Too many clock attempts. Please wait a minute and try again.' }
+});
+
 const pinRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -413,16 +602,48 @@ const transporter = nodemailer.createTransport({
 // --------------------------------------------------
 // AUTHENTICATION MIDDLEWARE
 // --------------------------------------------------
+
 function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user; // { id, email, role }
-    next();
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
+
+  jwt.verify(token, JWT_SECRET, async (err, session) => {
+    if (err || !session) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired session.' });
+    }
+
+    if (session.purpose !== 'session' || !session.id ||
+        !['admin', 'hr_admin', 'security', 'instructor'].includes(session.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Complete login verification before accessing this resource.'
+      });
+    }
+
+    try {
+      const [rows] = await db.promise().query(
+        'SELECT id, role, status FROM users WHERE id = ? LIMIT 1', [session.id]
+      );
+      const account = rows[0];
+      if (!account || account.status !== 'active') {
+        return res.status(401).json({ success: false, message: 'Account is inactive or no longer available. Please sign in again.' });
+      }
+      if (account.role !== session.role) {
+        return res.status(401).json({ success: false, message: 'Account permissions have changed. Please sign in again.' });
+      }
+      req.user = session;
+      return next();
+    } catch (databaseError) {
+      console.error('Session validation database error:', databaseError);
+      return res.status(503).json({ success: false, message: 'Unable to verify your session at this time.' });
+    }
   });
 }
+
 
 const getPHTimeFromDate = (dateObj) => {
   const options = { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' };
@@ -432,41 +653,92 @@ const getPHTimeFromDate = (dateObj) => {
 };
 
 
+
 const verifyOwnership = (req, res, next) => {
+  if (!req.user || req.user.id === undefined || req.user.id === null) {
+    return res.status(401).json({
+      success: false,
+      message: 'Authentication required.'
+    });
+  }
+
+
   if (req.user.role === 'admin' || req.user.role === 'hr_admin') {
     return next();
   }
 
-  const requestedEmployeeId = req.params.employeeId || req.params.identifier || req.params.userId || req.params.id;
-  
-  if (!requestedEmployeeId) {
-    return res.status(400).json({ error: "Missing employee identifier in request." });
+  const requestedIdentifier =
+    req.params?.employeeId ??
+    req.params?.identifier ??
+    req.params?.userId ??
+    req.params?.id;
+
+  const requestedValue =
+    requestedIdentifier === undefined || requestedIdentifier === null
+      ? ''
+      : String(requestedIdentifier).trim();
+
+  if (!requestedValue) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing employee identifier in request.'
+    });
   }
 
-  
-  try {
-    db.query("SELECT id, employee_id FROM users WHERE id = ?", [req.user.id], (err, rows) => {
-      if (err) {
-        console.error("Ownership DB Error:", err); 
-        return res.status(500).json({ error: "Database verification error" });
-      }
-      
-      if (rows.length === 0) {
-        return res.status(403).json({ error: "Forbidden: User not found." });
-      }
 
-      if (rows[0].employee_id !== requestedEmployeeId && rows[0].id.toString() !== requestedEmployeeId.toString()) {
-        console.warn(`IDOR Blocked: User ID ${req.user.id} attempted to access ${requestedEmployeeId}`);
-        return res.status(403).json({ error: "Forbidden: You can only access your own data." });
+  try {
+    db.query(
+      'SELECT id, employee_id FROM users WHERE id = ? LIMIT 1',
+      [req.user.id],
+      (err, rows) => {
+        if (err) {
+          console.error('Ownership DB Error:', err);
+
+          return res.status(500).json({
+            success: false,
+            message: 'Database verification error.'
+          });
+        }
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+          return res.status(403).json({
+            success: false,
+            message: 'Forbidden: account not found.'
+          });
+        }
+
+        const owner = rows[0];
+
+        const ownInternalId = String(owner.id);
+        const ownEmployeeId =
+          owner.employee_id == null
+            ? ''
+            : String(owner.employee_id);
+
+        
+        if (
+          requestedValue !== ownInternalId &&
+          requestedValue !== ownEmployeeId
+        ) {
+          return res.status(403).json({
+            success: false,
+            message: 'Forbidden: you can only access your own records.'
+          });
+        }
+
+        return next();
       }
-      
-      next();
-    });
+    );
   } catch (err) {
-    console.error("Ownership Middleware Error:", err);
-    return res.status(500).json({ error: "Server error during verification." });
+    console.error('Ownership Middleware Error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to verify record ownership.'
+    });
   }
 };
+
 
 function logVisitorHistory(visitorId, visitorName, bleId, floor, currentRoom, eventType, x = null, y = null) {
   const phNow = getPHDateTime(); 
@@ -510,6 +782,81 @@ function logAction(userId, action, targetType, targetId, req, oldValue = null, n
     if (err) console.error('Failed to insert audit log:', err);
   });
 }
+
+
+// ==========================================
+// C10.2: Attendance time integrity (Philippine local clock)
+// ==========================================
+// TIME values have no date component. A shorter clock-out time is
+// interpreted as the following day, and excessive shifts are rejected.
+const C10_MAX_SHIFT_HOURS = 16;
+
+function c10ParseTimeSeconds(value) {
+  if (value == null) return null;
+  const input = String(value).trim();
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(input);
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  const sec = Number(match[3] || 0);
+  if (h > 23 || m > 59 || sec > 59) return null;
+  return h * 3600 + m * 60 + sec;
+}
+
+function c10AttendanceHours(start, end, maxHours = C10_MAX_SHIFT_HOURS) {
+  const from = c10ParseTimeSeconds(start);
+  const to = c10ParseTimeSeconds(end);
+  if (from == null || to == null) return null;
+  const seconds = (to - from + 86400) % 86400;
+  if (seconds <= 0 || seconds > maxHours * 3600) return null;
+  return Math.round(seconds / 36) / 100;
+}
+
+// ==========================================
+// C08: ATTENDANCE GPS QUALITY VALIDATION
+// ==========================================
+
+const validateAttendanceGpsQuality = (body) => {
+  const rawAccuracy = body.gps_accuracy;
+  const rawTimestamp = body.gps_timestamp;
+
+  // Both fields are required for online attendance.
+  if (
+    rawAccuracy === undefined ||
+    rawAccuracy === null ||
+    String(rawAccuracy).trim() === '' ||
+    typeof rawTimestamp !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(rawTimestamp)
+  ) {
+    return 'GPS accuracy and timestamp are required.';
+  }
+
+  const accuracy = Number(rawAccuracy);
+  const gpsTime = Date.parse(rawTimestamp);
+
+  // Maximum reported horizontal accuracy: 50 meters
+  if (
+    !Number.isFinite(accuracy) ||
+    accuracy < 0 ||
+    accuracy > 50
+  ) {
+    return 'GPS accuracy is too low. Move to an open area and try again.';
+  }
+
+  if (!Number.isFinite(gpsTime)) {
+    return 'Invalid GPS timestamp.';
+  }
+
+  const ageMs = Date.now() - gpsTime;
+
+  // Allow 2 minutes for upload/network delay.
+  // Reject timestamps over 30 seconds in the future.
+  if (ageMs > 120000 || ageMs < -30000) {
+    return 'GPS reading is outdated or has an invalid timestamp. Please retry.';
+  }
+
+  return null;
+};
 
 // --------------------------------------------------
 // SCHOOL LOCATIONS
@@ -677,7 +1024,22 @@ const resumeStorage = multer.diskStorage({
   }
 });
 const uploadResume = multer({ storage: resumeStorage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: pdfFilter });
-
+const applicationStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, resumeDir),
+  filename: (req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const prefix = file.fieldname === 'tor' ? 'tor' : 'resume';
+    cb(null, `${prefix}_${unique}${path.extname(file.originalname || '.pdf')}`);
+  }
+});
+const uploadApplication = multer({
+  storage: applicationStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: pdfFilter
+}).fields([
+  { name: 'resume', maxCount: 1 },
+  { name: 'tor',    maxCount: 1 }
+]);
 // 3. SELFIES
 const selfieDir = path.join(uploadsPath, 'selfies');
 if (!fs.existsSync(selfieDir)) fs.mkdirSync(selfieDir, { recursive: true });
@@ -740,8 +1102,10 @@ const uploadAppeal = multer({ storage: appealStorage, limits: { fileSize: 5 * 10
 // 1. AUTHENTICATION & OTP
 // ============================================
 
-app.post('/api/auth/send-otp', otpLimiter, async (req, res) => {
-  console.log("OTP request received for:", req.body.email);
+
+app.post('/api/auth/send-otp', otpLimiter, requirePendingLogin, async (req, res) => {
+
+  console.log('OTP request received.');
   const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
@@ -751,7 +1115,12 @@ app.post('/api/auth/send-otp', otpLimiter, async (req, res) => {
       : { otp_expiry_minutes: 5 };
     const otpMinutes = Number(cfg.otp_expiry_minutes) || 5;
 
-    db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], async (err, results) => {
+    
+db.query(
+  "SELECT id, email, role FROM users WHERE id = ? AND email = ? AND status = 'active'",
+  [req.pendingLogin.id, email],
+  async (err, results) => {
+
       if (err) {
         console.error("DB error:", err);
         return res.status(500).json({ success: false, message: err.message });
@@ -760,10 +1129,13 @@ app.post('/api/auth/send-otp', otpLimiter, async (req, res) => {
         return res.status(404).json({ success: false, message: 'No active account found with that email.' });
       }
 
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = Date.now() + otpMinutes * 60 * 1000;
-      OTP_STORE[email] = { otp, expiresAt };
-      console.log(`[OTP] ${email} -> ${otp} (expires in ${otpMinutes}m)`);
+      
+const { otp, record } = createOtpChallenge(
+  email,
+  'login',
+  otpMinutes
+);
+
 
       try {
         const { data, error } = await resend.emails.send({
@@ -786,6 +1158,9 @@ app.post('/api/auth/send-otp', otpLimiter, async (req, res) => {
           console.error('Resend API Error:', error);
           return res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
         }
+        
+OTP_STORE[otpStorageKey(email, 'login')] = record;
+
 
         res.json({ success: true, message: 'OTP sent to your email.' });
       } catch (err) {
@@ -799,50 +1174,118 @@ app.post('/api/auth/send-otp', otpLimiter, async (req, res) => {
   }
 });
 
-app.post('/api/auth/verify-otp', otpLimiter, (req, res) => {
-  const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
-  const otp = req.body.otp;
-  if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
 
-  const record = OTP_STORE[email];
-  if (!record) return res.status(400).json({ success: false, message: 'No OTP found. Please request a new one.' });
-  if (Date.now() > record.expiresAt) {
-    delete OTP_STORE[email];
-    return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new one.' });
-  }
-  if (record.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP.' });
+app.post(
+  '/api/auth/verify-otp',
+  otpLimiter,
+  requirePendingLogin,
+  (req, res) => {
+    const email = String(req.body?.email || '')
+      .trim()
+      .toLowerCase();
 
-  delete OTP_STORE[email];
+    const otp = String(req.body?.otp || '');
 
-  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [email], (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: err.message });
-    if (results.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
+    if (!/^\d{6}$/.test(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Enter a valid six-digit OTP.'
+      });
+    }
 
-    const user = results[0];
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        employee_id: user.employee_id,
-        full_name: user.full_name,
-        email: user.email,
-        role: user.role,
-        monthly_salary: user.monthly_salary || 0,
-        work_days_per_month: user.work_days_per_month || 22,
-        biometric_enabled: user.biometric_enabled || false,
-        password_last_changed: user.password_last_changed
+    db.query(
+      `SELECT *
+       FROM users
+       WHERE id = ? AND email = ? AND status = 'active'
+       LIMIT 1`,
+      [req.pendingLogin.id, email],
+      (err, results) => {
+        if (err) {
+          console.error('OTP account lookup failed:', err.message);
+
+          return res.status(500).json({
+            success: false,
+            message: 'Unable to verify the account.'
+          });
+        }
+
+        if (!results.length) {
+          return res.status(403).json({
+            success: false,
+            message: 'This account is unavailable.'
+          });
+        }
+
+        const user = results[0];
+
+        if (
+          (req.pendingLogin.client === 'mobile' &&
+            user.role !== 'instructor') ||
+          (req.pendingLogin.client === 'web' &&
+            user.role === 'instructor')
+        ) {
+          return res.status(403).json({
+            success: false,
+            message: 'This account does not have access.'
+          });
+        }
+
+        const verification = checkOtpChallenge(
+          email,
+          'login',
+          otp,
+          true
+        );
+
+        if (!verification.valid) {
+          return res.status(400).json({
+            success: false,
+            message:
+              verification.reason === 'locked'
+                ? 'Too many invalid attempts. Request a new OTP.'
+                : verification.reason === 'expired'
+                  ? 'OTP expired. Request a new OTP.'
+                  : 'Invalid or unavailable OTP.'
+          });
+        }
+
+        const token = jwt.sign(
+          {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            purpose: 'session'
+          },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
+
+        return res.json({
+          success: true,
+          token,
+          user: {
+            id: user.id,
+            employee_id: user.employee_id,
+            full_name: user.full_name,
+            email: user.email,
+            role: user.role,
+            monthly_salary: user.monthly_salary || 0,
+            work_days_per_month: user.work_days_per_month || 22,
+            biometric_enabled: user.biometric_enabled || false,
+            password_last_changed: user.password_last_changed
+          }
+        });
       }
-    });
-  });
-});
+    );
+  }
+);
+
 
 // ============================================
 // PASSWORD RECOVERY & OTP VERIFICATION ROUTES
 // ============================================
 
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password', otpLimiter, async (req, res) => {
   const email = req.body.email?.trim().toLowerCase();
   const isMobile = req.body.isMobile;
   if (!email) return res.status(400).json({ success: false, message: 'Email required' });
@@ -869,10 +1312,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         return res.status(403).json({ success: false, message: 'This account does not have access.' });
       }
 
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = Date.now() + otpMinutes * 60 * 1000;
-      OTP_STORE[email] = { otp, expiresAt };
-      console.log(`[PASSWORD RESET OTP] ${email} → ${otp} (expires in ${otpMinutes}m)`);
+      
+const { otp, record } = createOtpChallenge(
+  email,
+  'reset',
+  otpMinutes
+);
+
 
       try {
         const { data, error } = await resend.emails.send({
@@ -896,6 +1342,10 @@ app.post('/api/auth/forgot-password', async (req, res) => {
           return res.status(500).json({ success: false, message: 'Failed to send password reset email.' });
         }
 
+        
+OTP_STORE[otpStorageKey(email, 'reset')] = record;
+
+
         res.json({ success: true, message: 'OTP sent to your email.' });
       } catch (err) {
         console.error('Unexpected email error:', err);
@@ -908,56 +1358,173 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   }
 });
 
+
 app.post('/api/auth/verify-reset-otp', otpLimiter, (req, res) => {
-  const email = req.body.email ? req.body.email.trim().toLowerCase() : '';
-  const otp = req.body.otp;
-  if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const otp = String(req.body?.otp || '');
 
-  const record = OTP_STORE[email];
-  if (!record) return res.status(400).json({ success: false, message: 'No OTP found. Please request a new one.' });
-  if (Date.now() > record.expiresAt) {
-    delete OTP_STORE[email];
-    return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new one.' });
+  if (!email || !otp) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email and OTP are required.'
+    });
   }
-  if (record.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP.' });
 
-  res.json({ success: true, message: 'OTP verified successfully.' });
+  const verification = checkOtpChallenge(
+    email,
+    'reset',
+    otp,
+    false
+  );
+
+  if (!verification.valid) {
+    return res.status(400).json({
+      success: false,
+      message: verification.reason === 'locked'
+        ? 'Too many attempts. Request a new reset code.'
+        : verification.reason === 'expired'
+          ? 'Reset code expired. Request a new one.'
+          : 'Invalid or unavailable reset code.'
+    });
+  }
+
+  return res.json({
+    success: true,
+    message: 'OTP verified successfully.'
+  });
 });
+
+
 
 app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
-  const email = req.body.email?.trim().toLowerCase();
-  const otp = req.body.otp;
-  const newPassword = req.body.newPassword;
+  const email = typeof req.body?.email === 'string'
+    ? req.body.email.trim().toLowerCase()
+    : '';
 
+  const otp = String(req.body?.otp ?? '');
+  const newPassword = req.body?.newPassword;
+
+  // 1. Validate required fields
   if (!email || !otp || !newPassword) {
-    return res.status(400).json({ success: false, message: 'All fields are required.' });
-  }
-  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
-    return res.status(400).json({ success: false, message: 'Your password must be at least 8 characters long, contain 1 uppercase letter, and 1 special character.' });
+    return res.status(400).json({
+      success: false,
+      message: 'All fields are required.'
+    });
   }
 
-  const record = OTP_STORE[email];
-  if (!record) return res.status(400).json({ success: false, message: 'OTP not found. Please request a new one.' });
-  if (Date.now() > record.expiresAt) {
-    delete OTP_STORE[email];
-    return res.status(400).json({ success: false, message: 'Your OTP has expired. Please request a new one.' });
+  // 2. Validate the password type and complexity
+  if (
+    typeof newPassword !== 'string' ||
+    newPassword.length < 8 ||
+    !/[A-Z]/.test(newPassword) ||
+    !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Your password must be at least 8 characters long, contain 1 uppercase letter, and 1 special character.'
+    });
   }
-  if (record.otp !== otp) return res.status(400).json({ success: false, message: 'The OTP entered is incorrect.' });
 
-  delete OTP_STORE[email];
+  // 3. Validate the reset OTP format
+  if (!/^\d{6}$/.test(otp)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Please enter a valid 6-digit OTP.'
+    });
+  }
 
   try {
+   
+    const verification = checkOtpChallenge(
+      email,
+      'reset',
+      otp,
+      true
+    );
+
+    if (!verification.valid) {
+      let message = 'The OTP entered is incorrect or unavailable.';
+
+      if (verification.reason === 'missing') {
+        message = 'OTP not found. Please request a new one.';
+      } else if (verification.reason === 'expired') {
+        message = 'Your OTP has expired. Please request a new one.';
+      } else if (verification.reason === 'locked') {
+        message = 'Too many incorrect OTP attempts. Please request a new one.';
+      }
+
+      return res.status(400).json({
+        success: false,
+        message
+      });
+    }
+
+    // 5. Hash the new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE email = ?", [hashedPassword, email], (err) => {
-      if (err) return res.status(500).json({ success: false, message: 'Database error during password reset.' });
-      res.json({ success: true, message: 'Your password has been successfully reset!' });
+
+    // 6. Update the existing user account
+    const [result] = await db.promise().query(
+      `UPDATE users
+       SET password = ?,
+           password_last_changed = CURRENT_DATE
+       WHERE email = ?
+         AND status = 'active'`,
+      [hashedPassword, email]
+    );
+
+    // 7. Check whether an active account was updated
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active account was found for this email.'
+      });
+    }
+
+    // 8. Return success
+    return res.status(200).json({
+      success: true,
+      message: 'Your password has been successfully reset!'
     });
+
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Encryption error. Please try again.' });
+    console.error('Password reset error:', error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to reset your password. Please try again.'
+    });
   }
 });
 
-const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+
+
+// R05: Legacy credentials are migrated before login continues. A failed migration
+// fails closed; plaintext must not remain stored after a successful login.
+const verifyAccountPassword = async (user, candidate) => {
+  if (typeof user?.password !== 'string' || typeof candidate !== 'string') return false;
+  if (/^\$2[aby]\$\d{2}\$/.test(user.password)) {
+    return bcrypt.compare(candidate, user.password);
+  }
+  // Compatibility for imported legacy accounts only. Use the same length and
+  // constant-time byte comparison and write a bcrypt hash before accepting it.
+  const submitted = crypto.createHash('sha256').update(candidate).digest();
+  const stored = crypto.createHash('sha256').update(user.password).digest();
+  if (!crypto.timingSafeEqual(submitted, stored)) return false;
+  const hashed = await bcrypt.hash(candidate, 12);
+  const [updated] = await db.promise().query(
+    'UPDATE users SET password = ?, password_last_changed = COALESCE(password_last_changed, CURRENT_DATE) WHERE id = ? AND password = ?',
+    [hashed, user.id, user.password]
+  );
+  if (updated.affectedRows !== 1) {
+    // Concurrent migration: accept only if the stored bcrypt hash matches.
+    const [rows] = await db.promise().query('SELECT password FROM users WHERE id = ? LIMIT 1', [user.id]);
+    if (!rows.length || !/^\$2[aby]\$\d{2}\$/.test(rows[0].password || '')) return false;
+    return bcrypt.compare(candidate, rows[0].password);
+  }
+  console.warn('Migrated legacy password to bcrypt for user ID:', user.id);
+  return true;
+};
 
 app.post('/api/login', loginLimiter, async (req, res) => {
   const { email, password, isMobile } = req.body;
@@ -994,16 +1561,15 @@ app.post('/api/login', loginLimiter, async (req, res) => {
     }
 
     const user = results[0];
-    const match = await bcrypt.compare(password, user.password);
-    
-    // 2. Password check:
-        if (!match && password === user.password) {
-      // Fix 11.4 — Audit trail for legacy plaintext passwords
-      console.warn(`[SECURITY WARNING] User ${user.id} (${cleanEmail}) logged in using a legacy plaintext password. Migrating to bcrypt now.`);
-      
-      const hashed = await bcrypt.hash(password, 10);
-      db.query("UPDATE users SET password = ? WHERE id = ?", [hashed, user.id]);
-    } else if (!match) {
+    let match = false;
+    try {
+      match = await verifyAccountPassword(user, password);
+    } catch (passwordError) {
+      console.error('Password verification or legacy migration failed:', passwordError);
+      return res.status(503).json({ success: false, message: 'Unable to verify credentials at this time.' });
+    }
+
+    if (!match) {
       // Record and escalate failed attempts against System Config limit
       const current = FAILED_LOGIN_ATTEMPTS.get(cleanEmail) || { count: 0, lockedUntil: null, lastFailedAt: 0 };
       current.count += 1;
@@ -1058,8 +1624,25 @@ app.post('/api/login', loginLimiter, async (req, res) => {
       });
     }
 
-    const tempToken = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '5m' });
-    res.json({ success: true, message: 'Login successful.', requiresOtp: true, tempToken, email: user.email });
+    
+const tempToken = jwt.sign(
+  {
+    id: user.id,
+    email: user.email,
+    purpose: 'otp-pending',
+    client: isMobile ? 'mobile' : 'web'
+  },
+  JWT_SECRET,
+  { expiresIn: '5m' }
+);
+
+    res.json({
+  success: true,
+  message: 'Login successful.',
+  requiresOtp: true,
+  tempToken,
+  email: user.email
+});
   });
 });
 
@@ -1125,8 +1708,14 @@ app.put('/api/users/:identifier/update-password', authenticateToken, verifyOwner
     if (results.length === 0) return res.status(404).json({ success: false, message: "User not found." });
     
     const user = results[0];
-    const match = await bcrypt.compare(currentPassword.trim(), user.password);
-    if (!match && currentPassword.trim() !== user.password) {
+    let match = false;
+    try {
+      match = await verifyAccountPassword(user, currentPassword.trim());
+    } catch (passwordError) {
+      console.error('Password verification error:', passwordError);
+      return res.status(503).json({ success: false, message: 'Unable to verify credentials at this time.' });
+    }
+    if (!match) {
       return res.status(401).json({ success: false, message: "Invalid current password provided." });
     }
 
@@ -1143,8 +1732,11 @@ app.put('/api/users/:identifier/update-password', authenticateToken, verifyOwner
 });
 
 app.put('/api/users/:id/reset-password', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Password reset is restricted to System Administrators.'
+    });
   }
 
   const { newPassword } = req.body;
@@ -1155,6 +1747,11 @@ app.put('/api/users/:id/reset-password', authenticateToken, async (req, res) => 
   }
   
   try {
+    const [targetRows] = await db.promise().query('SELECT role FROM users WHERE id = ? LIMIT 1', [userId]);
+    if (!targetRows.length) return res.status(404).json({ success: false, message: 'User not found.' });
+    if (targetRows[0].role === 'instructor') {
+      return res.status(403).json({ success: false, message: 'Instructor passwords cannot be reset from administrative staff management.' });
+    }
     const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
     db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [hashedPassword, userId], (err, result) => {
       if (err) return res.status(500).json({ success: false, message: err.message });
@@ -1238,7 +1835,564 @@ const GEO_EXIT_SUBQUERY = `
   )
 `;
 
-app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
+
+// ==========================================
+// C11.1: Machine-readable attendance response codes.
+// Existing status, message, success and offline-sync flags remain unchanged.
+// ==========================================
+const c11AttendanceCode = (status, body) => {
+  if (body?.code) return body.code;
+  if (body?.success === true) {
+    if (body.alreadyRecorded) return 'ATTENDANCE_ALREADY_RECORDED';
+    if (body.alreadySubmitted) return 'OFFLINE_EVENT_ALREADY_SUBMITTED';
+    if (body.pendingReview) return 'OFFLINE_EVENT_PENDING_REVIEW';
+    return 'ATTENDANCE_SUCCESS';
+  }
+  if (status === 401) return 'AUTH_SESSION_EXPIRED';
+  if (status === 403) return 'ATTENDANCE_FORBIDDEN';
+  if (status === 429) return 'ATTENDANCE_RATE_LIMITED';
+  if (status >= 500) return 'ATTENDANCE_SERVER_ERROR';
+  const msg = String(body?.message || '').toLowerCase();
+  if (/already clock|already recorded|already.*clocked|active clock-in|already.*attendance/.test(msg)) return 'ATTENDANCE_ALREADY_RECORDED';
+  if (/gps|location|geofence|campus|coordinate/.test(msg)) return 'ATTENDANCE_LOCATION_REJECTED';
+  if (/selfie|attachment|photo/.test(msg)) return 'ATTENDANCE_SELFIE_REQUIRED';
+  if (/schedule|shift|grace|window|time/.test(msg)) return 'ATTENDANCE_SCHEDULE_REJECTED';
+  if (/pending|correction/.test(msg)) return 'ATTENDANCE_REVIEW_REQUIRED';
+  if (status === 409) return 'ATTENDANCE_CONFLICT';
+  if (status === 400 || status === 422) return 'ATTENDANCE_VALIDATION_ERROR';
+  return 'ATTENDANCE_REQUEST_FAILED';
+};
+
+app.use('/api/attendance', (req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = body => {
+    if (body && typeof body === 'object' && !Array.isArray(body) &&
+        typeof body.success === 'boolean' && !body.code) {
+      return originalJson({ ...body, code: c11AttendanceCode(res.statusCode, body) });
+    }
+    return originalJson(body);
+  };
+  next();
+});
+
+// C11.2: Same-process overlapping upload protection. The database's unique
+// schedule constraint remains the authoritative cross-process safeguard.
+const c11ActiveAttendanceRequests = new Set();
+const c11SingleFlight = action => (req, res, next) => {
+  const schedule = String(req.body?.schedule_id || '').trim();
+  const userId = String(req.user?.id || '').trim();
+  if (!userId || !schedule) return next(); // existing endpoint validates these
+  const key = `${userId}:${schedule}:${action}`;
+  if (c11ActiveAttendanceRequests.has(key)) {
+    if (req.file?.path) fs.promises.unlink(req.file.path).catch(() => {});
+    return res.status(409).json({ success: false,
+      code: 'ATTENDANCE_REQUEST_IN_PROGRESS',
+      message: 'Attendance submission is already processing for this shift.' });
+  }
+  c11ActiveAttendanceRequests.add(key);
+  const release = () => c11ActiveAttendanceRequests.delete(key);
+  res.once('finish', release);
+  res.once('close', release);
+  next();
+};
+
+/* ==========================================
+   C06 — OFFLINE ATTENDANCE SYNC
+   Delayed events require HR verification.
+   ========================================== */
+
+
+app.post(
+  '/api/attendance/offline-sync',
+  authenticateToken,
+  uploadCorrectionFiles,
+  async (req, res) => {
+    const file = req.files?.selfie?.[0];
+
+    const discardFile = () => {
+      if (file?.path) {
+        fs.promises.unlink(file.path).catch(() => {});
+      }
+    };
+
+    const reject = (status, message) => {
+      discardFile();
+
+      return res.status(status).json({
+        success: false,
+        message
+      });
+    };
+
+    const {
+      event_id,
+      event_type,
+      occurred_at,
+      schedule_id,
+      latitude,
+      longitude
+    } = req.body || {};
+
+    // 1. Only instructors can submit offline attendance.
+    if (req.user.role !== 'instructor') {
+      return reject(403, 'Only instructors may sync attendance.');
+    }
+
+    if (!file) {
+      return reject(400, 'Attendance selfie is required.');
+    }
+
+    // 2. Validate the offline event.
+    if (
+      !/^[a-z0-9]{8,80}$/i.test(String(event_id || '')) ||
+      !['clock-in', 'clock-out'].includes(event_type)
+    ) {
+      return reject(400, 'Invalid offline event.');
+    }
+
+    // 3. Validate original device-reported timestamp.
+    if (
+      typeof occurred_at !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(occurred_at)
+    ) {
+      return reject(400, 'Invalid original attendance timestamp.');
+    }
+
+    const occurredMs = Date.parse(occurred_at);
+    const nowMs = Date.now();
+
+    if (
+      !Number.isFinite(occurredMs) ||
+      occurredMs > nowMs + 5 * 60 * 1000 ||
+      nowMs - occurredMs > 30 * 24 * 60 * 60 * 1000
+    ) {
+      return reject(
+        400,
+        'Offline attendance time is in the future or older than 30 days.'
+      );
+    }
+
+    // 4. Validate GPS coordinates.
+    const lat = Number(latitude);
+    const lon = Number(longitude);
+
+    if (
+      latitude === undefined ||
+      longitude === undefined ||
+      latitude === '' ||
+      longitude === '' ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lon) > 180 ||
+      (lat === 0 && lon === 0)
+    ) {
+      return reject(400, 'Valid GPS coordinates are required.');
+    }
+
+    // 5. Validate schedule ID.
+    if (
+      !/^\d+$/.test(String(schedule_id || '')) ||
+      Number(schedule_id) <= 0 ||
+      !Number.isSafeInteger(Number(schedule_id))
+    ) {
+      return reject(400, 'A valid schedule ID is required.');
+    }
+
+    // Convert original UTC timestamp to Philippine date and time.
+    const phDateTime = new Date(
+      occurredMs + 8 * 60 * 60 * 1000
+    ).toISOString();
+
+    const attendanceDate = phDateTime.slice(0, 10);
+    const attendanceTime = phDateTime.slice(11, 19);
+
+    const marker = `[OFFLINE_SYNC:${event_id}]`;
+
+    const correctionType =
+      event_type === 'clock-in'
+        ? 'clock_in'
+        : 'clock_out';
+
+    // 6. Initialize connection safely.
+    let connection = null;
+    let transactionStarted = false;
+    let committed = false;
+
+    try {
+      connection = await db.promise().getConnection();
+
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      // 7. Verify authenticated employee.
+      // Lock user row to serialize submissions for this account.
+      const [users] = await connection.query(
+        `SELECT id, employee_id
+         FROM users
+         WHERE id = ?
+           AND status = 'active'
+         FOR UPDATE`,
+        [req.user.id]
+      );
+
+      if (!users.length) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return reject(403, 'Employee account is unavailable.');
+      }
+
+      const user = users[0];
+
+      // 8. Verify schedule ownership.
+      // Supports both employee_id and internal users.id.
+      const [schedules] = await connection.query(
+        `SELECT s.id, s.place
+         FROM schedules s
+         WHERE s.id = ?
+           AND (s.user_id = ? OR s.user_id = ?)
+           AND DATE(s.date) = ?
+         LIMIT 1`,
+        [
+          Number(schedule_id),
+          user.employee_id,
+          user.id,
+          attendanceDate
+        ]
+      );
+
+      if (!schedules.length) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return reject(
+          400,
+          'The offline event does not match your assigned schedule.'
+        );
+      }
+
+      // 9. Verify the reported location.
+      const [locations] = await connection.query(
+        `SELECT latitude, longitude, radius
+         FROM school_locations
+         WHERE name = ?
+         LIMIT 1`,
+        [schedules[0].place]
+      );
+
+      if (!locations.length) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return reject(
+          400,
+          'Scheduled location is not registered.'
+        );
+      }
+
+      const school = locations[0];
+
+      const schoolLat = Number(school.latitude);
+      const schoolLon = Number(school.longitude);
+      const schoolRadius = Number(school.radius);
+
+      if (
+        !Number.isFinite(schoolLat) ||
+        !Number.isFinite(schoolLon) ||
+        !Number.isFinite(schoolRadius) ||
+        schoolRadius <= 0
+      ) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return reject(
+          500,
+          'Scheduled location configuration is invalid.'
+        );
+      }
+
+      const distance = getDistanceFromLatLonInMeters(
+        lat,
+        lon,
+        schoolLat,
+        schoolLon
+      );
+
+      if (!Number.isFinite(distance) || distance > schoolRadius) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return reject(
+          403,
+          'Reported attendance location is outside the scheduled campus.'
+        );
+      }
+
+      // 10. Prevent duplicate submissions of the same event.
+      const [duplicates] = await connection.query(
+        `SELECT id
+         FROM attendance_corrections
+         WHERE user_id = ?
+           AND reason LIKE ?
+         LIMIT 1`,
+        [user.id, `${marker}%`]
+      );
+
+      if (duplicates.length) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        discardFile();
+
+        return res.json({
+          success: true,
+          pendingReview: true,
+          alreadySubmitted: true,
+          message: 'This offline event was already submitted to HR.'
+        });
+      }
+
+      
+      // C09.5: Reconcile a previously recorded action.
+      const [officialAttendance] = await connection.query(
+        `SELECT
+           id,
+           TIME_TO_SEC(time_in) AS clock_in_seconds,
+           TIME_TO_SEC(time_out) AS clock_out_seconds
+         FROM attendance
+         WHERE user_id = ?
+           AND schedule_id = ?
+           AND DATE(date) = ?
+         LIMIT 1`,
+        [
+          user.employee_id,
+          Number(schedule_id),
+          attendanceDate
+        ]
+      );
+
+      if (officialAttendance.length > 0) {
+        const record = officialAttendance[0];
+
+        const parts = attendanceTime.split(':').map(Number);
+
+        const originalSeconds =
+          parts[0] * 3600 +
+          parts[1] * 60 +
+          parts[2];
+
+        const recordedValue =
+          correctionType === 'clock_in'
+            ? record.clock_in_seconds
+            : record.clock_out_seconds;
+
+        const recordedSeconds =
+          recordedValue == null
+            ? NaN
+            : Number(recordedValue);
+
+        // Compare timestamps within 2 minutes.
+        const rawDifference = Math.abs(
+          recordedSeconds - originalSeconds
+        );
+
+        // Account for midnight crossing.
+        const difference = Math.min(
+          rawDifference,
+          86400 - rawDifference
+        );
+
+        if (
+          Number.isFinite(originalSeconds) &&
+          Number.isFinite(recordedSeconds) &&
+          rawDifference <= 86400 &&
+          difference <= 120
+        ) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          discardFile();
+
+          return res.status(200).json({
+            success: true,
+            pendingReview: true,
+            alreadyRecorded: true,
+            message:
+              'Matching attendance is already recorded. ' +
+              'No additional HR correction is required.'
+          });
+        }
+      }
+
+
+
+
+      // 11. Prevent repeated correction requests for
+      // the same shift and attendance action.
+      const requestedColumn =
+        correctionType === 'clock_in'
+          ? 'requested_clock_in'
+          : 'requested_clock_out';
+
+      const [existing] = await connection.query(
+        `SELECT id
+         FROM attendance_corrections
+         WHERE user_id = ?
+           AND schedule_id = ?
+           AND attendance_date = ?
+           AND status IN ('pending', 'approved')
+           AND ${requestedColumn} IS NOT NULL
+         LIMIT 1`,
+        [
+          user.id,
+          Number(schedule_id),
+          attendanceDate
+        ]
+      );
+
+      if (existing.length) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return reject(
+          409,
+          'An attendance correction for this shift and action already exists. Please contact HR.'
+        );
+      }
+
+      // 12. Limit pending correction requests.
+      const [pendingCounts] = await connection.query(
+        `SELECT COUNT(*) AS total
+         FROM attendance_corrections
+         WHERE user_id = ?
+           AND status = 'pending'`,
+        [user.id]
+      );
+
+      if (Number(pendingCounts[0]?.total || 0) >= 10) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return reject(
+          429,
+          'Too many pending corrections. Please wait for HR review.'
+        );
+      }
+
+      // 13. Prepare HR review information.
+      const reason =
+        `${marker} Delayed ${correctionType} submission. ` +
+        `Device-reported time: ${occurred_at}. ` +
+        `GPS: ${lat}, ${lon}. ` +
+        'Original time and GPS are device-reported and require HR verification.';
+
+      // 14. Insert pending attendance correction.
+      const [inserted] = await connection.query(
+        `INSERT INTO attendance_corrections
+         (
+           user_id,
+           attendance_date,
+           schedule_id,
+           requested_clock_in,
+           requested_clock_out,
+           reason,
+           selfie_url,
+           status
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [
+          user.id,
+          attendanceDate,
+          Number(schedule_id),
+          correctionType === 'clock_in'
+            ? attendanceTime
+            : null,
+          correctionType === 'clock_out'
+            ? attendanceTime
+            : null,
+          reason,
+          `/uploads/corrections/${file.filename}`
+        ]
+      );
+
+      // 15. Commit only after successful insertion.
+      await connection.commit();
+
+      committed = true;
+      transactionStarted = false;
+
+      // Audit logging should not invalidate a successful
+      // attendance correction submission.
+      try {
+        logAction(
+          req.user.id,
+          'OFFLINE_ATTENDANCE_SUBMITTED',
+          'attendance_correction',
+          inserted.insertId,
+          req,
+          null,
+          {
+            event_id,
+            event_type,
+            occurred_at
+          }
+        );
+      } catch (auditError) {
+        console.error(
+          'Offline attendance audit logging error:',
+          auditError.message
+        );
+      }
+
+      // 16. Return successful submission.
+      return res.status(200).json({
+        success: true,
+        pendingReview: true,
+        correctionId: inserted.insertId,
+        message: 'Offline attendance submitted for HR review.'
+      });
+
+    } catch (error) {
+      // Only roll back if the transaction is still active.
+      if (connection && transactionStarted && !committed) {
+        await connection.rollback().catch((rollbackError) => {
+          console.error(
+            'Offline attendance rollback error:',
+            rollbackError.message
+          );
+        });
+      }
+
+      console.error('Offline attendance sync error:', error);
+
+      // Do not delete a file belonging to an already
+      // committed correction.
+      if (!committed) {
+        discardFile();
+      }
+
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          message: committed
+            ? 'Attendance submitted, but the response could not be completed.'
+            : 'Unable to submit offline attendance.'
+        });
+      }
+
+    } finally {
+      // Release only an acquired database connection.
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+);
+
+
+
+app.post('/api/attendance/clock-in', clockLimiter, authenticateToken, multerSelfie.single('selfie'), c11SingleFlight('clock-in'), async (req, res) => {
   let { latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
 
@@ -1246,11 +2400,55 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     return res.status(400).json({ success: false, message: 'A selfie is required to verify your attendance.' });
   }
   
-  const parsedLat = parseFloat(latitude);
-  const parsedLon = parseFloat(longitude);
-  if (!latitude || !longitude || isNaN(parsedLat) || isNaN(parsedLon) || parsedLat === 0 || parsedLon === 0) {
-    return res.status(400).json({ success: false, message: 'Unable to retrieve valid GPS location. Ensure location permissions are granted.' });
+  
+const parsedLat = Number(latitude);
+const parsedLon = Number(longitude);
+
+ 
+
+if (
+  latitude === undefined ||
+  latitude === null ||
+  longitude === undefined ||
+  longitude === null ||
+  String(latitude).trim() === '' ||
+  String(longitude).trim() === '' ||
+  !Number.isFinite(parsedLat) ||
+  !Number.isFinite(parsedLon) ||
+  parsedLat < -90 ||
+  parsedLat > 90 ||
+  parsedLon < -180 ||
+  parsedLon > 180 ||
+  (parsedLat === 0 && parsedLon === 0)
+) {
+  if (req.file?.path) {
+    fs.promises.unlink(req.file.path).catch(() => {});
   }
+
+  return res.status(400).json({
+    success: false,
+    message: 'Invalid GPS coordinates. Enable location services and try again.'
+  });
+}
+
+
+// C08: Validate reported GPS accuracy and freshness.
+const gpsQualityError = validateAttendanceGpsQuality(req.body);
+
+if (gpsQualityError) {
+  if (req.file?.path) {
+    fs.promises.unlink(req.file.path).catch(() => {});
+  }
+
+  return res.status(400).json({
+    success: false,
+    message: gpsQualityError
+  });
+}
+
+
+
+    
 
   const selfiePath = `/uploads/selfies/${req.file.filename}`;
   const { date: todayDate, time: currentTime } = getPHTime();
@@ -1289,10 +2487,16 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
       return res.status(400).json({ success: false, message: 'No active schedule found for today to check in.' });
     }
 
-    const [schedRows] = await connection.query(
-      "SELECT id, place, start_time, end_time FROM schedules WHERE id = ? AND user_id = ?",
-      [schedule_id, employee_id]
-    );
+    
+const [schedRows] = await connection.query(
+  `SELECT id, place, start_time, end_time
+   FROM schedules
+   WHERE id = ?
+     AND user_id = ?
+     AND DATE(date) = ?`,
+  [schedule_id, employee_id, todayDate]
+);
+
     if (schedRows.length === 0) {
       await connection.rollback();
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
@@ -1336,28 +2540,64 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     }
     // ─────────────────────────────────────────────────────────────────
 
-    if (currentTime > scheduledEndTime) {
-      const [existingAtt] = await connection.query(
-        "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ? AND date = ?", 
-        [employee_id, schedule_id, todayDate]
-      );
-      
-      if (existingAtt.length > 0) {
-        await connection.query("UPDATE attendance SET status = 'missed schedule' WHERE id = ?", [existingAtt[0].id]);
-      } else {
-        await connection.query(
-          `INSERT INTO attendance (user_id, schedule_id, date, status, location) 
-           VALUES (?, ?, ?, 'missed schedule', 'Missed Schedule')`,
-          [employee_id, schedule_id, todayDate]
-        );
-      }
-      await connection.commit(); 
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(403).json({
-        success: false,
-        message: 'This shift has already passed and has been marked as Missed Schedule.'
-      });
-    }
+  
+const [existingAttendance] = await connection.query(
+  `SELECT id, time_in, time_out, status
+   FROM attendance
+   WHERE user_id = ?
+     AND schedule_id = ?
+     AND DATE(date) = ?
+   LIMIT 1`,
+  [employee_id, schedule_id, todayDate]
+);
+
+if (existingAttendance.length > 0) {
+  await connection.rollback();
+
+  if (req.file?.path) {
+    fs.promises.unlink(req.file.path).catch(() => {});
+  }
+
+  return res.status(409).json({
+    success: false,
+    message:
+      'An attendance record already exists for this schedule. ' +
+      'Duplicate clock-in is not allowed.'
+  });
+}
+
+
+    
+// C10.2: Overnight schedules end on the NEXT calendar day.
+const c10StartSec = c10ParseTimeSeconds(scheduledStartTime);
+const c10EndSec = c10ParseTimeSeconds(scheduledEndTime);
+if (c10StartSec == null || c10EndSec == null) {
+  await connection.rollback();
+  if (req.file?.path) fs.promises.unlink(req.file.path).catch(() => {});
+  return res.status(409).json({ success: false, message: 'Schedule has invalid start/end times.' });
+}
+const c10OvernightSchedule = c10EndSec <= c10StartSec;
+if (!c10OvernightSchedule && currentTime > scheduledEndTime) {
+  await connection.query(
+    `INSERT INTO attendance
+     (user_id, schedule_id, date, status, location)
+     VALUES (?, ?, ?, 'missed schedule', 'Missed Schedule')`,
+    [employee_id, schedule_id, todayDate]
+  );
+
+  await connection.commit();
+
+  if (req.file?.path) {
+    fs.promises.unlink(req.file.path).catch(() => {});
+  }
+
+  return res.status(403).json({
+    success: false,
+    message:
+      'This shift has already passed and has been marked as Missed Schedule.'
+  });
+}
+
 
     const scheduledStart = new Date(`1970-01-01T${scheduledStartTime}`);
     const actualTime = new Date(`1970-01-01T${currentTime}`);
@@ -1384,11 +2624,15 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
     const schoolGeo = locRows[0];
 
     const distance = getDistanceFromLatLonInMeters(parsedLat, parsedLon, schoolGeo.latitude, schoolGeo.longitude);
-    if (distance > schoolGeo.radius) {
-      await connection.rollback();
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
-    }
+    
+if (distance > schoolGeo.radius) {
+  await connection.rollback();
+  if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+  return res.status(403).json({
+    success: false,
+    message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m`
+  });
+}
 
     // ── LAYER 2: server-side spoofing heuristics ─────────────────────
     try {
@@ -1512,7 +2756,13 @@ app.post('/api/attendance/clock-in', authenticateToken, multerSelfie.single('sel
   }
 });
 
-app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('selfie'), async (req, res) => {
+app.post('/api/attendance/clock-out', clockLimiter, authenticateToken, multerSelfie.single('selfie'), c11SingleFlight('clock-out'), async (req, res) => {
+  const discardSelfie = () => {
+      if (req.file?.path) {
+        fs.promises.unlink(req.file.path).catch(() => {});
+      }
+    };
+    let clockOutSaved = false;
   let { latitude, longitude, schedule_id } = req.body;
   const userId = req.user.id;
 
@@ -1521,11 +2771,54 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     return res.status(400).json({ success: false, message: 'A selfie is required to verify your clock-out.' });
   }
   
-  const parsedLat = parseFloat(latitude);
-  const parsedLon = parseFloat(longitude);
-  if (!latitude || !longitude || isNaN(parsedLat) || isNaN(parsedLon) || parsedLat === 0 || parsedLon === 0) {
-    return res.status(400).json({ success: false, message: 'Unable to retrieve valid GPS location. Ensure location permissions are granted.' });
+  
+const parsedLat = Number(latitude);
+const parsedLon = Number(longitude);
+
+  
+
+
+if (
+  latitude === undefined ||
+  latitude === null ||
+  longitude === undefined ||
+  longitude === null ||
+  String(latitude).trim() === '' ||
+  String(longitude).trim() === '' ||
+  !Number.isFinite(parsedLat) ||
+  !Number.isFinite(parsedLon) ||
+  parsedLat < -90 ||
+  parsedLat > 90 ||
+  parsedLon < -180 ||
+  parsedLon > 180 ||
+  (parsedLat === 0 && parsedLon === 0)
+) {
+  if (req.file?.path) {
+    fs.promises.unlink(req.file.path).catch(() => {});
   }
+
+  return res.status(400).json({
+    success: false,
+    message: 'Invalid GPS coordinates. Enable location services and try again.'
+  });
+}
+
+
+// C08: Validate reported GPS accuracy and freshness.
+const gpsQualityError = validateAttendanceGpsQuality(req.body);
+
+if (gpsQualityError) {
+  discardSelfie();
+
+  return res.status(400).json({
+    success: false,
+    message: gpsQualityError
+  });
+}
+
+
+
+
 
   const selfiePath = `/uploads/selfies/${req.file.filename}`;
   const { date: todayDate, time: currentTime } = getPHTime();
@@ -1535,7 +2828,16 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
       "SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active'",
       [userId]
     );
-    if (userRows.length === 0) return res.status(403).json({ success: false, message: 'User inactive or not found.' });
+    
+if (userRows.length === 0) {
+  discardSelfie();
+
+  return res.status(403).json({
+    success: false,
+    message: 'User inactive or not found.'
+  });
+}
+
     const employee_id = userRows[0].employee_id;
 
     if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
@@ -1556,57 +2858,109 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
       }
     }
 
-    if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
-      return res.status(400).json({ success: false, message: 'No active schedule found for today to check out.' });
-    }
-
-    const [schedRows] = await db.promise().query(
-      "SELECT place, end_time FROM schedules WHERE id = ? AND user_id = ?",
-      [schedule_id, employee_id]
-    );
-    if (schedRows.length === 0) return res.status(403).json({ success: false, message: 'Schedule not found.' });
-    const { place: schedulePlace, end_time: scheduledEndTime } = schedRows[0];
-
-    // ✅ GRACE PERIOD VALIDATION
-    const timeToMinutes = (timeStr) => {
-      const [hours, minutes] = timeStr.split(':').map(Number);
-      return (hours * 60) + minutes;
-    };
-
-    const endMin = timeToMinutes(scheduledEndTime);
-    const currentMin = timeToMinutes(currentTime);
     
+if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
+  discardSelfie();
+
+  return res.status(400).json({
+    success: false,
+    message: 'No active schedule found for today to check out.'
+  });
+}
+
+
+    
+const [schedRows] = await db.promise().query(
+  `SELECT place, start_time, end_time,
+          DATE_FORMAT(date, '%Y-%m-%d') AS shift_date
+   FROM schedules
+   WHERE id = ?
+     AND user_id = ?
+     AND DATE(date) BETWEEN DATE_SUB(DATE(?), INTERVAL 1 DAY) AND DATE(?)`,
+  [schedule_id, employee_id, todayDate, todayDate]
+);
+
+    
+if (schedRows.length === 0) {
+  discardSelfie();
+
+  return res.status(403).json({
+    success: false,
+    message: 'Schedule not found.'
+  });
+}
+
+    const { place: schedulePlace, start_time: scheduledStartTime,
+            end_time: scheduledEndTime, shift_date: shiftDate } = schedRows[0];
+
+    // C10.2: compare full Philippine timestamps, not clock times only.
+    const startSeconds = c10ParseTimeSeconds(scheduledStartTime);
+    const endSeconds = c10ParseTimeSeconds(scheduledEndTime);
+    if (startSeconds == null || endSeconds == null) {
+      discardSelfie();
+      return res.status(409).json({ success: false, message: 'Schedule times are invalid.' });
+    }
+    const shiftEndMs = Date.parse(`${shiftDate}T${scheduledEndTime}+08:00`) +
+      (endSeconds <= startSeconds ? 86400000 : 0);
+    const currentMs = Date.parse(`${todayDate}T${currentTime}+08:00`);
+    if (!Number.isFinite(shiftEndMs) || !Number.isFinite(currentMs)) {
+      discardSelfie();
+      return res.status(409).json({ success: false, message: 'Unable to validate shift times.' });
+    }
+    const minutesFromEnd = (currentMs - shiftEndMs) / 60000;
     const EARLY_GRACE_MINUTES = 5;
     const LATE_GRACE_MINUTES = 15;
 
-    // 1. Check if clocking out too early
-    if (currentMin < (endMin - EARLY_GRACE_MINUTES)) {
-      return res.status(403).json({ 
-        success: false, 
-        message: `Too early to clock out. You may only clock out starting 5 minutes before your shift ends (${formatTo12Hour(scheduledEndTime)}).` 
-      });
-    }
+    if (minutesFromEnd < -EARLY_GRACE_MINUTES) {
+  discardSelfie();
+
+  return res.status(403).json({
+    success: false,
+    message: `Too early to clock out. You may only clock out starting 5 minutes before your shift ends (${formatTo12Hour(scheduledEndTime)}).`
+  });
+}
+
 
     // 2. Check if clocking out too late
-    if (currentMin > (endMin + LATE_GRACE_MINUTES)) {
-      return res.status(403).json({ 
-        success: false, 
-        message: `Clock-out is too late. The 15-minute grace period has expired. Please file an Overtime request or an Attendance Correction for this shift.` 
-      });
-    }
+    
+if (minutesFromEnd > LATE_GRACE_MINUTES) {
+  discardSelfie();
+
+  return res.status(403).json({
+    success: false,
+    message: 'Clock-out is too late. The 15-minute grace period has expired. Please file an Overtime request or an Attendance Correction for this shift.'
+  });
+}
+
 
     const [locRows] = await db.promise().query(
       "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
       [schedulePlace]
     );
-    if (locRows.length === 0) return res.status(400).json({ success: false, message: `Location '${schedulePlace}' not registered in the system.` });
+    
+if (locRows.length === 0) {
+  discardSelfie();
+
+  return res.status(400).json({
+    success: false,
+    message: `Location '${schedulePlace}' not registered in the system.`
+  });
+}
+
     const schoolGeo = locRows[0];
 
     // Calculate distance strictly using provided GPS coordinates
     const distance = getDistanceFromLatLonInMeters(parsedLat, parsedLon, schoolGeo.latitude, schoolGeo.longitude);
-    if (distance > schoolGeo.radius) {
-      return res.status(403).json({ success: false, message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m` });
-    }
+   
+if (distance > schoolGeo.radius) {
+  discardSelfie();
+
+  return res.status(403).json({
+    success: false,
+    message: `Not within ${schedulePlace} campus. Distance: ${Math.round(distance)}m`
+  });
+}
+
 
     // ── LAYER 2: server-side spoofing heuristics ─────────────────────
     try {
@@ -1656,22 +3010,86 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     }
     // ─────────────────────────────────────────────────────────────────
 
-    const [existing] = await db.promise().query(
-      "SELECT id, time_in FROM attendance WHERE user_id = ? AND schedule_id = ? AND time_out IS NULL",
-      [employee_id, schedule_id]
-    );
-    if (existing.length === 0) return res.status(400).json({ success: false, message: 'No active clock-in found for this schedule.' });
+    
+const [existing] = await db.promise().query(
+  `SELECT id, time_in
+   FROM attendance
+   WHERE user_id = ?
+     AND schedule_id = ?
+     AND DATE(date) = ?
+     AND time_in IS NOT NULL
+     AND time_out IS NULL
+   ORDER BY id DESC
+   LIMIT 1`,
+  [employee_id, schedule_id, shiftDate]
+);
 
-    await db.promise().query(
-      `UPDATE attendance SET 
-        time_out = ?, 
-        clock_out_selfie = ?, 
-        clock_out_latitude = ?, 
-        clock_out_longitude = ?, 
-        location = ? 
-       WHERE id = ?`,
-      [currentTime, selfiePath, parsedLat, parsedLon, schedulePlace, existing[0].id]
-    );
+
+if (existing.length === 0) {
+  discardSelfie();
+
+  return res.status(409).json({
+    success: false,
+    message: 'No active clock-in found. You may have already clocked out.'
+  });
+}
+
+
+
+// C10.2: reject impossible durations and correctly handle midnight crossing.
+const [clockInTimeRows] = await db.promise().query(
+  `SELECT time_in FROM attendance WHERE id = ? LIMIT 1`,
+  [existing[0].id]
+);
+const calculatedHours = c10AttendanceHours(
+  clockInTimeRows[0]?.time_in,
+  currentTime
+);
+if (calculatedHours == null) {
+  discardSelfie();
+  return res.status(409).json({
+    success: false,
+    message: 'Clock-out would produce invalid or excessive work hours. Please contact HR.'
+  });
+}
+
+const [clockOutResult] = await db.promise().query(
+  `UPDATE attendance
+   SET
+     time_out = ?,
+     clock_out_selfie = ?,
+     clock_out_latitude = ?,
+     clock_out_longitude = ?,
+     location = ?,
+     total_hours = ?,
+     status = 'completed'
+   WHERE id = ?
+     AND time_in IS NOT NULL
+     AND time_out IS NULL`,
+  [
+    currentTime,
+    selfiePath,
+    parsedLat,
+    parsedLon,
+    schedulePlace,
+    calculatedHours,
+    existing[0].id
+  ]
+);
+
+
+
+if (clockOutResult.affectedRows !== 1) {
+  discardSelfie();
+
+  return res.status(409).json({
+    success: false,
+    message: 'This attendance record has already been clocked out.'
+  });
+}
+clockOutSaved = true;
+
+
 
     await db.promise().query(
       "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
@@ -1681,14 +3099,35 @@ app.post('/api/attendance/clock-out', authenticateToken, multerSelfie.single('se
     await broadcastInstructorStatus(employee_id);
     logAction(req.user.id, 'CLOCK_OUT', 'attendance', existing[0].id, req);
 
-    res.json({ success: true, message: `Clocked out successfully at ${formatTo12Hour(currentTime)}.` });
+    
+    // Return success after attendance has been saved.
+    return res.json({
+      success: true,
+      message: `Clocked out successfully at ${formatTo12Hour(currentTime)}.`
+    });
+
   } catch (err) {
     console.error("Clock-out error:", err);
-    res.status(500).json({ success: false, message: "A server error occurred during clock-out." });
+
+   
+    if (!clockOutSaved) {
+      discardSelfie();
+    }
+
+    
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: clockOutSaved
+          ? "Clock-out was saved, but a follow-up operation failed. Please refresh your attendance."
+          : "A server error occurred during clock-out."
+      });
+    }
   }
 });
 
-app.put('/api/attendance/update/:id', authenticateToken, async (req, res) => {
+
+app.put('/api/attendance/update/:id', authenticateToken, requireAction('attendance:update'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -1779,10 +3218,10 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
     });
   }
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!isValidISOCalendarDate(date)) {
     return res.status(400).json({
       success: false,
-      message: 'Invalid date format. Expected YYYY-MM-DD.'
+      message: 'Invalid calendar date. Expected a real YYYY-MM-DD date.'
     });
   }
 
@@ -1976,6 +3415,7 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
       await connection.commit();
 
       logAction(userId, 'SUBMIT_CORRECTION', 'attendance_correction', insertResult.insertId, req);
+      void c14NotifyHRPending('correction', insertResult.insertId, resolvedEmployeeId).catch(err => console.warn('C14 correction notify:',err.message));
       return res.json({ success: true, message: 'Correction request submitted. HR will review.' });
     } catch (txErr) {
       await connection.rollback();
@@ -2020,107 +3460,505 @@ app.get('/api/attendance/corrections/user/:employeeId', authenticateToken, verif
   }
 });
 
-app.put('/api/attendance/corrections/:id/review', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
 
-  const { id } = req.params;
-  const { status, admin_remarks } = req.body;
-  const phNow = getPHDateTime();
+/* ==========================================
+   C07 — TRANSACTIONAL ATTENDANCE CORRECTION REVIEW
+   Compatible with C06 offline attendance
+   ========================================== */
 
-  if (!['approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Status must be approved or rejected' });
-  }
+app.put(
+  '/api/attendance/corrections/:id/review',
+  authenticateToken,
+  requireAction('corrections:review'),
+  async (req, res) => {
 
-  // Fix 10.4 — cap admin_remarks length
-  const cleanAdminRemarks = admin_remarks ? String(admin_remarks).trim() : null;
-  if (cleanAdminRemarks && cleanAdminRemarks.length > 500) {
-    return res.status(400).json({ error: 'Admin remarks must be 500 characters or fewer.' });
-  }
-
-  try {
-    const [corr] = await db.promise().query(
-      `SELECT c.*, u.employee_id, u.id as internal_user_id 
-       FROM attendance_corrections c 
-       JOIN users u ON (c.user_id = u.id OR c.user_id = u.employee_id) 
-       WHERE c.id = ?`, 
-      [id]
-    );
-    if (corr.length === 0) return res.status(404).json({ error: 'Request not found' });
-
-    const record = corr[0];
-    const empIdString = record.employee_id; 
-    let targetScheduleId = record.schedule_id;
-
-    if (!targetScheduleId) {
-      const [schedRows] = await db.promise().query(
-        "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
-        [empIdString, record.internal_user_id, record.attendance_date]
-      );
-      if (schedRows.length > 0) targetScheduleId = schedRows[0].id;
+    // 1. Role verification
+    if (!['admin', 'hr_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden'
+      });
     }
 
-    // Stamped with exact Philippine Time on review
-    await db.promise().query(
-      "UPDATE attendance_corrections SET status = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
-      [status, cleanAdminRemarks, req.user.id, phNow, id]
-    );
+    const { id } = req.params;
+    const { status, admin_remarks } = req.body || {};
+    const phNow = getPHDateTime();
 
-    if (status === 'approved') {
-      const [existing] = await db.promise().query(
-        "SELECT id, time_in, time_out FROM attendance WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?",
-        [empIdString, record.internal_user_id, targetScheduleId]
+    if (!/^\d+$/.test(String(id)) || Number(id) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid correction ID.'
+      });
+    }
+
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status must be approved or rejected.'
+      });
+    }
+
+    // Preserve existing admin remarks validation.
+    const cleanAdminRemarks =
+      admin_remarks == null
+        ? null
+        : String(admin_remarks).trim() || null;
+
+    if (
+      cleanAdminRemarks &&
+      cleanAdminRemarks.length > 500
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Admin remarks must be 500 characters or fewer.'
+      });
+    }
+
+    let connection = null;
+    let transactionStarted = false;
+    let committed = false;
+
+    try {
+      // 2. Start transaction.
+      connection = await db.promise().getConnection();
+
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      // 3. Lock correction to prevent concurrent reviews.
+      const [corr] = await connection.query(
+        `SELECT
+           c.*,
+           u.employee_id,
+           u.id AS internal_user_id
+         FROM attendance_corrections c
+         JOIN users u
+           ON (
+             c.user_id = u.id
+             OR c.user_id = u.employee_id
+           )
+         WHERE c.id = ?
+         FOR UPDATE`,
+        [id]
       );
 
-      const finalIn = record.requested_clock_in || (existing.length > 0 ? existing[0].time_in : null);
-      const finalOut = record.requested_clock_out || (existing.length > 0 ? existing[0].time_out : null);
-      let totalHours = 0;
-      if (finalIn && finalOut && finalOut !== '--:--') {
-        totalHours = Math.max(0, (new Date(`1970-01-01T${finalOut}`) - new Date(`1970-01-01T${finalIn}`)) / 3600000);
+      if (!corr.length) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(404).json({
+          success: false,
+          message: 'Correction request not found.'
+        });
       }
 
-      if (existing.length === 0) {
-        await db.promise().query(
-          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out, status, total_hours, correction_requested, correction_status)
-           VALUES (?, ?, ?, ?, ?, 'completed', ?, 0, 'approved')`,
-          [empIdString, targetScheduleId, record.attendance_date, finalIn, finalOut, totalHours.toFixed(2)]
+      // Do not review an ambiguously matched owner.
+      if (corr.length !== 1) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message: 'Correction ownership is ambiguous. Contact the administrator.'
+        });
+      }
+
+      const record = corr[0];
+      const empIdString = String(record.employee_id);
+      const internalUserId = record.internal_user_id;
+
+      // 4. Prevent self-review.
+      if (
+        String(internalUserId) === String(req.user.id)
+      ) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(403).json({
+          success: false,
+          message: 'You cannot review your own correction request.'
+        });
+      }
+
+      // 5. Only pending corrections can be reviewed.
+      if (record.status !== 'pending') {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message: `This correction has already been ${record.status}.`
+        });
+      }
+
+      const isOfflineCorrection =
+        String(record.reason || '')
+          .startsWith('[OFFLINE_SYNC:');
+
+      // 6. Resolve schedule.
+      let targetScheduleId = record.schedule_id;
+
+      if (!targetScheduleId) {
+        const [schedRows] = await connection.query(
+          `SELECT id
+           FROM schedules
+           WHERE (user_id = ? OR user_id = ?)
+             AND DATE(date) = DATE(?)
+           ORDER BY start_time ASC
+           LIMIT 1`,
+          [
+            empIdString,
+            internalUserId,
+            record.attendance_date
+          ]
         );
-      } else {
-        const updates = [];
-        const values = [];
-        if (record.requested_clock_in) { updates.push('time_in = ?'); values.push(record.requested_clock_in); }
-        if (record.requested_clock_out) { updates.push('time_out = ?'); values.push(record.requested_clock_out); }
-        updates.push("status = 'completed', total_hours = ?, correction_requested = 0, correction_status = 'approved'");
-        values.push(totalHours.toFixed(2));
-        values.push(existing[0].id);
-        await db.promise().query(`UPDATE attendance SET ${updates.join(', ')} WHERE id = ?`, values);
+
+        if (schedRows.length) {
+          targetScheduleId = schedRows[0].id;
+        }
       }
-    } else if (status === 'rejected') {
-      // Revert attendance status to missing clock-out if clock-out correction is denied
-      await db.promise().query(
-        `UPDATE attendance 
-         SET correction_requested = 0, 
-             correction_status = 'rejected',
-             time_out = NULL,
-             total_hours = 0,
-             status = CASE 
-               WHEN time_in IS NOT NULL THEN 'missing clock-out'
-               ELSE 'missed schedule'
-             END
-         WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
-        [empIdString, record.internal_user_id, targetScheduleId]
+
+      // Approval must never insert unscheduled
+      // attendance without a verified schedule.
+      if (status === 'approved' && !targetScheduleId) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message:
+            'No matching schedule found. Assign a valid schedule before approving.'
+        });
+      }
+
+      // Verify ownership of the resolved schedule.
+      if (targetScheduleId) {
+        const [validSchedule] = await connection.query(
+          `SELECT id
+           FROM schedules
+           WHERE id = ?
+             AND (user_id = ? OR user_id = ?)
+             AND DATE(date) = DATE(?)
+           LIMIT 1`,
+          [
+            targetScheduleId,
+            empIdString,
+            internalUserId,
+            record.attendance_date
+          ]
+        );
+
+        if (!validSchedule.length) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message:
+              'Correction schedule does not belong to this employee or date.'
+          });
+        }
+      }
+
+      // 7. Approval processing
+      if (status === 'approved') {
+
+        // Lock attendance record for this schedule.
+        const [existing] = await connection.query(
+          `SELECT id, user_id, time_in, time_out, date
+           FROM attendance
+           WHERE schedule_id = ?
+           FOR UPDATE`,
+          [targetScheduleId]
+        );
+
+        if (existing.length > 1) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message: 'Duplicate attendance records require administrator review.'
+          });
+        }
+
+        // Protect against changing another employee's record.
+        if (existing.length) {
+          const currentOwner = String(existing[0].user_id);
+
+          if (
+            currentOwner !== empIdString &&
+            currentOwner !== String(internalUserId)
+          ) {
+            await connection.rollback();
+            transactionStarted = false;
+
+            return res.status(409).json({
+              success: false,
+              message: 'Attendance belongs to another employee.'
+            });
+          }
+        }
+
+        const currentAttendance = existing[0] || null;
+
+        const finalIn =
+          record.requested_clock_in ||
+          currentAttendance?.time_in ||
+          null;
+
+        const finalOut =
+          record.requested_clock_out ||
+          currentAttendance?.time_out ||
+          null;
+
+        // Do not create an invalid clock-out-only record.
+        if (!finalIn && finalOut) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message:
+              'Clock-out cannot be approved without a clock-in. Review the missing clock-in first.'
+          });
+        }
+
+        // A valid approved correction requires a time.
+        if (!finalIn && !finalOut) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message: 'No attendance time is available for approval.'
+          });
+        }
+
+        // 8. Validate local clock values; include legitimate overnight work.
+        let totalHours = 0;
+        const startSeconds = c10ParseTimeSeconds(finalIn);
+        const endSeconds = finalOut && finalOut !== '--:--'
+          ? c10ParseTimeSeconds(finalOut)
+          : null;
+
+        if (startSeconds == null ||
+            (finalOut && finalOut !== '--:--' && endSeconds == null)) {
+          await connection.rollback();
+          transactionStarted = false;
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid attendance time format.'
+          });
+        }
+
+        if (endSeconds != null) {
+          totalHours = c10AttendanceHours(finalIn, finalOut);
+          if (totalHours == null) {
+            await connection.rollback();
+            transactionStarted = false;
+            return res.status(409).json({
+              success: false,
+              message: 'Attendance hours must be greater than zero and at most 16 hours. Check the clock-in/out times.'
+            });
+          }
+        }
+
+        const attendanceStatus =
+          finalIn && finalOut && finalOut !== '--:--'
+            ? 'completed'
+            : 'missing clock-out';
+
+        // 9. Insert or update the attendance record.
+        if (!currentAttendance) {
+
+          await connection.query(
+            `INSERT INTO attendance
+             (
+               user_id,
+               schedule_id,
+               date,
+               time_in,
+               time_out,
+               status,
+               total_hours,
+               correction_requested,
+               correction_status
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'approved')`,
+            [
+              empIdString,
+              targetScheduleId,
+              record.attendance_date,
+              finalIn,
+              finalOut,
+              attendanceStatus,
+              totalHours.toFixed(2)
+            ]
+          );
+
+        } else {
+
+          const updates = [];
+          const values = [];
+
+          if (record.requested_clock_in) {
+            updates.push('time_in = ?');
+            values.push(record.requested_clock_in);
+          }
+
+          if (record.requested_clock_out) {
+            updates.push('time_out = ?');
+            values.push(record.requested_clock_out);
+          }
+
+          updates.push(
+            `status = ?,
+             total_hours = ?,
+             correction_requested = 0,
+             correction_status = 'approved'`
+          );
+
+          values.push(attendanceStatus);
+          values.push(totalHours.toFixed(2));
+          values.push(currentAttendance.id);
+
+          await connection.query(
+            `UPDATE attendance
+             SET ${updates.join(', ')}
+             WHERE id = ?`,
+            values
+          );
+        }
+
+      } else {
+        // 10. Rejection processing.
+        // C06 offline rejections must not erase online attendance.
+        if (!isOfflineCorrection && targetScheduleId) {
+          await connection.query(
+            `UPDATE attendance
+             SET correction_requested = 0,
+                 correction_status = 'rejected'
+             WHERE schedule_id = ?
+               AND (user_id = ? OR user_id = ?)`,
+            [
+              targetScheduleId,
+              empIdString,
+              internalUserId
+            ]
+          );
+        }
+      }
+
+      // 11. Update correction status in the SAME transaction.
+      const [reviewResult] = await connection.query(
+        `UPDATE attendance_corrections
+         SET
+           status = ?,
+           admin_remarks = ?,
+           reviewed_by = ?,
+           reviewed_at = ?
+         WHERE id = ?
+           AND status = 'pending'`,
+        [
+          status,
+          cleanAdminRemarks,
+          req.user.id,
+          phNow,
+          id
+        ]
       );
+
+      if (reviewResult.affectedRows !== 1) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message: 'Correction was already reviewed.'
+        });
+      }
+
+      // C10.1 + C10.3: audit and correction decision commit atomically.
+      // If the audit insert fails, the existing catch rolls back everything.
+      const oldAuditValue = {
+        status: record.status,
+        admin_remarks: record.admin_remarks ?? null,
+        reviewed_by: record.reviewed_by ?? null,
+        reviewed_at: record.reviewed_at ?? null
+      };
+      const newAuditValue = {
+        status,
+        admin_remarks: cleanAdminRemarks,
+        reviewed_by: req.user.id,
+        reviewed_at: phNow,
+        employee_id: empIdString,
+        schedule_id: targetScheduleId || null,
+        requested_clock_in: record.requested_clock_in ?? null,
+        requested_clock_out: record.requested_clock_out ?? null,
+        attendance_date: record.attendance_date,
+        source: isOfflineCorrection ? 'offline_sync' : 'manual_correction'
+      };
+      const forwardedIp = req.headers['x-forwarded-for'];
+      const rawIp = forwardedIp || req.socket?.remoteAddress || null;
+      const ipAddress = rawIp ? String(rawIp).split(',')[0].trim() : null;
+      await connection.query(
+        `INSERT INTO audit_logs
+         (user_id, action, target_type, target_id, old_value,
+          new_value, ip_address, user_agent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          req.user.id,
+          status === 'approved' ? 'APPROVE_CORRECTION' : 'REJECT_CORRECTION',
+          'attendance_correction',
+          id,
+          JSON.stringify(oldAuditValue),
+          JSON.stringify(newAuditValue),
+          ipAddress,
+          req.headers['user-agent'] || null,
+          phNow
+        ]
+      );
+
+      // Commit only after both data changes AND audit are persisted.
+      await connection.commit();
+      committed = true;
+      transactionStarted = false;
+      void c14NotifyInstructorDecision(internalUserId, 'correction', id, status).catch(err => console.warn('C14 correction decision notify:',err.message));
+
+      return res.json({
+        success: true,
+        message: `Correction request successfully ${status}.`
+      });
+
+    } catch (error) {
+
+      if (connection && transactionStarted && !committed) {
+        await connection.rollback().catch((rollbackError) => {
+          console.error(
+            'Correction rollback error:',
+            rollbackError
+          );
+        });
+      }
+
+      console.error('Review correction error:', error);
+
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to review attendance correction.'
+        });
+      }
+
+    } finally {
+      if (connection) {
+        connection.release();
+      }
     }
-    
-    const actionName = status === 'approved' ? 'APPROVE_CORRECTION' : 'REJECT_CORRECTION';
-    logAction(req.user.id, actionName, 'attendance_correction', id, req);
-    res.json({ success: true, message: `Correction request successfully ${status}.` });
-  } catch (err) {
-    console.error("Review correction error:", err);
-    res.status(500).json({ error: err.message });
   }
-});
+);
+
 
 
 // ============================================
@@ -2179,6 +4017,9 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
  
   if (!date) {
     return res.status(400).json({ success: false, error: "Date is required." });
+  }
+  if (!isValidISOCalendarDate(date)) {
+    return res.status(400).json({ success: false, error: 'Invalid calendar date. Expected a real YYYY-MM-DD date.' });
   }
   if (date > today) {
     return res.status(400).json({ success: false, error: "Cannot appeal for future dates." });
@@ -2297,6 +4138,7 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
       await connection.commit();
 
       logAction(req.user.id, 'SUBMIT_APPEAL', 'attendance_appeal', result.insertId, req);
+      void c14NotifyHRPending('appeal', result.insertId, employee_id).catch(err => console.warn('C14 appeal notify:',err.message));
       return res.json({ success: true, message: 'Appeal submitted successfully.' });
     } catch (txErr) {
       await connection.rollback();
@@ -2335,91 +4177,144 @@ app.get('/api/attendance-appeals/pending', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/attendance-appeals/:id/status', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ error: 'Forbidden' });
+// C10.3: Atomic attendance appeal review (preserves existing endpoint contract).
+app.put('/api/attendance-appeals/:id/status', authenticateToken, requireAction('appeals:review'), async (req, res) => {
+  if (!['admin', 'hr_admin'].includes(req.user.role)) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
   }
-  const { status, admin_remarks } = req.body;
   const appealId = req.params.id;
+  const { status, admin_remarks } = req.body || {};
+  if (!/^\d+$/.test(String(appealId)) || Number(appealId) <= 0 ||
+      !['approved', 'rejected'].includes(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid appeal ID or status.' });
+  }
+  const remarks = admin_remarks == null ? null : String(admin_remarks).trim() || null;
+  if (remarks && remarks.length > 500) {
+    return res.status(400).json({ success: false, message: 'Admin remarks must be 500 characters or fewer.' });
+  }
   const phNow = getPHDateTime();
-
-  if (!['approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'Status must be approved or rejected' });
-  }
-
-  // Fix 10.4 — cap admin_remarks length
-  const cleanAdminRemarks = admin_remarks ? String(admin_remarks).trim() : null;
-  if (cleanAdminRemarks && cleanAdminRemarks.length > 500) {
-    return res.status(400).json({ error: 'Admin remarks must be 500 characters or fewer.' });
-  }
-
+  let connection;
+  let started = false;
   try {
-    const [appealRows] = await db.promise().query(
-      "SELECT user_id, date, schedule_id, requested_time_in, requested_time_out FROM attendance_appeals WHERE id = ?",
-      [appealId]
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+    started = true;
+    const [appeals] = await connection.query(
+      `SELECT * FROM attendance_appeals WHERE id = ? FOR UPDATE`, [appealId]
     );
-    if (appealRows.length === 0) return res.status(404).json({ error: "Appeal not found" });
-    const { user_id, date, schedule_id, requested_time_in, requested_time_out } = appealRows[0];
-
-    let targetScheduleId = schedule_id;
+    if (appeals.length !== 1) {
+      await connection.rollback(); started = false;
+      return res.status(404).json({ success: false, message: 'Appeal not found.' });
+    }
+    const appeal = appeals[0];
+    if (appeal.status !== 'pending') {
+      await connection.rollback(); started = false;
+      return res.status(409).json({ success: false, message: `Appeal already ${appeal.status}.` });
+    }
+    const [owners] = await connection.query(
+      `SELECT id, employee_id FROM users WHERE id = ? OR employee_id = ? FOR UPDATE`,
+      [appeal.user_id, appeal.user_id]
+    );
+    if (owners.length !== 1) {
+      await connection.rollback(); started = false;
+      return res.status(409).json({ success: false, message: 'Appeal owner is ambiguous or missing.' });
+    }
+    const owner = owners[0];
+    if (String(owner.id) === String(req.user.id)) {
+      await connection.rollback(); started = false;
+      return res.status(403).json({ success: false, message: 'You cannot review your own appeal.' });
+    }
+    const empId = String(owner.employee_id);
+    let targetScheduleId = appeal.schedule_id;
     if (!targetScheduleId) {
-      const [schedRows] = await db.promise().query(
-        "SELECT id FROM schedules WHERE user_id = ? AND date = ? ORDER BY start_time ASC LIMIT 1",
-        [user_id, date]
+      const [matches] = await connection.query(
+        `SELECT id FROM schedules
+         WHERE (user_id = ? OR user_id = ?) AND DATE(date) = DATE(?)
+         ORDER BY start_time LIMIT 2`,
+        [empId, owner.id, appeal.date]
       );
-      if (schedRows.length > 0) targetScheduleId = schedRows[0].id;
+      if (matches.length === 1) targetScheduleId = matches[0].id;
     }
-
-    const [schedRecord] = targetScheduleId 
-      ? await db.promise().query("SELECT start_time, end_time FROM schedules WHERE id = ?", [targetScheduleId])
-      : [[]];
-
-    let start_time = requested_time_in || (schedRecord.length > 0 ? schedRecord[0].start_time : null);
-    let end_time = requested_time_out || (schedRecord.length > 0 ? schedRecord[0].end_time : null);
-    let total_hours = 0;
-    if (start_time && end_time) {
-      total_hours = Math.max(0, (new Date(`1970-01-01T${end_time}`) - new Date(`1970-01-01T${start_time}`)) / 3600000);
+    if (status === 'approved' && !targetScheduleId) {
+      await connection.rollback(); started = false;
+      return res.status(409).json({ success: false, message: 'A unique matching schedule is required for approval.' });
     }
-
-    // Stamped with exact Philippine Time on review
-    await db.promise().query(
-      "UPDATE attendance_appeals SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?",
-      [status, cleanAdminRemarks, phNow, appealId]
-    );
-
-    const action = status === 'approved' ? 'APPROVE_APPEAL' : 'REJECT_APPEAL';
-    logAction(req.user.id, action, 'attendance_appeal', appealId, req);
-
-    if (status === 'approved' && targetScheduleId) {
-      const [existingAtt] = await db.promise().query(
-        "SELECT id FROM attendance WHERE user_id = ? AND schedule_id = ?",
-        [user_id, targetScheduleId]
+    let scheduled = null;
+    if (targetScheduleId) {
+      const [schedules] = await connection.query(
+        `SELECT id, start_time, end_time FROM schedules
+         WHERE id = ? AND (user_id = ? OR user_id = ?)
+           AND DATE(date) = DATE(?) LIMIT 1`,
+        [targetScheduleId, empId, owner.id, appeal.date]
       );
-
-      if (existingAtt.length > 0) {
-        await db.promise().query(
-          `UPDATE attendance SET time_in = ?, time_out = ?, status = 'completed', total_hours = ?, location = 'Appeal Approved'
-           WHERE id = ?`,
-          [start_time, end_time, total_hours.toFixed(2), existingAtt[0].id]
+      if (!schedules.length) {
+        await connection.rollback(); started = false;
+        return res.status(409).json({ success: false, message: 'Appeal schedule does not match this employee and date.' });
+      }
+      scheduled = schedules[0];
+    }
+    if (status === 'approved') {
+      const finalIn = appeal.requested_time_in || scheduled.start_time;
+      const finalOut = appeal.requested_time_out || scheduled.end_time;
+      const hours = c10AttendanceHours(finalIn, finalOut);
+      if (hours == null) {
+        await connection.rollback(); started = false;
+        return res.status(409).json({ success: false, message: 'Invalid appeal time range (maximum 16 hours).' });
+      }
+      const [attendance] = await connection.query(
+        `SELECT id, user_id FROM attendance WHERE schedule_id = ? FOR UPDATE`, [targetScheduleId]
+      );
+      if (attendance.length > 1 || (attendance.length && ![empId, String(owner.id)].includes(String(attendance[0].user_id)))) {
+        await connection.rollback(); started = false;
+        return res.status(409).json({ success: false, message: 'Attendance owner or duplicate record conflict.' });
+      }
+      if (attendance.length) {
+        await connection.query(
+          `UPDATE attendance SET time_in = ?, time_out = ?, status = 'completed',
+                  total_hours = ?, location = 'Appeal Approved' WHERE id = ?`,
+          [finalIn, finalOut, hours, attendance[0].id]
         );
       } else {
-        await db.promise().query(
-          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out, status, location, total_hours)
+        await connection.query(
+          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out,
+                                   status, location, total_hours)
            VALUES (?, ?, ?, ?, ?, 'completed', 'Appeal Approved', ?)`,
-          [user_id, targetScheduleId, date, start_time, end_time, total_hours.toFixed(2)]
+          [empId, targetScheduleId, appeal.date, finalIn, finalOut, hours]
         );
       }
-    } else if (status === 'rejected' && targetScheduleId) {
-      await db.promise().query(
-        `UPDATE attendance SET status = 'absent', location = 'Appeal Rejected' WHERE user_id = ? AND schedule_id = ?`,
-        [user_id, targetScheduleId]
-      );
     }
-
-    res.json({ success: true, message: `Appeal successfully ${status}.` });
-  } catch (err) {
-    console.error("Update appeal status error:", err);
-    res.status(500).json({ error: err.message });
+    // Rejected appeal does NOT erase or mark unrelated valid attendance absent.
+    const [result] = await connection.query(
+      `UPDATE attendance_appeals SET status = ?, admin_remarks = ?, reviewed_at = ?
+       WHERE id = ? AND status = 'pending'`,
+      [status, remarks, phNow, appealId]
+    );
+    if (result.affectedRows !== 1) {
+      await connection.rollback(); started = false;
+      return res.status(409).json({ success: false, message: 'Appeal already reviewed.' });
+    }
+    const rawIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null;
+    await connection.query(
+      `INSERT INTO audit_logs (user_id, action, target_type, target_id, old_value,
+                               new_value, ip_address, user_agent, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [req.user.id, status === 'approved' ? 'APPROVE_APPEAL' : 'REJECT_APPEAL',
+       'attendance_appeal', appealId,
+       JSON.stringify({ status: appeal.status, admin_remarks: appeal.admin_remarks || null }),
+       JSON.stringify({ status, admin_remarks: remarks, reviewed_by: req.user.id,
+                        schedule_id: targetScheduleId || null }),
+       rawIp ? String(rawIp).split(',')[0].trim() : null,
+       req.headers['user-agent'] || null, phNow]
+    );
+    await connection.commit(); started = false;
+    void c14NotifyInstructorDecision(owner.id, 'appeal', appealId, status).catch(err => console.warn('C14 appeal decision notify:',err.message));
+    return res.json({ success: true, message: `Appeal successfully ${status}.` });
+  } catch (error) {
+    if (connection && started) await connection.rollback().catch(() => {});
+    console.error('C10 attendance appeal review error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to review attendance appeal.' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
@@ -2466,7 +4361,7 @@ app.get('/api/admin/leave-types', authenticateToken, (req, res) => {
 });
 
 // 2. Add a new leave type
-app.post('/api/admin/leave-types', authenticateToken, (req, res) => {
+app.post('/api/admin/leave-types', authenticateToken, requireAction('leave-types:write'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -2487,7 +4382,7 @@ app.post('/api/admin/leave-types', authenticateToken, (req, res) => {
 });
 
 // 3. Toggle Enable / Disable state of a leave type
-app.put('/api/admin/leave-types/:id/toggle', authenticateToken, (req, res) => {
+app.put('/api/admin/leave-types/:id/toggle', authenticateToken, requireAction('leave-types:write'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -2513,7 +4408,11 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
   const userId = req.user.id;
   const image_url = req.file ? `/uploads/leave_images/${req.file.filename}` : null;
   const phNow = getPHDateTime();
-  const isPaidInt = is_paid ? parseInt(is_paid, 10) : 1;
+  // Preserve the historic paid-by-default contract, but reject malformed overrides.
+  const isPaidInt = is_paid === undefined || is_paid === null || is_paid === '' ? 1 : Number(is_paid);
+  if (isPaidInt !== 0 && isPaidInt !== 1) {
+    return res.status(400).json({ success: false, message: 'is_paid must be 0 or 1.' });
+  }
 
   let requests = [];
   if (requestsRaw) {
@@ -2565,11 +4464,16 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
   const { date: today } = getPHTime();
   const isRetroactiveAllowed = /emergency|sick/i.test(lowerType);
 
-  // 3. Pre-validate all dates
+  // 3. Pre-validate all dates, including duplicate entries in the same batch.
+  const requestedDateKeys = new Set();
   for (const reqItem of requests) {
-    if (!reqItem.date || !/^\d{4}-\d{2}-\d{2}$/.test(reqItem.date)) {
-      return res.status(400).json({ success: false, message: `Invalid date format for ${reqItem.date}. Expected YYYY-MM-DD.` });
+    if (!reqItem || !isValidISOCalendarDate(reqItem.date)) {
+      return res.status(400).json({ success: false, message: `Invalid calendar date: ${reqItem?.date ?? 'missing'}. Expected a real YYYY-MM-DD date.` });
     }
+    if (requestedDateKeys.has(reqItem.date)) {
+      return res.status(409).json({ success: false, message: `Duplicate leave date ${reqItem.date} in this submission. Only one leave per date is allowed.` });
+    }
+    requestedDateKeys.add(reqItem.date);
 
     const reqDuration = reqItem.duration || 'Whole Day';
     if (!ALLOWED_DURATIONS.includes(reqDuration)) {
@@ -2600,8 +4504,10 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
   await connection.beginTransaction();
 
   try {
+    // Serialize submissions for one employee so two concurrent requests cannot both
+    // pass the pending/approved duplicate check before either inserts its rows.
     const [userRows] = await connection.query(
-      "SELECT employee_id FROM users WHERE id = ? AND status = 'active'",
+      "SELECT employee_id FROM users WHERE id = ? AND status = 'active' FOR UPDATE",
       [userId]
     );
     if (userRows.length === 0) {
@@ -2778,7 +4684,8 @@ app.get('/api/leave-requests/all', authenticateToken, (req, res) => {
 });
 
 // 3. Get Leave History by Identifier (Formatted with PHT Strings to Prevent UTC Shifting)
-app.get('/api/leave-requests/history/:identifier', authenticateToken, (req, res) => {
+
+app.get('/api/leave-requests/history/:identifier', authenticateToken, verifyOwnership, (req, res) => {
   const { identifier } = req.params;
   const sql = `
     SELECT 
@@ -2827,7 +4734,7 @@ app.get('/api/leave-requests/user/:employeeId', authenticateToken, verifyOwnersh
   });
 });
 
-app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) => {
+app.put('/api/leave-requests/:id/status', authenticateToken, requireAction('leaves:approve'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
@@ -2867,6 +4774,19 @@ app.put('/api/leave-requests/:id/status', authenticateToken, async (req, res) =>
     }
 
     const { user_id: employee_id, request_date, type, duration } = leaveRows[0];
+
+    const [requesterRows] = await connection.query(
+  "SELECT id FROM users WHERE employee_id = ? LIMIT 1",
+  [employee_id]
+);
+if (requesterRows.length > 0 && requesterRows[0].id === req.user.id) {
+  await connection.rollback();
+  return res.status(403).json({
+    success: false,
+    message: "You cannot approve your own leave request."
+  });
+}
+
     const deductionAmount = (duration === '1st Half' || duration === '2nd Half') ? 0.5 : 1.0;
 
     const [userRows] = await connection.query(
@@ -3056,7 +4976,7 @@ app.get('/api/leave-balances/:userId', authenticateToken, verifyOwnership, async
   }
 });
 
-app.put('/api/leave-balances/:userId', authenticateToken, async (req, res) => {
+app.put('/api/leave-balances/:userId', authenticateToken, requireAction('leave-balances:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -3207,7 +5127,7 @@ app.delete('/api/events/:id', authenticateToken, (req, res) => {
 // 6. SCHEDULES & REQUESTS (Secured & Validated)
 // ============================================
 
-app.get('/api/schedules', authenticateToken, (req, res) => {
+app.get('/api/schedules', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
   const sql = `
     SELECT 
       u.full_name, u.employee_id, s.id AS schedule_id, DATE_FORMAT(s.date, '%Y-%m-%d') AS schedule_date, 
@@ -3309,7 +5229,7 @@ async function hasScheduleConflict(user_id, date, start_time, end_time, excludeI
   return rows.length > 0;
 }
 
-app.get('/api/schedules/conflicts', authenticateToken, async (req, res) => {
+app.get('/api/schedules/conflicts', authenticateToken, allowRoles('admin','hr_admin'), async (req, res) => {
   const { user_id, date, exclude_id } = req.query;
   if (!user_id || !date) return res.json([]);
 
@@ -3330,7 +5250,7 @@ app.get('/api/schedules/conflicts', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/schedules', authenticateToken, async (req, res) => {
+app.post('/api/schedules', authenticateToken, requireAction('schedules:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -3386,7 +5306,7 @@ app.post('/api/schedules', authenticateToken, async (req, res) => {
 
 
 
-app.put('/api/schedules/:id', authenticateToken, async (req, res) => {
+app.put('/api/schedules/:id', authenticateToken, requireAction('schedules:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -3431,7 +5351,7 @@ app.put('/api/schedules/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/schedules/:id', authenticateToken, async (req, res) => {
+app.delete('/api/schedules/:id', authenticateToken, requireAction('schedules:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -3458,7 +5378,7 @@ app.delete('/api/schedules/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/schedules/bulk', authenticateToken, async (req, res) => {
+app.post('/api/schedules/bulk', authenticateToken, requireAction('schedules:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, error: 'Forbidden' });
   }
@@ -3644,7 +5564,7 @@ app.get('/api/payroll/employee-history/:employeeId', authenticateToken, verifyOw
     SELECT p.id, p.month_year, p.salary_rate, p.total_hours, p.overtime_hours,
            p.overtime_pay, p.transport_allowance, p.meal_allowance, p.housing_allowance,
            p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.loan_deduction,
-           p.other_deduction, p.gross_pay, p.tax_deduction, p.net_pay, p.status
+           p.other_deduction, p.late_deduction, p.gross_pay, p.tax_deduction, p.net_pay, p.status
     FROM payroll p
     JOIN users u ON p.user_id = u.id
     WHERE u.employee_id = ?
@@ -3657,7 +5577,7 @@ app.get('/api/payroll/employee-history/:employeeId', authenticateToken, verifyOw
   });
 });
 
-app.get('/api/employees', authenticateToken, async (req, res) => {
+app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','security','instructor'), async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
       const [results] = await db.promise().query(
@@ -3683,7 +5603,17 @@ app.get('/api/employees', authenticateToken, async (req, res) => {
     sql += ` ORDER BY full_name ASC`;
 
     const [results] = await db.promise().query(sql, params);
-    res.json(results || []);
+    // Cross-department directory access is view-only and contains only basic fields.
+    // Do not expose salary, personal identity details, or emergency contacts across departments.
+    const directoryFields = ['id','employee_id','full_name','email','role','status',
+      'position_level','position','contract_type','employment_type','phone_number','date_of_joining'];
+    const safeResults = (results || []).map(person => {
+      const ownsRecord = req.user.role === 'admin'
+        ? person.role !== 'instructor' : person.role === 'instructor';
+      if (ownsRecord) return person;
+      return Object.fromEntries(directoryFields.map(key => [key, person[key]]));
+    });
+    res.json(safeResults);
   } catch (err) {
     console.error("Failed to fetch employee directory:", err);
     res.status(500).json({ success: false, message: 'Failed to fetch employee directory.' });
@@ -3709,24 +5639,81 @@ app.post('/api/employees', authenticateToken, uploadResume.single('resume_file')
     street_address, city, state_province, postal_code, country, additional_info, position
   } = data;
 
+  
   if (!employee_id || !full_name || !email || !password || !role) {
     return res.status(400).json({ success: false, message: 'Employee ID, Name, Email, Password, and Role are mandatory fields.' });
   }
-  if (!isValidEmail(email)) {
-    return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
+
+  
+  const emailCheck = await validateEmailForAccount(email, { checkDns: true });
+  if (!emailCheck.valid) {
+    return res.status(400).json({ success: false, message: emailCheck.reason });
   }
-  if (!password || password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+
+  
+  if (password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
     return res.status(400).json({ success: false, message: 'For security, the password must be at least 8 characters, contain 1 uppercase letter, and 1 special character.' });
+  }
+
+  
+  const STAFF_ROLES = ['admin', 'hr_admin', 'security'];
+  const INSTRUCTOR_ROLE = 'instructor';
+
+  if (req.user.role === 'hr_admin') {
+    if (role !== INSTRUCTOR_ROLE) {
+      return res.status(403).json({
+        success: false,
+        message: 'HR can only create Instructor accounts. Staff accounts must be created by a System Administrator.'
+      });
+    }
+  } else if (req.user.role === 'admin') {
+    if (!STAFF_ROLES.includes(role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Admins can only create Staff accounts. Instructor accounts must be created by HR.'
+      });
+    }
+  } else {
+    return res.status(403).json({
+      success: false,
+      message: 'Forbidden. Only HR and Admin can create employee accounts.'
+    });
   }
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const finalPin = payroll_pin || '1234';
-    const finalAccess = payroll_access || 0;
+    
+const finalAccess = payroll_access || 0;
+
+let finalPin = null;
+
+if (payroll_pin !== undefined &&
+    payroll_pin !== null &&
+    String(payroll_pin).trim() !== '') {
+
+  const requestedPin = String(payroll_pin).trim();
+
+  if (!PAYROLL_PIN_PATTERN.test(requestedPin)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Payroll PIN must contain 4 to 6 numeric digits.'
+    });
+  }
+
+  if (requestedPin === '1234') {
+    return res.status(400).json({
+      success: false,
+      message: 'The default PIN 1234 is not allowed.'
+    });
+  }
+
+  finalPin = await bcrypt.hash(requestedPin, 12);
+}
+
 
     let infoObj = {};
     if (additional_info) {
-      try { infoObj = JSON.parse(additional_info); } catch(e) {}
+      try { infoObj = JSON.parse(additional_info); } catch (e) {}
     }
     if (req.file) {
       infoObj.resume_file = `/uploads/resumes/${req.file.filename}`;
@@ -3745,7 +5732,7 @@ app.post('/api/employees', authenticateToken, uploadResume.single('resume_file')
       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE)`;
 
     db.query(sql, [
-      employee_id.trim(), full_name.trim(), first_name || null, last_name || null, email.trim().toLowerCase(), hashedPassword, role, 
+      employee_id.trim(), full_name.trim(), first_name || null, last_name || null, email.trim().toLowerCase(), hashedPassword, role,
       employment_type || 'Full-time', position_level || 'Entry Level Simulationist', contract_type || employment_type || 'Full-time',
       monthly_salary || 0, work_days_per_month || 22,
       finalAccess, finalPin,
@@ -3771,7 +5758,7 @@ app.post('/api/employees', authenticateToken, uploadResume.single('resume_file')
 
 app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_file'), async(req, res) => {
   const employeeId = req.params.id;
-  
+
   const isPrivileged = req.user.role === 'admin' || req.user.role === 'hr_admin';
   const isSelf = req.user.id.toString() === employeeId.toString();
 
@@ -3779,15 +5766,10 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to edit this profile.' });
   }
 
-  // Guarantee body is an object to prevent undefined crashes
+  
   const data = req.body ? { ...req.body } : {};
   const updates = { ...data };
 
-  if (updates.email && !isValidEmail(updates.email)) {
-    return res.status(400).json({ success: false, message: 'Please provide a valid email format.' });
-  }
-
-  // Role Normalization Helper: maps frontend display titles to database ENUM/keys
   const normalizeRole = (roleStr) => {
     if (!roleStr) return roleStr;
     const clean = roleStr.toString().trim().toLowerCase();
@@ -3809,16 +5791,56 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
     return roleMap[clean] || clean;
   };
 
-  try {
+    try {
     const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [employeeId]);
     if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
     const oldData = oldRecord[0];
 
-    // Normalize incoming role fields before mapping
+    if (oldData.role === 'admin') {
+      
+      const isDemoting = updates.role !== undefined && updates.role !== 'admin';
+      const isDeactivating = updates.status !== undefined && updates.status !== 'active';
+
+      if (isDemoting || isDeactivating) {
+        const [adminCount] = await db.promise().query(
+          "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active' AND id != ?",
+          [employeeId]
+        );
+        if (adminCount[0].count === 0) {
+          return res.status(403).json({
+            success: false,
+            message: 'Action denied: This is the last active System Administrator. You cannot demote or deactivate this account.'
+          });
+        }
+      }
+    }
+
     if (updates.role !== undefined) updates.role = normalizeRole(updates.role);
     if (updates.system_role !== undefined) updates.system_role = normalizeRole(updates.system_role);
 
+    // Only the dedicated Role Management endpoint can reassign roles.
+    // This prevents department switching through employee profile updates.
+    if (isPrivileged && (
+      (updates.role !== undefined && updates.role !== oldData.role) ||
+      (updates.system_role !== undefined && updates.system_role !== oldData.role)
+    )) {
+      return res.status(403).json({ success: false,
+        message: 'Use Role Management to change account roles.' });
+    }
+    delete updates.role;
+    delete updates.system_role;
+    if (isPrivileged && String(req.user.id) === String(employeeId) &&
+        updates.status !== undefined && updates.status !== oldData.status) {
+      return res.status(403).json({ success: false, message: 'Cannot change your own account status.' });
+    }
+
+    // ==========================================
+    // ROLE-BASED ACCESS CONTROL (RBAC) VALIDATION
+    // ==========================================
+    
     if (!isPrivileged) {
+      // 1. Normal users editing their own profile
+      // Strip out any sensitive fields they try to sneak in
       delete updates.role;
       delete updates.system_role;
       delete updates.status;
@@ -3826,6 +5848,82 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       delete updates.work_days_per_month;
       delete updates.payroll_access;
       delete updates.payroll_pin;
+
+    } else if (req.user.role === 'hr_admin') {
+      // 2. HR Editing a user
+      
+      // HR can ONLY edit Instructors
+      if (oldData.role !== 'instructor') {
+        return res.status(403).json({
+          success: false,
+          message: 'HR can only manage Instructor accounts. Staff accounts must be managed by a System Administrator.'
+        });
+      }
+
+      // HR cannot change roles
+      delete updates.role;
+      delete updates.system_role;
+
+      // HR cannot move to Trash or restore from Trash (Admin only)
+      if (updates.status !== undefined && updates.status !== oldData.status) {
+        const allowedHRStatuses = ['active', 'deactivated', 'archived'];
+        if (!allowedHRStatuses.includes(updates.status)) {
+          return res.status(403).json({
+            success: false,
+            message: 'HR cannot change account status to "' + updates.status + '". Delete and restore are Admin-only.'
+          });
+        }
+      }
+
+    } else if (req.user.role === 'admin') {
+      // 3. Admin Editing a user
+      
+      // Admin CANNOT edit Instructors (Instructors belong to HR)
+      if (oldData.role === 'instructor') {
+        return res.status(403).json({
+          success: false,
+          message: 'Instructors are managed by HR. Admins cannot edit Instructor accounts.'
+        });
+      }
+
+      // Account administrators may change staff access information, not HR payroll or personal records.
+      const adminAllowedFields = new Set(['email','status','account_expiry','account_expiration_date',
+        'first_name','last_name','middle_initial','full_name','phone','phone_number']);
+      for (const key of Object.keys(updates)) {
+        if (!adminAllowedFields.has(key)) delete updates[key];
+      }
+
+      // Admin can only assign Staff roles
+      if (updates.role !== undefined) {
+        const allowedAdminRoles = ['admin', 'hr_admin', 'security'];
+        if (!allowedAdminRoles.includes(updates.role)) {
+          return res.status(403).json({
+            success: false,
+            message: 'Admins can only assign Staff roles (System Admin, HR Administrator, Security).'
+          });
+        }
+      }
+    }
+
+   
+    if (typeof updates.email === 'string' && updates.email.trim() !== '') {
+      const incoming = normalizeEmail(updates.email);
+      const existing = normalizeEmail(oldData.email);
+
+      if (incoming !== existing) {
+        
+        if (req.user.role === 'hr_admin' && oldData.role !== 'instructor') {
+          return res.status(403).json({
+            success: false,
+            message: 'HR cannot change the email of staff accounts. Contact a System Administrator.'
+          });
+        }
+
+        const emailCheck = await validateEmailForAccount(incoming, { checkDns: true });
+        if (!emailCheck.valid) {
+          return res.status(400).json({ success: false, message: emailCheck.reason });
+        }
+      }
     }
 
     if (updates.additional_info !== undefined) {
@@ -3844,6 +5942,7 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
         console.error("Failed to parse additional_info:", e);
       }
     }
+    delete updates.payroll_pin;
 
     const fieldMapping = {
       full_name: 'full_name',
@@ -3856,12 +5955,12 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       contract_type: 'contract_type',
       status: 'status',
       role: 'role',
-      system_role: 'role', // Catches payload if frontend uses system_role
+      system_role: 'role',
       date_of_joining: 'date_of_joining',
       monthly_salary: 'monthly_salary',
       work_days_per_month: 'work_days_per_month',
       payroll_access: 'payroll_access',
-      payroll_pin: 'payroll_pin',
+      
       date_of_birth: 'date_of_birth',
       gender: 'gender',
       emergency_contact_name: 'emergency_contact_name',
@@ -3885,13 +5984,13 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
     const setClauses = [];
     const values = [];
     const handledColumns = new Set();
-    
+
     for (const [frontField, dbField] of Object.entries(fieldMapping)) {
       if (updates[frontField] !== undefined && !handledColumns.has(dbField)) {
         handledColumns.add(dbField);
         let val = updates[frontField];
-        
-        // Convert all blank strings to NULL (or 0 for numbers) to prevent MySQL truncation errors
+
+       
         if (val === '') {
           if (numColumns.includes(dbField)) {
             val = 0;
@@ -3899,7 +5998,7 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
             val = null;
           }
         }
-        
+
         setClauses.push(`${dbField} = ?`);
         values.push(val);
       }
@@ -3955,25 +6054,388 @@ app.get('/api/employees/:id', authenticateToken, verifyOwnership, (req, res) => 
 
 
 
-app.put('/api/employees/:employeeId/toggle-status', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to alter account status.' });
+app.put('/api/employees/:employeeId/toggle-status', authenticateToken,
+  allowRoles('admin', 'hr_admin'), async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const [rows] = await db.promise().query(
+      'SELECT id, role, status FROM users WHERE employee_id = ? LIMIT 1', [employeeId]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    const target = rows[0];
+    const owns = req.user.role === 'admin' ? target.role !== 'instructor' : target.role === 'instructor';
+    if (!owns) return res.status(403).json({ success: false, message: 'This account is view-only for your role.' });
+    if (String(target.id) === String(req.user.id)) {
+      return res.status(403).json({success:false,message:'Cannot change your own account status.'});
+    }
+    if (!['active','deactivated'].includes(target.status)) {
+      return res.status(409).json({success:false,message:'Only active or deactivated accounts may be toggled.'});
+    }
+    if (target.role === 'admin' && target.status === 'active') {
+      const [[row]] = await db.promise().query(
+        "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND status = 'active' AND id <> ?", [target.id]);
+      if (!row.total) return res.status(403).json({success:false,message:'Cannot deactivate the last active System Administrator.'});
+    }
+    const newStatus = target.status === 'active' ? 'deactivated' : 'active';
+    await db.promise().query('UPDATE users SET status = ? WHERE id = ?', [newStatus, target.id]);
+    logAction(req.user.id, 'TOGGLE_EMPLOYEE_STATUS', 'user', target.id, req);
+    return res.json({success:true,newStatus,message:`Employee successfully ${newStatus}.`});
+  } catch (err) {
+    console.error('Toggle status error:', err);
+    return res.status(500).json({success:false,message:'Failed to toggle status.'});
   }
-
-  const { employeeId } = req.params;
-  db.query("SELECT status FROM users WHERE employee_id = ?", [employeeId], (err, results) => {
-    if (err || results.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
-    
-    const newStatus = results[0].status === 'active' ? 'deactivated' : 'active';
-    db.query("UPDATE users SET status = ? WHERE employee_id = ?", [newStatus, employeeId], (err) => {
-      if (err) return res.status(500).json({ success: false, message: 'Failed to toggle status.' });
-      
-      logAction(req.user.id, 'TOGGLE_EMPLOYEE_STATUS', 'user', employeeId, req);
-      res.json({ success: true, message: `Employee successfully ${newStatus}.`, newStatus });
-    });
-  });
 });
 
+
+// ================================================================
+// C14: Persistent, per-user attendance notification inbox.
+// Unique recipient+event keys make repeated polling idempotent.
+// The authoritative source remains the existing correction/appeal
+// and attendance tables; this is an auxiliary notification ledger.
+// Requires C14_NOTIFICATION_MIGRATION.sql before enabling clients.
+// ================================================================
+const c14Types = new Set(['CORRECTION_PENDING','APPEAL_PENDING','CORRECTION_DECISION','APPEAL_DECISION','MISSING_CLOCK_OUT']);
+async function c14Insert(userId, eventKey, type, title, message, targetType = null, targetId = null, pushNow = false) {
+  if (!c14Types.has(type)) return;
+  const [write] = await db.promise().query(
+    `INSERT IGNORE INTO attendance_notifications
+     (recipient_id,event_key,event_type,title,message,target_type,target_id)
+     VALUES (?,?,?,?,?,?,?)`,
+    [userId, eventKey, type, title, message, targetType, targetId]
+  );
+  // Push is best-effort; durable inbox delivery does NOT depend on Expo.
+  if (write.affectedRows === 1 && pushNow) {
+    try {
+      const [[recipient]] = await db.promise().query(
+        `SELECT expo_push_token FROM users WHERE id = ? AND status = 'active' LIMIT 1`, [userId]);
+      if (recipient?.expo_push_token && Expo.isExpoPushToken(recipient.expo_push_token)) {
+        await expo.sendPushNotificationsAsync([{
+          to: recipient.expo_push_token, sound: 'default', title, body: message,
+          data: { type: 'attendance_notification', eventKey }
+        }]);
+      }
+    } catch (err) { console.warn('C14 push deferred; inbox retained:', err.message); }
+  }
+}
+
+// Reconstruct recent notifications from official records, including when
+// a server crash occurred between request commit and notification delivery.
+async function c14ReconcileForUser(user) {
+  const id = Number(user.id);
+  if (!Number.isSafeInteger(id) || id < 1) return;
+  if (['admin','hr_admin'].includes(user.role)) {
+    const [corrections] = await db.promise().query(
+      `SELECT c.id, u.full_name FROM attendance_corrections c
+       JOIN users u ON u.id = c.user_id
+       WHERE c.status = 'pending' AND c.created_at >= NOW() - INTERVAL 14 DAY
+       ORDER BY c.id DESC LIMIT 60`);
+    const [appeals] = await db.promise().query(
+      `SELECT a.id, u.full_name FROM attendance_appeals a
+       JOIN users u ON u.employee_id = a.user_id
+       WHERE a.status = 'pending' AND a.submitted_at >= NOW() - INTERVAL 14 DAY
+       ORDER BY a.id DESC LIMIT 60`);
+    for (const r of corrections) await c14Insert(id, `correction:pending:${r.id}`, 'CORRECTION_PENDING',
+      'Attendance correction pending', `${r.full_name} submitted an attendance correction.`, 'correction', r.id);
+    for (const r of appeals) await c14Insert(id, `appeal:pending:${r.id}`, 'APPEAL_PENDING',
+      'Attendance appeal pending', `${r.full_name} submitted an attendance appeal.`, 'appeal', r.id);
+    // Hide stale HR pending notifications after an official decision.
+    await db.promise().query(`
+      UPDATE attendance_notifications n
+      JOIN attendance_corrections c ON c.id = n.target_id
+      SET n.read_at = COALESCE(n.read_at, CURRENT_TIMESTAMP)
+      WHERE n.recipient_id = ? AND n.event_type = 'CORRECTION_PENDING'
+        AND c.status <> 'pending' AND n.read_at IS NULL`, [id]);
+    await db.promise().query(`
+      UPDATE attendance_notifications n
+      JOIN attendance_appeals a ON a.id = n.target_id
+      SET n.read_at = COALESCE(n.read_at, CURRENT_TIMESTAMP)
+      WHERE n.recipient_id = ? AND n.event_type = 'APPEAL_PENDING'
+        AND a.status <> 'pending' AND n.read_at IS NULL`, [id]);
+    return;
+  }
+  const [[owner]] = await db.promise().query(
+    `SELECT id,employee_id FROM users WHERE id = ? AND status = 'active' LIMIT 1`, [id]);
+  if (!owner || user.role !== 'instructor') return;
+  const [corrections] = await db.promise().query(
+    `SELECT id,status FROM attendance_corrections
+     WHERE user_id = ? AND status IN ('approved','rejected')
+       AND reviewed_at >= NOW() - INTERVAL 30 DAY ORDER BY id DESC LIMIT 60`, [id]);
+  const [appeals] = await db.promise().query(
+    `SELECT id,status FROM attendance_appeals
+     WHERE user_id = ? AND status IN ('approved','rejected')
+       AND reviewed_at >= NOW() - INTERVAL 30 DAY ORDER BY id DESC LIMIT 60`, [owner.employee_id]);
+  for (const r of corrections) await c14Insert(id, `correction:${r.status}:${r.id}`, 'CORRECTION_DECISION',
+    'Attendance correction update', `Your correction request was ${r.status}.`, 'correction', r.id);
+  for (const r of appeals) await c14Insert(id, `appeal:${r.status}:${r.id}`, 'APPEAL_DECISION',
+    'Attendance appeal update', `Your attendance appeal was ${r.status}.`, 'appeal', r.id);
+  // Only incomplete attendance where Clock In is known, shift ended, no
+  // pending request. Never call a routine absence a missing Clock Out.
+  const [missing] = await db.promise().query(
+    `SELECT s.id, DATE_FORMAT(s.date,'%Y-%m-%d') AS shift_date
+     FROM schedules s JOIN attendance a ON a.schedule_id = s.id
+     WHERE s.user_id = ? AND a.time_in IS NOT NULL AND a.time_out IS NULL
+       AND DATE(s.date) BETWEEN DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR) - INTERVAL 3 DAY
+                            AND DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR)
+       AND TIMESTAMP(DATE(s.date), s.end_time)
+           + INTERVAL (s.end_time <= s.start_time) DAY < UTC_TIMESTAMP() + INTERVAL 8 HOUR
+       AND NOT EXISTS (SELECT 1 FROM attendance_corrections c
+         WHERE c.schedule_id = s.id AND c.status = 'pending')
+       AND NOT EXISTS (SELECT 1 FROM attendance_appeals ap
+         WHERE ap.schedule_id = s.id AND ap.status = 'pending')
+     ORDER BY s.id DESC LIMIT 30`, [owner.employee_id]);
+  for (const r of missing) await c14Insert(id, `missing-clock-out:${r.id}`, 'MISSING_CLOCK_OUT',
+    'Missing Clock Out', `No Clock Out was recorded for the shift on ${r.shift_date}. Check Attendance History.`,
+    'schedule', r.id);
+}
+
+
+// Non-blocking notifications after authoritative transaction commits.
+// A missing C14 migration cannot cause a previously successful HR action
+// to fail. The polling reconciliation also covers missed event inserts.
+async function c14NotifyHRPending(kind, requestId, employeeName) {
+  const [reviewers] = await db.promise().query(
+    `SELECT id FROM users WHERE role IN ('admin','hr_admin') AND status = 'active'`);
+  const type = kind === 'correction' ? 'CORRECTION_PENDING' : 'APPEAL_PENDING';
+  for (const reviewer of reviewers) await c14Insert(reviewer.id,
+    `${kind}:pending:${requestId}`, type, `Attendance ${kind} pending`,
+    `${employeeName} submitted an attendance ${kind}.`, kind, requestId, true);
+}
+async function c14NotifyInstructorDecision(internalId, kind, requestId, status) {
+  await c14Insert(internalId, `${kind}:${status}:${requestId}`,
+    kind === 'correction' ? 'CORRECTION_DECISION' : 'APPEAL_DECISION',
+    `Attendance ${kind} update`, `Your ${kind} request was ${status}.`, kind, requestId, true);
+}
+// Interval ensures delivery is attempted without requiring an open client.
+// Only a bounded number of active accounts are evaluated per cycle.
+const c14Dispatcher = setInterval(async () => {
+  try {
+    const [users] = await db.promise().query(
+      `SELECT id,role FROM users WHERE status = 'active'
+       AND role IN ('admin','hr_admin','instructor') ORDER BY id LIMIT 200`);
+    for (const u of users) {
+      try { await c14ReconcileForUser(u); }
+      catch (err) { console.warn('C14 dispatcher skip:', err.message); }
+    }
+  } catch (err) { console.warn('C14 dispatcher unavailable:',err.message); }
+}, 5 * 60 * 1000);
+c14Dispatcher.unref?.();
+
+// ================================================================
+// C15.6: Conservative notification retention / background cleanup.
+// This only purges OLD, ALREADY-READ entries from the auxiliary
+// attendance_notifications table; it never touches official records.
+// Retention is based on BOTH creation and read dates:
+//   - created at least 180 days ago by default, AND
+//   - marked read at least 30 days ago by default.
+// Unread notifications are kept without an automatic expiry.
+// Limits and interval are bounded to prevent a large cleanup query.
+// No new table/column/index is required by this implementation.
+// ================================================================
+const c15RetentionInt = (name, fallback, min, max) => {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < min || n > max) {
+    console.warn(`C15 retention: invalid ${name}; using ${fallback}.`);
+    return fallback;
+  }
+  return n;
+};
+const c15NotificationRetentionDays = c15RetentionInt('C15_NOTIFICATION_RETENTION_DAYS', 180, 90, 3650);
+const c15ReadGraceDays = c15RetentionInt('C15_NOTIFICATION_READ_GRACE_DAYS', 30, 7, 3650);
+const c15RetentionBatchSize = 250;
+const c15RetentionMaxBatches = 4; // At most 1,000 deletions per daily run.
+let c15RetentionRunning = false;
+
+async function c15CleanupOldReadNotifications() {
+  if (c15RetentionRunning) return;
+  c15RetentionRunning = true;
+  try {
+    let deleted = 0;
+    for (let batch = 0; batch < c15RetentionMaxBatches; batch++) {
+      const [result] = await db.promise().query(
+        `DELETE FROM attendance_notifications
+         WHERE read_at IS NOT NULL
+           AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+           AND read_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+         ORDER BY id ASC LIMIT ?`,
+        [c15NotificationRetentionDays, c15ReadGraceDays, c15RetentionBatchSize]
+      );
+      const affected = Number(result.affectedRows || 0);
+      deleted += affected;
+      if (affected < c15RetentionBatchSize) break;
+    }
+    if (deleted > 0) console.info(`C15 retention: removed ${deleted} expired read attendance notifications.`);
+  } catch (err) {
+    // Missing table / database outage must never affect attendance requests.
+    console.warn('C15 notification retention deferred:', err.message);
+  } finally {
+    c15RetentionRunning = false;
+  }
+}
+
+// Startup grace period avoids cleanup while the app is initializing.
+// The interval is not a delivery guarantee and runs per server process;
+// deletions remain bounded and safe under multiple server instances.
+const c15RetentionStart = setTimeout(() => {
+  void c15CleanupOldReadNotifications();
+  const dailyTimer = setInterval(() => {
+    void c15CleanupOldReadNotifications();
+  }, 24 * 60 * 60 * 1000);
+  dailyTimer.unref?.();
+}, 60 * 60 * 1000);
+c15RetentionStart.unref?.();
+
+app.get('/api/attendance/notifications', authenticateToken, async (req, res) => {
+  try {
+    // Reconciliation is best-effort. Existing inbox remains readable if
+    // a single legacy record cannot be resolved.
+    try { await c14ReconcileForUser(req.user); }
+    catch (err) { console.warn('C14 reconcile deferred:', err.message); }
+    const [rows] = await db.promise().query(
+      `SELECT id,event_type,title,message,target_type,target_id,created_at,read_at
+       FROM attendance_notifications WHERE recipient_id = ?
+       ORDER BY id DESC LIMIT 100`, [req.user.id]);
+    const [[count]] = await db.promise().query(
+      `SELECT COUNT(*) AS total FROM attendance_notifications
+       WHERE recipient_id = ? AND read_at IS NULL`, [req.user.id]);
+    res.json({ success: true, data: rows, unread: count.total });
+  } catch (err) {
+    console.error('C14 notifications error:', err);
+    res.status(503).json({ success: false, code: 'C14_NOTIFICATIONS_UNAVAILABLE', message: 'Attendance notifications are unavailable. Apply the C14 database migration and retry.' });
+  }
+});
+
+app.put('/api/attendance/notifications/:id/read', authenticateToken, async (req, res) => {
+  try {
+    if (!/^\d+$/.test(req.params.id) || Number(req.params.id) < 1)
+      return res.status(400).json({ success: false, message: 'Invalid notification ID.' });
+    const [result] = await db.promise().query(
+      `UPDATE attendance_notifications SET read_at = COALESCE(read_at,CURRENT_TIMESTAMP)
+       WHERE id = ? AND recipient_id = ?`, [req.params.id,req.user.id]);
+    if (!result.affectedRows) return res.status(404).json({ success: false, message: 'Notification not found.' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('C14 mark read:', err);
+    res.status(503).json({ success: false, message: 'Unable to mark notification as read.' });
+  }
+});
+
+// ===============================================================
+// C12: Attendance recovery / reconciliation (READ ONLY).
+// Uses the same schedule_id as official attendance and HR requests.
+// No automatic clock-out, no writes, no synthetic attendance times.
+// ===============================================================
+const c12PHDateKey = (d = new Date()) => new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 10);
+const c12ValidDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+  !Number.isNaN(Date.parse(value)) && new Date(value + 'T00:00:00Z').toISOString().slice(0,10) === value;
+
+async function c12RecoveryRows(req, res, employeeId = null, transform = null) {
+  const today = c12PHDateKey();
+  const from = req.query.from || today;
+  const to = req.query.to || today;
+  if (!c12ValidDate(from) || !c12ValidDate(to) || from > to ||
+      (Date.parse(to) - Date.parse(from)) / 86400000 > 31) {
+    return res.status(400).json({ success: false, code: 'C12_INVALID_DATE_RANGE', message: 'Choose a valid date range of at most 32 calendar days.' });
+  }
+  try {
+    const params = [from, to];
+    let ownerFilter = '';
+    if (employeeId !== null) {
+      ownerFilter = ' AND u.employee_id = ?';
+      params.push(String(employeeId));
+    }
+    const [rows] = await db.promise().query(`
+      SELECT s.id AS schedule_id, DATE_FORMAT(s.date, '%Y-%m-%d') AS date,
+        s.start_time, s.end_time, u.employee_id, u.full_name,
+        a.id AS attendance_id, a.time_in, a.time_out, a.status AS attendance_status,
+        a.total_hours,
+        c.id AS correction_id, c.status AS correction_status, c.reason AS correction_reason,
+        ap.id AS appeal_id, ap.status AS appeal_status,
+        CASE WHEN (TIMESTAMP(DATE(s.date), s.end_time)
+                 + INTERVAL (s.end_time <= s.start_time) DAY)
+                 < (UTC_TIMESTAMP() + INTERVAL 8 HOUR) THEN 1 ELSE 0 END AS shift_ended
+      FROM schedules s
+      JOIN users u ON u.employee_id = s.user_id AND u.role = 'instructor' AND u.status IN ('active', 'deactivated')
+      LEFT JOIN attendance a ON a.schedule_id = s.id
+      LEFT JOIN attendance_corrections c ON c.id = (
+        SELECT MAX(c2.id) FROM attendance_corrections c2 WHERE c2.schedule_id = s.id
+      )
+      LEFT JOIN attendance_appeals ap ON ap.id = (
+        SELECT MAX(ap2.id) FROM attendance_appeals ap2 WHERE ap2.schedule_id = s.id
+      )
+      WHERE DATE(s.date) BETWEEN ? AND ? ${ownerFilter}
+      ORDER BY s.date DESC, s.start_time DESC, s.id DESC LIMIT 500
+    `, params);
+    const data = rows.map(row => {
+      const hasIn = row.time_in !== null && row.time_in !== '--:--';
+      const hasOut = row.time_out !== null && row.time_out !== '--:--';
+      const review = String(row.correction_status || '').toLowerCase();
+      const appeal = String(row.appeal_status || '').toLowerCase();
+      const offline = String(row.correction_reason || '').includes('[OFFLINE_SYNC:');
+      const onLeave = String(row.attendance_status || '').toLowerCase().includes('leave');
+      const ended = Number(row.shift_ended) === 1;
+      let status = 'SCHEDULED';
+      if (onLeave) status = 'ON_LEAVE';
+      else if (review === 'pending' || appeal === 'pending') status = offline && review === 'pending' ? 'OFFLINE_PENDING_REVIEW' : 'PENDING_HR_REVIEW';
+      else if (hasIn && hasOut) status = 'COMPLETED';
+      else if (hasIn && ended) status = 'MISSING_CLOCK_OUT';
+      else if (hasIn) status = 'IN_PROGRESS';
+      else if (ended) status = 'MISSED_SCHEDULE';
+      return {
+        schedule_id: row.schedule_id, date: row.date, employee_id: row.employee_id,
+        full_name: row.full_name, start_time: row.start_time, end_time: row.end_time,
+        attendance_id: row.attendance_id, time_in: row.time_in, time_out: row.time_out,
+        attendance_status: row.attendance_status, total_hours: row.total_hours,
+        correction_id: row.correction_id, correction_status: review || null,
+        appeal_id: row.appeal_id, appeal_status: appeal || null,
+        status, needs_action: status === 'MISSING_CLOCK_OUT',
+        offline_submitted_for_review: offline && review === 'pending',
+        reviewed: ['approved', 'rejected', 'cancelled'].includes(review),
+        // C13: Recovery state is derived from official records; no automatic edits.
+        recovery_state: ['PENDING_HR_REVIEW', 'OFFLINE_PENDING_REVIEW'].includes(status)
+          ? 'AWAITING_HR'
+          : status === 'MISSING_CLOCK_OUT' ? 'NEEDS_CORRECTION'
+          : status === 'COMPLETED' || status === 'ON_LEAVE' ? 'RESOLVED'
+          : status === 'MISSED_SCHEDULE' ? 'NEEDS_REVIEW'
+          : status === 'IN_PROGRESS' ? 'IN_PROGRESS' : 'NO_ACTION',
+        recovery_guidance: ['PENDING_HR_REVIEW', 'OFFLINE_PENDING_REVIEW'].includes(status)
+          ? 'Your request has reached the server and is awaiting HR review. Do not submit duplicates.'
+          : status === 'MISSING_CLOCK_OUT'
+          ? 'Your shift ended without a Clock Out. Open attendance correction to request HR review; do not invent a time.'
+          : status === 'MISSED_SCHEDULE'
+          ? 'No official attendance was recorded for this completed schedule. Contact HR or use the existing appeal process.'
+          : status === 'COMPLETED' ? 'Attendance is recorded. Review completed correction decisions in your history.'
+          : status === 'ON_LEAVE' ? 'Recorded as on leave.'
+          : status === 'IN_PROGRESS' ? 'Your shift has not ended yet.'
+          : 'No recovery action needed.',
+        recovery_request_type: review === 'pending' ? 'correction' : appeal === 'pending' ? 'appeal' : null,
+        recovery_request_id: review === 'pending' ? row.correction_id : appeal === 'pending' ? row.appeal_id : null
+      };
+    });
+    const payload = { success: true, data, truncated: rows.length === 500, from, to };
+    return res.json(transform ? transform(payload) : payload);
+  } catch (err) {
+    console.error('C12 recovery query failed:', err);
+    return res.status(500).json({ success: false, code: 'C12_RECOVERY_UNAVAILABLE', message: 'Unable to load attendance recovery status.' });
+  }
+}
+
+app.get('/api/attendance/recovery/user/:employeeId', authenticateToken, verifyOwnership,
+  (req, res) => c12RecoveryRows(req, res, req.params.employeeId));
+app.get('/api/attendance/recovery/overview', authenticateToken, allowRoles('admin', 'hr_admin'),
+  (req, res) => c12RecoveryRows(req, res));
+
+// C13.2: Read-only HR queue, reusing C12 filters and authorization.
+app.get('/api/attendance/recovery/queue', authenticateToken, allowRoles('admin', 'hr_admin'),
+  (req, res) => c12RecoveryRows(req, res, null, payload => {
+    const relevant = payload.data.filter(row =>
+      ['NEEDS_CORRECTION', 'NEEDS_REVIEW', 'AWAITING_HR', 'RESOLVED'].includes(row.recovery_state));
+    return { ...payload, data: relevant, counts: {
+      missing_clock_out: relevant.filter(r => r.recovery_state === 'NEEDS_CORRECTION').length,
+      pending_hr: relevant.filter(r => r.recovery_state === 'AWAITING_HR').length,
+      resolved: relevant.filter(r => r.recovery_state === 'RESOLVED').length
+    }};
+  }));
 
 app.get('/api/attendance-report', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -4000,9 +6462,9 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
           WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 'Pending'
           WHEN ap.id IS NOT NULL AND ap.status = 'pending' THEN 'Pending'
           WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
-          WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Missing Clock-Out'
+          WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') AND TIMESTAMP(DATE(s.date), s.end_time) + INTERVAL (s.end_time <= s.start_time) DAY < NOW() THEN 'Missing Clock-Out'
           WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN 'In Progress'
-          WHEN a.time_in IS NULL AND CONCAT(s.date, ' ', s.end_time) < NOW() THEN 'Absent'
+          WHEN a.time_in IS NULL AND TIMESTAMP(DATE(s.date), s.end_time) + INTERVAL (s.end_time <= s.start_time) DAY < NOW() THEN 'Absent'
           ELSE COALESCE(a.status, 'Scheduled')
       END AS status,
 
@@ -4023,16 +6485,16 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
         WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
         WHEN a.time_in IS NULL OR a.time_out IS NULL OR a.time_out = '--:--' THEN 0
         ELSE GREATEST(0, ROUND(
-          TIME_TO_SEC(TIMEDIFF(
-            -- The Calculation Cap Logic
-            CASE 
-              -- If they clocked out within the grace period (-5 mins to +15 mins), use the scheduled end time
-              WHEN TIME_TO_SEC(TIMEDIFF(a.time_out, s.end_time)) BETWEEN -300 AND 900 THEN s.end_time
-              -- Otherwise (e.g., approved correction for a much later time), use their actual time out
-              ELSE a.time_out
-            END,
-            a.time_in
-          )) / 3600, 2
+          MOD(
+            TIME_TO_SEC(
+              CASE
+                WHEN MOD(TIME_TO_SEC(a.time_out) - TIME_TO_SEC(s.end_time) + 43200, 86400) - 43200
+                     BETWEEN -300 AND 900 THEN s.end_time
+                ELSE a.time_out
+              END
+            ) - TIME_TO_SEC(a.time_in) + 86400,
+            86400
+          ) / 3600, 2
         ))
       END AS total_hours
 
@@ -4063,8 +6525,28 @@ app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
 
   try {
     
-    const [userRows] = await db.promise().query("SELECT id, employee_id, status FROM users WHERE id = ?", [employeeId]);
+    const [userRows] = await db.promise().query("SELECT id, employee_id, role, status FROM users WHERE id = ?", [employeeId]);
     if (userRows.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    if (String(req.user.id) === String(employeeId)) {
+      return res.status(403).json({ success: false, message: 'Cannot permanently delete your own account.' });
+    }
+    if (userRows[0].role === 'instructor') {
+      return res.status(403).json({ success: false, message: 'Instructor accounts are managed by HR and cannot be permanently deleted here.' });
+    }
+
+    if (userRows[0].role === 'admin') {
+      const [adminCount] = await db.promise().query(
+        "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active' AND id != ?",
+        [employeeId]
+      );
+      if (adminCount[0].count === 0) {
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Action denied: You cannot permanently delete the last active System Administrator.' 
+        });
+      }
+    }
+    
     if (userRows[0].status !== 'deleted') {
       return res.status(400).json({ success: false, message: 'Employee must be moved to Deleted status before permanent deletion.' });
     }
@@ -4093,7 +6575,7 @@ app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwne
   const sql = `
     SELECT a.*, 
            DATE_FORMAT(a.date, '%Y-%m-%d') as date, 
-           ROUND(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60, 2) as total_hours,
+           COALESCE(a.total_hours, 0) AS total_hours,
            a.reviewed_at, a.updated_at, u.full_name, u.employee_id,
            COALESCE(
              (SELECT status FROM attendance_corrections c 
@@ -4132,7 +6614,7 @@ app.get('/api/attendance-report-user/:employeeId', authenticateToken, verifyOwne
 // 8. VISITORS, SCANNERS & BLE TAGS
 // ============================================
 
-app.get('/api/appointments/:id/visitors', authenticateToken, (req, res) => {
+app.get('/api/appointments/:id/visitors', authenticateToken, allowRoles('admin','security'), (req, res) => {
   const { id } = req.params;
   db.query("SELECT * FROM appointment_visitors WHERE appointment_id = ?", [id], (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Failed to load companion visitors.' });
@@ -4140,7 +6622,7 @@ app.get('/api/appointments/:id/visitors', authenticateToken, (req, res) => {
   });
 });
 
-app.get('/api/ble-tags', authenticateToken, (req, res) => {
+app.get('/api/ble-tags', authenticateToken, allowRoles('admin','security'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -4223,82 +6705,101 @@ app.post('/api/ble-tags', authenticateToken, async (req, res) => {
 });
 
 app.put('/api/ble-tags/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+  if (!['admin', 'security'].includes(req.user.role)) {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
-
-  const { id } = req.params;
-  const { ble_id, label, mac_address } = req.body;
-
-  if (!ble_id || !mac_address) {
-    return res.status(400).json({ success: false, message: "BLE ID and MAC address are required." });
+  const tagId = Number(req.params.id);
+  const { ble_id, label, mac_address } = req.body || {};
+  if (!Number.isSafeInteger(tagId) || tagId <= 0 || typeof ble_id !== 'string' || !ble_id.trim() ||
+      typeof mac_address !== 'string' || !mac_address.trim()) {
+    return res.status(400).json({ success: false, message: 'Valid tag ID, BLE ID and MAC address are required.' });
   }
-
-  
-  if (ble_id.trim().length > 50 || (label && label.trim().length > 100)) {
-    return res.status(400).json({ success: false, message: "BLE ID (max 50) or Label (max 100) is too long." });
+  if (ble_id.trim().length > 50 || (label && (typeof label !== 'string' || label.trim().length > 100))) {
+    return res.status(400).json({ success: false, message: 'BLE ID (max 50) or Label (max 100) is too long.' });
   }
-
   const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
   if (!macRegex.test(mac_address.trim())) {
-    return res.status(400).json({ success: false, message: "Invalid MAC address format." });
+    return res.status(400).json({ success: false, message: 'Invalid MAC address format.' });
   }
-
+  let connection;
   try {
-    // Check if another tag already uses this BLE ID or MAC Address
-    const [existing] = await db.promise().query(
-      "SELECT id FROM ble_tags WHERE (ble_id = ? OR UPPER(mac_address) = UPPER(?)) AND id != ?", 
-      [ble_id.trim(), mac_address.trim(), id]
-    );
-
-    if (existing.length > 0) {
-      return res.status(409).json({ success: false, message: "A different tag with this BLE ID or MAC address already exists." });
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+    const [existingTag] = await connection.query('SELECT ble_id FROM ble_tags WHERE id = ? FOR UPDATE', [tagId]);
+    if (!existingTag.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'BLE tag not found.' });
     }
-
-    await db.promise().query(
-      "UPDATE ble_tags SET ble_id = ?, label = ?, mac_address = ? WHERE id = ?",
-      [ble_id.trim(), label ? label.trim() : '', mac_address.trim().toUpperCase(), id]
+    const [inUse] = await connection.query(
+      'SELECT id FROM visitor_requests WHERE ble_id = ? AND arrived = 1 AND returned = 0 AND no_show = 0 LIMIT 1',
+      [existingTag[0].ble_id]
     );
-
-    logAction(req.user.id, 'UPDATE_BLE_TAG', 'ble_tag', id, req);
-    res.json({ success: true, message: "BLE Tag updated successfully." });
+    if (inUse.length) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Cannot edit a BLE tag assigned to an active visitor. Check out the visitor first.' });
+    }
+    const [duplicates] = await connection.query(
+      'SELECT id FROM ble_tags WHERE (ble_id = ? OR UPPER(mac_address) = UPPER(?)) AND id != ? LIMIT 1',
+      [ble_id.trim(), mac_address.trim(), tagId]
+    );
+    if (duplicates.length) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'A different tag with this BLE ID or MAC address already exists.' });
+    }
+    await connection.query('UPDATE ble_tags SET ble_id = ?, label = ?, mac_address = ? WHERE id = ?',
+      [ble_id.trim(), typeof label === 'string' ? label.trim() : '', mac_address.trim().toUpperCase(), tagId]);
+    await connection.commit();
+    logAction(req.user.id, 'UPDATE_BLE_TAG', 'ble_tag', tagId, req);
+    return res.json({ success: true, message: 'BLE Tag updated successfully.' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'BLE ID already exists.' });
+    console.error('BLE update error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to update BLE tag.' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
 app.delete('/api/ble-tags/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+  if (!['admin', 'security'].includes(req.user.role)) {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
-  const { id } = req.params;
-
+  const tagId = Number(req.params.id);
+  if (!Number.isSafeInteger(tagId) || tagId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid BLE tag ID.' });
+  }
+  let connection;
   try {
-    const [tag] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE id = ?", [id]);
-    if (tag.length === 0) return res.status(404).json({ success: false, message: "Tag not found." });
-
-    // Validate tag is not in active use
-    const [inUse] = await db.promise().query(
-      "SELECT id, first_name, last_name FROM visitor_requests WHERE ble_id = ? AND arrived = 1 AND returned = 0",
-      [tag[0].ble_id]
-    );
-
-    if (inUse.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete tag: Currently in use by visitor ${inUse[0].first_name} ${inUse[0].last_name}.`
-      });
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+    const [tags] = await connection.query('SELECT ble_id FROM ble_tags WHERE id = ? FOR UPDATE', [tagId]);
+    if (!tags.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Tag not found.' });
     }
-
-    await db.promise().query("DELETE FROM ble_tags WHERE id = ?", [id]);
-    logAction(req.user.id, 'DELETE_BLE_TAG', 'ble_tag', id, req);
-    res.json({ success: true, message: "BLE Tag deleted successfully." });
+    const [inUse] = await connection.query(
+      'SELECT id, first_name, last_name FROM visitor_requests WHERE ble_id = ? AND arrived = 1 AND returned = 0 AND no_show = 0 LIMIT 1',
+      [tags[0].ble_id]
+    );
+    if (inUse.length) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: `Cannot delete tag: Currently in use by visitor ${inUse[0].first_name} ${inUse[0].last_name}.` });
+    }
+    await connection.query('DELETE FROM ble_tags WHERE id = ?', [tagId]);
+    await connection.commit();
+    logAction(req.user.id, 'DELETE_BLE_TAG', 'ble_tag', tagId, req);
+    return res.json({ success: true, message: 'BLE Tag deleted successfully.' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('BLE tag delete error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to delete BLE tag.' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
-app.get('/api/ble-tags/in-use', authenticateToken, (req, res) => {
+app.get('/api/ble-tags/in-use', authenticateToken, allowRoles('admin','security'), (req, res) => {
   db.query(
     "SELECT DISTINCT ble_id FROM visitor_requests WHERE arrived = 1 AND returned = 0 AND no_show = 0 AND ble_id IS NOT NULL",
     (err, results) => {
@@ -4308,50 +6809,77 @@ app.get('/api/ble-tags/in-use', authenticateToken, (req, res) => {
   );
 });
 
-app.put('/api/visitor-requests/:id/return', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const [rows] = await db.promise().query(
-      "SELECT id, first_name, last_name, ble_id, destination, arrived, returned FROM visitor_requests WHERE id = ?",
-      [id]
-    );
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
-    const visitor = rows[0];
-
-    if (visitor.arrived != 1) {
-      return res.status(400).json({ success: false, message: "Visitor has not checked in yet." });
-    }
-    if (visitor.returned == 1) {
-      return res.status(400).json({ success: false, message: "Visitor has already returned their BLE tag." });
-    }
-    
-    const ble_id = visitor.ble_id;
-    const visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
-
-    if (ble_id) {
-      delete visitorDestinations[ble_id];   
-      delete liveVisitors[ble_id];
-      delete lastKnownVisitorsData[ble_id];
-      logVisitorHistory(ble_id, visitorName, ble_id, null, 'Exit / Returned', 'disconnect', null, null);
-    }
-
-    await db.promise().query(
-      `UPDATE visitor_requests 
-       SET returned = 1, returned_at = NOW(), 
-           used_ble_id = ?, ble_id = NULL 
-       WHERE id = ?`,
-      [ble_id, id]
-    );
-
-    logAction(req.user.id, 'VISITOR_RETURN', 'visitor_request', id, req);
-    res.json({ success: true, message: "BLE tag successfully returned." });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+app.put('/api/visitor-requests/:id/return', authenticateToken, requireAction('visitors:return'), async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid visitor request ID.' });
   }
+  let connection;
+  let bleId;
+  let visitorName;
+  try {
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+    // Read the current tag to acquire inventory and visit locks in the same order as check-in.
+    const [initial] = await connection.query('SELECT ble_id FROM visitor_requests WHERE id = ?', [requestId]);
+    if (!initial.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Visitor request not found.' });
+    }
+    if (initial[0].ble_id) {
+      await connection.query('SELECT id FROM ble_tags WHERE ble_id = ? FOR UPDATE', [initial[0].ble_id]);
+    }
+    const [rows] = await connection.query(
+      'SELECT id, first_name, last_name, ble_id, arrived, returned FROM visitor_requests WHERE id = ? FOR UPDATE',
+      [requestId]
+    );
+    const visitor = rows[0];
+    if (Number(visitor.arrived) !== 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Visitor has not checked in yet.' });
+    }
+    if (Number(visitor.returned) === 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Visitor has already returned their BLE tag.' });
+    }
+    if (visitor.ble_id !== initial[0].ble_id) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Visitor BLE tag changed. Refresh and try again.' });
+    }
+    bleId = visitor.ble_id;
+    visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
+    const [update] = await connection.query(
+      `UPDATE visitor_requests SET returned = 1, returned_at = NOW(), used_ble_id = ?, ble_id = NULL
+       WHERE id = ? AND arrived = 1 AND returned = 0`,
+      [bleId, requestId]
+    );
+    if (update.affectedRows !== 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Visit has already been checked out.' });
+    }
+    await connection.commit();
+  } catch (err) {
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('Visitor check-out error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to complete visitor check-out.' });
+  } finally {
+    if (connection) connection.release();
+  }
+  // Update live tracking only after the database transaction is committed.
+  if (bleId) {
+    // Do not erase tracking for a newer visit that reused the tag after this checkout committed.
+    if (!liveVisitors[bleId] || !liveVisitors[bleId].visitorRequestId || liveVisitors[bleId].visitorRequestId === requestId) {
+      delete visitorDestinations[bleId];
+      delete liveVisitors[bleId];
+      delete lastKnownVisitorsData[bleId];
+    }
+    logVisitorHistory(bleId, visitorName, bleId, null, 'Exit / Returned', 'disconnect', null, null);
+  }
+  logAction(req.user.id, 'VISITOR_RETURN', 'visitor_request', requestId, req);
+  return res.json({ success: true, message: 'BLE tag successfully returned.' });
 });
 
-app.get('/api/scanners', authenticateToken, (req, res) => {
+app.get('/api/scanners', authenticateToken, allowRoles('admin','security'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin' && req.user.role !== 'security') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -4457,247 +6985,338 @@ app.delete('/api/scanners/:id', authenticateToken, (req, res) => {
 // 8. VISITORS, SCANNERS & BLE TAGS (Secured & Validated)
 // ============================================
 
-app.post('/api/appointments/book', (req, res) => {
-  const { firstName, lastName, email, phone, date, time, reason, primaryBleId, additionalVisitors } = req.body;
-  const { date: today } = getPHTime();
-  
-  // Strict Validation
-  if (!firstName || !lastName || !email || !date || !time || !reason) {
-    return res.status(400).json({ success: false, message: "All required visitor fields must be filled out." });
+// R04: HCT Academy appointment times use Philippine local date and time.
+function validateVisitSchedule(date, time) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return 'Select a valid appointment date (YYYY-MM-DD).';
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ success: false, message: "Please provide a valid email address." });
+  const [year, month, day] = date.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    return 'The selected appointment date does not exist.';
   }
-  if (date < today) {
-    return res.status(400).json({ success: false, message: "Cannot book appointments for past dates." });
+  if (typeof time !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d(?::00)?$/.test(time)) {
+    return 'Select a valid appointment time (HH:MM).';
   }
+  const today = getPHTime();
+  if (date < today.date || (date === today.date && time.slice(0, 5) <= today.time.slice(0, 5))) {
+    return 'Appointment date and time must be in the future (Philippine time).';
+  }
+  const minutes = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+  const weekday = parsed.getUTCDay();
+  if (weekday === 0) return 'Appointments are not available on Sundays.';
+  if (minutes < 480 || (weekday === 6 ? minutes >= 720 : minutes >= 1020)) {
+    return weekday === 6
+      ? 'Saturday appointments must be between 8:00 AM and 11:59 AM.'
+      : 'Weekday appointments must be between 8:00 AM and 4:59 PM.';
+  }
+  return null;
+}
 
-  const appointmentStatus = 'PENDING';
-  const sql = `INSERT INTO visitor_requests 
-    (first_name, last_name, email, phone, visit_date, visit_time, reason, ble_id, status) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+// All appointment writes lock the requested slot to avoid concurrent booking/approval conflicts.
+async function lockAppointmentSlot(connection, date, time) {
+  const key = 'uv_visit_' + crypto.createHash('sha256').update(date + '|' + time.slice(0, 5)).digest('hex').slice(0, 32);
+  const [[lock]] = await connection.query('SELECT GET_LOCK(?, 5) AS acquired', [key]);
+  if (lock.acquired !== 1) { const e = new Error('Appointment slot is temporarily busy. Please retry.'); e.status = 409; throw e; }
+  return key;
+}
 
-  db.query(sql, [firstName.trim(), lastName.trim(), email.trim(), phone || null, date, time, reason, primaryBleId || null, appointmentStatus], (err, result) => {
-    if (err) {
-      console.error("DB insert error:", err);
-      return res.status(500).json({ success: false, message: "Database connection failed while booking." });
-    }
+async function releaseAppointmentSlot(connection, lockKey) {
+  if (connection && lockKey) {
+    try { await connection.query('SELECT RELEASE_LOCK(?)', [lockKey]); }
+    catch (err) { console.error('Appointment lock release failed:', err); }
+  }
+}
 
-    const appointmentId = result.insertId;
-
-    if (additionalVisitors && additionalVisitors.length > 0) {
-      const visSql = "INSERT INTO appointment_visitors (appointment_id, visitor_name, ble_id) VALUES ?";
-      const values = additionalVisitors.map(v => [appointmentId, v.name, v.bleId || null]);
-      db.query(visSql, [values], (err2) => {
-        if (err2) console.error("Error inserting additional visitors:", err2);
-      });
-    }
-
-    const subject = 'Visit Request Received - HCT Academy';
-    const primaryTagText = primaryBleId ? `Your BLE Tag: ${primaryBleId}\n` : '';
-    const phoneText = phone ? `Phone: ${phone}\n` : '';
-    let visitorDetails = '';
-
-    if (additionalVisitors && additionalVisitors.length > 0) {
-      visitorDetails = '\nAdditional Visitors:\n';
-      additionalVisitors.forEach((v, i) => {
-        visitorDetails += `  ${i+1}. ${v.name} – BLE Tag: ${v.bleId || 'None assigned'}\n`;
-      });
-      visitorDetails += '\nPlease share the BLE tags with your companions. They will be given to you upon arrival by our security guard.\n';
-    }
-
-    const emailBody = `Dear ${firstName} ${lastName},\n\n` +
-      `Your visit request has been received. We will review it and notify you once approved.\n\n` +
-      `Details:\n` +
-      `Date: ${date}\n` +
-      `Time: ${time}\n` +
-      `${phoneText}` +
-      `${primaryTagText}` +
-      `Reason: ${reason}\n` +
-      `${visitorDetails}\n` +
-      `Thank you,\nHCT Academy`;
-
-    res.json({ success: true, message: "Appointment request submitted successfully. Check your email for details." });
-
-    resend.emails.send({
-      from: 'UniVITA Academy <no-reply@univitahct.tech>',
-      to: [email],
-      subject: subject,
-      text: emailBody
-    }).catch((error) => {
-      console.error("Background Email error:", error);
-    });
-  });
+// No visitor identity or personal information is exposed to the public calendar.
+app.get('/api/appointments/booked-slots', async (req, res) => {
+  const date = req.query.date;
+  if (date !== undefined && (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+    return res.status(400).json({ success: false, message: 'Invalid date filter.' });
+  }
+  try {
+    const [rows] = await db.promise().query(
+      `SELECT DATE_FORMAT(visit_date, '%Y-%m-%d') AS visit_date,
+              TIME_FORMAT(visit_time, '%H:%i') AS visit_time
+       FROM visitor_requests WHERE status = 'APPROVED'
+         AND visit_date >= ? AND (? IS NULL OR visit_date = ?)`,
+      [getPHTime().date, date || null, date || null]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('Public slots fetch error:', error);
+    res.status(500).json({ success: false, message: 'Unable to load booked time slots.' });
+  }
 });
 
-app.put('/api/appointments/:id/status', authenticateToken, (req, res) => {
-  const { status, adminNotes } = req.body;
-  const requestId = req.params.id;
-  const adminId = req.user.id;
-
-  if (adminNotes && adminNotes.length > 500) {
-    return res.status(400).json({ success: false, message: "Admin notes must be 500 characters or less." });
+app.post('/api/appointments/book', async (req, res) => {
+  const { firstName, lastName, email, phone, date, time, reason, additionalVisitors } = req.body || {};
+  const fields = [firstName, lastName, email, date, time, reason];
+  if (fields.some(value => typeof value !== 'string' || !value.trim())) {
+    return res.status(400).json({ success: false, message: 'Complete all required appointment fields, including first and last name.' });
   }
-
-  if (status === 'REJECTED' && (!adminNotes || !adminNotes.trim())) {
-    return res.status(400).json({ success: false, message: "A reason is required when rejecting a request." });
+  const clean = {
+    firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim().toLowerCase(),
+    phone: typeof phone === 'string' ? phone.trim() : '', reason: reason.trim(),
+    date, time: time.slice(0, 5)
+  };
+  if (clean.firstName.length > 100 || clean.lastName.length > 100 || clean.reason.length > 500 || clean.email.length > 255) {
+    return res.status(400).json({ success: false, message: 'Appointment details exceed the allowed length.' });
   }
+  if (phone != null && (typeof phone !== 'string' || (clean.phone && !/^[0-9+\-\s()]{7,20}$/.test(clean.phone)))) {
+    return res.status(400).json({ success: false, message: 'Please enter a valid phone number.' });
+  }
+  const scheduleError = validateVisitSchedule(date, time);
+  if (scheduleError) return res.status(400).json({ success: false, message: scheduleError });
+  if (additionalVisitors != null && !Array.isArray(additionalVisitors)) {
+    return res.status(400).json({ success: false, message: 'Companion list must be an array.' });
+  }
+  if ((additionalVisitors || []).length > 50) {
+    return res.status(400).json({ success: false, message: 'Maximum of 50 companions per request.' });
+  }
+  const companions = [];
+  const names = new Set([`${clean.firstName} ${clean.lastName}`.toLowerCase().replace(/\s+/g, ' ')]);
+  for (const v of additionalVisitors || []) {
+    if (!v || typeof v.name !== 'string' || !v.name.trim() || v.name.trim().length > 100) {
+      return res.status(400).json({ success: false, message: 'Each companion requires a name of 1–100 characters.' });
+    }
+    const name = v.name.trim().replace(/\s+/g, ' ');
+    const normalized = name.toLowerCase();
+    if (names.has(normalized)) return res.status(409).json({ success: false, message: 'Duplicate visitor names are not allowed in one appointment.' });
+    names.add(normalized);
+    companions.push(name);
+  }
+  let connection, lockKey, appointmentId;
+  try {
+    const emailCheck = await validateEmailForAccount(clean.email, { checkDns: true });
+    if (!emailCheck.valid) return res.status(400).json({ success: false, message: emailCheck.reason });
+    connection = await db.promise().getConnection();
+    lockKey = await lockAppointmentSlot(connection, clean.date, clean.time);
+    await connection.beginTransaction();
+    const [reserved] = await connection.query(
+      `SELECT id FROM visitor_requests WHERE visit_date = ? AND visit_time = ?
+       AND status = 'APPROVED' LIMIT 1`, [clean.date, clean.time]
+    );
+    if (reserved.length) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'This time slot is already approved for another visit. Please choose another time.' });
+    }
+    const [duplicates] = await connection.query(
+      `SELECT id FROM visitor_requests WHERE email = ? AND visit_date = ? AND visit_time = ?
+       AND status IN ('PENDING', 'APPROVED', 'RESCHEDULED') LIMIT 1`, [clean.email, clean.date, clean.time]
+    );
+    if (duplicates.length) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'You already have a request for this date and time.' });
+    }
+    const [insert] = await connection.query(
+      `INSERT INTO visitor_requests
+       (first_name, last_name, email, phone, visit_date, visit_time, reason, ble_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'PENDING')`,
+      [clean.firstName, clean.lastName, clean.email, clean.phone || null, clean.date, clean.time, clean.reason]
+    );
+    appointmentId = insert.insertId;
+    if (companions.length) {
+      await connection.query('INSERT INTO appointment_visitors (appointment_id, visitor_name, ble_id) VALUES ?',
+        [companions.map(name => [appointmentId, name, null])]);
+    }
+    await connection.commit();
+  } catch (error) {
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('Appointment booking error:', error);
+    return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Unable to save appointment. Please try again.' });
+  } finally {
+    await releaseAppointmentSlot(connection, lockKey);
+    if (connection) connection.release();
+  }
+  res.json({ success: true, message: 'Appointment request submitted successfully. Check your email for details.', appointmentId });
+  const companionText = companions.length ? `\nAdditional Visitors:\n${companions.map((name, i) => `  ${i + 1}. ${name}`).join('\n')}\n` : '';
+  const body = `Dear ${clean.firstName} ${clean.lastName},\n\nYour visit request has been received and is pending approval.\n\nDate: ${clean.date}\nTime: ${clean.time}\nReason: ${clean.reason}\n${companionText}\nBLE tags will be assigned at authorized check-in, after approval.\n\nThank you,\nHCT Academy`;
+  resend.emails.send({ from: 'UniVITA Academy <no-reply@univitahct.tech>', to: [clean.email], subject: 'Visit Request Received - HCT Academy', text: body })
+    .catch(error => console.error('Background appointment email error:', error));
+});
 
+app.put('/api/appointments/:id/status', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+  }
+  const requestId = Number(req.params.id);
+  const { status, adminNotes } = req.body || {};
+  const notes = typeof adminNotes === 'string' ? adminNotes.trim() : '';
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid appointment ID.' });
+  }
   if (!['APPROVED', 'REJECTED'].includes(status)) {
-    return res.status(400).json({ success: false, message: "Invalid appointment status." });
+    return res.status(400).json({ success: false, message: 'Invalid appointment status.' });
+  }
+  if (adminNotes != null && typeof adminNotes !== 'string') {
+    return res.status(400).json({ success: false, message: 'Admin notes must be text.' });
+  }
+  if (notes.length > 500) {
+    return res.status(400).json({ success: false, message: 'Admin notes must be 500 characters or less.' });
+  }
+  if (status === 'REJECTED' && !notes) {
+    return res.status(400).json({ success: false, message: 'A reason is required when rejecting a request.' });
   }
 
-  db.query("SELECT * FROM visitor_requests WHERE id = ?", [requestId], (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
-    if (results.length === 0) return res.status(404).json({ success: false, message: "Appointment request not found." });
-
-    const request = results[0];
-    const { first_name, last_name, email, visit_date, visit_time, reason, phone } = request;
-
+  let connection;
+  let request;
+  let lockKey;
+  try {
+    connection = await db.promise().getConnection();
     if (status === 'APPROVED') {
-      db.query(
-        `SELECT id FROM visitor_requests 
-         WHERE email = ? AND visit_date = ? AND visit_time = ? AND status = 'APPROVED' AND id != ?`,
-        [email, visit_date, visit_time, requestId],
-        (dupErr, existing) => {
-          if (dupErr) return res.status(500).json({ success: false, message: "Database connection failed." });
-          if (existing.length > 0) {
-            return res.status(409).json({ 
-              success: false, 
-              message: "Conflict: This visitor already has an approved appointment at this exact date and time." 
-            });
-          }
-          proceedToUpdate();
-        }
-      );
-    } else {
-      proceedToUpdate();
+      const [dateRows] = await connection.query('SELECT visit_date, visit_time FROM visitor_requests WHERE id = ?', [requestId]);
+      if (!dateRows.length) return res.status(404).json({ success: false, message: 'Appointment request not found.' });
+      lockKey = await lockAppointmentSlot(connection, String(dateRows[0].visit_date).slice(0, 10), String(dateRows[0].visit_time).slice(0, 5));
     }
-
-    function proceedToUpdate() {
-      db.query(
-        "UPDATE visitor_requests SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW() WHERE id = ?", 
-        [status, adminNotes || null, adminId, requestId], 
-        (updateErr) => {
-          if (updateErr) return res.status(500).json({ success: false, message: "Failed to update appointment status." });
-          
-          const action = status === 'APPROVED' ? 'APPROVE_APPOINTMENT' : 'REJECT_APPOINTMENT';
-          logAction(adminId, action, 'visitor_request', requestId, req);
-          
-          db.query("SELECT * FROM appointment_visitors WHERE appointment_id = ?", [requestId], (visErr, visitors) => {
-            if (visErr) visitors = [];
-            const isApproved = status === 'APPROVED';
-            const subject = isApproved ? "Visit Request Approved - HCT Academy" : "Visit Request Status Update - HCT Academy";
-            
-            let emailBody = `Dear ${first_name} ${last_name},\n\n`;
-            if (isApproved) {
-              emailBody += "Your visit request has been APPROVED.\n\nWe look forward to welcoming you to HCT Academy.\n\n";
-            } else { 
-              emailBody += "We regret to inform you that your visit request has been DECLINED.\n\n"; 
-              if (adminNotes) emailBody += `Reason: ${adminNotes}\n\n`; 
-            }
-            
-            emailBody += `Details:\nDate: ${visit_date}\nTime: ${visit_time}\nReason: ${reason}\n`;
-            if (phone) emailBody += `Phone: ${phone}\n`;
-            
-            if (visitors && visitors.length > 0) {
-              emailBody += "\nAdditional Visitors:\n";
-              visitors.forEach((v, i) => { 
-                emailBody += `  ${i+1}. ${v.visitor_name}\n`; 
-              });
-            }
-            
-            emailBody += "\nBLE tags for tracking will be assigned to you and your companions upon arrival by our security guard.\n";
-            emailBody += "\nThank you for your understanding.\n\nBest regards,\nHCT Academy";
-            
-            const mailOptions = { from: process.env.MAIL_USER, to: email, subject: subject, text: emailBody };
-            transporter.sendMail(mailOptions, (error) => {
-              if (error) { 
-                console.error("Email error:", error); 
-                return res.json({ success: true, message: `Status updated to ${status}, but notification email failed to send.` }); 
-              }
-              res.json({ success: true, message: `Appointment ${status} successfully. Email sent.` });
-            });
-          });
-        }
-      );
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT * FROM visitor_requests WHERE id = ? FOR UPDATE', [requestId]);
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Appointment request not found.' });
     }
-  });
-});
-
-app.put('/api/appointments/:id', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
+    request = rows[0];
+    if (status === 'APPROVED') {
+      const expectedSlotKey = 'uv_visit_' + crypto.createHash('sha256').update(
+        String(request.visit_date).slice(0, 10) + '|' + String(request.visit_time).slice(0, 5)
+      ).digest('hex').slice(0, 32);
+      if (lockKey !== expectedSlotKey) {
+        await connection.rollback();
+        return res.status(409).json({ success: false, message: 'Appointment schedule changed. Refresh and approve again.' });
+      }
+    }
+    if (request.status !== 'PENDING' || Number(request.arrived) === 1 || Number(request.no_show) === 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Only pending, unvisited appointments can be approved or rejected.' });
+    }
+    if (status === 'APPROVED') {
+      const scheduleError = validateVisitSchedule(String(request.visit_date).slice(0, 10), String(request.visit_time).slice(0, 5));
+      if (scheduleError) {
+        await connection.rollback();
+        return res.status(409).json({ success: false, message: `Cannot approve appointment: ${scheduleError}` });
+      }
+      const [conflicts] = await connection.query(
+        `SELECT id FROM visitor_requests
+         WHERE visit_date = ? AND visit_time = ? AND status = 'APPROVED' AND id != ? LIMIT 1`,
+        [request.visit_date, request.visit_time, requestId]
+      );
+      if (conflicts.length) {
+        await connection.rollback();
+        return res.status(409).json({ success: false, message: 'This time slot has already been approved for another visit.' });
+      }
+    }
+    const [update] = await connection.query(
+      `UPDATE visitor_requests SET status = ?, admin_notes = ?, processed_by = ?, processed_at = NOW()
+       WHERE id = ? AND status = 'PENDING' AND arrived = 0 AND no_show = 0`,
+      [status, notes || null, req.user.id, requestId]
+    );
+    if (update.affectedRows !== 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Appointment status changed. Refresh and try again.' });
+    }
+    await connection.commit();
+  } catch (err) {
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('Appointment decision error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to update appointment status.' });
+  } finally {
+    await releaseAppointmentSlot(connection, lockKey);
+    if (connection) connection.release();
   }
-  const { id } = req.params;
-  const { visit_date, visit_time, admin_notes } = req.body;
-  const { date: today } = getPHTime();
-  
-  if (!visit_date || !visit_time) {
-    return res.status(400).json({ success: false, message: 'Date and time are required to reschedule.' });
-  }
-  
-  
-  if (visit_date < today) {
-    return res.status(400).json({ success: false, message: 'Cannot reschedule an appointment to a past date.' });
-  }
-  
-  
-  if (admin_notes && admin_notes.length > 500) {
-    return res.status(400).json({ success: false, message: "Reschedule reason must be 500 characters or less." });
-  }
 
-  db.query("SELECT * FROM visitor_requests WHERE id = ?", [id], (err, rows) => {
-    if (err) return res.status(500).json({ success: false, message: "Database connection failed." });
-    if (rows.length === 0) return res.status(404).json({ success: false, message: 'Appointment not found.' });
-    
-    const request = rows[0];
-    const sql = `UPDATE visitor_requests SET visit_date = ?, visit_time = ?, admin_notes = ? WHERE id = ?`;
-    
-    db.query(sql, [visit_date, visit_time, admin_notes || null, id], (err, result) => {
-      if (err) return res.status(500).json({ success: false, message: "Failed to update appointment schedule." });
-      
-      logAction(req.user.id, 'RESCHEDULE_APPOINTMENT', 'visitor_request', id, req);
-
-      const emailBody = `Dear ${request.first_name} ${request.last_name},\n\n` +
-        `Your campus visit appointment schedule has been updated by administration.\n\n` +
-        `New Schedule Details:\n` +
-        `Date: ${visit_date}\n` +
-        `Time: ${visit_time}\n` +
-        (admin_notes ? `Reason / Remarks for Rescheduling: ${admin_notes}\n\n` : '\n') +
-        `We look forward to welcoming you to HCT Academy.\n\nBest regards,\nHCT Academy`;
-
-      const mailOptions = {
-        from: process.env.MAIL_USER,
-        to: request.email,
-        subject: 'Appointment Schedule Updated - HCT Academy',
-        text: emailBody
-      };
-
-      transporter.sendMail(mailOptions, (error) => {
-        if (error) console.error("Reschedule email error:", error);
-      });
-
-      res.json({ success: true, message: 'Appointment successfully rescheduled.' });
+  logAction(req.user.id, status === 'APPROVED' ? 'APPROVE_APPOINTMENT' : 'REJECT_APPOINTMENT', 'visitor_request', requestId, req);
+  try {
+    const [companions] = await db.promise().query('SELECT * FROM appointment_visitors WHERE appointment_id = ?', [requestId]);
+    let emailBody = `Dear ${request.first_name} ${request.last_name},\n\n`;
+    emailBody += status === 'APPROVED'
+      ? 'Your visit request has been APPROVED.\n\nWe look forward to welcoming you to HCT Academy.\n\n'
+      : `We regret to inform you that your visit request has been DECLINED.\n\nReason: ${notes}\n\n`;
+    emailBody += `Details:\nDate: ${request.visit_date}\nTime: ${request.visit_time}\nReason: ${request.reason}\n`;
+    if (request.phone) emailBody += `Phone: ${request.phone}\n`;
+    if (companions.length) {
+      emailBody += '\nAdditional Visitors:\n';
+      companions.forEach((v, index) => { emailBody += `  ${index + 1}. ${v.visitor_name}\n`; });
+    }
+    emailBody += '\nBLE tags for tracking will be assigned upon arrival by our security guard.\n\nBest regards,\nHCT Academy';
+    const subject = status === 'APPROVED' ? 'Visit Request Approved - HCT Academy' : 'Visit Request Status Update - HCT Academy';
+    transporter.sendMail({ from: process.env.MAIL_USER, to: request.email, subject, text: emailBody }, (error) => {
+      if (error) console.error('Appointment decision email error:', error);
     });
-  });
+  } catch (err) {
+    console.error('Appointment email preparation error:', err);
+  }
+  return res.json({ success: true, message: `Appointment ${status} successfully. Email notification queued.` });
 });
 
-app.get('/api/appointments/pending', authenticateToken, (req, res) => {
+app.put('/api/appointments/:id', authenticateToken, requireAction('visitors:approve'), async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, message: 'Only Administrators can reschedule appointments.' });
+  }
+  const id = Number(req.params.id);
+  const { visit_date, visit_time, admin_notes } = req.body || {};
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ success: false, message: 'Invalid appointment ID.' });
+  const scheduleError = validateVisitSchedule(visit_date, visit_time);
+  if (scheduleError) return res.status(400).json({ success: false, message: scheduleError });
+  if (admin_notes != null && (typeof admin_notes !== 'string' || admin_notes.length > 500)) {
+    return res.status(400).json({ success: false, message: 'Reschedule reason must be text of 500 characters or less.' });
+  }
+  let connection, lockKey, previous;
+  try {
+    connection = await db.promise().getConnection();
+    lockKey = await lockAppointmentSlot(connection, visit_date, visit_time);
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT * FROM visitor_requests WHERE id = ? FOR UPDATE', [id]);
+    if (!rows.length) { await connection.rollback(); return res.status(404).json({ success: false, message: 'Appointment not found.' }); }
+    previous = rows[0];
+    if (!['PENDING', 'APPROVED', 'RESCHEDULED'].includes(previous.status) || previous.arrived || previous.returned || previous.no_show) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Only active, unvisited appointment requests can be rescheduled.' });
+    }
+    if (String(previous.visit_date).slice(0, 10) === visit_date && String(previous.visit_time).slice(0, 5) === visit_time.slice(0, 5)) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Choose a different date or time to reschedule.' });
+    }
+    const [conflicts] = await connection.query(
+      `SELECT id FROM visitor_requests WHERE visit_date = ? AND visit_time = ? AND status = 'APPROVED' AND id != ? LIMIT 1`,
+      [visit_date, visit_time, id]);
+    if (conflicts.length) { await connection.rollback(); return res.status(409).json({ success: false, message: 'This time slot has already been approved for another visit.' }); }
+    const [duplicates] = await connection.query(
+      `SELECT id FROM visitor_requests WHERE email = ? AND visit_date = ? AND visit_time = ? AND status IN ('PENDING','APPROVED','RESCHEDULED') AND id != ? LIMIT 1`,
+      [previous.email, visit_date, visit_time, id]);
+    if (duplicates.length) { await connection.rollback(); return res.status(409).json({ success: false, message: 'This visitor already has a request for the selected time.' }); }
+    await connection.query('UPDATE visitor_requests SET visit_date = ?, visit_time = ?, admin_notes = ? WHERE id = ?',
+      [visit_date, visit_time.slice(0, 5), admin_notes?.trim() || null, id]);
+    await connection.commit();
+  } catch (err) {
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('Reschedule failed:', err);
+    return res.status(err.status || 500).json({ success: false, message: err.status ? err.message : 'Failed to update appointment schedule.' });
+  } finally {
+    await releaseAppointmentSlot(connection, lockKey);
+    if (connection) connection.release();
+  }
+  logAction(req.user.id, 'RESCHEDULE_APPOINTMENT', 'visitor_request', id, req);
+  const emailBody = `Dear ${previous.first_name} ${previous.last_name},\n\nYour campus visit schedule has been updated.\n\nDate: ${visit_date}\nTime: ${visit_time}\n${admin_notes ? `Reason: ${admin_notes}\n` : ''}\nHCT Academy`;
+  transporter.sendMail({ from: process.env.MAIL_USER, to: previous.email, subject: 'Appointment Schedule Updated - HCT Academy', text: emailBody },
+    error => { if (error) console.error('Reschedule email error:', error); });
+  return res.json({ success: true, message: 'Appointment successfully rescheduled.' });
+});
+
+app.get('/api/appointments/pending', authenticateToken, allowRoles('admin','security'), (req, res) => {
   db.query("SELECT * FROM visitor_requests WHERE status = 'PENDING'", (err, results) => {
     if (err) return res.status(500).json({ success: false, message: "Failed to fetch pending requests." });
     res.json(results || []);
   });
 });
 
-app.get('/api/appointments/history', authenticateToken, (req, res) => {
+app.get('/api/appointments/history', authenticateToken, allowRoles('admin','security'), (req, res) => {
   db.query("SELECT * FROM visitor_requests WHERE status != 'PENDING' ORDER BY visit_date DESC", (err, results) => {
     if (err) return res.status(500).json({ success: false, message: "Failed to fetch history." });
     res.json(results || []);
   });
 });
 
-app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
+app.get('/api/dashboard/summary', authenticateToken, allowRoles('admin','hr_admin','security'), async (req, res) => {
   try {
     const [leaves, visitors, employees] = await Promise.all([
       db.promise().query("SELECT COUNT(*) as count FROM leave_requests WHERE status = 'Pending'"),
@@ -4847,7 +7466,7 @@ app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
 
 app.post('/api/ble-data', async (req, res) => {
   const hardwareApiKey = req.headers['x-api-key'];
-  if (process.env.HARDWARE_API_KEY && hardwareApiKey !== process.env.HARDWARE_API_KEY) {
+  if (!process.env.HARDWARE_API_KEY || hardwareApiKey !== process.env.HARDWARE_API_KEY) {
     console.warn("Unauthorized hardware access attempt blocked.");
     return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
@@ -4935,7 +7554,7 @@ app.post('/api/ble-data', async (req, res) => {
 app.post('/api/scan', async (req, res) => {
   const hardwareApiKey = req.headers['x-api-key'];
   const phNow = getPHDateTime();
-  if (process.env.HARDWARE_API_KEY && hardwareApiKey !== process.env.HARDWARE_API_KEY) {
+  if (!process.env.HARDWARE_API_KEY || hardwareApiKey !== process.env.HARDWARE_API_KEY) {
     return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
   }
 
@@ -5062,7 +7681,7 @@ app.post('/api/scan', async (req, res) => {
 // LIVE POSITIONS & VISIT REASONS (Secured & Validated)
 // ============================================
 
-app.get('/api/positions', authenticateToken, async (req, res) => {
+app.get('/api/positions', authenticateToken, allowRoles('security'), async (req, res) => {
   try {
     const [activeVisitors] = await db.promise().query(`
       SELECT vr.id, vr.first_name, vr.last_name, vr.ble_id, vr.destination
@@ -5137,7 +7756,7 @@ app.get('/api/visit-reasons', (req, res) => {
   });
 });
 
-app.post('/api/visit-reasons', authenticateToken, (req, res) => {
+app.post('/api/visit-reasons', authenticateToken, requireAction('system:visit-reasons'), (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
@@ -5163,7 +7782,7 @@ app.post('/api/visit-reasons', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/visit-reasons/:id', authenticateToken, (req, res) => {
+app.put('/api/visit-reasons/:id', authenticateToken, requireAction('system:visit-reasons'), (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
@@ -5193,7 +7812,7 @@ app.put('/api/visit-reasons/:id', authenticateToken, (req, res) => {
   });
 });
 
-app.delete('/api/visit-reasons/:id', authenticateToken, (req, res) => {
+app.delete('/api/visit-reasons/:id', authenticateToken, requireAction('system:visit-reasons'), (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
@@ -5351,7 +7970,7 @@ app.get('/api/programs', authenticateToken, (req, res) => {
 });
 
 // 2. Create a new program
-app.post('/api/programs', authenticateToken, (req, res) => {
+app.post('/api/programs', authenticateToken, requireAction('programs:write'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -5375,7 +7994,7 @@ app.post('/api/programs', authenticateToken, (req, res) => {
 });
 
 // 3. Update an existing program
-app.put('/api/programs/:id', authenticateToken, async (req, res) => {
+app.put('/api/programs/:id', authenticateToken, requireAction('programs:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -5408,7 +8027,7 @@ app.put('/api/programs/:id', authenticateToken, async (req, res) => {
 });
 
 // 4. Delete a program
-app.delete('/api/programs/:id', authenticateToken, async (req, res) => {
+app.delete('/api/programs/:id', authenticateToken, requireAction('programs:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -5447,7 +8066,7 @@ app.get('/api/courses', authenticateToken, (req, res) => {
 });
 
 // 2. Create a new course (Now requires program_id)
-app.post('/api/courses', authenticateToken, (req, res) => {
+app.post('/api/courses', authenticateToken, requireAction('courses:write'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -5467,7 +8086,7 @@ app.post('/api/courses', authenticateToken, (req, res) => {
 });
 
 // 3. Update a course
-app.put('/api/courses/:id', authenticateToken, async (req, res) => {
+app.put('/api/courses/:id', authenticateToken, requireAction('courses:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -5496,7 +8115,7 @@ app.put('/api/courses/:id', authenticateToken, async (req, res) => {
 });
 
 // 4. Delete a course
-app.delete('/api/courses/:id', authenticateToken, async (req, res) => {
+app.delete('/api/courses/:id', authenticateToken, requireAction('courses:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
@@ -5650,11 +8269,11 @@ app.get('/api/emergency-alerts', authenticateToken, (req, res) => {
 
 app.get('/api/public/jobs', (req, res) => {
   db.query(
-    `SELECT id, title, department, description, requirements, employment_type, 
-            location_type, location, salary_min, salary_max, created_at 
-     FROM job_postings 
-     WHERE status = 'open' 
-     ORDER BY created_at DESC`, 
+    `SELECT id, title, department, description, requirements, employment_type,
+       location_type, location, salary_min, salary_max, requires_prc, created_at
+  FROM job_postings
+ WHERE status = 'open'
+ ORDER BY created_at DESC`, 
     (err, jobs) => {
       if (err) {
         console.error("Fetch public jobs error:", err);
@@ -5665,23 +8284,55 @@ app.get('/api/public/jobs', (req, res) => {
   );
 });
 
-app.post('/api/jobs/apply', uploadResume.single('resume'), (req, res) => {
-  const { job_id, full_name, email, phone, cover_letter } = req.body;
-  
+app.post('/api/jobs/apply', uploadApplication, async (req, res) => {
+  const { job_id, full_name, email, phone, cover_letter, prc_license_no } = req.body;
+  const resumeFile = req.files?.resume?.[0];
+  const torFile    = req.files?.tor?.[0];
+
+  const cleanup = () => {
+    [resumeFile, torFile].forEach((f) => {
+      if (f && fs.existsSync(f.path)) {
+        try { fs.unlinkSync(f.path); } catch (_) {}
+      }
+    });
+  };
+
   if (!job_id || !full_name || !email) {
+    cleanup();
     return res.status(400).json({ success: false, message: 'Job ID, full name, and email are required fields.' });
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ success: false, message: 'Please provide a valid email address.' });
+
+  if (!resumeFile) {
+    cleanup();
+    return res.status(400).json({ success: false, message: 'A resume is required to apply.' });
   }
 
-  const resumePath = req.file ? `/uploads/resumes/${req.file.filename}` : null;
-  
+  const emailCheck = await validateEmailForAccount(email, { checkDns: true });
+  if (!emailCheck.valid) {
+    cleanup();
+    return res.status(400).json({ success: false, message: emailCheck.reason });
+  }
+
+  const resumePath = `/uploads/resumes/${resumeFile.filename}`;
+  const torPath    = torFile ? `/uploads/resumes/${torFile.filename}` : null;
+
   db.query(
-    "INSERT INTO job_applicants (job_id, full_name, email, phone, cover_letter, resume_path) VALUES (?, ?, ?, ?, ?, ?)", 
-    [job_id, full_name.trim(), email.trim().toLowerCase(), phone || null, cover_letter || null, resumePath], 
+    `INSERT INTO job_applicants
+       (job_id, full_name, email, phone, cover_letter, prc_license_no, resume_path, tor_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      job_id,
+      full_name.trim(),
+      email.trim().toLowerCase(),
+      phone || null,
+      cover_letter || null,
+      prc_license_no ? String(prc_license_no).trim() : null,
+      resumePath,
+      torPath
+    ],
     (err) => {
       if (err) {
+        cleanup();
         console.error("Job application error:", err);
         return res.status(500).json({ success: false, message: 'Failed to submit job application.' });
       }
@@ -5690,16 +8341,17 @@ app.post('/api/jobs/apply', uploadResume.single('resume'), (req, res) => {
   );
 });
 
-app.get('/api/jobs', authenticateToken, (req, res) => {
+app.get('/api/jobs', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
   db.query(
     `SELECT jp.id, jp.title, jp.department, jp.description, jp.requirements, jp.employment_type,
-            jp.location_type, jp.location, jp.salary_min, jp.salary_max, jp.status, jp.posted_by, jp.created_at,
-            (SELECT COUNT(*) FROM job_applicants ja WHERE ja.job_id = jp.id AND ja.status = 'new') AS applicant_count
-     FROM job_postings jp 
-     ORDER BY jp.created_at DESC`,
+       jp.location_type, jp.location, jp.salary_min, jp.salary_max, jp.status,
+       jp.requires_prc, jp.posted_by, jp.created_at,
+       (SELECT COUNT(*) FROM job_applicants ja WHERE ja.job_id = jp.id AND ja.status = 'new') AS applicant_count
+  FROM job_postings jp
+ ORDER BY jp.created_at DESC`,
     (err, results) => {
       if (err) {
         console.error("Fetch admin jobs error:", err);
@@ -5710,34 +8362,38 @@ app.get('/api/jobs', authenticateToken, (req, res) => {
   );
 });
 
-app.post('/api/jobs', authenticateToken, (req, res) => {
+app.post('/api/jobs', authenticateToken, requireAction('jobs:create'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
-  const { 
+  const {
     title, department, description, requirements, employment_type,
-    location_type, location, salary_min, salary_max, status
+    location_type, location, salary_min, salary_max, status, requires_prc
   } = req.body;
 
   if (!title || !title.trim() || !description || !description.trim()) {
     return res.status(400).json({ success: false, message: 'Job title and description are required.' });
   }
-  if (salary_min && (isNaN(salary_min) || salary_min < 0)) {
-    return res.status(400).json({ success: false, message: 'Minimum salary must be a valid positive number.' });
+  if (!salary_min || isNaN(salary_min) || Number(salary_min) < 0) {
+    return res.status(400).json({ success: false, message: 'Minimum salary is required and must be a valid non-negative number.' });
   }
-  if (salary_max && (isNaN(salary_max) || salary_max < 0)) {
-    return res.status(400).json({ success: false, message: 'Maximum salary must be a valid positive number.' });
+  if (!salary_max || isNaN(salary_max) || Number(salary_max) < 0) {
+    return res.status(400).json({ success: false, message: 'Maximum salary is required and must be a valid non-negative number.' });
+  }
+  if (Number(salary_max) < Number(salary_min)) {
+    return res.status(400).json({ success: false, message: 'Maximum salary must be greater than or equal to minimum salary.' });
   }
 
   db.query(
-    `INSERT INTO job_postings 
-      (title, department, description, requirements, employment_type,
-       location_type, location, salary_min, salary_max, status, posted_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO job_postings
+       (title, department, description, requirements, employment_type,
+        location_type, location, salary_min, salary_max, status, requires_prc, posted_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      title.trim(), department || null, description.trim(), requirements || null, employment_type || 'Full-time',
-      location_type || 'On-site', location || null, salary_min || null, salary_max || null,
-      status || 'open', req.user.id
+      title.trim(), department || null, description.trim(), requirements || null,
+      employment_type || 'Full-time', location_type || 'On-site', location || null,
+      Number(salary_min), Number(salary_max),
+      status || 'open', requires_prc ? 1 : 0, req.user.id
     ],
     (err, result) => {
       if (err) {
@@ -5750,18 +8406,27 @@ app.post('/api/jobs', authenticateToken, (req, res) => {
   );
 });
 
-app.put('/api/jobs/:id', authenticateToken, async (req, res) => {
+app.put('/api/jobs/:id', authenticateToken, requireAction('jobs:edit'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
-  const { 
+  const {
     title, department, description, requirements, employment_type,
-    location_type, location, salary_min, salary_max, status
+    location_type, location, salary_min, salary_max, status, requires_prc
   } = req.body;
   const jobId = req.params.id;
 
   if (!title || !title.trim() || !description || !description.trim()) {
     return res.status(400).json({ success: false, message: 'Job title and description are required.' });
+  }
+  if (!salary_min || isNaN(salary_min) || Number(salary_min) < 0) {
+    return res.status(400).json({ success: false, message: 'Minimum salary is required and must be a valid non-negative number.' });
+  }
+  if (!salary_max || isNaN(salary_max) || Number(salary_max) < 0) {
+    return res.status(400).json({ success: false, message: 'Maximum salary is required and must be a valid non-negative number.' });
+  }
+  if (Number(salary_max) < Number(salary_min)) {
+    return res.status(400).json({ success: false, message: 'Maximum salary must be greater than or equal to minimum salary.' });
   }
 
   try {
@@ -5774,24 +8439,21 @@ app.put('/api/jobs/:id', authenticateToken, async (req, res) => {
 
     db.query(
       `UPDATE job_postings SET
-        title = ?, department = ?, description = ?, requirements = ?,
-        employment_type = ?, location_type = ?, location = ?,
-        salary_min = ?, salary_max = ?, status = ?
+         title = ?, department = ?, description = ?, requirements = ?,
+         employment_type = ?, location_type = ?, location = ?,
+         salary_min = ?, salary_max = ?, status = ?, requires_prc = ?
        WHERE id = ?`,
       [
         title.trim(), department || null, description.trim(), requirements || null,
         employment_type || 'Full-time', location_type || 'On-site', location || null,
-        salary_min || null, salary_max || null, status || 'open', jobId
+        Number(salary_min), Number(salary_max),
+        status || 'open', requires_prc ? 1 : 0, jobId
       ],
       (err, result) => {
         if (err) {
           console.error("Update job error:", err);
           return res.status(500).json({ success: false, message: 'Failed to update job posting.' });
         }
-        if (result.affectedRows === 0) {
-          return res.status(404).json({ success: false, message: 'Job posting not found.' });
-        }
-        
         logAction(req.user.id, 'UPDATE_JOB', 'job_posting', jobId, req, oldData, newData);
         res.json({ success: true, message: 'Job posting updated successfully.' });
       }
@@ -5802,7 +8464,58 @@ app.put('/api/jobs/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/jobs/:id', authenticateToken, (req, res) => {
+app.put('/api/applicants/:id/onboarding', authenticateToken, requireAction('applicants:update'), async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+  }
+
+  const applicantId = req.params.id;
+  const { nbi_verified, csc_form_verified, medical_verified } = req.body;
+
+  const toBool = (v) => (v === true || v === 1 || v === '1' || v === 'true') ? 1 : 0;
+  const payload = {
+    nbi_verified:      toBool(nbi_verified),
+    csc_form_verified: toBool(csc_form_verified),
+    medical_verified:  toBool(medical_verified)
+  };
+
+  try {
+    const [existing] = await db.promise().query(
+      "SELECT id, status FROM job_applicants WHERE id = ?",
+      [applicantId]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ success: false, message: 'Applicant not found.' });
+    }
+    if (existing[0].status !== 'hired') {
+      return res.status(400).json({
+        success: false,
+        message: 'Onboarding checklist can only be updated once the applicant is marked as Hired.'
+      });
+    }
+
+    await db.promise().query(
+      `UPDATE job_applicants
+          SET nbi_verified = ?, csc_form_verified = ?, medical_verified = ?,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+      [payload.nbi_verified, payload.csc_form_verified, payload.medical_verified, applicantId]
+    );
+
+    logAction(
+      req.user.id, 'UPDATE_APPLICANT_ONBOARDING', 'job_applicant', applicantId,
+      req, null, payload
+    );
+
+    res.json({ success: true, message: 'Onboarding checklist updated.', ...payload });
+  } catch (err) {
+    console.error("Onboarding update error:", err);
+    res.status(500).json({ success: false, message: 'Server error while updating onboarding checklist.' });
+  }
+});
+
+app.delete('/api/jobs/:id', authenticateToken, requireAction('jobs:delete'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -5826,14 +8539,15 @@ app.delete('/api/jobs/:id', authenticateToken, (req, res) => {
   });
 });
 
-app.get('/api/jobs/:id', authenticateToken, (req, res) => {
+app.get('/api/jobs/:id', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
   db.query(
     `SELECT id, title, department, description, requirements, employment_type,
-            location_type, location, salary_min, salary_max, status, posted_by, created_at
-     FROM job_postings WHERE id = ?`,
+       location_type, location, salary_min, salary_max, status,
+       requires_prc, posted_by, created_at
+  FROM job_postings WHERE id = ?`,
     [req.params.id],
     (err, results) => {
       if (err) {
@@ -5848,17 +8562,19 @@ app.get('/api/jobs/:id', authenticateToken, (req, res) => {
   );
 });
 
-app.get('/api/jobs/:id/applicants', authenticateToken, (req, res) => {
+app.get('/api/jobs/:id/applicants', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
-  const jobId = req.params.id;
   db.query(
-    `SELECT id, job_id, full_name, email, phone, cover_letter, resume_path, status, applied_at, score
-     FROM job_applicants
-     WHERE job_id = ?
-     ORDER BY applied_at DESC`,
-    [jobId],
+    `SELECT id, job_id, full_name, email, phone, cover_letter, prc_license_no,
+            resume_path, tor_path,
+            nbi_verified, csc_form_verified, medical_verified,
+            status, applied_at, score
+       FROM job_applicants
+      WHERE job_id = ?
+      ORDER BY applied_at DESC`,
+    [req.params.id],
     (err, results) => {
       if (err) {
         console.error("Applicants fetch error:", err);
@@ -5869,7 +8585,7 @@ app.get('/api/jobs/:id/applicants', authenticateToken, (req, res) => {
   );
 });
 
-app.put('/api/applicants/:id', authenticateToken, (req, res) => {
+app.put('/api/applicants/:id', authenticateToken, requireAction('applicants:update'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
   }
@@ -6143,7 +8859,7 @@ app.post('/api/chat/group-room', authenticateToken, async (req, res) => {
 // 12. MONTHLY ATTENDANCE, PAYROLL & REPORTS
 // ============================================
 
-app.get('/api/attendance-monthly', authenticateToken, async (req, res) => {
+app.get('/api/attendance-monthly', authenticateToken, allowRoles('admin','hr_admin'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
@@ -6206,16 +8922,19 @@ app.get('/api/attendance-monthly', authenticateToken, async (req, res) => {
   });
 });
 
-app.get('/api/payroll/history', authenticateToken, (req, res) => {
+app.get('/api/payroll/history', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
   }
 
   const sql = `
     SELECT 
-      p.id, p.month_year, p.gross_pay, p.net_pay, p.tax_deduction,
+      p.id, p.user_id, p.month_year, p.gross_pay, p.net_pay, p.tax_deduction,
       p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction,
       p.loan_deduction, p.other_deduction, p.status,
+      p.salary_rate, p.total_hours, p.overtime_hours, p.overtime_pay,
+      p.transport_allowance, p.meal_allowance, p.housing_allowance,
+      p.late_deduction, p.total_earnings,
       u.full_name, u.employee_id
     FROM payroll p
     JOIN users u ON p.user_id = u.id
@@ -6237,7 +8956,7 @@ app.get('/api/school-locations', authenticateToken, (req, res) => {
   });
 });
 
-app.post('/api/school-locations', authenticateToken, (req, res) => {
+app.post('/api/school-locations', authenticateToken, requireAction('locations:write'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -6284,7 +9003,7 @@ app.post('/api/school-locations', authenticateToken, (req, res) => {
   );
 });
 
-app.put('/api/school-locations/:id', authenticateToken, async (req, res) => {
+app.put('/api/school-locations/:id', authenticateToken, requireAction('locations:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -6345,7 +9064,7 @@ app.put('/api/school-locations/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/school-locations/:id', authenticateToken, async (req, res) => {
+app.delete('/api/school-locations/:id', authenticateToken, requireAction('locations:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -6382,7 +9101,7 @@ app.delete('/api/school-locations/:id', authenticateToken, async (req, res) => {
 
 
 
-app.get('/api/reports/compliance/attendance-compliance', authenticateToken, async (req, res) => {
+app.get('/api/reports/compliance/attendance-compliance', authenticateToken, allowRoles('hr_admin'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR authorization required.' });
   }
@@ -6534,6 +9253,20 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
         audit_status: auditStatus
       };
     });
+
+    // Frontend-owned printable compliance report (R08 layout update).
+    // Preserve the original PDF response for existing consumers; format=json
+    // returns only authorized report data, not a rendered document.
+    if (req.query.format === 'json') {
+      return res.json({
+        success: true,
+        report_type: 'internal_attendance_compliance',
+        period: { month, year, start_date: startDate, end_date: endDate },
+        filters: { program_id: program_id || '', course: course || '' },
+        generated_at: new Date().toISOString(),
+        records: reportData
+      });
+    }
 
     const PDFDocument = require('pdfkit');
     const doc = new PDFDocument({ margin: 36, size: 'A4', layout: 'landscape' });
@@ -6750,339 +9483,563 @@ app.get('/api/reports/compliance/attendance-compliance', authenticateToken, asyn
 });
 
 
-app.post('/api/payroll/unlock', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
-  }
 
-  const { email, pin } = req.body;
-  if (!email || !pin) {
-    return res.status(400).json({ success: false, message: 'Email and PIN are required.' });
-  }
+app.post(
+  '/api/payroll/unlock',
+  authenticateToken,
+  requireAction('payroll:unlock'),
+  async (req, res) => {
+    try {
+      const { email, pin } = req.body || {};
 
-  if (!checkPinRateLimit(email)) {
-    return res.status(429).json({
-      success: false,
-      message: 'Too many failed attempts. Please wait 15 minutes before trying again.'
-    });
-  }
-
-  db.query(
-    "SELECT * FROM users WHERE email = ? AND status = 'active' AND (role = 'admin' OR role = 'hr_admin')",
-    [email],
-    (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
-      if (results.length === 0) {
-        return res.status(404).json({ success: false, message: 'Admin account not found or deactivated.' });
+      if (typeof email !== 'string' ||
+          typeof pin !== 'string' ||
+          !PAYROLL_PIN_PATTERN.test(pin)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Enter a valid email and 4 to 6 digit PIN.'
+        });
       }
 
-      const admin = results[0];
-      if (admin.payroll_pin !== pin) {
-        recordFailedPinAttempt(email);
-        
-        return res.status(400).json({ success: false, message: 'Incorrect security PIN.' });
+      const normalizedEmail = email.trim().toLowerCase();
+
+      // The PIN must belong to the authenticated account.
+      const [users] = await db.promise().query(
+        `SELECT id, email, role, status, payroll_pin
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [req.user.id]
+      );
+
+      const account = users[0];
+
+      if (!account ||
+          account.status !== 'active' ||
+          account.role !== 'hr_admin' ||
+          String(account.email).toLowerCase() !== normalizedEmail) {
+        return res.status(403).json({
+          success: false,
+          message: 'Payroll access is not permitted for this account.'
+        });
       }
 
-      clearPinAttempts(email);
+      const attemptKey = String(account.id);
+
+      if (!checkPinRateLimit(attemptKey)) {
+        return res.status(429).json({
+          success: false,
+          message: 'Too many failed attempts. Please wait 15 minutes.'
+        });
+      }
+
+      if (!account.payroll_pin) {
+        return res.status(403).json({
+          success: false,
+          message: 'No payroll PIN is configured. Set your PIN in Settings first.'
+        });
+      }
+
+      // Known legacy default is not accepted for unlocking.
+      if (account.payroll_pin === '1234') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your default PIN must be changed in Settings before accessing payroll.'
+        });
+      }
+
+      const validPin = await verifyStoredPayrollPin(
+        account.id,
+        account.payroll_pin,
+        pin
+      );
+
+      if (!validPin) {
+        recordFailedPinAttempt(attemptKey);
+
+        return res.status(400).json({
+          success: false,
+          message: 'Incorrect security PIN.'
+        });
+      }
+
+      // Also reject accounts whose old default PIN was
+      // previously migrated into a bcrypt hash.
+      if (pin === '1234') {
+        return res.status(403).json({
+          success: false,
+          message: 'Change the default PIN in Settings before accessing payroll.'
+        });
+      }
+
+      clearPinAttempts(attemptKey);
 
       const payrollToken = jwt.sign(
-        { id: admin.id, email: admin.email, role: admin.role, purpose: 'payroll-access' },
+        {
+          id: account.id,
+          email: account.email,
+          role: account.role,
+          purpose: 'payroll-access'
+        },
         PAYROLL_JWT_SECRET,
         { expiresIn: '15m' }
       );
 
       db.query(
-        "INSERT INTO payroll_access_logs (user_id, email) VALUES (?, ?)",
-        [admin.id, admin.email],
-        (err) => {
-          if (err) console.error('Failed to log payroll access:', err);
+        `INSERT INTO payroll_access_logs (user_id, email)
+         VALUES (?, ?)`,
+        [account.id, account.email],
+        (logError) => {
+          if (logError) {
+            console.error('Payroll access audit error:', logError.message);
+          }
         }
       );
 
-      res.json({ success: true, message: 'Access granted.', token: payrollToken, expiresIn: 900 });
-    }
-  );
-});
+      return res.json({
+        success: true,
+        message: 'Payroll access granted.',
+        token: payrollToken,
+        expiresIn: 900
+      });
 
-app.put('/api/users/update-pin', authenticateToken, (req, res) => {
-  const { email, currentPin, newPin } = req.body;
-  
-  if (!email || !currentPin || !newPin) {
-    return res.status(400).json({ success: false, message: 'Email, current PIN, and new PIN are required.' });
-  }
-  
-  if (!/^\d{4,6}$/.test(newPin)) {
-    return res.status(400).json({ success: false, message: 'The new PIN must be between 4 and 6 numeric digits.' });
-  }
+    } catch (error) {
+      console.error('Payroll unlock error:', error.message);
 
- 
-  db.query(
-    "SELECT * FROM users WHERE id = ? AND status = 'active' AND (role = 'admin' OR role = 'hr_admin')",
-    [req.user.id], 
-    (err, results) => {
-      if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
-      if (results.length === 0) return res.status(404).json({ success: false, message: 'Admin account not found.' });
-
-      const admin = results[0];
-      if (admin.payroll_pin !== currentPin) {
-        return res.status(401).json({ success: false, message: 'The current PIN provided is incorrect.' });
-      }
-
-      db.query("UPDATE users SET payroll_pin = ? WHERE id = ?", [newPin, admin.id], (err) => {
-        if (err) return res.status(500).json({ success: false, message: 'Database error while saving new PIN.' });
-        clearPinAttempts(admin.email);
-        res.json({ success: true, message: 'Security PIN successfully updated.' });
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to verify payroll access.'
       });
     }
-  );
-});
+  }
+);
+
+
+
+app.put(
+  '/api/users/update-pin',
+  authenticateToken,
+  requireAction('payroll:unlock'),
+  async (req, res) => {
+    try {
+      const { currentPin, newPin } = req.body || {};
+
+      if (typeof currentPin !== 'string' ||
+          typeof newPin !== 'string' ||
+          !currentPin ||
+          !PAYROLL_PIN_PATTERN.test(newPin)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Enter your current credential and a valid new PIN of 4 to 6 digits.'
+        });
+      }
+
+      if (newPin === '1234') {
+        return res.status(400).json({
+          success: false,
+          message: 'The default PIN 1234 cannot be used.'
+        });
+      }
+
+      const [users] = await db.promise().query(
+        `SELECT id, email, role, status, password, payroll_pin
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [req.user.id]
+      );
+
+      const account = users[0];
+
+      if (!account ||
+          account.status !== 'active' ||
+          account.role !== 'hr_admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not authorized to change a payroll PIN.'
+        });
+      }
+
+      const attemptKey = String(account.id);
+
+      if (!checkPinRateLimit(attemptKey)) {
+        return res.status(429).json({
+          success: false,
+          message: 'Too many attempts. Please wait 15 minutes.'
+        });
+      }
+
+      let credentialValid = false;
+
+      if (account.payroll_pin) {
+        // Normal PIN change.
+        credentialValid = await verifyStoredPayrollPin(
+          account.id,
+          account.payroll_pin,
+          currentPin
+        );
+      } else {
+        // First-time PIN setup:
+        // verify the user's account password.
+        credentialValid = Boolean(
+          account.password &&
+          await bcrypt.compare(currentPin, account.password)
+        );
+      }
+
+      if (!credentialValid) {
+        recordFailedPinAttempt(attemptKey);
+
+        return res.status(401).json({
+          success: false,
+          message: 'Current PIN or account password is incorrect.'
+        });
+      }
+
+      if (account.payroll_pin &&
+          await verifyStoredPayrollPin(
+            account.id,
+            account.payroll_pin,
+            newPin
+          )) {
+        return res.status(400).json({
+          success: false,
+          message: 'Your new PIN must be different from your current PIN.'
+        });
+      }
+
+      const hashedPin = await bcrypt.hash(newPin, 12);
+
+      await db.promise().query(
+        `UPDATE users
+         SET payroll_pin = ?
+         WHERE id = ?`,
+        [hashedPin, account.id]
+      );
+
+      clearPinAttempts(attemptKey);
+
+      return res.json({
+        success: true,
+        message: 'Payroll security PIN updated successfully.'
+      });
+
+    } catch (error) {
+      console.error('Payroll PIN update error:', error.message);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to update payroll security PIN.'
+      });
+    }
+  }
+);
+
 
 // ============================================
 // 12. PAYROLL (Secured & Validated)
 // ============================================
 
-app.post('/api/payroll/finalize', verifyPayrollAccess, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to finalize payroll.' });
-  }
-  const {
-    user_id, month_year, salary_rate, total_hours, overtime_hours, overtime_pay,
-    transport_allowance, meal_allowance, housing_allowance, sss_deduction, philhealth_deduction,
-    pagibig_deduction, loan_deduction, other_deduction, gross_pay, tax_deduction, net_pay,
-    total_earnings, status
-  } = req.body;
+// R01 — Server-authoritative payroll snapshots and employee/period uniqueness.
+// The rates below deliberately retain the existing capstone formulas; statutory
+// rate verification and payment status policy are handled separately in R02.
+const R01_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const r01Money = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
-  // 1. Strict Input Validation
-  if (!user_id || !month_year || total_hours === undefined || gross_pay === undefined || net_pay === undefined) {
-    return res.status(400).json({ success: false, message: 'Missing required payroll fields (user ID, month/year, hours, or pay).' });
-  }
-  
-  if (isNaN(total_hours) || isNaN(gross_pay) || isNaN(net_pay)) {
-    return res.status(400).json({ success: false, message: 'Calculated payroll values must be valid numbers.' });
-  }
+function r01PeriodFromLabel(label) {
+  const match = /^(January|February|March|April|May|June|July|August|September|October|November|December) (20\d{2})$/.exec(String(label || ''));
+  if (!match) return null;
+  const month = R01_MONTHS.indexOf(match[1]) + 1;
+  const year = Number(match[2]);
+  const now = new Date();
+  if (year > now.getFullYear() || (year === now.getFullYear() && month > now.getMonth() + 1)) return null;
+  return { month, year, monthYear: `${R01_MONTHS[month - 1]} ${year}` };
+}
 
-  db.query("SELECT id FROM payroll WHERE user_id = ? AND month_year = ?", [user_id, month_year], (err, rows) => {
-    if (err) {
-      console.error("Payroll check error:", err);
-      return res.status(500).json({ success: false, message: 'Database connection error while checking existing payroll.' });
+function r01ParseAdjustment(value, name) {
+  if (value === undefined || value === null || value === '') return 0;
+  if ((typeof value !== 'string' && typeof value !== 'number') ||
+      String(value).trim() === '' || !/^\d+(?:\.\d{1,2})?$/.test(String(value)) ||
+      !Number.isFinite(Number(value)) || Number(value) > 1000000) {
+    const error = new Error(`${name} must be a non-negative amount with up to two decimal places (maximum ₱1,000,000).`);
+    error.httpStatus = 400;
+    throw error;
+  }
+  return r01Money(value);
+}
+
+async function r01LoadPayrollSource(connection, userId, month, year) {
+  const start = `${year}-${String(month).padStart(2, '0')}-01`;
+  const end = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+  const [employees] = await connection.query(
+    `SELECT id, employee_id, full_name, monthly_salary, work_days_per_month
+     FROM users WHERE id = ? AND role = 'instructor' AND status = 'active'`, [userId]);
+  if (!employees.length) {
+    const error = new Error('Active instructor not found.');
+    error.httpStatus = 404;
+    throw error;
+  }
+  const emp = employees[0];
+  const [attendance] = await connection.query(
+    `SELECT COALESCE(SUM(CASE WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL
+                              THEN GREATEST(0, TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out)) / 60
+                              ELSE 0 END), 0) AS regular_hours,
+            COALESCE(SUM(CASE WHEN a.time_in IS NOT NULL AND s.start_time IS NOT NULL
+                                   AND TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) > 900
+                              THEN TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) / 60
+                              ELSE 0 END), 0) AS late_minutes
+     FROM attendance a LEFT JOIN schedules s ON s.id = a.schedule_id
+     WHERE a.user_id = ? AND a.date BETWEEN ? AND ?
+       AND LOWER(TRIM(a.status)) NOT IN ('on leave', 'absent', 'system auto-clock out')`,
+    [emp.employee_id, start, end]);
+  const [overtime] = await connection.query(
+    `SELECT COALESCE(SUM(GREATEST(0, TIMESTAMPDIFF(MINUTE, start_time, end_time)) / 60), 0) AS overtime_hours
+     FROM overtime_requests WHERE user_id = ? AND date BETWEEN ? AND ? AND LOWER(status) = 'approved'`,
+    [emp.id, start, end]);
+  // Count only individually approved paid leave dates; ignore cancelled/unpaid requests.
+  // A day with recorded attendance is not paid twice as both worked time and full-day leave.
+  const [leaves] = await connection.query(
+    `SELECT COUNT(*) AS paid_leave_days FROM (
+       SELECT DISTINCT DATE(l.request_date) AS leave_date
+       FROM leave_requests l
+       WHERE (l.employee_id = ? OR l.user_id = ? OR l.user_id = ?)
+         AND DATE(l.request_date) BETWEEN ? AND ?
+         AND LOWER(TRIM(l.status)) = 'approved' AND l.is_paid = 1
+         AND l.request_date IS NOT NULL
+         AND LOWER(COALESCE(l.duration, 'Whole Day')) = 'whole day'
+         AND NOT EXISTS (SELECT 1 FROM attendance a
+                         WHERE a.user_id = ? AND a.date = DATE(l.request_date)
+                           AND a.time_in IS NOT NULL AND a.time_out IS NOT NULL
+                           AND LOWER(TRIM(a.status)) NOT IN ('absent', 'on leave', 'system auto-clock out'))
+     ) approved_paid_leave_dates`,
+    [emp.employee_id, String(emp.id), emp.employee_id, start, end, emp.employee_id]);
+  return {
+    ...emp,
+    regularHours: Number(attendance[0]?.regular_hours || 0),
+    lateMinutes: Number(attendance[0]?.late_minutes || 0),
+    overtimeHours: Number(overtime[0]?.overtime_hours || 0),
+    paidLeaveDays: Number(leaves[0]?.paid_leave_days || 0),
+    payrollYear: year, payrollMonth: month
+  };
+}
+
+function r01Calculate(source, adjustments = {}) {
+  const monthlySalary = Number(source.monthly_salary);
+  const workDays = Number(source.work_days_per_month);
+  if (!Number.isFinite(monthlySalary) || monthlySalary < 0 || !Number.isInteger(workDays) || workDays <= 0) {
+    const error = new Error('Instructor salary or work days are invalid. Correct the employee profile before finalizing.');
+    error.httpStatus = 422;
+    throw error;
+  }
+  for (const field of ['regularHours','overtimeHours','lateMinutes','paidLeaveDays']) {
+    if (!Number.isFinite(source[field]) || source[field] < 0) {
+      const error = new Error(`Invalid ${field} in payroll source records.`);
+      error.httpStatus = 422;
+      throw error;
     }
-    if (rows.length > 0) {
-      return res.status(409).json({ success: false, message: `Payroll for ${month_year} has already been finalized for this employee.` });
-    }
+  }
+  const hourlyRate = monthlySalary / workDays / 8;
+  const paidLeaveHours = source.paidLeaveDays * 8;
+  const baseEarnings = (source.regularHours + paidLeaveHours) * hourlyRate;
+  const overtimePay = source.overtimeHours * hourlyRate * 1.25;
+  const lateDeduction = source.lateMinutes / 60 * hourlyRate;
+  const transport = adjustments.transport || 0;
+  const meal = adjustments.meal || 0;
+  const housing = adjustments.housing || 0;
+  const bonus = adjustments.bonus || 0;
+  const loans = adjustments.loans || 0;
+  const other = adjustments.other || 0;
+  const grossPay = baseEarnings + overtimePay + transport + meal + housing + bonus;
+  const statutoryBase = Math.max(0, (monthlySalary > 0 ? monthlySalary : baseEarnings) - lateDeduction);
+  const sss = calcPHSSS(statutoryBase, source.payrollYear);
+  const philhealth = calcPHPhilHealth(statutoryBase);
+  const pagibig = calcPHPagIbig(statutoryBase, source.payrollYear, source.payrollMonth);
+  const taxable = Math.max(0, grossPay - lateDeduction - sss - philhealth - pagibig);
+  // BIR Annex E (2023 onwards), monthly withholding table.
+  // Bracket bases are prescribed rounded monthly amounts.
+  const bracket = [
+    { min: 0, max: 20833, rate: 0, base: 0 },
+    { min: 20833, max: 33332, rate: .15, base: 0 },
+    { min: 33332, max: 66666, rate: .20, base: 1875 },
+    { min: 66666, max: 166666, rate: .25, base: 8541.80 },
+    { min: 166666, max: 666666, rate: .30, base: 33541.80 },
+    { min: 666666, max: Infinity, rate: .35, base: 183541.80 }
+  ].find(b => taxable > b.min && taxable <= b.max);
+  const tax = bracket ? bracket.base + (taxable - bracket.min) * bracket.rate : 0;
+  const netPay = Math.max(0, grossPay - lateDeduction - sss - philhealth - pagibig - tax - loans - other);
+  return {
+    salary_rate: r01Money(hourlyRate), total_hours: r01Money(source.regularHours + paidLeaveHours),
+    overtime_hours: r01Money(source.overtimeHours), overtime_pay: r01Money(overtimePay),
+    transport_allowance: transport, meal_allowance: meal, housing_allowance: housing,
+    sss_deduction: r01Money(sss), philhealth_deduction: r01Money(philhealth),
+    pagibig_deduction: r01Money(pagibig), loan_deduction: loans, other_deduction: other,
+    late_deduction: r01Money(lateDeduction), gross_pay: r01Money(grossPay),
+    tax_deduction: r01Money(tax), net_pay: r01Money(netPay), total_earnings: r01Money(netPay)
+  };
+}
 
-    const finalSalaryRate = salary_rate || (total_hours > 0 ? gross_pay / total_hours : 0);
-    
-    db.query(
-      `INSERT INTO payroll 
-        (user_id, month_year, salary_rate, total_hours, overtime_hours, overtime_pay,
-         transport_allowance, meal_allowance, housing_allowance, sss_deduction, philhealth_deduction,
-         pagibig_deduction, loan_deduction, other_deduction, gross_pay, tax_deduction, net_pay,
-         total_earnings, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        user_id, month_year, finalSalaryRate, total_hours, overtime_hours || 0, overtime_pay || 0,
-        transport_allowance || 0, meal_allowance || 0, housing_allowance || 0,
-        sss_deduction || 0, philhealth_deduction || 0, pagibig_deduction || 0,
-        loan_deduction || 0, other_deduction || 0, gross_pay, tax_deduction || 0, net_pay,
-        total_earnings || net_pay, status || 'paid'
-      ],
-      (err, result) => {
-        if (err) {
-          console.error("Payroll insertion error:", err);
-          return res.status(500).json({ success: false, message: 'Database error while finalizing payroll.' });
-        }
-        logAction(req.user.id, 'FINALIZE_PAYROLL', 'payroll', result.insertId, req);
-        res.json({ success: true, message: 'Payroll record successfully finalized and saved.' });
-      }
-    );
-  });
+const R01_PAYROLL_COLUMNS = [
+  'user_id','month_year','salary_rate','total_hours','overtime_hours','overtime_pay',
+  'transport_allowance','meal_allowance','housing_allowance','sss_deduction',
+  'philhealth_deduction','pagibig_deduction','loan_deduction','other_deduction',
+  'late_deduction','gross_pay','tax_deduction','net_pay','total_earnings','status'
+];
+async function r01InsertPayroll(connection, userId, monthYear, values) {
+  const data = { user_id: userId, month_year: monthYear, ...values, status: 'pending' };
+  const params = R01_PAYROLL_COLUMNS.map(k => data[k]);
+  const [result] = await connection.query(
+    `INSERT INTO payroll (${R01_PAYROLL_COLUMNS.join(', ')}) VALUES (${params.map(() => '?').join(', ')})`, params);
+  return result.insertId;
+}
+
+function r01Error(res, err, context) {
+  if (err && err.code === 'ER_DUP_ENTRY') return res.status(409).json({ success: false, message: 'Payroll for this employee and period was already finalized.' });
+  if (err && err.httpStatus) return res.status(err.httpStatus).json({ success: false, message: err.message });
+  console.error(context, err);
+  return res.status(500).json({ success: false, message: 'Unable to finalize payroll. Please try again or contact the administrator.' });
+}
+
+// Authoritative preview for HR confirmation, not a separate payroll record.
+app.post('/api/payroll/preview', verifyPayrollAccess, requireAction('payroll:finalize'), async (req, res) => {
+  if (!['admin','hr_admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Forbidden.' });
+  const userId = Number(req.body.user_id);
+  const period = r01PeriodFromLabel(req.body.month_year);
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !period) {
+    return res.status(400).json({ success: false, message: 'A valid instructor and non-future payroll period are required.' });
+  }
+  try {
+    const adjustments = {};
+    for (const [key, field] of Object.entries({
+      transport: 'transport_allowance', meal: 'meal_allowance', housing: 'housing_allowance',
+      bonus: 'bonus', loans: 'loan_deduction', other: 'other_deduction'
+    })) adjustments[key] = r01ParseAdjustment(req.body[field], field);
+    const source = await r01LoadPayrollSource(db.promise(), userId, period.month, period.year);
+    const calculated = r01Calculate(source, adjustments);
+    return res.json({ success: true, calculated, source: {
+      employee: source.full_name, regular_hours: r01Money(source.regularHours),
+      paid_leave_days: source.paidLeaveDays, overtime_hours: r01Money(source.overtimeHours),
+      late_minutes: r01Money(source.lateMinutes)
+    } });
+  } catch (error) { return r01Error(res, error, 'Payroll preview error:'); }
 });
 
-
-// PHILIPPINE STATUTORY CALCULATION HELPERS
-
-const calcPHSSS = (monthlySalary) => {
-  if (monthlySalary <= 0) return 0;
-  let msc = 5000;
-  if (monthlySalary >= 34750) msc = 35000;
-  else if (monthlySalary > 5000) {
-    const step = Math.floor((monthlySalary - 4750) / 500);
-    msc = 5000 + (step * 500);
+// Existing endpoint, request URL, and successful response keys are preserved.
+// Legacy submitted totals and deduction overrides are not trusted as calculations.
+app.post('/api/payroll/finalize', verifyPayrollAccess, requireAction('payroll:finalize'), async (req, res) => {
+  if (!['admin','hr_admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Forbidden.' });
+  const userId = Number(req.body.user_id);
+  const period = r01PeriodFromLabel(req.body.month_year);
+  if (!Number.isSafeInteger(userId) || userId <= 0 || !period) {
+    return res.status(400).json({ success: false, message: 'A valid instructor and non-future payroll period are required.' });
   }
-  return msc * 0.045; 
-};
-
-const calcPHPhilHealth = (monthlySalary) => {
-  if (monthlySalary <= 0) return 0;
-  let base = monthlySalary;
-  if (base < 10000) base = 10000; 
-  if (base > 100000) base = 100000; 
-  return (base * 0.05) / 2; 
-};
-
-const calcPHPagIbig = (monthlySalary) => {
-  if (monthlySalary <= 0) return 0;
-  let base = monthlySalary;
-  if (base > 5000) base = 5000; 
-  return base * 0.02; 
-};
-
-
-app.post('/api/payroll/run-monthly', verifyPayrollAccess, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden.' });
-  }
-
-  const period = parseReportPeriod(req.body.month, req.body.year);
-  if (period.error) {
-    return res.status(400).json({ success: false, message: period.error });
-  }
-  const { month, year } = period;
-
-  if (!month || !year || isNaN(month) || isNaN(year)) {
-    return res.status(400).json({ success: false, message: 'A valid numeric month and year are required.' });
-  }
-
-  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const lastDay = new Date(year, month, 0).getDate();
-  const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
-  const monthYear = new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-
   try {
-   
-    const [attSummary] = await db.promise().query(`
-      SELECT 
-        u.id,
-        u.employee_id, 
-        u.full_name,
-        u.monthly_salary,
-        u.work_days_per_month,
-        COALESCE(SUM(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60), 0) AS regular_hours,
-        (SELECT COALESCE(SUM(TIMESTAMPDIFF(MINUTE, start_time, end_time)/60), 0) FROM overtime_requests WHERE user_id = u.id AND date BETWEEN ? AND ? AND status = 'approved') AS overtime_hours,
-        COALESCE(SUM(CASE WHEN a.status = 'on leave' THEN 1 ELSE 0 END), 0) AS leave_days,
-        COALESCE(SUM(
-          CASE 
-            WHEN a.time_in IS NOT NULL 
-                 AND s.start_time IS NOT NULL 
-                 AND TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) > 900
-            THEN TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) / 60
-            ELSE 0
-          END
-        ), 0) AS late_minutes
-      FROM users u
-      LEFT JOIN attendance a ON u.employee_id = a.user_id 
-        AND a.date BETWEEN ? AND ? 
-        AND a.status NOT IN ('on leave', 'absent')
-      LEFT JOIN schedules s ON a.schedule_id = s.id
-      WHERE u.role = 'instructor' AND u.status = 'active'
-      GROUP BY u.id
-    `, [startDate, endDate, startDate, endDate]);
-
-    if (attSummary.length === 0) {
-      return res.status(400).json({ success: false, message: 'No active instructors found to process.' });
+    const adjustmentNames = {
+      transport: 'transport_allowance', meal: 'meal_allowance', housing: 'housing_allowance',
+      bonus: 'bonus', loans: 'loan_deduction', other: 'other_deduction'
+    };
+    const adjustments = {};
+    for (const [key, field] of Object.entries(adjustmentNames)) {
+      adjustments[key] = r01ParseAdjustment(req.body[field], field);
     }
+    const source = await r01LoadPayrollSource(db.promise(), userId, period.month, period.year);
+    const calc = r01Calculate(source, adjustments);
+    // InnoDB UNIQUE(user_id, month_year) guarantees exactly one record under concurrency.
+    const id = await r01InsertPayroll(db.promise(), userId, period.monthYear, calc);
+    logAction(req.user.id, 'FINALIZE_PAYROLL', 'payroll', id, req);
+    return res.json({ success: true, message: 'Payroll finalized and awaiting payment confirmation.', payroll_id: id, calculated: calc });
+  } catch (error) {
+    return r01Error(res, error, 'Payroll finalization error:');
+  }
+});
 
+// R02 statutory deductions: employee shares, with effective-date-aware caps.
+// Official references: SSS 2025 contribution schedule, PhilHealth 2026 5%
+// premium, Pag-IBIG Circular 460, BIR Annex E (2023 onward).
+const calcPHSSS = (salary, year = 2026) => {
+  if (salary <= 0) return 0;
+  const minMSC = year >= 2025 ? 5000 : 4000;
+  const maxMSC = year >= 2025 ? 35000 : 30000;
+  const rate = year >= 2025 ? 0.05 : 0.045;
+  // SSS bracket midpoint is 250 + multiples of 500.
+  const msc = salary < minMSC + 250 ? minMSC :
+    Math.min(maxMSC, minMSC + Math.floor((salary - (minMSC - 250)) / 500) * 500);
+  return r01Money(msc * rate);
+};
+const calcPHPhilHealth = (salary) => {
+  if (salary <= 0) return 0;
+  return r01Money(Math.min(100000, Math.max(10000, salary)) * 0.05 / 2);
+};
+const calcPHPagIbig = (salary, year = 2026, month = 1) => {
+  if (salary <= 0) return 0;
+  const cap = year > 2024 || (year === 2024 && month >= 2) ? 10000 : 5000;
+  return r01Money(Math.min(cap, salary) * (salary <= 1500 ? .01 : .02));
+};
+
+// R02: Payroll is prepared/finalized when inserted ('pending'). The employee
+// has NOT necessarily been paid. Only an authorized HR user may confirm
+// disbursement, and the one-way transition is guarded by an atomic UPDATE.
+app.post('/api/payroll/:id/mark-paid', verifyPayrollAccess, requireAction('payroll:finalize'), async (req, res) => {
+  if (req.user.role !== 'hr_admin') {
+    return res.status(403).json({ success: false, message: 'Only HR personnel may confirm payroll payment.' });
+  }
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return res.status(400).json({ success: false, message: 'A valid payroll record is required.' });
+  }
+  if (req.body?.confirm_paid !== true) {
+    return res.status(400).json({ success: false, message: 'Confirm that the payment was actually disbursed before marking it paid.' });
+  }
+  try {
+    const [result] = await db.promise().query(
+      `UPDATE payroll SET status = 'paid' WHERE id = ? AND status = 'pending' AND user_id IS NOT NULL`, [id]);
+    if (result.affectedRows !== 1) {
+      return res.status(409).json({ success: false, message: 'This payroll record is already paid or cannot be confirmed.' });
+    }
+    logAction(req.user.id, 'CONFIRM_PAYROLL_PAID', 'payroll', id, req);
+    return res.json({ success: true, payroll_id: id, status: 'paid', message: 'Payment confirmation saved.' });
+  } catch (error) {
+    console.error('Payroll payment confirmation error:', error);
+    return res.status(500).json({ success: false, message: 'Unable to confirm payment.' });
+  }
+});
+
+app.post('/api/payroll/run-monthly', verifyPayrollAccess, requireAction('payroll:run'), async (req, res) => {
+  if (!['admin','hr_admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Forbidden.' });
+  const period = parseReportPeriod(req.body.month, req.body.year);
+  if (period.error) return res.status(400).json({ success: false, message: period.error });
+  const { month, year } = period;
+  const monthYear = `${R01_MONTHS[month - 1]} ${year}`;
+  try {
+    const [employees] = await db.promise().query(
+      `SELECT id, full_name FROM users WHERE role = 'instructor' AND status = 'active' ORDER BY id`);
+    if (!employees.length) return res.status(400).json({ success: false, message: 'No active instructors found to process.' });
     const processed = [];
     const skipped = [];
-    
-   
-    const taxTable = [
-      { min: 0, max: 20833, rate: 0, base: 0 },
-      { min: 20833, max: 33332, rate: 0.15, base: 0 },
-      { min: 33332, max: 66666, rate: 0.20, base: 1875 }, 
-      { min: 66666, max: 166666, rate: 0.25, base: 8541.67 }, 
-      { min: 166666, max: 666666, rate: 0.30, base: 33541.67 },
-      { min: 666666, max: Infinity, rate: 0.35, base: 183541.67 }, 
-    ];
-
-    for (const emp of attSummary) {
-      const [existing] = await db.promise().query("SELECT id FROM payroll WHERE user_id = ? AND month_year = ?", [emp.id, monthYear]);
-      if (existing.length > 0) {
-        skipped.push({ employee: emp.full_name, reason: 'Already finalized' });
-        continue;
-      }
-
-      let monthlySalary = Number(emp.monthly_salary) || 0;
-      let workDays = Number(emp.work_days_per_month) || 22;
-      const hourlyRate = workDays > 0 ? (monthlySalary / workDays / 8) : 0;
-      
-      const regularHours = Number(emp.regular_hours);
-      const leaveDays = Number(emp.leave_days);
-      const paidLeaveHours = leaveDays * 8; 
-      const baseEarnings = (regularHours + paidLeaveHours) * hourlyRate;
-
-      const overtimeHours = Number(emp.overtime_hours);
-      const overtimePay = overtimeHours * hourlyRate * 1.25;
-
-      let lateMinutes = Number(emp.late_minutes);
-      const lateDeduction = (lateMinutes / 60) * hourlyRate;
-
-      const grossPay = baseEarnings + overtimePay;
-      
-      
-      const netBaseForStatutory = Math.max(0, (monthlySalary > 0 ? monthlySalary : baseEarnings) - lateDeduction);
-
-      
-      let sss = calcPHSSS(netBaseForStatutory); 
-      let philHealth = calcPHPhilHealth(netBaseForStatutory); 
-      let pagIbig = calcPHPagIbig(netBaseForStatutory); 
-
-      
-      const taxableIncome = Math.max(0, (baseEarnings + overtimePay - lateDeduction) - sss - philHealth - pagIbig);
-      
-      let tax = 0;
-      for (let bracket of taxTable) {
-        if (taxableIncome > bracket.min && taxableIncome <= bracket.max) {
-          tax = bracket.base + (taxableIncome - bracket.min) * bracket.rate;
-          break;
+    for (const emp of employees) {
+      try {
+        const source = await r01LoadPayrollSource(db.promise(), emp.id, month, year);
+        const values = r01Calculate(source);
+        const id = await r01InsertPayroll(db.promise(), emp.id, monthYear, values);
+        processed.push({ employee: emp.full_name, totalHours: source.regularHours, netPay: values.net_pay.toFixed(2) });
+        logAction(req.user.id, 'FINALIZE_PAYROLL', 'payroll', id, req);
+      } catch (error) {
+        if (error.code === 'ER_DUP_ENTRY') {
+          skipped.push({ employee: emp.full_name, reason: 'Already finalized' });
+          continue;
         }
+        throw error;
       }
-
-      const netPay = Math.max(0, grossPay - lateDeduction - sss - philHealth - pagIbig - tax);
-
-      await db.promise().query(
-        `INSERT INTO payroll 
-          (user_id, month_year, salary_rate, total_hours, overtime_hours, overtime_pay,
-           transport_allowance, meal_allowance, housing_allowance, sss_deduction, philhealth_deduction,
-           pagibig_deduction, loan_deduction, other_deduction, gross_pay, tax_deduction, net_pay,
-           status, total_earnings)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, 0, 0, ?, ?, ?, 'paid', ?)`,
-        [
-          emp.id, 
-          monthYear, 
-          hourlyRate.toFixed(2), 
-          (regularHours + paidLeaveHours).toFixed(2), 
-          overtimeHours.toFixed(2),
-          overtimePay.toFixed(2),
-          sss.toFixed(2),
-          philHealth.toFixed(2),
-          pagIbig.toFixed(2),
-          grossPay.toFixed(2), 
-          tax.toFixed(2), 
-          netPay.toFixed(2), 
-          netPay.toFixed(2)
-        ]
-      );
-
-      processed.push({ employee: emp.full_name, totalHours: regularHours, netPay: netPay.toFixed(2) });
     }
-
     logAction(req.user.id, 'RUN_MONTHLY_PAYROLL', 'payroll', null, req);
-    res.json({ 
-      success: true, 
-      message: `Monthly payroll processed successfully. (${processed.length} processed, ${skipped.length} skipped)`,
-      processed: processed.length, 
-      skipped: skipped.length, 
-      details: { processed, skipped } 
-    });
-
-  } catch (err) {
-    console.error('Monthly payroll error:', err);
-    res.status(500).json({ success: false, message: 'Server connection failed while processing payroll.' });
+    return res.json({ success: true,
+      message: `Monthly payroll finalized. Awaiting payment confirmation. (${processed.length} processed, ${skipped.length} skipped)`,
+      processed: processed.length, skipped: skipped.length, details: { processed, skipped } });
+  } catch (error) {
+    return r01Error(res, error, 'Monthly payroll error:');
   }
 });
 
-app.put('/api/payroll/update-employee-salary/:employeeId', authenticateToken, (req, res) => {
+app.put('/api/payroll/update-employee-salary/:employeeId', authenticateToken, requireAction('payroll:update-salary'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to update salaries.' });
   }
@@ -7115,7 +10072,7 @@ app.put('/api/payroll/update-employee-salary/:employeeId', authenticateToken, (r
 });
 
 // Added missing Auth Middleware
-app.get('/api/payroll/access-logs', verifyPayrollAccess,  (req, res) => {
+app.get('/api/payroll/access-logs', verifyPayrollAccess, allowRoles('hr_admin'),  (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
@@ -7136,7 +10093,7 @@ app.get('/api/payroll/access-logs', verifyPayrollAccess,  (req, res) => {
 // 13. ADMIN AUDIT LOGS & CONFIGURATION
 // ============================================
 
-app.get('/api/audit-logs', authenticateToken, (req, res) => {
+app.get('/api/audit-logs', authenticateToken, allowRoles('admin'), (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const sql = `
     SELECT 
@@ -7164,9 +10121,9 @@ app.get('/api/audit-logs', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/users/:id/role', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
+app.put('/api/users/:id/role', authenticateToken, requireAction('roles:assign'), async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, message: 'Forbidden. Only System Admins can change user roles.' });
   }
   
   const { role } = req.body;
@@ -7186,6 +10143,23 @@ app.put('/api/users/:id/role', authenticateToken, async (req, res) => {
     const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
     if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
     const oldData = oldRecord[0];
+    if (oldData.status !== 'active') {
+      return res.status(409).json({success:false,message:'Only active accounts can be reassigned. Activate the account through its owning department first.'});
+    }
+    if (oldData.role === role) return res.json({success:true,message:'Role is already assigned.'});
+
+    if (oldData.role === 'admin' && role !== 'admin') {
+      const [adminCount] = await db.promise().query(
+        "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active' AND id != ?",
+        [userId]
+      );
+      if (adminCount[0].count === 0) {
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Action denied: You cannot demote the last active System Administrator.' 
+        });
+      }
+    }
 
     await db.promise().query("UPDATE users SET role = ? WHERE id = ?", [role, userId]);
     
@@ -7214,13 +10188,13 @@ db.query(createConfigTable, (err) => {
   }
 });
 
-app.get('/api/system-config', authenticateToken, async (req, res) => {
+app.get('/api/system-config', authenticateToken, allowRoles('admin'), async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const cfg = await getSystemConfig();
   res.json(cfg);
 });
 
-app.put('/api/system-config', authenticateToken, async (req, res) => {
+app.put('/api/system-config', authenticateToken, requireAction('system:config'), async (req, res) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
@@ -7266,7 +10240,7 @@ app.put('/api/system-config', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/visitor-requests', authenticateToken, (req, res) => {
+app.get('/api/visitor-requests', authenticateToken, allowRoles('admin','security'), (req, res) => {
   const { date, status } = req.query;
   let sql = "SELECT * FROM visitor_requests WHERE 1=1";
   const params = [];
@@ -7279,121 +10253,130 @@ app.get('/api/visitor-requests', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/visitor-requests/:id/arrive', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  const { floor, destination, ble_id } = req.body; 
+app.put('/api/visitor-requests/:id/arrive', authenticateToken, requireAction('visitors:checkin'), async (req, res) => {
+  const requestId = Number(req.params.id);
+  const { floor, destination, ble_id } = req.body || {};
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid visitor request ID.' });
+  }
+  if (typeof destination !== 'string' || !destination.trim() || typeof ble_id !== 'string' || !ble_id.trim() || floor == null) {
+    return res.status(400).json({ success: false, message: 'Floor, destination room, and BLE tag are required.' });
+  }
+  const cleanFloor = String(floor).trim();
+  const cleanRoom = destination.trim();
+  const cleanBleId = ble_id.trim();
+  if (!(ALLOWED_ROOMS[cleanFloor] || []).includes(cleanRoom)) {
+    return res.status(400).json({ success: false, message: 'Invalid destination room for the selected floor.' });
+  }
 
-      if (!destination || !destination.trim() || !ble_id || !ble_id.trim() || !floor) {
-      return res.status(400).json({ success: false, message: "Floor, destination room, and BLE tag are required." });
-    }
-
-    const cleanFloor = String(floor).trim();
-    const cleanRoom = destination.trim();
-    const cleanBleId = ble_id.trim();
-
-    
-    const validRooms = ALLOWED_ROOMS[cleanFloor] || [];
-    if (!validRooms.includes(cleanRoom)) {
-      return res.status(400).json({ success: false, message: "Invalid destination room for the selected floor." });
-    }
-
+  let connection;
+  let visitorName;
   try {
-    const [reqRows] = await db.promise().query(
-      "SELECT id, first_name, last_name, status, arrived, returned, no_show FROM visitor_requests WHERE id = ?",
-      [id]
-    );
-    if (reqRows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
-    const visitor = reqRows[0];
-
-    if (visitor.status !== 'APPROVED') {
-      return res.status(400).json({ success: false, message: `Cannot check in. Appointment status is '${visitor.status}'.` });
-    }
-    if (visitor.arrived == 1 && visitor.returned != 1) {
-      return res.status(400).json({ success: false, message: "Visitor is already checked in." });
-    }
-
-    // Verify tag is registered in inventory
-    const [tagRows] = await db.promise().query("SELECT id FROM ble_tags WHERE ble_id = ?", [cleanBleId]);
-    if (tagRows.length === 0) {
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+    // All concurrent check-ins for this tag must first acquire the same inventory row lock.
+    const [tagRows] = await connection.query('SELECT id FROM ble_tags WHERE ble_id = ? FOR UPDATE', [cleanBleId]);
+    if (!tagRows.length) {
+      await connection.rollback();
       return res.status(404).json({ success: false, message: `BLE Tag '${cleanBleId}' is not registered in the inventory.` });
     }
-
-    // Verify tag is not already in use
-    const [activeWithTag] = await db.promise().query(
-      "SELECT id, first_name, last_name FROM visitor_requests WHERE ble_id = ? AND arrived = 1 AND returned = 0 AND id != ?",
-      [cleanBleId, id]
+    const [reqRows] = await connection.query(
+      'SELECT id, first_name, last_name, status, arrived, returned, no_show FROM visitor_requests WHERE id = ? FOR UPDATE',
+      [requestId]
     );
-    if (activeWithTag.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: `Tag '${cleanBleId}' is currently in use by ${activeWithTag[0].first_name} ${activeWithTag[0].last_name}.`
-      });
+    if (!reqRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Visitor request not found.' });
     }
-
-    const visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
-
-    // Link visitor to the tag and destination in database
-    await db.promise().query(
-      `UPDATE visitor_requests 
-       SET arrived = 1, arrived_at = NOW(), destination = ?, ble_id = ?, returned = 0, no_show = 0 
-       WHERE id = ?`,
-      [cleanRoom, cleanBleId, id]
+    const visitor = reqRows[0];
+    if (visitor.status !== 'APPROVED') {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: `Cannot check in. Appointment status is '${visitor.status}'.` });
+    }
+    if (Number(visitor.no_show) === 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'This appointment was marked No Show and cannot be checked in.' });
+    }
+    if (Number(visitor.returned) === 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'This visit was already completed. A new appointment is required.' });
+    }
+    if (Number(visitor.arrived) === 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Visitor is already checked in.' });
+    }
+    const [activeWithTag] = await connection.query(
+      `SELECT id, first_name, last_name FROM visitor_requests
+       WHERE ble_id = ? AND arrived = 1 AND returned = 0 AND no_show = 0 LIMIT 1`,
+      [cleanBleId]
     );
-
-    logAction(req.user.id, 'VISITOR_ARRIVE', 'visitor_request', id, req);
-
-    // Initial state: NO COORDINATES. Pin only appears when scanner pings.
-    liveVisitors[cleanBleId] = {
-      id: cleanBleId,
-      name: visitorName,
-      bleId: cleanBleId,
-      floor: cleanFloor,
-      currentRoom: "Waiting for Scanner...",
-      destination: cleanRoom,
-      x: null,                 // NO DEFAULT COORDINATES
-      y: null,                 // NO DEFAULT COORDINATES
-      lastSeen: Date.now(),
-      isDetected: false,       // Awaiting scanner detection
-      isDisconnected: false
-    };
-
-    res.json({ success: true, message: "Visitor checked in successfully. BLE tag activated." });
+    if (activeWithTag.length) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: `Tag '${cleanBleId}' is currently in use by ${activeWithTag[0].first_name} ${activeWithTag[0].last_name}.` });
+    }
+    const [updated] = await connection.query(
+      `UPDATE visitor_requests SET arrived = 1, arrived_at = NOW(), destination = ?,
+       ble_id = ?, returned = 0, no_show = 0 WHERE id = ? AND status = 'APPROVED'
+       AND arrived = 0 AND returned = 0 AND no_show = 0`,
+      [cleanRoom, cleanBleId, requestId]
+    );
+    if (updated.affectedRows !== 1) {
+      await connection.rollback();
+      return res.status(409).json({ success: false, message: 'Visitor check-in state changed. Refresh and try again.' });
+    }
+    visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
+    await connection.commit();
   } catch (err) {
-    console.error("Check-in error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    console.error('Check-in error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to complete visitor check-in.' });
+  } finally {
+    if (connection) connection.release();
   }
+
+  logAction(req.user.id, 'VISITOR_ARRIVE', 'visitor_request', requestId, req);
+  liveVisitors[cleanBleId] = {
+    id: cleanBleId, visitorRequestId: requestId, name: visitorName, bleId: cleanBleId, floor: cleanFloor,
+    currentRoom: 'Waiting for Scanner...', destination: cleanRoom,
+    x: null, y: null, lastSeen: Date.now(), isDetected: false, isDisconnected: false
+  };
+  return res.json({ success: true, message: 'Visitor checked in successfully. BLE tag activated.' });
 });
 
-app.put('/api/visitor-requests/:id/no-show', authenticateToken, async (req, res) => {
-  const { id } = req.params;
+app.put('/api/visitor-requests/:id/no-show', authenticateToken, allowRoles('security'), async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid visitor request ID.' });
+  }
   try {
-    const [rows] = await db.promise().query(
-      "SELECT id, arrived, returned FROM visitor_requests WHERE id = ?",
-      [id]
+    // Guard against simultaneous check-in and No Show requests; no active visit may be erased.
+    const [result] = await db.promise().query(
+      `UPDATE visitor_requests SET no_show = 1, no_show_at = NOW(), ble_id = NULL
+       WHERE id = ? AND status = 'APPROVED' AND arrived = 0 AND returned = 0 AND no_show = 0`,
+      [requestId]
     );
-    if (rows.length === 0) return res.status(404).json({ success: false, message: "Visitor request not found." });
-    const visitor = rows[0];
-
-    if (visitor.arrived == 1 && visitor.returned != 1) {
-      return res.status(400).json({ success: false, message: "Cannot mark as No Show: Visitor is currently checked in on campus." });
+    if (result.affectedRows !== 1) {
+      const [rows] = await db.promise().query('SELECT id FROM visitor_requests WHERE id = ?', [requestId]);
+      return res.status(rows.length ? 409 : 404).json({ success: false, message: rows.length
+        ? 'Cannot mark No Show: appointment is not approved, was already checked in, completed, or marked No Show.'
+        : 'Visitor request not found.' });
     }
-    if (visitor.returned == 1) {
-      return res.status(400).json({ success: false, message: "Cannot mark as No Show: Visit has already been completed." });
-    }
-
-    await db.promise().query(
-      "UPDATE visitor_requests SET no_show = 1, no_show_at = NOW(), arrived = 0, ble_id = NULL WHERE id = ?",
-      [id]
-    );
-
-    logAction(req.user.id, 'VISITOR_NO_SHOW', 'visitor_request', id, req);
-    res.json({ success: true, message: "Visitor marked as No Show." });
+    logAction(req.user.id, 'VISITOR_NO_SHOW', 'visitor_request', requestId, req);
+    return res.json({ success: true, message: 'Visitor marked as No Show.' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error('Visitor No Show error:', err);
+    return res.status(500).json({ success: false, message: 'Unable to update visitor No Show status.' });
   }
 });
 
 app.put('/api/visitor-requests/:id/destination', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'security') {
+    return res.status(403).json({
+      success: false,
+      message: 'Only Admin or Security can re-route a visitor destination.'
+    });
+  }
+
   const { id } = req.params;
   const { destination, ble_id } = req.body;
 
@@ -7998,7 +10981,7 @@ setInterval(async () => {
   }
 }, 20000);
 
-app.get('/api/visitor-history', authenticateToken, (req, res) => {
+app.get('/api/visitor-history', authenticateToken, allowRoles('admin','security'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -8023,7 +11006,7 @@ app.get('/api/visitor-history', authenticateToken, (req, res) => {
   });
 });
 
-app.get('/api/visitor-requests/history', authenticateToken, (req, res) => {
+app.get('/api/visitor-requests/history', authenticateToken, allowRoles('admin','security'), (req, res) => {
   if (req.user.role !== 'security' && req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -8122,6 +11105,9 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(date)) {
     return res.status(400).json({ success: false, message: 'Invalid date format. Expected YYYY-MM-DD.' });
+  }
+  if (!isValidISOCalendarDate(date)) {
+    return res.status(400).json({ success: false, message: 'Invalid calendar date.' });
   }
   const dateObjCheck = new Date(`${date}T00:00:00`);
   if (isNaN(dateObjCheck.getTime())) {
@@ -8419,7 +11405,7 @@ app.get('/api/overtime-requests/pending', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res) => {
+app.put('/api/overtime-requests/:id/status', authenticateToken, requireAction('overtime:approve'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
   }
@@ -8456,6 +11442,14 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
     }
 
     const reqData = rows[0];
+
+if (reqData.internal_user_id === req.user.id) {
+  await connection.rollback();
+  return res.status(403).json({
+    success: false,
+    message: "You cannot approve your own overtime request."
+  });
+}
 
     // Defensive re-validation on approval
     if (status === 'approved') {
@@ -8659,10 +11653,7 @@ app.put('/api/overtime-requests/:id/status', authenticateToken, async (req, res)
 
 // Payroll Calculations Helpers
 function calculateHours(start, end) {
-  const startDate = new Date(`1970-01-01T${start}`);
-  const endDate = new Date(`1970-01-01T${end}`);
-  const diffHours = (endDate - startDate) / 3600000;
-  return diffHours > 0 ? diffHours : 0; // Prevent negative hours
+  return c10AttendanceHours(start, end) ?? 0;
 }
 
 async function hourlyRateFromUser(userId) {
@@ -8821,7 +11812,7 @@ app.get('/api/leave-requests/grouped', authenticateToken, (req, res) => {
   );
 });
 
-app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) => {
+app.put('/api/leave-requests/batch-status', authenticateToken, requireAction('leaves:batch'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
   }
@@ -8863,6 +11854,18 @@ app.put('/api/leave-requests/batch-status', authenticateToken, async (req, res) 
       }
 
       const { user_id: employee_id, request_date, type, duration } = leaveRows[0];
+
+      const [requesterRows] = await connection.query(
+  "SELECT id FROM users WHERE employee_id = ? LIMIT 1",
+  [employee_id]
+);
+if (requesterRows.length > 0 && requesterRows[0].id === req.user.id) {
+  await connection.rollback();
+  return res.status(403).json({
+    success: false,
+    message: "You cannot approve your own leave request."
+  });
+}
       const deductionAmount = (duration === '1st Half' || duration === '2nd Half') ? 0.5 : 1.0;
       
       const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
@@ -9583,7 +12586,7 @@ app.get('/api/activity/recent', authenticateToken, async (req, res) => {
 // ============================================
 // MANUAL CTO CREDIT ENTRY (HR / Admin)
 // ============================================
-app.post('/api/leave-balances/manual-cto', authenticateToken, async (req, res) => {
+app.post('/api/leave-balances/manual-cto', authenticateToken, requireAction('cto:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR authorization required.' });
   }
@@ -9686,7 +12689,8 @@ app.post('/api/leave-balances/manual-cto', authenticateToken, async (req, res) =
   }
 });
 
-app.get('/api/cto-credits/:userId', authenticateToken, async (req, res) => {
+
+app.get('/api/cto-credits/:userId', authenticateToken, verifyOwnership, async (req, res) => {
   const { userId } = req.params;
   const year = parseInt(req.query.year, 10) || new Date().getFullYear();
 
@@ -9921,8 +12925,19 @@ wss.on('connection', (ws, req) => {
   }
   
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const userId = decoded.id;
+    
+const decoded = jwt.verify(token, JWT_SECRET);
+
+if (
+  decoded.purpose !== 'session' ||
+  !decoded.id ||
+  !['admin', 'hr_admin', 'security', 'instructor'].includes(decoded.role)
+) {
+  return ws.close(4003, 'Authenticated session required');
+}
+
+const userId = decoded.id;
+
     
     db.query("SELECT id, email, role FROM users WHERE id = ? AND status = 'active'", [userId], (err, rows) => {
       if (err || rows.length === 0) {

@@ -14,7 +14,7 @@ const formatToManilaTime = (timestamp) => {
   if (!timestamp) return '—';
   let safeStamp = timestamp;
   if (typeof timestamp === 'string' && timestamp.includes(' ') && !timestamp.includes('T')) {
-    safeStamp = timestamp.replace(' ', 'T') + 'Z';
+    safeStamp = `${timestamp.replace(' ', 'T')}+08:00`; // The API's naive SQL datetime is Philippine local time.
   }
   const date = new Date(safeStamp);
   if (isNaN(date.getTime())) return '—';
@@ -37,34 +37,40 @@ const formatVisitTime = (timeStr) => {
 
 const CompletedVisits = () => {
   const [visitors, setVisitors] = useState([]);
+  const [fetchError, setFetchError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const phToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 7);
-    return d.toISOString().split('T')[0];
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
   });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(() => phToday());
 
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchHistory = useCallback(async () => {
-    if (!startDate || !endDate) {
-      toast.warning('Please select both start and end dates');
+    if (!startDate || !endDate || startDate > endDate) {
+      toast.warning('Choose a valid start and end date (start must not follow end).');
       return;
     }
     setLoading(true);
+    setFetchError('');
     try {
       const res = await axios.get(`${API_BASE}/visitor-requests/history`, {
         params: { startDate, endDate },
         ...getAuthHeaders()
       });
-      setVisitors(res.data);
+      setVisitors(Array.isArray(res.data) ? res.data : []);
       setCurrentPage(1);
     } catch (err) {
       console.error('Failed to fetch visitor history', err);
-      toast.error(err.response?.data?.error || 'Failed to load history');
+      setVisitors([]);
+      const message = err.response?.data?.error || 'Failed to load history';
+      setFetchError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -83,7 +89,12 @@ const CompletedVisits = () => {
       v.destination || '—',
       v.ble_id || '—'
     ]);
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const csvCell = value => {
+      const raw = String(value ?? '');
+      const safe = /^[\s\uFEFF]*[=+@\-\t\r]/.test(raw) ? `'${raw}` : raw;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+    const csvContent = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -112,6 +123,11 @@ const CompletedVisits = () => {
         </div>
       </div>
 
+      <section className="cv-overview" aria-label="Completed visitor summary">
+        <div className="cv-overview-item"><span>Completed visits</span><strong>{visitors.length}</strong><small>Within selected date range</small></div>
+        <div className="cv-overview-item"><span>Unique visitors</span><strong>{new Set(visitors.map(v => v.email || `${v.first_name || ''}|${v.last_name || ''}`).filter(Boolean)).size}</strong><small>Distinct visitor records</small></div>
+        <div className="cv-overview-item"><span>BLE-tagged visits</span><strong>{visitors.filter(v => v.ble_id).length}</strong><small>Visits with a recorded tag</small></div>
+      </section>
       <div className="cv-filters-card">
         <div className="cv-filters-wrapper">
           <div className="cv-date-group">
@@ -140,7 +156,7 @@ const CompletedVisits = () => {
             <button
               className="btn-export-modern"
               onClick={exportToCSV}
-              disabled={visitors.length === 0}
+              disabled={loading || Boolean(fetchError) || visitors.length === 0}
             >
               <Download size={16} />
               <span>Export CSV</span>
@@ -151,6 +167,8 @@ const CompletedVisits = () => {
 
       {loading ? (
         <div className="cv-loading-state">Loading completed visits...</div>
+      ) : fetchError ? (
+        <div className="cv-empty-state" role="alert"><p>Unable to load completed visits: {fetchError}</p></div>
       ) : visitors.length === 0 ? (
         <div className="cv-empty-state">
           <Calendar size={40} className="empty-icon" />

@@ -22,7 +22,7 @@
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
-  padding: 2rem; /* Added missing padding */
+  padding: 2rem;
   box-sizing: border-box;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   color: var(--text-dark);
@@ -33,38 +33,6 @@
 .expert-container select,
 .expert-container textarea {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-}
-
-.expert-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-  gap: 1rem;
-  width: 100%;
-}
-
-.expert-title-group {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.expert-title {
-  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--text-dark);
-  margin: 0 0 0.2rem 0;
-  letter-spacing: -0.02em;
-}
-
-.expert-subtitle {
-  color: var(--text-muted);
-  font-size: 0.875rem;
-  margin: 0;
-  font-weight: 500;
 }
 
 /* Utilities & Empty / Loading States */
@@ -117,7 +85,7 @@
   justify-content: center;
   gap: 0.5rem;
   padding: 0.65rem 1.25rem;
-  border-radius: 8px;
+  border-radius: 6px;
   font-weight: 600;
   font-size: 0.875rem;
   cursor: pointer;
@@ -141,11 +109,11 @@
   box-sizing: border-box;
   background: #FFFFFF;
   padding: 0.85rem 1.25rem;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--border-light);
   flex-wrap: wrap;
   box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .expert-banner-item {
@@ -164,16 +132,18 @@
 /* Stats Grid */
 .expert-stats-grid {
   display: grid;
-  gap: 1rem;
+  gap: 1.25rem;
   width: 100%;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
+
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
 .grid-5 { grid-template-columns: repeat(5, 1fr); }
 
 .expert-stat-card {
   background: #FFFFFF;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 1.15rem 1.25rem;
   border: 1px solid var(--border-light);
   border-left: 4px solid var(--primary-teal);
@@ -187,14 +157,14 @@
 .expert-stat-card:hover {
   background: #FAFAFA;
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.05);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 
 .expert-stat-header {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.75rem;
 }
 
 .expert-stat-label {
@@ -207,7 +177,7 @@
 
 .expert-stat-value {
   font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
-  font-size: 2rem;
+  font-size: 1.8rem;
   font-weight: 800;
   color: var(--text-dark);
   line-height: 1;
@@ -216,7 +186,7 @@
 /* Dashboard Panels */
 .expert-dashboard-panels {
   display: flex;
-  gap: 1rem;
+  gap: 1.25rem;
   width: 100%;
 }
 
@@ -226,7 +196,7 @@
 
 .expert-panel {
   background: #FFFFFF;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
@@ -239,7 +209,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.85rem 1.25rem;
+  padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border-light);
   background: #F8FAFC;
 }
@@ -326,7 +296,6 @@
   color: var(--text-dark);
 }
 
-/* 🟢 ADDED: Subtext for HR Tasks */
 .expert-task-subtext {
   margin: 2px 0 0 0;
   font-size: 0.75rem;
@@ -374,49 +343,7 @@
   font-weight: 500;
 }
 
-/* 🟢 ADDED: HR & Security Shortcuts List */
-.expert-action-list {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-}
-
-.expert-action-btn {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.25rem;
-  background: #FFFFFF;
-  border: none;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-dark);
-  font-size: 0.875rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  text-align: left;
-}
-
-.expert-action-btn:last-child {
-  border-bottom: none;
-}
-
-.expert-action-btn:hover {
-  background: #F8FAFC;
-  color: var(--primary-teal);
-}
-
-.expert-action-btn svg {
-  color: var(--text-muted);
-  transition: transform 0.15s ease, color 0.15s ease;
-}
-
-.expert-action-btn:hover svg {
-  transform: translateX(4px);
-  color: var(--primary-teal);
-}
-
-/* 🟢 ADDED: Security Dashboard Tabs */
+/* Security Dashboard Tabs */
 .expert-sec-tabs {
   display: flex;
   width: 100%;
@@ -458,7 +385,6 @@
   background: #FEF2F2;
 }
 
-/* 🟢 ADDED: Alert Badge & Dismiss Button */
 .expert-alert-badge {
   background: #EF4444;
   color: #FFFFFF;
@@ -673,6 +599,11 @@
   color: var(--text-dark);
 }
 
+.expert-act-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .expert-act-time {
   font-size: 0.75rem;
   color: var(--text-muted);
@@ -709,9 +640,6 @@
   color: var(--text-muted);
 }
 
-.grid-4 { 
-  grid-template-columns: repeat(4, 1fr); 
-}
 /* Responsive Styles */
 @media (max-width: 1100px) {
   .grid-5 { grid-template-columns: repeat(3, 1fr); }

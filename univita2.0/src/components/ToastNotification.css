@@ -1,170 +1,170 @@
+/* src/components/ToastNotification.css
+   UniVITA enterprise system notifications.
+   Selectors are scoped to avoid global .notification collisions.
+*/
 .notification-container {
   position: fixed;
   top: 20px;
   right: 20px;
-  z-index: 9999;
+  z-index: 11000;
+  width: min(400px, calc(100vw - 32px));
   max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   pointer-events: none;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-.notification {
-  margin-bottom: 12px;
-  padding: 14px 16px;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  animation: slideInRight 0.3s ease-out, slideOutRight 0.3s ease-out 3.7s forwards;
-  pointer-events: auto;
+.notification-container .notification {
+  --toast-accent: #0D9488;
+  --toast-tint: #F0FDFA;
+  --toast-ink: #115E59;
   position: relative;
   overflow: hidden;
-}
-
-@keyframes slideInRight {
-  from {
-    transform: translateX(400px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes slideOutRight {
-  from {
-    transform: translateX(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(400px);
-    opacity: 0;
-  }
-}
-
-.notification-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.notification-message {
-  flex: 1;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
-.notification-close {
-  background: none;
-  border: none;
-  font-size: 18px;
-  cursor: pointer;
   padding: 0;
+  background: #FFFFFF;
+  color: #172B3A;
+  border: 1px solid #E2E8F0;
+  border-left: 3px solid var(--toast-accent);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12), 0 1px 3px rgba(15, 23, 42, 0.06);
+  pointer-events: auto;
+  animation: univitaToastSlideIn 0.3s ease-out both,
+             univitaToastSlideOut 0.3s ease-in 3.7s forwards;
+}
+
+.notification-container .notification-success {
+  --toast-accent: #059669;
+  --toast-tint: #ECFDF5;
+  --toast-ink: #047857;
+}
+
+.notification-container .notification-error {
+  --toast-accent: #DC2626;
+  --toast-tint: #FEF2F2;
+  --toast-ink: #B91C1C;
+}
+
+.notification-container .notification-warning {
+  --toast-accent: #D97706;
+  --toast-tint: #FFFBEB;
+  --toast-ink: #B45309;
+}
+
+.notification-container .notification-info {
+  --toast-accent: #2563EB;
+  --toast-tint: #EFF6FF;
+  --toast-ink: #1D4ED8;
+}
+
+.notification-container .notification-content {
   display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 12px 15px 14px;
+}
+
+.notification-container .notification-icon {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  transition: background-color 0.2s ease;
-  flex-shrink: 0;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  color: var(--toast-ink);
+  background: var(--toast-tint);
+  border-radius: 5px;
 }
 
-.notification-close:hover {
-  background-color: rgba(0, 0, 0, 0.1);
+.notification-container .notification-message {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
-.notification-progress {
+.notification-container .notification-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #64748B;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.notification-container .notification-close:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+.notification-container .notification-close:focus-visible {
+  outline: 2px solid #0D9488;
+  outline-offset: 2px;
+}
+
+.notification-container .notification-progress {
   position: absolute;
   bottom: 0;
   left: 0;
+  width: 100%;
   height: 3px;
-  background-color: currentColor;
-  animation: progressBar 3s linear forwards;
+  background: var(--toast-accent);
+  transform-origin: left center;
+  animation: univitaToastProgress 3s linear forwards;
 }
 
-@keyframes progressBar {
-  from {
-    width: 100%;
-  }
-  to {
-    width: 0%;
-  }
+@keyframes univitaToastSlideIn {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
-/* Success */
-.notification-success {
-  background-color: #d4edda;
-  color: #155724;
-  border-left: 4px solid #28a745;
+@keyframes univitaToastSlideOut {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(40px); }
 }
 
-.notification-success .notification-close {
-  color: #155724;
-}
-
-.notification-success .notification-progress {
-  background-color: #28a745;
-}
-
-/* Error */
-.notification-error {
-  background-color: #f8d7da;
-  color: #721c24;
-  border-left: 4px solid #dc3545;
-}
-
-.notification-error .notification-close {
-  color: #721c24;
-}
-
-.notification-error .notification-progress {
-  background-color: #dc3545;
-}
-
-/* Warning */
-.notification-warning {
-  background-color: #fff3cd;
-  color: #856404;
-  border-left: 4px solid #ffc107;
-}
-
-.notification-warning .notification-close {
-  color: #856404;
-}
-
-.notification-warning .notification-progress {
-  background-color: #ffc107;
-}
-
-/* Info */
-.notification-info {
-  background-color: #d1ecf1;
-  color: #0c5460;
-  border-left: 4px solid #17a2b8;
-}
-
-.notification-info .notification-close {
-  color: #0c5460;
-}
-
-.notification-info .notification-progress {
-  background-color: #17a2b8;
+@keyframes univitaToastProgress {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
 
 @media (max-width: 600px) {
   .notification-container {
-    left: 10px;
-    right: 10px;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    width: auto;
     max-width: none;
   }
 
-  .notification {
-    margin-bottom: 10px;
-    padding: 12px 14px;
+  .notification-container .notification-content {
+    padding: 12px 10px 14px 12px;
   }
 
-  .notification-message {
+  .notification-container .notification-message {
     font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-container .notification {
+    animation: none;
+  }
+
+  .notification-container .notification-progress {
+    animation: none;
+    display: none;
   }
 }

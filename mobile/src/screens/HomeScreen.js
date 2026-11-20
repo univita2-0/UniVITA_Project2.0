@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef, useContext, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
-  Alert, RefreshControl, Modal, TextInput, Platform, StatusBar, AppState, ActivityIndicator
+  Alert, RefreshControl, Modal, TextInput, Platform, StatusBar, AppState, ActivityIndicator, DeviceEventEmitter
 } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +12,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import axios from 'axios';
 import {
-  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, checkLocationServicesEnabled, sendLocationPing, API_URL, OFFLINE_QUEUE_KEY
+  clockIn, clockOut, fetchAttendanceHistory, fetchUserSchedule, setTrackingEnabled, checkLocationServicesEnabled, sendLocationPing, API_URL, OFFLINE_QUEUE_KEY, fetchC12AttendanceRecovery, getC12LocalAttendanceEvents, fetchC14AttendanceNotifications
 } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import {
@@ -57,6 +57,94 @@ const LOCATION_TASK_NAME = 'background-location-task';
 const getTodayString = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 const EARLY_GRACE_MINUTES = 5;
 const LATE_GRACE_MINUTES  = 15; 
+
+
+const getReliableAttendanceLocation = async () => {
+  const MAX_ACCURACY_METERS = 50;
+  const MAX_LOCATION_AGE_MS = 30000;
+  const MAX_ATTEMPTS = 2;
+
+  const gpsEnabled = await Location.hasServicesEnabledAsync();
+
+  if (!gpsEnabled) {
+    throw new Error(
+      'GPS is turned off. Please enable Location Services.'
+    );
+  }
+
+  const { status } =
+    await Location.requestForegroundPermissionsAsync();
+
+  if (status !== 'granted') {
+    throw new Error(
+      'Location permission is required for attendance.'
+    );
+  }
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let location;
+
+    try {
+      location = await Promise.race([
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High
+        }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('GPS request timed out.')),
+            15000
+          )
+        )
+      ]);
+    } catch (error) {
+      if (attempt === MAX_ATTEMPTS) {
+        throw new Error(
+          'Unable to get your GPS location. ' +
+          'Move to an open area and try again.'
+        );
+      }
+      continue;
+    }
+
+    const { latitude, longitude, accuracy } =
+      location.coords || {};
+
+    const age = Date.now() - location.timestamp;
+
+    const coordinatesValid =
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180 &&
+      !(latitude === 0 && longitude === 0);
+
+    const accuracyValid =
+      Number.isFinite(accuracy) &&
+      accuracy >= 0 &&
+      accuracy <= MAX_ACCURACY_METERS;
+
+    const freshnessValid =
+      Number.isFinite(age) &&
+      age >= -5000 &&
+      age <= MAX_LOCATION_AGE_MS;
+
+    if (
+      coordinatesValid &&
+      accuracyValid &&
+      freshnessValid
+    ) {
+      return location;
+    }
+  }
+
+  throw new Error(
+    'GPS accuracy is too low or the location is outdated. ' +
+    'Move near a window or an open area, then try again.'
+  );
+};
+
 
 const getInitialMonthString = () => {
   const now = new Date();
@@ -159,7 +247,19 @@ export default function HomeScreen({ navigation }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [user, setUser] = useState({ id: null, name: "Employee", employeeId: "", full_name: "" });
   const [refreshing, setRefreshing] = useState(false);
+  // C11.2: Keep the attendance UI locked through GPS, selfie and upload.
+  const c11ActionRef = useRef(false);
+  const [c11ActionBusy, setC11ActionBusy] = useState(false);
+  const c11RunAttendance = async task => {
+    if (c11ActionRef.current) return;
+    c11ActionRef.current = true;
+    setC11ActionBusy(true);
+    try { await task(); }
+    finally { c11ActionRef.current = false; setC11ActionBusy(false); }
+  };
+
   
+  const [c12Recovery, setC12Recovery] = useState({ missing: 0, pendingReview: 0, waitingSync: 0 });
   const [rawHistory, setRawHistory] = useState([]);
   const [rawSchedule, setRawSchedule] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(getInitialMonthString());
@@ -171,6 +271,30 @@ export default function HomeScreen({ navigation }) {
   const [modalDateFilter, setModalDateFilter] = useState('');
 
   const [notifications, setNotifications] = useState([]);
+  const [c14Unread, setC14Unread] = useState(0);
+  // C15.3: Keep the attendance badge in sync when the inbox marks an item read.
+  // Never reset the last known count because of a temporary network failure.
+  useEffect(() => {
+    let active = true;
+    let pending = false;
+    const refresh = async () => {
+      if (!active || pending) return;
+      pending = true;
+      try {
+        const result = await fetchC14AttendanceNotifications();
+        if (active && result?.success) setC14Unread(Math.max(0, Number(result.unread || 0)));
+      } catch { /* Preserve last known count on transient failures. */ }
+      finally { pending = false; }
+    };
+    refresh();
+    const timer = setInterval(refresh, 45000);
+    const changed = DeviceEventEmitter.addListener('c15:attendance-notifications-changed', refresh);
+    const foreground = AppState.addEventListener('change', state => {
+      if (state === 'active') refresh();
+    });
+    return () => { active = false; clearInterval(timer); changed.remove(); foreground.remove(); };
+  }, []);
+
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   
@@ -606,6 +730,16 @@ const greeting = useMemo(() => {
         setUser({ ...parsed, employeeId: empId });
         const schedule = await fetchUserSchedule(empId);
         const history = await fetchAttendanceHistory(empId);
+        const [recovery, localEvents] = await Promise.all([
+          fetchC12AttendanceRecovery(empId).catch(() => null),
+          getC12LocalAttendanceEvents().catch(() => null)
+        ]);
+        const monitored = recovery?.success ? recovery.data : [];
+        setC12Recovery({
+          missing: monitored.filter(e => e.status === 'MISSING_CLOCK_OUT').length,
+          pendingReview: monitored.filter(e => ['OFFLINE_PENDING_REVIEW','PENDING_HR_REVIEW'].includes(e.status)).length,
+          waitingSync: localEvents?.success ? localEvents.data.length : 0
+        });
         
         setRawHistory(history || []);
         setRawSchedule(schedule || []);
@@ -621,230 +755,449 @@ const greeting = useMemo(() => {
   loadDataRef.current = loadData;
 }, [loadData]);
 
-  const handleClockIn = async () => {
-  if (!todaySchedule) return Alert.alert("Notice", "No schedule available for today.");
-
-  // 🚨 NEW: Defensive Guard for Approved Leave (Whole Day or Half Day)
-  // The UI button is already disabled, but this prevents any edge-case bypasses.
-  if (isBlockedByLeave) {
-    if (leaveDuration === 'Whole Day') {
-      return Alert.alert('On Approved Leave', 'You have an approved Whole Day leave for today. Please contact HR if you wish to cancel your leave and work.');
-    }
-    if (leaveDuration === '1st Half') {
-      return Alert.alert('On Approved Leave (1st Half)', 'You are on leave this morning. Clock-in will become available at 12:00 PM.');
-    }
-    if (leaveDuration === '2nd Half') {
-      return Alert.alert('On Approved Leave (2nd Half)', 'You are on leave this afternoon. Clock-in is only available before 12:00 PM.');
-    }
-    return; // Failsafe
+  
+const handleClockIn = async () => {
+  // 1. Check today's schedule
+  if (!todaySchedule) {
+    return Alert.alert(
+      'Notice',
+      'No schedule available for today.'
+    );
   }
 
-  // 🚨 1. Offline-queue guard
+  // 2. Check approved leave restrictions
+  if (isBlockedByLeave) {
+    if (leaveDuration === 'Whole Day') {
+      return Alert.alert(
+        'On Approved Leave',
+        'You have an approved Whole Day leave for today. Please contact HR if you wish to cancel your leave and work.'
+      );
+    }
+
+    if (leaveDuration === '1st Half') {
+      return Alert.alert(
+        'On Approved Leave (1st Half)',
+        'You are on leave this morning. Clock-in will become available at 12:00 PM.'
+      );
+    }
+
+    if (leaveDuration === '2nd Half') {
+      return Alert.alert(
+        'On Approved Leave (2nd Half)',
+        'You are on leave this afternoon. Clock-in is only available before 12:00 PM.'
+      );
+    }
+
+    return;
+  }
+
+  // 3. C06: Prevent duplicate offline clock-ins
   try {
-    const rawQueue = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
+    const rawQueue = await AsyncStorage.getItem(
+      OFFLINE_QUEUE_KEY
+    );
+
     if (rawQueue) {
       const queued = JSON.parse(rawQueue) || [];
-      const alreadyQueued = queued.some(
-        q =>
-          q.action === 'clock-in' &&
-          String(q.payload?.schedule_id) === String(todaySchedule.id)
-      );
+
+      const alreadyQueued =
+        Array.isArray(queued) &&
+        queued.some(
+          q =>
+            q.action === 'clock-in' &&
+            String(q.payload?.schedule_id) ===
+              String(todaySchedule.id)
+        );
+
       if (alreadyQueued) {
         Alert.alert(
           'Clock-In Already Saved',
-          'A clock-in for this shift is already saved and will sync automatically ' +
-          'when connection returns. Please wait for it to sync before tapping again.',
+          'A clock-in for this shift is already saved offline. Please wait for synchronization or HR verification.',
           [{ text: 'OK' }]
         );
         return;
       }
     }
   } catch (e) {
-    console.warn('Queue read failed in clock-in guard:', e);
+    console.warn(
+      'Queue read failed in clock-in guard:',
+      e
+    );
+
+    Alert.alert(
+      'Attendance Unavailable',
+      'Unable to check saved offline attendance. Please try again.'
+    );
+    return;
   }
 
-  // 🚨 2. Pending Leave Guard (Warn and Auto-Cancel)
+  // 4. Check pending leave
   if (isLeavePending) {
     Alert.alert(
       'Pending Leave Found',
       'You have a pending leave request for today. If you clock in, your leave request will be automatically cancelled. Do you want to proceed?',
       [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Clock In', 
-          style: 'destructive', 
-          onPress: () => executeClockIn() 
+        {
+          text: 'Cancel',
+          style: 'cancel'
         },
+        {
+          text: 'Clock In',
+          style: 'destructive',
+          onPress: () => {
+            c11RunAttendance(executeClockIn);
+          }
+        }
       ]
     );
     return;
   }
 
-  // 3. If no pending or approved leave, proceed normally
-  executeClockIn();
+  // 5. Continue normal clock-in
+  await executeClockIn();
 
+  // 6. Actual clock-in process
   async function executeClockIn() {
     try {
-      const { isLocationMocked } = await isMockingLocation();
-      if (isLocationMocked === true) {
+      // Check fake/mock GPS
+      try {
+        const { isLocationMocked } =
+          await isMockingLocation();
+
+        if (isLocationMocked === true) {
+          Alert.alert(
+            'Security Alert',
+            'Mock location detected. Please disable fake GPS apps or mock-location settings before clocking in.'
+          );
+          return;
+        }
+      } catch (e) {
+        console.warn(
+          'Mock location check failed (non-blocking):',
+          e?.message || e
+        );
+      }
+
+      // Verify GPS services and permission
+      const isGpsReady =
+        await checkLocationServicesEnabled();
+
+      if (!isGpsReady) return;
+
+      // Capture required selfie
+      const selfieUri = await captureSelfie();
+
+      if (!selfieUri) {
         Alert.alert(
-          'Security Alert',
-          'Mock location detected. Please disable any fake GPS apps or developer "Allow mock locations" settings to clock in.'
+          'Action Required',
+          'A selfie is mandatory for clock-in.'
         );
         return;
       }
-    } catch (e) {
-      console.warn('Mock location check failed (non-blocking):', e?.message || e);
-    }
 
-    const isGpsReady = await checkLocationServicesEnabled();
-    if (!isGpsReady) return;
+      // C08: Request fresh, accurate GPS after selfie
+      const location =
+        await getReliableAttendanceLocation();
 
-    const selfieUri = await captureSelfie();
-    if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory for clock-in.');
+      // Submit clock-in to backend
+      
+const result = await clockIn({
+  employee_id: String(user.employeeId || ''),
+  latitude: String(location.coords.latitude),
+  longitude: String(location.coords.longitude),
 
-    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+  // C08: GPS accuracy and timestamp
+  gps_accuracy: String(location.coords.accuracy),
+  gps_timestamp: new Date(location.timestamp).toISOString(),
 
-    try {
-      const result = await clockIn({
-        employee_id: String(user.employeeId || ''),
-        latitude: String(location.coords.latitude),
-        longitude: String(location.coords.longitude),
-        location_enabled: 'true',
-        schedule_id: String(todaySchedule.id),
-        selfie: selfieUri,
-      });
+  location_enabled: 'true',
+  schedule_id: String(todaySchedule.id),
+  selfie: selfieUri
+});
 
+
+      // Successful online clock-in
       if (result.success) {
-        Alert.alert('Success', result.message);
-        try { await setTrackingEnabled(true); } catch (e) {}
+        Alert.alert(
+          'Success',
+          result.message
+        );
+
+        try {
+          await setTrackingEnabled(true);
+        } catch (e) {
+          console.warn(
+            'Enable tracking failed:',
+            e
+          );
+        }
+
         await startBackgroundTracking(colors.primary);
         await loadData();
+
+      // C06: Clock-in saved offline
       } else if (result.queued) {
-        Alert.alert('Saved Offline', result.message);
-        try { await setTrackingEnabled(true); } catch (e) {}
+        Alert.alert(
+          'Saved Offline',
+          result.message
+        );
+
+        try {
+          await setTrackingEnabled(true);
+        } catch (e) {
+          console.warn(
+            'Enable tracking failed:',
+            e
+          );
+        }
+
         await startBackgroundTracking(colors.primary);
         await loadData();
+
+      // Backend rejected clock-in
       } else {
-        Alert.alert('Clock-In Error', result.message);
+        Alert.alert(
+          'Clock-In Error',
+          result.message ||
+            'Clock-in could not be completed.'
+        );
       }
+
     } catch (error) {
-      console.warn('Clock-in request threw unexpectedly:', error?.message || error);
-      Alert.alert('Network Error', 'Connection failed.');
+      console.warn(
+        'Clock-in error:',
+        error?.message || error
+      );
+
+      Alert.alert(
+        'Clock-In Unavailable',
+        error?.message ||
+          'Unable to verify attendance location. Please try again.'
+      );
     }
   }
 };
 
-  const handleClockOut = async () => {
-  if (!todaySchedule) return;
 
+// ==========================================
+// CLOCK OUT
+// ==========================================
+
+const handleClockOut = async () => {
+  // 1. Check today's schedule
+  if (!todaySchedule) {
+    return Alert.alert(
+      'Notice',
+      'No schedule available for today.'
+    );
+  }
+
+  // 2. Check mock GPS
   try {
-    const { isLocationMocked } = await isMockingLocation();
+    const { isLocationMocked } =
+      await isMockingLocation();
+
     if (isLocationMocked === true) {
       Alert.alert(
         'Security Alert',
-        'Mock location detected. Please disable any fake GPS apps or developer "Allow mock locations" settings to clock out.'
+        'Mock location detected. Please disable fake GPS apps or mock-location settings before clocking out.'
       );
       return;
     }
   } catch (e) {
-    console.warn('Mock location check failed (non-blocking):', e?.message || e);
-  }
-
- 
-try {
-  const rawQueue = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);  
-  if (rawQueue) {
-    const queued = JSON.parse(rawQueue) || [];
-    const alreadyQueued = queued.some(
-      q =>
-        q.action === 'clock-out' &&
-        String(q.payload?.schedule_id) === String(todaySchedule.id)
+    console.warn(
+      'Mock location check failed (non-blocking):',
+      e?.message || e
     );
-    if (alreadyQueued) {
-      Alert.alert(
-        'Clock-Out Already Saved',
-        'A clock-out for this shift is already saved and will sync automatically ' +
-        'when connection returns. Please wait for it to sync before tapping again.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
   }
-} catch (e) {
-  console.warn('Queue read failed in clock-out guard:', e);
-}
 
-  const endMins         = todaySchedule.endMins;
-  const earlyWindowFrom = endMins - EARLY_GRACE_MINUTES;
-  const lateWindowTo    = endMins + LATE_GRACE_MINUTES;
+  // 3. C06: Prevent duplicate offline clock-outs
+  try {
+    const rawQueue = await AsyncStorage.getItem(
+      OFFLINE_QUEUE_KEY
+    );
 
+    if (rawQueue) {
+      const queued = JSON.parse(rawQueue) || [];
+
+      const alreadyQueued =
+        Array.isArray(queued) &&
+        queued.some(
+          q =>
+            q.action === 'clock-out' &&
+            String(q.payload?.schedule_id) ===
+              String(todaySchedule.id)
+        );
+
+      if (alreadyQueued) {
+        Alert.alert(
+          'Clock-Out Already Saved',
+          'A clock-out for this shift is already saved offline. Please wait for synchronization or HR verification.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn(
+      'Queue read failed in clock-out guard:',
+      e
+    );
+
+    Alert.alert(
+      'Attendance Unavailable',
+      'Unable to check saved offline attendance. Please try again.'
+    );
+    return;
+  }
+
+  // 4. Check clock-out time window
+  const endMins = todaySchedule.endMins;
+
+  const earlyWindowFrom =
+    endMins - EARLY_GRACE_MINUTES;
+
+  const lateWindowTo =
+    endMins + LATE_GRACE_MINUTES;
+
+  // 5. Too early to clock out
   if (currentMinutes < earlyWindowFrom) {
     Alert.alert(
-      "Early Clock-Out",
+      'Early Clock-Out',
       `Clock-out opens ${EARLY_GRACE_MINUTES} minutes before your shift ends at ` +
-      `${formatTo12H(todaySchedule.end_time)}. Do you wish to request a correction ` +
-      `for an early departure?`,
+        `${formatTo12H(todaySchedule.end_time)}. Do you wish to request a correction for an early departure?`,
       [
-        { text: "Cancel", style: "cancel" },
         {
-          text: "Request",
-          onPress: () => navigation.navigate("Requests", {
-            prefillTab: "correction",
-            prefillDate: getTodayString(),
-            prefillType: "clock_out",
-            prefillTime: currentTimeStrPHT,
-            prefillReason: "Early departure requested",
-            prefillScheduleId: todaySchedule?.id,
-          }),
+          text: 'Cancel',
+          style: 'cancel'
         },
+        {
+          text: 'Request',
+          onPress: () =>
+            navigation.navigate('Requests', {
+              prefillTab: 'correction',
+              prefillDate: getTodayString(),
+              prefillType: 'clock_out',
+              prefillTime: currentTimeStrPHT,
+              prefillReason: 'Early departure requested',
+              prefillScheduleId: todaySchedule?.id
+            })
+        }
       ]
     );
     return;
   }
 
+  // 6. Too late to clock out
   if (currentMinutes > lateWindowTo) {
     Alert.alert(
-      "Grace Period Expired",
+      'Grace Period Expired',
       `The ${LATE_GRACE_MINUTES}-minute clock-out grace period ended at ` +
-      `${formatTo12H(attendanceStatus.graceEndStr)}. Please file an Overtime request ` +
-      `or an Attendance Correction for this shift.`,
-      [{ text: "OK" }]
+        `${formatTo12H(attendanceStatus.graceEndStr)}. Please file an Overtime request ` +
+        `or an Attendance Correction for this shift.`,
+      [{ text: 'OK' }]
     );
     return;
   }
 
-  const selfieUri = await captureSelfie();
-  if (!selfieUri) return Alert.alert('Action Required', 'A selfie is mandatory.');
-  const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-
+  // 7. C08: Verify GPS and submit clock-out
   try {
-    const result = await clockOut({
-      employee_id: String(user.employeeId || ''),
-      latitude: String(location.coords.latitude),
-      longitude: String(location.coords.longitude),
-      location_enabled: 'false',
-      schedule_id: String(todaySchedule.id),
-      selfie: selfieUri,
-    });
+    const isGpsReady =
+      await checkLocationServicesEnabled();
 
-    if (result.success) {
-      Alert.alert('Success', result.message);
-      try {
-        const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-        if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-      } catch (e) {}
-      await loadData();
-    } else if (result.queued) {
-      Alert.alert('Saved Offline', result.message);
-      await loadData();
-    } else {
-      Alert.alert('Clock-Out Error', result.message);
+    if (!isGpsReady) return;
+
+    // Capture selfie
+    const selfieUri = await captureSelfie();
+
+    if (!selfieUri) {
+      Alert.alert(
+        'Action Required',
+        'A selfie is mandatory for clock-out.'
+      );
+      return;
     }
+
+    // C08: Obtain accurate and recent GPS
+    const location =
+      await getReliableAttendanceLocation();
+
+    // 8. Submit clock-out
+    
+const result = await clockOut({
+  employee_id: String(user.employeeId || ''),
+  latitude: String(location.coords.latitude),
+  longitude: String(location.coords.longitude),
+
+  // C08: GPS accuracy and timestamp
+  gps_accuracy: String(location.coords.accuracy),
+  gps_timestamp: new Date(location.timestamp).toISOString(),
+
+  location_enabled: 'false',
+  schedule_id: String(todaySchedule.id),
+  selfie: selfieUri
+});
+
+
+    // 9. Successful online clock-out
+    if (result.success) {
+      Alert.alert(
+        'Success',
+        result.message
+      );
+
+      try {
+        const isRegistered =
+          await TaskManager.isTaskRegisteredAsync(
+            LOCATION_TASK_NAME
+          );
+
+        if (isRegistered) {
+          await Location.stopLocationUpdatesAsync(
+            LOCATION_TASK_NAME
+          );
+        }
+      } catch (e) {
+        console.warn(
+          'Stop background tracking failed:',
+          e
+        );
+      }
+
+      await loadData();
+
+    // 10. C06: Saved offline for HR verification
+    } else if (result.queued) {
+      Alert.alert(
+        'Saved Offline',
+        result.message
+      );
+
+      await loadData();
+
+    // 11. Backend rejected clock-out
+    } else {
+      Alert.alert(
+        'Clock-Out Error',
+        result.message ||
+          'Clock-out could not be completed.'
+      );
+    }
+
   } catch (error) {
-    Alert.alert('Network Error', 'Connection failed.');
+    console.warn(
+      'Clock-out error:',
+      error?.message || error
+    );
+
+    Alert.alert(
+      'Clock-Out Unavailable',
+      error?.message ||
+        'Unable to verify attendance location. Please try again.'
+    );
   }
 };
+
 
   useEffect(() => { const timer = setInterval(() => setCurrentTime(new Date()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { loadData(); }, [loadData]);
@@ -990,14 +1343,33 @@ const canClockOutNow =
               activeOpacity={0.7}
             >
               <Bell size={22} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={1.8} />
-              {notifications.length > 0 && (
+              {Math.max(notifications.length, c14Unread) > 0 && (
                 <View style={styles.notificationBadge}>
-                  <Text style={styles.notificationBadgeText}>{notifications.length > 9 ? '9+' : notifications.length}</Text>
+                  <Text style={styles.notificationBadgeText}>{Math.max(notifications.length, c14Unread) > 9 ? '9+' : Math.max(notifications.length, c14Unread)}</Text>
                 </View>
               )}
             </TouchableOpacity>
           </View>
 
+          {(c12Recovery.missing > 0 || c12Recovery.pendingReview > 0 || c12Recovery.waitingSync > 0) && (
+            <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('AttendanceHistory')}
+              style={{ backgroundColor: isLight ? '#FFFBEB' : colors.surface, borderColor: '#EAB308', borderWidth: 1,
+                borderRadius: 8, padding: 12, marginBottom: 14 }}>
+              <Text style={{ color: isLight ? '#92400E' : colors.textPrimary, fontFamily: 'Inter_18pt-Bold', fontSize: 13 }}>
+                Attendance needs attention
+              </Text>
+              {c12Recovery.missing > 0 && <Text style={{ color: colors.textPrimary, fontSize: 12 }}>
+                {c12Recovery.missing} shift(s) have a missing Clock Out. Open Attendance History for the affected date and request a correction using the actual time.
+              </Text>}
+              {c12Recovery.pendingReview > 0 && <Text style={{ color: colors.textPrimary, fontSize: 12 }}>
+                {c12Recovery.pendingReview} attendance request(s) are awaiting HR review. Track the result in Correction or Appeal History; do not submit duplicates.
+              </Text>}
+              {c12Recovery.waitingSync > 0 && <Text style={{ color: colors.textPrimary, fontSize: 12 }}>
+                {c12Recovery.waitingSync} offline attendance event(s) are still saved on this phone, awaiting sync.
+              </Text>}
+              <Text style={{ color: '#0D9488', fontSize: 12, marginTop: 5 }}>View attendance history</Text>
+            </TouchableOpacity>
+          )}
           <View style={styles.glassBanner}>
             <View style={styles.bannerContentLeft}>
               <View style={styles.calendarIconWrapper}><Calendar size={22} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={1.5} /></View>
@@ -1078,7 +1450,8 @@ const canClockOutNow =
 
           <View style={styles.actionContainer}>
             <TouchableOpacity
-  style={[styles.btnPillPrimary, !finalCanClockIn && styles.btnDisabled]}
+  style={[styles.btnPillPrimary, (!finalCanClockIn || c11ActionBusy) && styles.btnDisabled]}
+  disabled={c11ActionBusy}
     onPress={() => {
     if (!finalCanClockIn) {
       if (!todaySchedule) return Alert.alert('No Schedule', 'No active shift was found for today.');
@@ -1101,7 +1474,7 @@ const canClockOutNow =
       }
       return Alert.alert('Clock-In Unavailable', 'This shift is no longer open for clock-in.');
     }
-    handleClockIn();
+    c11RunAttendance(handleClockIn);
   }}
   activeOpacity={0.85}
 >
@@ -1110,7 +1483,8 @@ const canClockOutNow =
             </TouchableOpacity>
 
             <TouchableOpacity
-  style={[styles.btnPillOutline, !canClockOutNow && styles.btnDisabledOutline]}
+  style={[styles.btnPillOutline, (!canClockOutNow || c11ActionBusy) && styles.btnDisabledOutline]}
+  disabled={c11ActionBusy}
   onPress={() => {
     if (!canClockOutNow) {
       if (isPendingCorrection) return Alert.alert('Pending Review', 'Your correction request is being reviewed by HR.');
@@ -1140,7 +1514,7 @@ const canClockOutNow =
           return;
       }
     }
-    handleClockOut();
+    c11RunAttendance(handleClockOut);
   }}
   activeOpacity={0.85}
 >

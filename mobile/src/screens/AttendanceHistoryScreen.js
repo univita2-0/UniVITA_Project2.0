@@ -10,11 +10,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from '@react-native-community/datetimepicker'; // 👈 Native Date Picker
 import { ThemeContext, themeColors } from '../context/ThemeContext';
-import { fetchUserSchedule, fetchAttendanceHistory } from './api';
+import { fetchUserSchedule, fetchAttendanceHistory, fetchC12AttendanceRecovery, getC12LocalAttendanceEvents, getC13RecoveryGuidance } from './api';
 
 const formatTime = (timeStr) => {
   if (!timeStr || timeStr === '--:--' || String(timeStr).includes('null')) return '--:--';
-  const clean = String(timeStr).includes('T') ? String(timeStr).split('T')[1].split('Z')[0] : String(timeStr);
+  // Absolute ISO timestamps must be converted to Philippine local time.
+  const raw = String(timeStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(raw)) {
+    const instant = new Date(raw);
+    if (!Number.isNaN(instant.getTime())) {
+      return instant.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true,
+      });
+    }
+    return '--:--';
+  }
+  const clean = raw.includes('T') ? raw.split('T')[1] : raw;
   const parts = clean.substring(0, 5).split(':');
   let hours = parseInt(parts[0], 10);
   const minutes = parts[1] || '00';
@@ -42,6 +53,8 @@ export default function AttendanceHistoryScreen({ navigation }) {
   const styles = getStyles(colors, isLight);
 
   const [history, setHistory] = useState([]);
+  const [c12OfflineEvents, setC12OfflineEvents] = useState([]);
+  const [c12Warning, setC12Warning] = useState('');
   const [loading, setLoading] = useState(true);
 
   // Date Filter States
@@ -88,6 +101,13 @@ export default function AttendanceHistoryScreen({ navigation }) {
             fetchAttendanceHistory(employeeId).catch(() => [])
           ]);
 
+          const [c12Recovery, c12Local] = await Promise.all([
+            fetchC12AttendanceRecovery(employeeId).catch(() => ({success:false,data:[]})),
+            getC12LocalAttendanceEvents().catch(() => ({success:false,data:[]}))
+          ]);
+          const c12Map = new Map((c12Recovery?.data || []).map(item => [String(item.schedule_id), item]));
+          setC12OfflineEvents(c12Local?.data || []);
+          setC12Warning(!c12Recovery?.success ? 'Server recovery status unavailable; showing existing attendance records.' : '');
           const rawSchedules = Array.isArray(schedulesData) ? schedulesData : [];
           const rawAttendance = Array.isArray(attendanceData) ? attendanceData : [];
 
@@ -96,13 +116,10 @@ export default function AttendanceHistoryScreen({ navigation }) {
           const computedShifts = rawSchedules.map((sched) => {
             const schedDateStr = String(sched.date || '').split('T')[0];
             
-            let record = rawAttendance.find(a => a.schedule_id && a.schedule_id === sched.id);
-            if (!record) {
-              record = rawAttendance.find(a => {
-                const aDateStr = String(a.date || a.attendance_date || '').split('T')[0];
-                return aDateStr === schedDateStr;
-              });
-            }
+            let record = rawAttendance.find(a => a.schedule_id != null && String(a.schedule_id) === String(sched.id));
+            // C12: Never assign an unscheduled attendance record to a scheduled
+            // shift merely because the dates match; instructors may have multiple
+            // schedules on the same day.
 
             const timeIn = record?.time_in || sched.time_in || null;
             const timeOut = record?.time_out || sched.time_out || null;
@@ -111,11 +128,13 @@ export default function AttendanceHistoryScreen({ navigation }) {
 
             const [endH, endM] = (sched.end_time || '23:59:00').substring(0, 5).split(':').map(Number);
             const [sY, sM, sD] = schedDateStr.split('-').map(Number);
-            const shiftEndDateTime = new Date(sY, sM - 1, sD, endH || 23, endM || 59, 0);
+            const shiftEndDateTime = new Date(sY, sM - 1, sD, Number.isFinite(endH) ? endH : 23, Number.isFinite(endM) ? endM : 59, 0);
             const isPastShift = now > shiftEndDateTime;
 
             const dbStatus = String(record?.status || sched.attendance_record_status || sched.status || '').toLowerCase();
 
+            const c12Server = c12Map.get(String(sched.id));
+            const c12Offline = (c12Local?.data || []).some(e => String(e.schedule_id) === String(sched.id));
             let computedStatus = 'SCHEDULED';
 
             if (dbStatus.includes('leave') || (sched.course && sched.course.toLowerCase().includes('leave'))) {
@@ -142,13 +161,21 @@ export default function AttendanceHistoryScreen({ navigation }) {
               }
             }
 
+            // Prefer authoritative server status, then show unsent local submissions.
+            if (c12Server?.status === 'OFFLINE_PENDING_REVIEW') computedStatus = 'OFFLINE PENDING HR REVIEW';
+            else if (c12Server?.status === 'PENDING_HR_REVIEW') computedStatus = 'PENDING HR REVIEW';
+            else if (c12Server?.status === 'MISSING_CLOCK_OUT') computedStatus = 'MISSED CLOCK OUT';
+            else if (c12Server?.status === 'IN_PROGRESS') computedStatus = 'IN PROGRESS';
+            else if (c12Offline) computedStatus = 'WAITING TO SYNC';
             return {
               ...sched,
               time_in: timeIn,
               time_out: timeOut,
               hasValidTimeIn,
               hasValidTimeOut,
-              computedStatus
+              computedStatus,
+              c13Guidance: c12Offline ? 'Saved on this device and not yet submitted to HR. Reconnect to sync. Do not delete the app or clear its storage.' : getC13RecoveryGuidance(c12Server),
+              c13Resolution: c12Offline ? 'WAITING_TO_SYNC' : (c12Server?.recovery_state || null)
             };
           });
 
@@ -167,6 +194,10 @@ export default function AttendanceHistoryScreen({ navigation }) {
 
   const renderStatusBadge = (status) => {
     const s = String(status || '').toUpperCase();
+    if (s.includes('WAITING TO SYNC') || s.includes('PENDING HR REVIEW')) {
+      const label = s.includes('WAITING') ? 'Waiting to Sync' : 'Pending HR Review';
+      return <View style={[styles.badge, styles.badgeWarning]}><Clock size={12} color="#D97706" /><Text style={styles.badgeTextWarning}>{label}</Text></View>;
+    }
     if (s.includes('COMPLETED')) {
       return <View style={[styles.badge, styles.badgeSuccess]}><CheckCircle size={12} color="#059669" /><Text style={styles.badgeTextSuccess}>Completed</Text></View>;
     }
@@ -246,7 +277,7 @@ export default function AttendanceHistoryScreen({ navigation }) {
             >
               <Calendar size={14} color={selectedDate ? '#FFFFFF' : (isLight ? '#64748B' : colors.textSecondary)} style={{ marginRight: 6 }} />
               <Text style={[styles.filterText, selectedDate && styles.filterTextActive]}>
-                {selectedDate ? formatDate(selectedDate.toISOString()) : 'Select Date'}
+                {selectedDate ? selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', weekday: 'short' }) : 'Select Date'}
               </Text>
             </TouchableOpacity>
 
@@ -280,6 +311,10 @@ export default function AttendanceHistoryScreen({ navigation }) {
         />
       )}
 
+      {c12Warning ? <Text style={{ color: '#B45309', marginHorizontal: 16, marginTop: 8, fontSize: 12 }}>{c12Warning}</Text> : null}
+      {c12OfflineEvents.length ? <Text style={{ color: colors.textSecondary, marginHorizontal: 16, marginTop: 8, fontSize: 12 }}>
+        {c12OfflineEvents.length} attendance event(s) saved on this device, waiting to sync. These are not yet HR-approved.
+      </Text> : null}
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {loading ? (
           <ActivityIndicator size="large" color="#0D9488" style={{ marginTop: 40 }} />
@@ -328,6 +363,14 @@ export default function AttendanceHistoryScreen({ navigation }) {
                   {renderActualLog(item)}
                 </View>
               </View>
+              {item.c13Guidance ? <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10 }}>
+                <Text style={{ color: colors.textPrimary, fontSize: 12, lineHeight: 19 }} accessibilityRole="text">
+                  Recovery: {item.c13Guidance}
+                </Text>
+                {item.c13Resolution === 'NEEDS_CORRECTION' && <TouchableOpacity
+                  accessibilityRole="button" onPress={() => navigation.navigate('Requests')}
+                  style={{ paddingVertical: 10 }}><Text style={{ color: colors.primary, fontWeight: '700', fontSize: 12 }}>Open Requests / Attendance Correction</Text></TouchableOpacity>}
+              </View> : null}
             </View>
           ))
         )}

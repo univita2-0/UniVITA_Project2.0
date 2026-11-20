@@ -1,10 +1,11 @@
 // src/pages/AttendanceAppeals.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import FormalModal from '../components/FormalModal';
 import { CheckCircle, XCircle, ExternalLink, ClipboardList, ChevronLeft, ChevronRight, Search, X, Eye } from 'lucide-react';
-import { API_BASE } from '../api';
+import { API_BASE, getWebApiErrorMessage } from '../api';
+import { useRole } from '../permissions';
 import './AttendanceAppeals.css';
 
 const getAuthHeaders = () => ({
@@ -46,12 +47,16 @@ const STATUS_TABS = [
 ];
 
 const AttendanceAppeals = () => {
+  const { can, isAdmin } = useRole();
+  const canReviewAppeals = can('appeals:review');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [historyAppeals, setHistoryAppeals] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
 
   const [pendingSearch, setPendingSearch] = useState('');
   const [pendingAppeals, setPendingAppeals] = useState([]);
+  const [c15FocusedId, setC15FocusedId] = useState(null);
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [loadingPending, setLoadingPending] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
@@ -62,12 +67,23 @@ const AttendanceAppeals = () => {
   const [showRemarkModal, setShowRemarkModal] = useState(false);
   const [actionType, setActionType] = useState('');
   const [processing, setProcessing] = useState(false);
+  const reviewingAppealRef = useRef(false); // C11: synchronously guard review submissions
 
   const [historyPage, setHistoryPage] = useState(1);
   const [pendingPage, setPendingPage] = useState(1);
   const itemsPerPage = 20;
 
   const [activeStatusTab, setActiveStatusTab] = useState('all');
+  // C14.4: Bring HR pending status up to date when returning to browser tab.
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetchPendingAppeals();
+    };
+    document.addEventListener('visibilitychange', onFocus);
+    return () => document.removeEventListener('visibilitychange', onFocus);
+  }, []);
+
 
   const debouncedSearchQuery = useDebounce(searchQuery);
   const debouncedPendingSearch = useDebounce(pendingSearch);
@@ -122,7 +138,38 @@ const AttendanceAppeals = () => {
     }
   };
 
+  // C15: Resolve the exact pending appeal referenced by the dashboard notification.
+  useEffect(() => {
+    const raw = sessionStorage.getItem('c15_request_focus');
+    if (!raw) return;
+    let intent;
+    try { intent = JSON.parse(raw); } catch (_) { sessionStorage.removeItem('c15_request_focus'); return; }
+    if (intent?.kind !== 'appeal') return;
+    sessionStorage.removeItem('c15_request_focus');
+    if (!Number.isSafeInteger(intent.id) || intent.id <= 0) return;
+    setC15FocusedId(intent.id);
+    fetchPendingAppeals();
+  }, []);
+
+  useEffect(() => {
+    if (!c15FocusedId || loadingPending) return;
+    const matchingPending = pendingAppeals.find(a => Number(a.id) === c15FocusedId);
+    if (matchingPending) {
+      setViewingAppeal(matchingPending);
+    } else {
+      const matchingHistory = historyAppeals.find(a => Number(a.id) === c15FocusedId);
+      if (matchingHistory) setViewingAppeal(matchingHistory);
+      else if (!loadingHistory) toast.info('This appeal is not in the current request list.');
+    }
+    setC15FocusedId(null);
+  }, [c15FocusedId, pendingAppeals, historyAppeals, loadingPending, loadingHistory]);
+
   const openRemarkModal = (appeal, action) => {
+    // FIX 10.4 — defense-in-depth: only HR can open the review modal
+    if (!canReviewAppeals) {
+      toast.error('You do not have permission to review attendance appeals.');
+      return;
+    }
     setSelectedAppeal(appeal);
     setActionType(action);
     setAdminRemarks('');
@@ -131,6 +178,11 @@ const AttendanceAppeals = () => {
   };
 
   const confirmThenOpenRemark = (appeal, action) => {
+    // FIX 10.4 — defense-in-depth: gate before confirmation dialog
+    if (!canReviewAppeals) {
+      toast.error('You do not have permission to review attendance appeals.');
+      return;
+    }
     const label = action === 'approved' ? 'approve' : 'reject';
     if (window.confirm(`Are you sure you want to ${label} this appeal for ${appeal.full_name} (${appeal.employee_id})?`)) {
       openRemarkModal(appeal, action);
@@ -138,6 +190,12 @@ const AttendanceAppeals = () => {
   };
 
   const updateAppealStatus = async () => {
+    if (reviewingAppealRef.current) return;
+    // FIX 10.4 — defense-in-depth: reject API call if role lacks permission
+    if (!canReviewAppeals) {
+      toast.error('You do not have permission to review attendance appeals.');
+      return;
+    }
     if (!selectedAppeal) return;
 
     if (adminRemarks && adminRemarks.length > 1000) {
@@ -145,6 +203,7 @@ const AttendanceAppeals = () => {
       return;
     }
 
+    reviewingAppealRef.current = true;
     setProcessing(true);
     try {
       await axios.put(`${API_BASE}/attendance-appeals/${selectedAppeal.id}/status`, {
@@ -156,8 +215,12 @@ const AttendanceAppeals = () => {
       fetchPendingAppeals();
       fetchHistoryAppeals();
     } catch (err) {
-      toast.error(err.response?.data?.error || err.response?.data?.message || 'Failed to update appeal status. Please try again.');
+      toast.error(getWebApiErrorMessage(err, 'Failed to update appeal status. Please try again.'));
+      if (err?.response?.status === 409) {
+        await Promise.all([fetchPendingAppeals(), fetchHistoryAppeals()]);
+      }
     } finally {
+      reviewingAppealRef.current = false;
       setProcessing(false);
     }
   };
@@ -194,17 +257,44 @@ const AttendanceAppeals = () => {
 
   return (
     <div className="aa-container">
-      <div className="aa-header">
-        <div className="aa-title-group">
-          <div>
-            <p className="aa-subtitle">Review historical and resolved employee attendance disputes.</p>
-          </div>
+      {/* FIX 10.4 — read-only banner for Admin */}
+      {isAdmin && (
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: '20px',
+          background: '#F0FDFA',
+          border: '1px solid #99F6E4',
+          borderRadius: '5px',
+          color: '#0F766E',
+          fontSize: '12px',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
+          <span><strong>Read-only view.</strong> Attendance appeal reviews are handled by HR.</span>
         </div>
-        <button className="aa-btn-secondary" onClick={() => setShowPendingModal(true)}>
-          <ClipboardList size={16} /> Pending Requests
+      )}
+
+      <header className="aa-header">
+        <div className="aa-title-group">
+          
+          <p className="aa-subtitle">Review employee disputes, supporting evidence, and finalized decisions.</p>
+        </div>
+        <button type="button" className="aa-btn-secondary aa-review-cta" onClick={() => setShowPendingModal(true)}>
+          Pending requests
           {pendingCount > 0 && <span className="aa-badge-count">{pendingCount}</span>}
         </button>
-      </div>
+      </header>
+
+      <section className="aa-summary" aria-label="Appeals overview">
+        <div className="aa-summary-item"><span>Total resolved</span><strong>{historyAppeals.length}</strong><small>Historical records</small></div>
+        <div className="aa-summary-item"><span>Pending review</span><strong>{pendingCount}</strong><small>Awaiting HR decision</small></div>
+        <div className="aa-summary-item"><span>Approved</span><strong>{historyAppeals.filter(a => a.status?.toLowerCase() === 'approved').length}</strong><small>Resolved appeals</small></div>
+        <div className="aa-summary-item"><span>Rejected</span><strong>{historyAppeals.filter(a => a.status?.toLowerCase() === 'rejected').length}</strong><small>Resolved appeals</small></div>
+      </section>
+      <div className="aa-section-intro"><div><p>Filter and inspect submitted attendance appeals.</p></div><span>{filteredHistory.length} records</span></div>
 
       {/* STATUS TABS */}
       <div className="aa-tabs" role="tablist" aria-label="Appeal status filter">
@@ -222,9 +312,9 @@ const AttendanceAppeals = () => {
         ))}
       </div>
 
-      <div className="aa-search-card" style={{ padding: '12px 20px' }}>
+      <div className="aa-search-card">
         <div className="aa-search-row">
-          <div className="aa-search-input-group" style={{ maxWidth: '400px' }}>
+          <div className="aa-search-input-group">
             <Search size={18} className="text-muted" />
             <input
               type="text"
@@ -234,7 +324,7 @@ const AttendanceAppeals = () => {
               onChange={e => setSearchQuery(e.target.value)}
               className="aa-clean-input"
             />
-            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+            {searchQuery && <button type="button" className="aa-input-clear" aria-label="Clear appeal search" onClick={() => setSearchQuery('')}><X size={16}/></button>}
           </div>
         </div>
       </div>
@@ -363,7 +453,8 @@ const AttendanceAppeals = () => {
               </div>
             </div>
             <div className="aa-custom-modal-footer">
-              {viewingAppeal.status === 'pending' && (
+              {/* FIX 10.4 — Approve/Reject only for HR */}
+              {viewingAppeal.status === 'pending' && canReviewAppeals && (
                 <>
                   <button className="aa-btn-reject-custom" onClick={() => confirmThenOpenRemark(viewingAppeal, 'rejected')}>
                     <XCircle size={16} /> Reject
@@ -372,6 +463,11 @@ const AttendanceAppeals = () => {
                     <CheckCircle size={16} /> Approve
                   </button>
                 </>
+              )}
+              {viewingAppeal.status === 'pending' && !canReviewAppeals && (
+                <span style={{ fontSize: '0.8rem', color: '#64748B', fontStyle: 'italic', marginRight: 'auto' }}>
+                  Read-only — awaiting HR review
+                </span>
               )}
               <button className="aa-btn-secondary" onClick={() => setViewingAppeal(null)}>Close Window</button>
             </div>
@@ -400,7 +496,7 @@ const AttendanceAppeals = () => {
                   onChange={e => setPendingSearch(e.target.value)}
                   className="aa-clean-input"
                 />
-                {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+                {pendingSearch && <button type="button" className="aa-input-clear" aria-label="Clear pending appeal search" onClick={() => setPendingSearch('')}><X size={16}/></button>}
               </div>
 
               {loadingPending ? (
@@ -450,10 +546,17 @@ const AttendanceAppeals = () => {
                         )}
                       </div>
 
-                      <div className="aa-minimal-footer">
-                        <button className="aa-btn-min-reject" onClick={() => confirmThenOpenRemark(appeal, 'rejected')}>Reject</button>
-                        <button className="aa-btn-min-approve" onClick={() => confirmThenOpenRemark(appeal, 'approved')}>Approve</button>
-                      </div>
+                      {/* FIX 10.4 — Approve/Reject only for HR */}
+                      {canReviewAppeals ? (
+                        <div className="aa-minimal-footer">
+                          <button className="aa-btn-min-reject" onClick={() => confirmThenOpenRemark(appeal, 'rejected')}>Reject</button>
+                          <button className="aa-btn-min-approve" onClick={() => confirmThenOpenRemark(appeal, 'approved')}>Approve</button>
+                        </div>
+                      ) : (
+                        <div className="aa-minimal-footer" style={{ justifyContent: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B', fontStyle: 'italic' }}>Read-only — awaiting HR review</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -478,7 +581,7 @@ const AttendanceAppeals = () => {
         </div>
       )}
 
-      {/* REMARK MODAL */}
+      {/* REMARK MODAL — reachable only via HR-gated confirmThenOpenRemark */}
       <FormalModal show={showRemarkModal} onClose={() => !processing && setShowRemarkModal(false)} title={`${actionType === 'approved' ? 'Approve' : 'Reject'} Appeal`} footer={
         <>
           <button className="aa-btn-secondary" onClick={() => setShowRemarkModal(false)} disabled={processing}>Cancel</button>

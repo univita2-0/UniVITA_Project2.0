@@ -4,9 +4,10 @@ import { toast } from 'react-toastify';
 import { 
   RefreshCw, Edit3, Save, X, AlertCircle, Search, 
   ChevronLeft, ChevronRight, Plus, Calendar, 
-  Clock
+  Clock, ShieldAlert
 } from 'lucide-react';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 import './LeaveBalancesManagement.css';
 
 const getAuthHeaders = () => ({
@@ -14,6 +15,12 @@ const getAuthHeaders = () => ({
 });
 
 const LeaveBalancesManagement = () => {
+  // ---- Role detection (Fix 10.14) ----
+  const currentUserRole = getUserRole();
+  const isAdmin = currentUserRole === 'admin';
+  const isHR = currentUserRole === 'hr_admin';
+  const canWrite = isHR; // HR handles leave balances & CTO configurations
+
   const [employees, setEmployees] = useState([]);
   const [leaveTypes, setLeaveTypes] = useState([]);
   const [allLeaveTypes, setAllLeaveTypes] = useState([]);
@@ -134,11 +141,19 @@ const LeaveBalancesManagement = () => {
   }, [selectedYear, showBalanceModal, selectedEmployee]);
 
   const handleEditBalance = (balance) => {
+    if (!canWrite) {
+      toast.error('You do not have permission to edit leave balances.');
+      return;
+    }
     setEditingBalance(balance.leave_type_id);
     setTempValue(balance.remaining_days.toString());
   };
 
   const handleSaveBalance = async (balance) => {
+    if (!canWrite) {
+      toast.error('You do not have permission to edit leave balances.');
+      return;
+    }
     const newValue = parseFloat(tempValue);
     if (isNaN(newValue) || newValue < 0) {
       toast.warning('Please enter a valid non-negative number.');
@@ -195,6 +210,10 @@ const LeaveBalancesManagement = () => {
 
   const handleSaveCtoAdjustment = async (e) => {
     e.preventDefault();
+    if (!canWrite) {
+      toast.error('You do not have permission to adjust CTO credits.');
+      return;
+    }
     const rawVal = parseFloat(ctoAdjustment);
     if (isNaN(rawVal) || rawVal <= 0) {
       toast.warning('Please enter a valid positive adjustment value.');
@@ -251,6 +270,10 @@ const LeaveBalancesManagement = () => {
   // --- LEAVE TYPE CONFIG HANDLERS ---
   const handleCreateLeaveType = async (e) => {
     e.preventDefault();
+    if (!canWrite) {
+      toast.error('You do not have permission to configure leave types.');
+      return;
+    }
     if (!newTypeName.trim()) {
       toast.warning('Please provide a leave type name.');
       return;
@@ -280,6 +303,10 @@ const LeaveBalancesManagement = () => {
   };
 
   const handleToggleLeaveType = async (id) => {
+    if (!canWrite) {
+      toast.error('You do not have permission to configure leave types.');
+      return;
+    }
     try {
       await axios.put(`${API_BASE}/admin/leave-types/${id}/toggle`, {}, getAuthHeaders());
       toast.success('Leave type status updated.');
@@ -304,14 +331,33 @@ const LeaveBalancesManagement = () => {
   const currentEmployees = filteredEmployees.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
-    <div className="lbm-container">
+    <div className="lbm-container lbm-page">
       <div className="lbm-header">
         <div className="lbm-title-group">
           <div>
-            <p className="lbm-subtitle">Monitor annual leave quotas, manage overtime CTO conversions, and configure leave types.</p>
+           
+            <p className="lbm-subtitle">
+              {isAdmin 
+                ? 'Read-only view of annual leave quotas, CTO conversions, and leave types.'
+                : 'Monitor annual leave quotas, manage overtime CTO conversions, and configure leave types.'}
+            </p>
           </div>
         </div>
       </div>
+
+      {/* Read-only banner for Admin */}
+      {isAdmin && (
+        <div className="lbm-readonly-banner">
+          <ShieldAlert size={16} />
+          <span>Read-only view. Leave balance adjustments and policy configurations are managed by HR.</span>
+        </div>
+      )}
+
+      <section className="lbm-overview" aria-label="Leave credits overview">
+        <div className="lbm-overview-item"><span>Active instructors</span><strong>{employees.length}</strong><small>Eligible employee accounts</small></div>
+        <div className="lbm-overview-item"><span>Configured leave types</span><strong>{allLeaveTypes.length}</strong><small>Organization-wide policies</small></div>
+        <div className="lbm-overview-item"><span>Active leave types</span><strong>{allLeaveTypes.filter(t => Boolean(t.is_active)).length}</strong><small>Available to mobile users</small></div>
+      </section>
 
       <div className="lbm-toolbar">
         <div className="lbm-tabs">
@@ -358,7 +404,7 @@ const LeaveBalancesManagement = () => {
                 onChange={e => setSearchQuery(e.target.value)} 
                 className="lbm-clean-input" 
               />
-              {searchQuery && <X size={14} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+              {searchQuery && <button type="button" className="lbm-input-clear" aria-label="Clear employee search" onClick={() => setSearchQuery('')}><X size={14}/></button>}
             </div>
             <div className="lbm-stats-badge">
               Active Instructors: <strong>{employees.length}</strong>
@@ -429,9 +475,11 @@ const LeaveBalancesManagement = () => {
             <div>
               <p className="lbm-card-subtitle">Disabled leave types are hidden instantly from mobile leave request options.</p>
             </div>
-            <button className="lbm-btn-primary" onClick={() => setShowAddTypeModal(true)}>
-              <Plus size={16} /> Add Leave Type
-            </button>
+            {canWrite && (
+              <button className="lbm-btn-primary" onClick={() => setShowAddTypeModal(true)}>
+                <Plus size={16} /> Add Leave Type
+              </button>
+            )}
           </div>
 
           <div className="lbm-table-wrapper">
@@ -441,7 +489,7 @@ const LeaveBalancesManagement = () => {
                   <th>Leave Type Name</th>
                   <th className="text-center">Default Quota</th>
                   <th className="text-center">Mobile Sync Status</th>
-                  <th className="text-right">Action</th>
+                  {canWrite && <th className="text-right">Action</th>}
                 </tr>
               </thead>
               <tbody>
@@ -454,14 +502,16 @@ const LeaveBalancesManagement = () => {
                         {lt.is_active ? 'ENABLED' : 'DISABLED'}
                       </span>
                     </td>
-                    <td className="text-right">
-                      <button 
-                        className={`lbm-btn-toggle ${lt.is_active ? 'disable' : 'enable'}`}
-                        onClick={() => handleToggleLeaveType(lt.id)}
-                      >
-                        {lt.is_active ? 'Disable' : 'Enable'}
-                      </button>
-                    </td>
+                    {canWrite && (
+                      <td className="text-right">
+                        <button 
+                          className={`lbm-btn-toggle ${lt.is_active ? 'disable' : 'enable'}`}
+                          onClick={() => handleToggleLeaveType(lt.id)}
+                        >
+                          {lt.is_active ? 'Disable' : 'Enable'}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -545,12 +595,14 @@ const LeaveBalancesManagement = () => {
                                       <Save size={14} />
                                     </button>
                                   </div>
-                                ) : (
+                                ) : canWrite ? (
                                   <div className="lbm-action-group right">
                                     <button onClick={() => handleEditBalance(balance)} className="lbm-icon-btn edit" title="Edit Balance">
                                       <Edit3 size={14} />
                                     </button>
                                   </div>
+                                ) : (
+                                  <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 500 }}>Read-only</span>
                                 )}
                               </td>
                             </tr>
@@ -635,21 +687,23 @@ const LeaveBalancesManagement = () => {
                     <div className="lbm-cto-bar-title">
                       <span>Transaction History</span>
                     </div>
-                    <button 
-                      className={`lbm-btn-toggle-adjust ${isAdjustingCto ? 'active' : ''}`} 
-                      onClick={() => {
-                        setIsAdjustingCto(!isAdjustingCto);
-                        setCtoAdjustment('');
-                        setCtoReason('');
-                        setCtoEntryType('CREDIT');
-                        setCtoUnit('HOURS');
-                      }}
-                    >
-                      {isAdjustingCto ? 'Cancel Adjustment' : '+ Manual Adjustment'}
-                    </button>
+                    {canWrite && (
+                      <button 
+                        className={`lbm-btn-toggle-adjust ${isAdjustingCto ? 'active' : ''}`} 
+                        onClick={() => {
+                          setIsAdjustingCto(!isAdjustingCto);
+                          setCtoAdjustment('');
+                          setCtoReason('');
+                          setCtoEntryType('CREDIT');
+                          setCtoUnit('HOURS');
+                        }}
+                      >
+                        {isAdjustingCto ? 'Cancel Adjustment' : '+ Manual Adjustment'}
+                      </button>
+                    )}
                   </div>
 
-                  {isAdjustingCto && (
+                  {canWrite && isAdjustingCto && (
                     <form onSubmit={handleSaveCtoAdjustment} className="lbm-cto-adjust-box">
                       <div className="lbm-adjust-header">
                         <h4>Add Manual CTO Credit Entry</h4>
@@ -785,7 +839,7 @@ const LeaveBalancesManagement = () => {
       )}
 
       {/* ADD LEAVE TYPE MODAL */}
-      {showAddTypeModal && (
+      {showAddTypeModal && canWrite && (
         <div className="lbm-custom-modal-backdrop" onClick={() => setShowAddTypeModal(false)}>
           <div className="lbm-custom-modal small" onClick={e => e.stopPropagation()}>
             <div className="lbm-custom-modal-header">

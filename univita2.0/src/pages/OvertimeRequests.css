@@ -554,3 +554,94 @@
   .ot-minimal-footer { flex-direction: column; }
   .ot-btn-min-reject, .ot-btn-min-approve { width: 100%; text-align: center; }
 }
+
+/* ===== UNIVITA ENTERPRISE REFRESH — OVERTIME REQUESTS ===== */
+.ot-container {
+  padding: 5px 10px 10px;
+  min-height: 100%;
+  background: transparent;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #142435;
+}
+.ot-container *, .ot-container *::before, .ot-container *::after { box-sizing: border-box; }
+.ot-page-heading { display:flex; justify-content:space-between; align-items:flex-end; gap:18px; padding:13px 0 17px; }
+.ot-page-heading h1 {font-size:23px; line-height:1.25; letter-spacing:-.6px; font-weight:700; margin:5px 0 5px; color:#142435;}
+.ot-page-heading p { margin:0; font-size:12.5px; line-height:1.55; color:#64748b; }
+.ot-eyebrow {display:flex;align-items:center;gap:7px;font-size:10px;letter-spacing:.095em;font-weight:700;color:#0d9488;}
+.ot-heading-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.ot-btn-secondary, .ot-btn-primary {min-height:35px;padding:8px 12px;border-radius:5px;box-shadow:none;font-family:inherit;font-size:12px;font-weight:600;white-space:nowrap;}
+.ot-btn-primary {display:inline-flex;align-items:center;gap:8px;cursor:pointer;background:#0b5959;border:1px solid #0b5959;color:#fff;}
+.ot-btn-primary:hover {background:#074747;}
+.ot-btn-primary .ot-badge-count {background:rgba(255,255,255,.2);color:#fff;border-radius:4px;margin:0;min-width:21px;}
+.ot-btn-secondary:focus-visible, .ot-btn-primary:focus-visible, .ot-tab:focus-visible, .ot-container button:focus-visible, .ot-container a:focus-visible {outline:2px solid #0d9488;outline-offset:2px;}
+.ot-readonly-notice {display:flex;gap:10px;align-items:center;background:#F0FDFA;border:1px solid #99F6E4;border-radius:5px;color:#0F766E;font-size:12px;font-weight:500;line-height:1.6;padding:12px 16px;margin-bottom:20px;}
+.ot-readonly-icon {width:16px;height:16px;border-radius:50%;border:1.5px solid currentColor;text-align:center;line-height:13px;font-weight:700;flex-shrink:0;}
+.ot-summary-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:15px;}
+.ot-summary-card {padding:14px 15px 13px;background:#fff;border:1px solid #e1e7ed;border-radius:6px;display:flex;flex-direction:column;gap:7px;box-shadow:0 1px 2px rgba(20,36,53,.025);}
+.ot-summary-top {display:flex;justify-content:space-between;align-items:center;gap:10px;color:#64748b;font-weight:600;font-size:11px;}
+.ot-summary-top svg {color:#0b7c78;flex-shrink:0;}
+.ot-summary-card strong {font-size:26px;line-height:1;font-weight:700;letter-spacing:-.8px;color:#162d3b;font-variant-numeric:tabular-nums;}
+.ot-summary-card small {font-size:10.5px;color:#8a97a7;}
+.ot-records-section {border:1px solid #e1e7ed;border-radius:6px;overflow:hidden;background:#fff;}
+.ot-section-header {display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 15px 12px;}
+.ot-section-header h2 {font-size:14px;font-weight:700;color:#142435;margin:0 0 4px;}
+.ot-section-header p {font-size:11px;color:#7a8999;margin:0;}
+.ot-record-count {font-size:11px;color:#64748b;font-weight:600;background:#f3f6f8;border:1px solid #e5ebef;border-radius:4px;padding:5px 8px;white-space:nowrap;}
+.ot-tabs {margin:0;padding:0 15px 0;border-bottom:1px solid #e6ebf0;gap:20px;border-radius:0;}
+.ot-tab {border:none;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:#748293;padding:11px 2px 10px;font-size:11.5px;font-weight:600;gap:8px;}
+.ot-tab:hover {border-color:transparent;color:#075f5a;}
+.ot-tab.active {border-color:#0d9488;color:#0c625c;font-weight:700;}
+.ot-tab-count {font-size:10px;color:inherit;background:#f1f5f8;border-radius:4px;padding:3px 5px;min-width:18px;text-align:center;}
+.ot-tab.active .ot-tab-count {background:#e4f7f3;}
+.ot-search-card {margin:0;border:0;border-radius:0;box-shadow:none;padding:11px 15px;background:#fff;}
+.ot-search-input-group, .ot-search-input-group.border {gap:8px;border-radius:5px;border-color:#d8e0e7;max-width:350px;background:#fff;padding:0 9px;min-height:36px;}
+.ot-search-input-group svg {color:#8593a2;flex-shrink:0;}
+.ot-clean-input {font-size:11.5px;padding:8px 0;font-weight:400;}
+.ot-clean-input::placeholder {color:#98a3ad;}
+.ot-clear-search {display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:#81909e;padding:4px;cursor:pointer;}
+.ot-card {border:0;border-top:1px solid #e5ebef;border-radius:0;box-shadow:none;}
+.ot-table th {padding:11px 14px;background:#f8fafb;letter-spacing:.04em;font-size:10px;color:#6d7d8e;font-weight:700;}
+.ot-table td {padding:10px 14px;border-color:#edf1f4;font-size:11.5px;}
+.ot-table tr:last-child td {border-bottom:0;}
+.ot-chip {border-radius:4px;padding:4px 7px;font-size:10px;letter-spacing:.015em;font-weight:650;}
+.ot-action-inspect-btn {width:29px;height:29px;border-color:#dce4ea;border-radius:4px;}
+.ot-pagination {padding:10px 14px;background:#fff;}
+.ot-page-info, .ot-page-current, .ot-page-btn {font-size:11px;}
+.ot-page-btn {border-radius:4px;min-height:30px;}
+.ot-modal-title-block h3 {font-size:15px;margin:0;color:#142435;}
+.ot-modal-title-block p {font-size:11px;font-weight:400;color:#8190a0;margin:5px 0 0;}
+.ot-custom-modal-backdrop {background:rgba(13,30,43,.54);backdrop-filter:none;}
+.ot-custom-modal {border-radius:7px;max-height:min(88vh,900px);border:1px solid #dce4eb;box-shadow:0 24px 60px rgba(11,32,49,.22);}
+.ot-custom-modal-header {padding:15px 18px;}
+.ot-custom-modal-body {padding:15px 18px;background:#fff;}
+.ot-custom-modal-footer {padding:12px 18px;gap:8px;}
+.ot-user-profile-header {border-radius:5px;padding:10px 12px;}
+.ot-avatar-circle,.ot-minimal-avatar {border-radius:5px;background:#eaf7f5;color:#0a6f68;}
+.ot-custom-details-grid {gap:8px;}
+.ot-detail-box {border-radius:5px;padding:11px 12px;background:#fbfcfd;}
+.ot-detail-box label,.ot-minimal-field label {font-size:10px;}
+.ot-detail-box span,.ot-detail-box p {font-size:12px;}
+.ot-minimal-list {gap:9px;}
+.ot-minimal-card {border-radius:5px;box-shadow:none;}
+.ot-minimal-header {padding:10px 12px;}
+.ot-minimal-body {padding:12px;gap:9px;}
+.ot-minimal-footer {padding:10px 12px;background:#fafbfc;}
+.ot-btn-min-reject,.ot-btn-min-approve {border-radius:4px;min-height:32px;font-size:11px;padding:7px 12px;}
+.ot-proof-action-btn,.ot-status-dot,.ot-minimal-type-badge {border-radius:4px;}
+.ot-spin {animation:ot-spin .9s linear infinite;}
+@keyframes ot-spin {to {transform:rotate(360deg)}}
+@media (max-width:900px) { .ot-summary-grid {grid-template-columns:repeat(2,minmax(0,1fr));} }
+@media (max-width:640px) {
+  .ot-container {padding:5px 10px 10px;}
+  .ot-page-heading {align-items:stretch;flex-direction:column;gap:13px;}
+  .ot-heading-actions {justify-content:flex-start;}
+  .ot-summary-grid {gap:8px;}
+  .ot-summary-card {padding:11px;}
+  .ot-summary-card strong {font-size:22px;}
+  .ot-tabs {gap:10px;overflow-x:auto;flex-wrap:nowrap;}
+  .ot-tab {flex:0 0 auto;padding:11px 1px;}
+  .ot-section-header {align-items:flex-start;}
+  .ot-custom-modal-header,.ot-custom-modal-body,.ot-custom-modal-footer {padding:12px;}
+  .ot-minimal-footer {flex-direction:column;}
+}
+@media (prefers-reduced-motion:reduce) {.ot-spin {animation:none;}}

@@ -62,7 +62,8 @@ const VisitorHistory = () => {
     try {
       // Fetches the fine-grained hardware tracking logs
       const res = await axios.get(`${API_BASE}/visitor-history`, getAuthHeaders());
-      setData(res.data || []);
+      setData(Array.isArray(res.data) ? res.data : []);
+      setCurrentPage(1);
     } catch (err) {
       console.error('Failed to load tracking history:', err);
       toast.error('Failed to load tracking history.');
@@ -102,6 +103,9 @@ const VisitorHistory = () => {
 
     return matchesSearch && matchesDate;
   });
+
+  const uniqueTagCount = new Set(filteredData.map(item => item.ble_id).filter(Boolean)).size;
+  const uniqueRoomCount = new Set(filteredData.map(item => item.current_room).filter(Boolean)).size;
 
   // Calculate Pagination Slices
   const totalPages = Math.ceil(filteredData.length / rowsPerPage) || 1;
@@ -148,8 +152,8 @@ const VisitorHistory = () => {
     <div className="vh-container">
       <div className="vh-header-section">
         <div>
-          <h2 className="vh-title">Hardware Tracking Log</h2>
-          <p className="vh-subtitle">Complete fine-grained archive of all BLE tag movements and room detections.</p>
+          <h2 className="vh-title">Visitor Tracking History</h2>
+          <p className="vh-subtitle">Review historical BLE tag movement, room detections, and tracking events.</p>
         </div>
         <div className="vh-actions">
           <button className="btn-vh-outline" onClick={fetchHistory} disabled={loading}>
@@ -161,6 +165,11 @@ const VisitorHistory = () => {
         </div>
       </div>
 
+      <section className="vh-overview" aria-label="Tracking activity summary">
+        <div className="vh-overview-item"><span>Tracking events</span><strong>{filteredData.length}</strong><small>Matching current filters</small></div>
+        <div className="vh-overview-item"><span>BLE tags observed</span><strong>{uniqueTagCount}</strong><small>Unique tag identifiers</small></div>
+        <div className="vh-overview-item"><span>Rooms detected</span><strong>{uniqueRoomCount}</strong><small>Distinct recorded rooms</small></div>
+      </section>
       <div className="vh-card">
         <div className="vh-toolbar">
           <div className="vh-toolbar-controls">

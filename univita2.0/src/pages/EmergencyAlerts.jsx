@@ -32,6 +32,8 @@ const EmergencyAlerts = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [historyPage, setHistoryPage] = useState(1);
+  const HISTORY_PAGE_SIZE = 10;
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('auth_token');
@@ -151,6 +153,10 @@ const EmergencyAlerts = () => {
     return true;
   });
 
+  const historyPageCount = Math.max(1, Math.ceil(filteredAlerts.length / HISTORY_PAGE_SIZE));
+  const safeHistoryPage = Math.min(historyPage, historyPageCount);
+  const pagedAlerts = filteredAlerts.slice((safeHistoryPage - 1) * HISTORY_PAGE_SIZE, safeHistoryPage * HISTORY_PAGE_SIZE);
+
   const getSeverityIcon = (sev) => {
     switch (sev) {
       case 'critical': return <AlertOctagon size={14} />;
@@ -180,6 +186,7 @@ const EmergencyAlerts = () => {
     setFilterSeverity('all');
     setStartDate('');
     setEndDate('');
+    setHistoryPage(1);
   };
 
   const noRolesSelected = targetRoles.length === 0;
@@ -189,7 +196,8 @@ const EmergencyAlerts = () => {
       <div className="ea-header">
         <div>
           
-          <p className="ea-subtitle">Broadcast critical information across the organization.</p>
+          
+          <p className="ea-subtitle">Create organization-wide notices and review past broadcasts.</p>
         </div>
         <button className="btn-view-history" onClick={openHistoryModal}>
           <History size={16} />
@@ -263,6 +271,7 @@ const EmergencyAlerts = () => {
                   key={role.value}
                   type="button"
                   className={`ea-role-btn ${targetRoles.includes(role.value) ? 'active' : ''}`}
+                  aria-pressed={targetRoles.includes(role.value)}
                   onClick={() => toggleRole(role.value)}
                 >
                   {role.label}
@@ -312,14 +321,14 @@ const EmergencyAlerts = () => {
                 type="text"
                 placeholder="Search alerts..."
                 value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+                onChange={e => { setSearchQuery(e.target.value); setHistoryPage(1); }}
                 className="ea-input-search"
               />
             </div>
 
             <select
               value={filterSeverity}
-              onChange={e => setFilterSeverity(e.target.value)}
+              onChange={e => { setFilterSeverity(e.target.value); setHistoryPage(1); }}
               className="ea-select-filter"
             >
               <option value="all">All Severities</option>
@@ -335,7 +344,7 @@ const EmergencyAlerts = () => {
               <input
                 type="date"
                 value={startDate}
-                onChange={e => setStartDate(e.target.value)}
+                onChange={e => { setStartDate(e.target.value); setHistoryPage(1); }}
                 className="ea-date-input"
               />
             </div>
@@ -345,7 +354,7 @@ const EmergencyAlerts = () => {
                 type="date"
                 value={endDate}
                 min={startDate || undefined}
-                onChange={e => setEndDate(e.target.value)}
+                onChange={e => { setEndDate(e.target.value); setHistoryPage(1); }}
                 className="ea-date-input"
               />
             </div>
@@ -380,7 +389,7 @@ const EmergencyAlerts = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredAlerts.map(alert => (
+                {pagedAlerts.map(alert => (
                   <tr key={alert.id}>
                     <td className="ea-date-cell">{new Date(alert.sent_at).toLocaleString()}</td>
                     <td className="ea-title-cell">{alert.title}</td>
@@ -396,6 +405,16 @@ const EmergencyAlerts = () => {
                 ))}
               </tbody>
             </table>
+            {filteredAlerts.length > HISTORY_PAGE_SIZE && (
+              <div className="ea-pagination">
+                <span>Showing {(safeHistoryPage - 1) * HISTORY_PAGE_SIZE + 1}–{Math.min(safeHistoryPage * HISTORY_PAGE_SIZE, filteredAlerts.length)} of {filteredAlerts.length} alerts</span>
+                <div className="ea-pagination-buttons">
+                  <button type="button" disabled={safeHistoryPage <= 1} onClick={() => setHistoryPage(p => Math.max(1, p - 1))}>Previous</button>
+                  <span>Page {safeHistoryPage} of {historyPageCount}</span>
+                  <button type="button" disabled={safeHistoryPage >= historyPageCount} onClick={() => setHistoryPage(p => Math.min(historyPageCount, p + 1))}>Next</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </FormalModal>

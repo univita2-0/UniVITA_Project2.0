@@ -20,6 +20,7 @@ const Login = ({ onBack }) => {
   // Steps: 'login' | 'otp' | 'forgot-password' | 'reset-otp' | 'reset-new-password'
   const [step, setStep] = useState('login'); 
   const [otp, setOtp] = useState('');
+  const [pendingLoginToken, setPendingLoginToken] = useState('');
   const [resetOtp, setResetOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
@@ -36,136 +37,345 @@ const Login = ({ onBack }) => {
 
   const startResendTimer = () => setResendTimer(60);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    if (!email.trim() || !password.trim()) {
-      toast.error('Please enter both email and password.');
-      return;
-    }
-    if (!EMAIL_REGEX.test(email.trim())) {
-      toast.error('Please enter a valid email address.');
-      return;
-    }
+  
+const handleLogin = async (e) => {
+  e.preventDefault();
 
-    setOtpLoading(true);
+  const emailClean = email.trim().toLowerCase();
 
-    try {
-      const result = await login({ email: email.trim(), password });
+  if (!emailClean || !password.trim()) {
+    toast.error('Please enter both email and password.');
+    return;
+  }
 
-      if (result && result.success) {
-        if (result.requiresPasswordReset) {
-          toast.error('Your password has expired. Please use the mobile app to reset it.');
-          setOtpLoading(false);
-          return;
-        }
+  if (!EMAIL_REGEX.test(emailClean)) {
+    toast.error('Please enter a valid email address.');
+    return;
+  }
 
-        const otpRes = await fetch(`${API_BASE}/auth/send-otp`, {
+  setOtpLoading(true);
+  setPendingLoginToken('');
+  setOtp('');
+
+  try {
+    // Step 1: Verify email and password.
+    const result = await login({
+      email: emailClean,
+      password
+    });
+
+    if (result && result.success) {
+      if (result.requiresPasswordReset) {
+        toast.error(
+          'Your password has expired. Please use the mobile app to reset it.'
+        );
+        return;
+      }
+
+      // C04: Backend must provide a temporary token
+      // after successful password verification.
+      if (!result.tempToken) {
+        toast.error(
+          'Login verification could not start. Please try again.'
+        );
+        return;
+      }
+
+      // Step 2: Request OTP using the temporary login token.
+      const otpRes = await fetch(
+        `${API_BASE}/auth/send-otp`,
+        {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email.trim() }),
-        });
-        const otpData = await otpRes.json();
-
-        if (otpData && otpData.success) {
-          setStep('otp');
-          startResendTimer();
-          toast.success('Security verification code sent to your email.');
-        } else {
-          toast.error(otpData?.message || 'Failed to send OTP verification code.');
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${result.tempToken}`
+          },
+          body: JSON.stringify({
+            email: emailClean
+          })
         }
-      } else {
-        const serverMsg = result?.message || '';
-        if (serverMsg.includes("does not have access")) {
-          toast.error("This account does not have access.");
-        } else if (serverMsg.toLowerCase().includes('password') || serverMsg === 'Invalid credentials.') {
-          toast.error('Incorrect password.');
-        } else if (serverMsg.toLowerCase().includes('email') || serverMsg.toLowerCase().includes('not found')) {
-          toast.error('Email invalid or account not found.');
-        } else {
-          toast.error(serverMsg || 'Incorrect email or password. Please try again.');
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Connection error. Please try again.');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
+      );
 
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    if (!otp || otp.length < 6) {
-      toast.error('Please enter a valid 6-digit OTP code.');
-      return;
-    }
+      const otpData = await otpRes.json();
 
-    setOtpLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), otp }),
-      });
-      const data = await res.json();
+      if (otpRes.ok && otpData?.success) {
+        // Save temporary token for verification and resending.
+        setPendingLoginToken(result.tempToken);
 
-      if (data && data.success) {
-        if (data.user.role === 'instructor') {
-          toast.error('This account does not have access.');
-          setStep('login');
-          setOtp('');
-          return;
-        }
-
-        
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('user_id', data.user.id);
-        localStorage.setItem('user_name', data.user.full_name);
-        localStorage.setItem('user_role', data.user.role);
-        localStorage.setItem('user_email', data.user.email);
-        localStorage.setItem('employee_id', data.user.employee_id);
-
-        toast.success('Authentication successful. Redirecting...');
-        setTimeout(() => {
-          window.location.href = '/';
-        }, 800);
-      } else {
-        toast.error(data?.message || 'Invalid OTP');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Invalid OTP');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (!email.trim() || !EMAIL_REGEX.test(email.trim())) {
-      toast.error('Valid email is required to resend code.');
-      return;
-    }
-
-    setOtpLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const data = await res.json();
-      if (data && data.success) {
+        setStep('otp');
         startResendTimer();
-        toast.success('A new verification code has been sent.');
+
+        toast.success(
+          'Security verification code sent to your email.'
+        );
       } else {
-        toast.error(data?.message || 'Failed to resend OTP.');
+        const message =
+          otpData?.message ||
+          'Failed to send OTP verification code.';
+
+        toast.error(message);
+        setPendingLoginToken('');
       }
-    } catch (err) {
-      toast.error('Connection error while resending code.');
-    } finally {
-      setOtpLoading(false);
+
+    } else {
+      const serverMsg = result?.message || '';
+      const lowerMessage = serverMsg.toLowerCase();
+
+      if (lowerMessage.includes('does not have access')) {
+        toast.error('This account does not have access.');
+
+      } else if (
+        lowerMessage.includes('password') ||
+        serverMsg === 'Invalid credentials.'
+      ) {
+        toast.error('Incorrect password.');
+
+      } else if (
+        lowerMessage.includes('email') ||
+        lowerMessage.includes('not found')
+      ) {
+        toast.error('Email invalid or account not found.');
+
+      } else {
+        toast.error(
+          serverMsg ||
+          'Incorrect email or password. Please try again.'
+        );
+      }
     }
-  };
+
+  } catch (err) {
+    console.error('Login verification error:', err);
+
+    toast.error(
+      'Connection error. Please check your internet connection and try again.'
+    );
+
+  } finally {
+    setOtpLoading(false);
+  }
+};
+
+
+  
+const handleVerifyOtp = async (e) => {
+  e.preventDefault();
+
+  const cleanOtp = String(otp || '').trim();
+
+  // Validate OTP format.
+  if (!/^\d{6}$/.test(cleanOtp)) {
+    toast.error('Please enter a valid 6-digit OTP code.');
+    return;
+  }
+
+  // C04: Require a pending login session.
+  if (!pendingLoginToken) {
+    toast.error(
+      'Your login verification session is missing. Please log in again.'
+    );
+
+    setStep('login');
+    setOtp('');
+    return;
+  }
+
+  setOtpLoading(true);
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/auth/verify-otp`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${pendingLoginToken}`
+        },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          otp: cleanOtp
+        })
+      }
+    );
+
+    const data = await res.json();
+
+    if (res.ok && data?.success) {
+      // Validate the authenticated response.
+      if (!data.token || !data.user) {
+        toast.error(
+          'Authentication response is incomplete. Please try again.'
+        );
+        return;
+      }
+
+      // Instructors must use the mobile application.
+      if (data.user.role === 'instructor') {
+        toast.error('This account does not have access.');
+
+        setPendingLoginToken('');
+        setStep('login');
+        setOtp('');
+        return;
+      }
+
+      // Allow only authorized web roles.
+      const allowedWebRoles = [
+        'admin',
+        'hr_admin',
+        'security'
+      ];
+
+      if (!allowedWebRoles.includes(data.user.role)) {
+        toast.error('Your account is not authorized for web access.');
+
+        setPendingLoginToken('');
+        setStep('login');
+        setOtp('');
+        return;
+      }
+
+      // Store the FINAL authenticated session token.
+      // Do not store the temporary OTP token as auth_token.
+      localStorage.setItem('auth_token', data.token);
+      localStorage.setItem('user_id', String(data.user.id));
+      localStorage.setItem('user_name', data.user.full_name || '');
+      localStorage.setItem('user_role', data.user.role);
+      localStorage.setItem('role', data.user.role);
+      localStorage.setItem('user_email', data.user.email || '');
+
+      localStorage.setItem(
+        'employee_id',
+        data.user.employee_id == null
+          ? ''
+          : String(data.user.employee_id)
+      );
+
+      // C04: Clear temporary verification data.
+      setPendingLoginToken('');
+      setOtp('');
+      setPassword('');
+
+      toast.success(
+        'Authentication successful. Redirecting...'
+      );
+
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 800);
+
+    } else {
+      const message =
+        data?.message || 'Invalid OTP verification code.';
+
+      toast.error(message);
+
+      // Expired or invalid pending login tokens
+      // require the user to repeat password verification.
+      if (res.status === 401 || res.status === 403) {
+        setPendingLoginToken('');
+        setOtp('');
+        setStep('login');
+
+        toast.info(
+          'Please log in again to start a new verification session.'
+        );
+      }
+    }
+
+  } catch (err) {
+    console.error('OTP verification error:', err);
+
+    toast.error(
+      'Unable to verify OTP. Please check your connection and try again.'
+    );
+
+  } finally {
+    setOtpLoading(false);
+  }
+};
+
+
+  
+const handleResendOtp = async () => {
+  const emailClean = email.trim().toLowerCase();
+
+  if (!emailClean || !EMAIL_REGEX.test(emailClean)) {
+    toast.error('Valid email is required to resend code.');
+    return;
+  }
+
+  // C04: Resending requires the same verified
+  // temporary login session.
+  if (!pendingLoginToken) {
+    toast.error(
+      'Your login verification session has expired. Please log in again.'
+    );
+
+    setStep('login');
+    setOtp('');
+    return;
+  }
+
+  setOtpLoading(true);
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/auth/send-otp`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${pendingLoginToken}`
+        },
+        body: JSON.stringify({
+          email: emailClean
+        })
+      }
+    );
+
+    const data = await res.json();
+
+    if (res.ok && data?.success) {
+      // Remove old OTP input when a new code is issued.
+      setOtp('');
+
+      startResendTimer();
+
+      toast.success(
+        'A new verification code has been sent to your email.'
+      );
+
+    } else {
+      toast.error(
+        data?.message || 'Failed to resend OTP.'
+      );
+
+      // If temporary login token expired,
+      // the user must verify their password again.
+      if (res.status === 401 || res.status === 403) {
+        setPendingLoginToken('');
+        setOtp('');
+        setStep('login');
+
+        toast.info(
+          'Please log in again to request another OTP.'
+        );
+      }
+    }
+
+  } catch (err) {
+    console.error('Resend OTP error:', err);
+
+    toast.error(
+      'Connection error while resending code. Please try again.'
+    );
+
+  } finally {
+    setOtpLoading(false);
+  }
+};
+
 
   const handleForgotPasswordSubmit = async (e) => {
     e.preventDefault();

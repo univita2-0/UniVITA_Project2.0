@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useContext } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, ActivityIndicator, StatusBar, Platform
+  TouchableOpacity, ActivityIndicator, StatusBar, Platform, AppState, DeviceEventEmitter
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -13,9 +13,51 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
-import { API_URL } from './api';
+import { API_URL, fetchC14AttendanceNotifications, markC14AttendanceNotificationRead } from './api';
 
-// src/screens/NotificationsScreen.js
+// C15.4: Store only pending read IDs, scoped to the signed-in employee.
+// The server remains authoritative; no attendance records are changed here.
+const c15ReadQueueKey = employeeId => `@c15_pending_notification_reads:${String(employeeId)}`;
+const c15ValidIds = values => [...new Set((Array.isArray(values) ? values : [])
+  .map(Number).filter(id => Number.isSafeInteger(id) && id > 0))].slice(0, 200);
+const c15GetQueuedReads = async employeeId => {
+  if (!employeeId) return [];
+  try { return c15ValidIds(JSON.parse(await AsyncStorage.getItem(c15ReadQueueKey(employeeId)) || '[]')); }
+  catch { return []; }
+};
+const c15SaveQueuedReads = async (employeeId, ids) => {
+  if (employeeId) await AsyncStorage.setItem(c15ReadQueueKey(employeeId), JSON.stringify(c15ValidIds(ids)));
+};
+const c15ResolveEmployeeId = async () => {
+  let id = await AsyncStorage.getItem('employee_id');
+  if (!id) {
+    try {
+      const user = JSON.parse(await AsyncStorage.getItem('user') || '{}');
+      id = user.employee_id || user.employeeId || user.id;
+    } catch {}
+  }
+  return id ? String(id) : null;
+};
+// Sequential, idempotent PUTs; keep unsuccessful IDs to retry on next refresh.
+const c15FlushQueuedReads = async employeeId => {
+  const queued = await c15GetQueuedReads(employeeId);
+  if (!queued.length) return [];
+  const failed = [];
+  for (const id of queued) {
+    try { await markC14AttendanceNotificationRead(id); }
+    catch (error) {
+      // Session expiry is handled in api.js. Don't send more requests with stale auth.
+      failed.push(id);
+      if (/log in|session|unauthorized/i.test(String(error?.message || ''))) {
+        failed.push(...queued.slice(queued.indexOf(id) + 1));
+        break;
+      }
+    }
+  }
+  await c15SaveQueuedReads(employeeId, failed);
+  if (failed.length !== queued.length) DeviceEventEmitter.emit('c15:attendance-notifications-changed');
+  return failed;
+};
 
 const formatPHTDateTime = (dateInput) => {
   if (!dateInput) return '';
@@ -63,6 +105,27 @@ const formatPHTDateTime = (dateInput) => {
   });
 };
 
+// C15.5: Keep notification labels short, consistent, and action-specific.
+// The backend's event type determines the status; a message's wording does not.
+const c155DescribeAttendanceEvent = notification => {
+  const event = String(notification?.event_type || '').toUpperCase();
+  const target = String(notification?.target_type || '').toLowerCase();
+  const category = target === 'appeal' || event.startsWith('APPEAL_') ? 'Appeal' : 'Correction';
+  if (event === 'CORRECTION_PENDING' || event === 'APPEAL_PENDING') {
+    return { title: `${category} submitted`, status: 'pending' };
+  }
+  if (event === 'CORRECTION_DECISION' || event === 'APPEAL_DECISION') {
+    const message = String(notification?.message || '').toLowerCase();
+    const decision = /\breject(?:ed|ion)?\b|\bdeclined\b/.test(message) ? 'rejected'
+      : /\bapprov(?:ed|al)?\b/.test(message) ? 'approved' : 'info';
+    return { title: decision === 'info' ? `${category} reviewed` : `${category} ${decision}`, status: decision };
+  }
+  if (event.includes('MISSING_CLOCK_OUT') || event.includes('CLOCK_OUT_MISSING')) {
+    return { title: 'Missing Clock-Out', status: 'attention' };
+  }
+  return { title: notification?.title || 'Attendance update', status: 'info' };
+};
+
 export default function NotificationsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { isDark } = useContext(ThemeContext);
@@ -72,30 +135,32 @@ export default function NotificationsScreen({ navigation }) {
 
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [c14Error, setC14Error] = useState('');
+  const [c15ReadError, setC15ReadError] = useState('');
 
   useFocusEffect(
     useCallback(() => {
+      let active = true;
+      let pending = false;
       const fetchNotifications = async () => {
-        setLoading(true);
+        if (!active || pending) return;
+        pending = true;
+        if (!notifications.length) setLoading(true);
         try {
           const token = await AsyncStorage.getItem('auth_token');
-          let employeeId = await AsyncStorage.getItem('employee_id');
-
-          if (!employeeId) {
-            const rawUser = await AsyncStorage.getItem('user');
-            if (rawUser) {
-              try {
-                const parsed = JSON.parse(rawUser);
-                employeeId = parsed.employee_id || parsed.employeeId || parsed.id;
-              } catch (e) {}
-            }
-          }
+          const employeeId = await c15ResolveEmployeeId();
 
           if (!token || !employeeId) {
             setNotifications([]);
             return;
           }
 
+          const failedReadIds = await c15FlushQueuedReads(employeeId).catch(err => {
+            console.warn('Pending notification read sync unavailable:', err?.message || err);
+            return [];
+          });
+          if (active) setC15ReadError(failedReadIds.length ? 'Some read updates will retry when connected.' : '');
+          const pendingReadIds = new Set(failedReadIds);
           const config = { headers: { Authorization: `Bearer ${token}` } };
 
           // Fetch all request modules in parallel
@@ -133,19 +198,83 @@ export default function NotificationsScreen({ navigation }) {
           processItems(appealsRes, 'Appeal', 'date', 'submitted_at');
           processItems(schedulesRes, 'Schedule', 'request_type', 'created_at');
 
+          // C14: server-side durable inbox; do not show duplicate legacy
+          // correction/appeal decision entries when C14 has those decisions.
+          try {
+            const inbox = await fetchC14AttendanceNotifications();
+            if (!inbox?.success) throw new Error(inbox?.message || 'Attendance inbox unavailable.');
+            if (inbox.success) {
+              const c14 = (inbox.data || []).map(n => ({
+                id: `c14_${n.id}`, notificationId: n.id, type: 'Attendance',
+                targetType: n.target_type, targetId: n.target_id, eventType: n.event_type,
+                title: c155DescribeAttendanceEvent(n).title,
+                remarks: n.message, date: n.created_at,
+                status: c155DescribeAttendanceEvent(n).status,
+                unread: !n.read_at && !pendingReadIds.has(Number(n.id))
+              }));
+              const decided = new Set((inbox.data || []).filter(n => n.event_type?.endsWith('_DECISION'))
+                .map(n => `${n.target_type === 'correction' ? 'Correction' : 'Appeal'}_${n.target_id}`));
+              aggregated = aggregated.filter(item => !decided.has(item.id));
+              aggregated.push(...c14);
+            }
+            if (active) setC14Error('');
+          } catch (err) {
+            if (active) setC14Error('Attendance alerts are temporarily unavailable. Other request updates remain visible.');
+          }
           // Sort descending by action date
           aggregated.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-          setNotifications(aggregated);
+          if (active) setNotifications(aggregated);
         } catch (error) {
           console.error("Failed to load notifications:", error);
+          if (active) setC14Error("Unable to refresh notifications. Showing the last available updates.");
         } finally {
-          setLoading(false);
+          pending = false;
+          if (active) setLoading(false);
         }
       };
 
       fetchNotifications();
+      const timer = setInterval(fetchNotifications, 30000);
+      const stateListener = AppState.addEventListener('change', next => {
+        if (next === 'active') fetchNotifications();
+      });
+      return () => { active = false; clearInterval(timer); stateListener.remove(); };
     }, [])
   );
+
+  // C15: Open the existing authoritative history screen, not a new review flow.
+  // Navigation works for both read and unread notifications.
+  const openNotification = async (item) => {
+    if (item.notificationId && item.unread) {
+      const employeeId = await c15ResolveEmployeeId();
+      try {
+        await markC14AttendanceNotificationRead(item.notificationId);
+        if (employeeId) {
+          const pending = await c15GetQueuedReads(employeeId);
+          await c15SaveQueuedReads(employeeId, pending.filter(id => id !== Number(item.notificationId)));
+        }
+        setC15ReadError('');
+      } catch (err) {
+        // Preserve user intent when temporarily offline, without duplicating events.
+        if (employeeId && !/log in|session|unauthorized/i.test(String(err?.message || ''))) {
+          const pending = await c15GetQueuedReads(employeeId);
+          await c15SaveQueuedReads(employeeId, [...pending, Number(item.notificationId)]);
+          setC15ReadError('Read status will sync when the connection returns.');
+        } else {
+          setC15ReadError('Unable to update read status. Please sign in again if needed.');
+        }
+      }
+      setNotifications(old => old.map(n => n.id === item.id ? { ...n, unread: false } : n));
+      DeviceEventEmitter.emit('c15:attendance-notifications-changed');
+    }
+    const kind = String(item.targetType || item.type || '').toLowerCase();
+    const screen = kind === 'correction' ? 'CorrectionHistory'
+      : kind === 'appeal' ? 'AppealHistory'
+      : kind === 'schedule' || kind === 'attendance' ? 'AttendanceHistory'
+      : kind === 'leave' ? 'LeaveHistory'
+      : kind === 'overtime' ? 'OvertimeHistory' : null;
+    if (screen) navigation.navigate(screen, { targetId: item.targetId ? String(item.targetId) : undefined });
+  };
 
   const getIcon = (type) => {
     switch (type) {
@@ -186,17 +315,19 @@ export default function NotificationsScreen({ navigation }) {
         nestedScrollEnabled={true}
         alwaysBounceVertical={true}
       >
+        {!!c14Error && <Text style={{color:'#B45309',padding:12}}>{c14Error}</Text>}
+        {!!c15ReadError && <Text style={{color:'#B45309',paddingHorizontal:12,paddingBottom:8}}>{c15ReadError}</Text>}
         {loading ? (
           <ActivityIndicator size="large" color="#0D9488" style={{ marginTop: 40 }} />
         ) : notifications.length === 0 ? (
           <View style={styles.emptyState}>
             <Inbox size={48} color={colors.textSecondary} opacity={0.5} />
             <Text style={styles.emptyTitle}>All Caught Up!</Text>
-            <Text style={styles.emptySub}>You have no approved or rejected request updates.</Text>
+            <Text style={styles.emptySub}>No request or attendance updates are available.</Text>
           </View>
         ) : (
           notifications.map(item => (
-            <View key={item.id} style={styles.card}>
+            <TouchableOpacity key={item.id} style={[styles.card, item.unread && {borderColor:'#0D9488',borderWidth:1}]} onPress={() => openNotification(item)}>
               <View style={styles.iconBox}>
                 {getIcon(item.type)}
               </View>
@@ -212,15 +343,30 @@ export default function NotificationsScreen({ navigation }) {
                       <CheckCircle size={12} color="#059669" />
                       <Text style={styles.badgeTextSuccess}>Approved</Text>
                     </View>
-                  ) : (
+                  ) : item.status === 'rejected' ? (
                     <View style={styles.badgeDanger}>
                       <XCircle size={12} color="#DC2626" />
                       <Text style={styles.badgeTextDanger}>Rejected</Text>
                     </View>
+                  ) : item.status === 'pending' ? (
+                    <View style={styles.badgeNeutral}>
+                      <Clock size={12} color={colors.textSecondary} />
+                      <Text style={styles.badgeTextNeutral}>Pending review</Text>
+                    </View>
+                  ) : item.status === 'attention' ? (
+                    <View style={styles.badgeNeutral}>
+                      <AlertTriangle size={12} color={colors.textSecondary} />
+                      <Text style={styles.badgeTextNeutral}>Needs attention</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.badgeNeutral}>
+                      <Bell size={12} color={colors.textSecondary} />
+                      <Text style={styles.badgeTextNeutral}>{item.unread ? 'New' : 'Read'}</Text>
+                    </View>
                   )}
                 </View>
               </View>
-            </View>
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
@@ -310,6 +456,12 @@ const getStyles = (colors, isLight) => StyleSheet.create({
     lineHeight: 18
   },
   
+  badgeNeutral: {
+    flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
+    gap: 5, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 5,
+    backgroundColor: colors.surface || (isLight ? '#F1F5F9' : '#1E293B')
+  },
+  badgeTextNeutral: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
   statusWrap: {
     alignSelf: 'flex-start'
   },

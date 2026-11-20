@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Check, X, Search, RefreshCw, ClipboardList, ChevronLeft, ChevronRight, CheckCircle, XCircle, Eye, ExternalLink, Calendar, User, FileText, MessageSquare, Clock } from 'lucide-react';
+import { X, Search, RefreshCw, ClipboardList, ChevronLeft, ChevronRight, CheckCircle, XCircle, Eye, ExternalLink, Calendar, User, FileText, MessageSquare, Clock, Layers3, CalendarCheck2, Ban, ListChecks } from 'lucide-react';
 import { API_BASE } from '../api';
+import { useRole } from '../permissions';
 import './LeaveManagement.css';
 
 const getAuthHeaders = () => ({
@@ -17,6 +18,8 @@ const LEAVE_STATUS_TABS = [
 ];
 
 const LeaveManagement = () => {
+  const { can, isAdmin } = useRole();
+
   const [historyGroups, setHistoryGroups] = useState([]);
   const [pendingGroups, setPendingGroups] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -72,6 +75,11 @@ const LeaveManagement = () => {
   }, [fetchData]);
 
   const openActionModal = (group, action) => {
+    // FIX 10.2 — defense-in-depth: only HR can open the approve/reject modal
+    if (!can('leaves:batch')) {
+      toast.error('You do not have permission to approve or reject leave requests.');
+      return;
+    }
     setSelectedGroup(group);
     setActionType(action);
     setRemarks('');
@@ -84,6 +92,11 @@ const LeaveManagement = () => {
   };
 
   const handleBatchAction = async () => {
+    // FIX 10.2 — defense-in-depth: reject API call if role lacks permission
+    if (!can('leaves:batch')) {
+      toast.error('You do not have permission to approve or reject leave requests.');
+      return;
+    }
     if (!selectedGroup) return;
     setProcessing(true);
     try {
@@ -168,12 +181,36 @@ const LeaveManagement = () => {
   const pendingTotalPages = Math.ceil(filteredPending.length / itemsPerPage);
   const currentPending = filteredPending.slice((pendingPage - 1) * itemsPerPage, pendingPage * itemsPerPage);
 
+  // FIX 10.2 — single boolean for both action buttons (both are hr_admin only)
+  const canDecide = can('leaves:approve') && can('leaves:reject');
+
   return (
-    <div className="expert-container">
+    <div className="expert-container lm-page">
+      {/* FIX 10.2 — read-only banner for Admin */}
+      {isAdmin && (
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: '20px',
+          background: '#F0FDFA',
+          border: '1px solid #99F6E4',
+          borderRadius: '5px',
+          color: '#0F766E',
+          fontSize: '12px',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
+          <span><strong>Read-only view.</strong> Leave approvals are handled by HR.</span>
+        </div>
+      )}
+
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-            <p className="expert-subtitle">Review historical and resolved employee leave logs across the organization.</p>
+           
+            <p className="expert-subtitle">Review leave submissions, process HR decisions, and track request history.</p>
           </div>
         </div>
         <div className="expert-header-actions">
@@ -181,13 +218,19 @@ const LeaveManagement = () => {
             <RefreshCw size={15} className={loading ? "spin-icon" : ""} /> Refresh
           </button>
           
-          {/* FIXED: Changed class to expert-btn-secondary to match Appeals page */}
           <button className="expert-btn-secondary" onClick={() => setShowPendingModal(true)}>
             <ClipboardList size={16} /> Pending Requests
             {pendingCount > 0 && <span className="lm-badge-count">{pendingCount}</span>}
           </button>
         </div>
       </div>
+
+      <section className="lm-summary-grid" aria-label="Leave request overview">
+        <div className="lm-summary-card"><div className="lm-summary-symbol"><Layers3 size={17} /></div><div><span>All Requests</span><strong>{historyGroups.length + pendingGroups.length}</strong><small>Grouped submissions</small></div></div>
+        <div className="lm-summary-card"><div className="lm-summary-symbol pending"><ClipboardList size={17} /></div><div><span>Awaiting Review</span><strong>{pendingCount}</strong><small>Pending HR action</small></div></div>
+        <div className="lm-summary-card"><div className="lm-summary-symbol approved"><CalendarCheck2 size={17} /></div><div><span>Approved</span><strong>{historyGroups.filter(g => g.status?.toLowerCase() === 'approved').length}</strong><small>Resolved submissions</small></div></div>
+        <div className="lm-summary-card"><div className="lm-summary-symbol rejected"><Ban size={17} /></div><div><span>Rejected / Cancelled</span><strong>{historyGroups.filter(g => ['rejected','cancelled'].includes(g.status?.toLowerCase())).length}</strong><small>Closed submissions</small></div></div>
+      </section>
 
       {/* STATUS TABS */}
       <div className="lm-tabs" role="tablist" aria-label="Leave status filter">
@@ -216,7 +259,7 @@ const LeaveManagement = () => {
               onChange={e => setSearchTerm(e.target.value)}
               className="expert-clean-input"
             />
-            {searchTerm && <X size={16} className="clear-icon" onClick={() => setSearchTerm('')} />}
+            {searchTerm && <button type="button" className="lm-input-clear" aria-label="Clear history search" onClick={() => setSearchTerm('')}><X size={15}/></button>}
           </div>
           <div className="expert-meta-stats">
             Total Records: <strong>{filteredHistory.length}</strong>
@@ -225,6 +268,7 @@ const LeaveManagement = () => {
       </div>
 
       <div className="expert-card">
+        <div className="lm-table-heading"><div><ListChecks size={16}/><strong>Leave request history</strong></div><span>{filteredHistory.length} records</span></div>
         {loading ? (
           <div className="expert-loading">
             <RefreshCw size={24} className="spin-icon" />
@@ -247,7 +291,7 @@ const LeaveManagement = () => {
                 </thead>
                 <tbody>
                   {currentHistory.map(group => (
-                    <tr key={group.ids?.[0] || Math.random()}>
+                    <tr key={group.ids?.[0] || `${group.employee_id}-${group.start_date}-${group.type}` }>
                       <td className="whitespace-nowrap font-mono text-muted">{group.employee_id || '—'}</td>
                       <td className="whitespace-nowrap font-semibold text-dark">{group.full_name || 'Unknown'}</td>
                       <td className="whitespace-nowrap">
@@ -386,7 +430,8 @@ const LeaveManagement = () => {
             </div>
 
             <div className="lm-custom-modal-footer">
-              {selectedGroup.status === 'Pending' && (
+              {/* FIX 10.2 — Approve/Reject only for HR */}
+              {selectedGroup.status === 'Pending' && canDecide && (
                 <>
                   <button className="lm-btn-reject-custom" onClick={() => { setShowDetailsModal(false); openActionModal(selectedGroup, 'Rejected'); }}>
                     <XCircle size={16} /> Reject
@@ -420,7 +465,7 @@ const LeaveManagement = () => {
               <div className="expert-search-input-group modal-search">
                 <Search size={18} className="search-icon" />
                 <input type="text" placeholder="Search Name or Employee ID..." value={pendingSearch} onChange={e => setPendingSearch(e.target.value)} className="expert-clean-input" />
-                {pendingSearch && <X size={16} className="clear-icon" onClick={() => setPendingSearch('')} />}
+                {pendingSearch && <button type="button" className="lm-input-clear" aria-label="Clear pending search" onClick={() => setPendingSearch('')}><X size={15}/></button>}
               </div>
 
               {loadingPending ? (
@@ -433,7 +478,7 @@ const LeaveManagement = () => {
               ) : (
                 <div className="lm-minimal-list">
                   {currentPending.map(group => (
-                    <div key={group.ids?.[0] || Math.random()} className="lm-minimal-card">
+                    <div key={group.ids?.[0] || `${group.employee_id}-${group.start_date}-${group.type}` } className="lm-minimal-card">
                       <div className="lm-minimal-header">
                         <div className="lm-minimal-user">
                           <div className="lm-minimal-avatar">
@@ -473,10 +518,17 @@ const LeaveManagement = () => {
                         )}
                       </div>
 
-                      <div className="lm-minimal-footer">
-                        <button className="lm-btn-min-reject" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Rejected'); }}>Reject</button>
-                        <button className="lm-btn-min-approve" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Approved'); }}>Approve</button>
-                      </div>
+                      {/* FIX 10.2 — Approve/Reject only for HR; read-only hint for Admin */}
+                      {canDecide ? (
+                        <div className="lm-minimal-footer">
+                          <button className="lm-btn-min-reject" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Rejected'); }}>Reject</button>
+                          <button className="lm-btn-min-approve" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Approved'); }}>Approve</button>
+                        </div>
+                      ) : (
+                        <div className="lm-minimal-footer" style={{ justifyContent: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#64748B', fontStyle: 'italic' }}>Read-only — awaiting HR review</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -501,7 +553,7 @@ const LeaveManagement = () => {
         </div>
       )}
 
-      {/* REMARKS MODAL */}
+      {/* REMARKS MODAL (only reachable via HR-gated openActionModal) */}
       {showRemarksModal && (
         <div className="lm-custom-modal-backdrop" onClick={() => setShowRemarksModal(false)}>
           <div className="lm-custom-modal small" onClick={e => e.stopPropagation()}>

@@ -1,7 +1,7 @@
 /* univita2.0/src/api.js */
 import axios from 'axios';
 
-const USE_REMOTE = true; 
+const USE_REMOTE = false; 
 
 const REMOTE_URL = "https://api.univitahct.tech";
 const LOCAL_URL = "http://localhost:5000";
@@ -33,6 +33,19 @@ axios.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// C01–C11 web compatibility: surface the server's human-readable error first.
+// Attendance responses may also include a stable `code` for diagnostics.
+export const getWebApiErrorMessage = (error, fallback = 'Request failed. Please try again.') => {
+    const payload = error?.response?.data;
+    if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message;
+    if (typeof payload?.error === 'string' && payload.error.trim()) return payload.error;
+    if (error?.response?.status === 429) return 'Too many requests. Please try again shortly.';
+    if (error?.response?.status === 401) return 'Your session has expired. Please sign in again.';
+    if (error?.response?.status >= 500) return 'Server unavailable. Please try again later.';
+    if (!error?.response && error?.request) return 'Network connection failed. Please check your internet.';
+    return fallback;
+};
 
 // Helper to handle JSON parsing safely and prevent dashboard crashes
 const handleWebResponse = async (res) => {
@@ -567,4 +580,38 @@ export const addManualCtoCredit = async (employeeId, creditHours, reason, year =
     console.error("Add Manual CTO Credit Error:", error);
     return { success: false, message: "Network error" };
   }
+};
+
+// C12 read-only attendance recovery for HR and Admin dashboards.
+export const fetchC12WebRecovery = async (from, to) => {
+  const params = new URLSearchParams();
+  if (from) params.append('from', from);
+  if (to) params.append('to', to);
+  const response = await axios.get(`${API_BASE}/attendance/recovery/overview?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+  });
+  return response.data;
+};
+
+// C13.2: Read-only centralized HR recovery queue (same 32-day window as C12).
+export const fetchC13RecoveryQueue = async (from, to) => {
+  const params = new URLSearchParams({ from, to });
+  const response = await axios.get(`${API_BASE}/attendance/recovery/queue?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+  });
+  return response.data;
+};
+
+// C14 notification inbox. Requestor identity is taken from JWT, not query params.
+export const fetchC14WebNotifications = async () => {
+  const response = await axios.get(`${API_BASE}/attendance/notifications`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
+  });
+  return response.data;
+};
+export const markC14WebNotificationRead = async id => {
+  const response = await axios.put(`${API_BASE}/attendance/notifications/${encodeURIComponent(id)}/read`, {}, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
+  });
+  return response.data;
 };

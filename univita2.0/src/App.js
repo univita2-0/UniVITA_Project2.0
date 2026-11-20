@@ -35,17 +35,17 @@ import PinChangeModal from './pages/PinChangeModal';
 import PayrollHistoryModal from './pages/PayrollHistoryModal';
 import useInactivityTimer from './hooks/useInactivityTimer';
 import JobPostings from './pages/JobPostings';
-import PrivacyPolicy from './pages/PrivacyPolicy'; 
+import PrivacyPolicy from './pages/PrivacyPolicy';
 
 import ToastNotification from './components/ToastNotification';
 import { NotificationProvider } from './contexts/NotificationContext';
-import Policies from './pages/Policies';
+
 import Settings from './pages/Settings';
 import AuditLogs from './pages/AuditLogs';
 import RoleManagement from './pages/RoleManagement';
 import SystemConfig from './pages/SystemConfig';
 import ManageScanners from './pages/ManageScanners';
-import EmergencyAlertBanner from './components/EmergencyAlertBanner'; 
+import EmergencyAlertBanner from './components/EmergencyAlertBanner';
 import 'leaflet/dist/leaflet.css';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -55,18 +55,48 @@ import ManageReasons from './pages/ManageReasons';
 import ManageBLETags from './pages/ManageBLETags';
 import CompletedVisits from './pages/CompletedVisits';
 import OvertimeRequests from './pages/OvertimeRequests';
-import './App.css'; 
+import './App.css';
+
+// FIX 10 — RBAC helpers + role matrix now live in a shared module so
+// App.js (route guards) and Layout.jsx (menu filtering) read from ONE source.
+import { ROUTE_ROLES, getUserRole, decodeJwtPayload, canAccessRoute } from './permissions';
+
+// ============================================
+// FIX 9 — CLIENT-SIDE ROLE GUARD (RequireRole stays here — it's
+// the render primitive used by this file only)
+// ============================================
+function RequireRole({ roles, children }) {
+  const role = getUserRole();
+  if (!role || !Array.isArray(roles) || !roles.includes(role)) {
+    console.warn(
+      `[RequireRole] Blocked: role="${role || 'none'}" attempted a view requiring ${JSON.stringify(roles)}.`
+    );
+    return (
+      <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }}>
+        <h3 style={{ color: '#DC2626', marginBottom: '0.5rem' }}>Access Denied</h3>
+        <p style={{ color: '#6B7280' }}>
+          Your account does not have permission to view this page.
+          If you believe this is an error, contact your System Administrator.
+        </p>
+      </div>
+    );
+  }
+  return children;
+}
+
+// ============================================
+// APP
+// ============================================
 
 function App() {
-  // 🟢 FIX: Check localStorage synchronously on initial render to prevent landing page flicker
+  // 🟢 FIX 9: Read role from JWT payload — not from localStorage.user_role
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const token = localStorage.getItem('auth_token');
-    const role = localStorage.getItem('user_role');
-    return !!(token && role && role !== 'instructor');
+    const payload = decodeJwtPayload(localStorage.getItem('auth_token'));
+    return canAccessRoute(payload?.role, 'dashboard');
   });
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  
+
   const [currentView, setCurrentView] = useState(() => {
     const token = localStorage.getItem('auth_token');
     return token ? 'dashboard' : 'appointment';
@@ -83,11 +113,13 @@ function App() {
 
   const adminEmail = localStorage.getItem('user_email') || '';
 
+  // 🟢 FIX 9: Validate role from JWT payload, not from localStorage
   useEffect(() => {
     const token = localStorage.getItem('auth_token');
-    const role = localStorage.getItem('user_role');
+    const payload = decodeJwtPayload(token);
+    const role = payload?.role;
 
-    if (token && role) {
+    if (token && canAccessRoute(role, 'dashboard')) {
       if (role === 'instructor') {
         localStorage.clear();
         setIsAuthenticated(false);
@@ -130,6 +162,11 @@ function App() {
   };
 
   const handleSetView = (view) => {
+    // Reject unauthorized navigation attempts before updating application state.
+    if (!canAccessRoute(getUserRole(), view)) {
+      console.warn(`[RBAC] Navigation denied to ${String(view)}`);
+      return;
+    }
     if (view === 'payroll-main' || view === 'payroll-history') {
       if (!payrollToken) {
         setCurrentView('payroll');
@@ -159,7 +196,9 @@ function App() {
     setShowPinModal(true);
   };
 
-  const openPayrollHistory = () => setShowPayrollHistoryModal(true);
+  const openPayrollHistory = () => {
+    if (canAccessRoute(getUserRole(), 'payroll-history')) setShowPayrollHistoryModal(true);
+  };
 
   const getHeaderTitle = () => {
     if (showHistoryDetail) return { title: 'Visitor History' };
@@ -184,13 +223,12 @@ function App() {
       case 'locations': return { title: 'Location Management' };
       case 'courses': return { title: 'Course Management' };
       case 'programs': return { title: 'Program Management' };
-      
       case 'leave-balances': return { title: 'Leave Balance' };
       case 'emergency-alerts': return { title: 'Emergency Alerts' };
       case 'profile': return { title: 'Profile' };
       case 'job-postings': return { title: 'Recruitment' };
       case 'performance': return { title: 'Performance Evaluation' };
-      case 'policies': return { title: 'HR Policies' };
+     
       case 'settings': return { title: 'Settings' };
       case 'audit-logs': return { title: 'Audit Logs' };
       case 'role-management': return { title: 'Role Management' };
@@ -207,70 +245,93 @@ function App() {
     }
   };
 
+  // 🟢 FIX 9 + FIX 10: every route gated by RequireRole + ROUTE_ROLES (single source)
   const renderContent = () => {
-    if (showHistoryDetail) return <VisitorHistory />;
-    switch (currentView) {
-      case 'dashboard': {
-        const role = localStorage.getItem('user_role');
-        if (role === 'admin') return <AdminDashboard setView={handleSetView} onShowPayrollHistory={openPayrollHistory} />;
-        if (role === 'hr_admin') return <HRDashboard setView={handleSetView} />;
-        if (role === 'security') return <SecurityDashboard setView={handleSetView} />;
-        return <AdminDashboard setView={handleSetView} onShowPayrollHistory={openPayrollHistory} />;
-      }
-      case 'manage-request': return <ManageRequest />;
-      case 'history': return <History />;
-      case 'track-visitor': return <BuildingVisitorTracking />;
-      case 'attendance': return <Attendance />;
-      case 'schedule': return <Schedule />;
-      case 'attendance-correction': return <AttendanceCorrection />;
-      case 'attendance-appeals': return <AttendanceAppeals />;
-      case 'overtime-requests': return <OvertimeRequests />;
-      case 'leave-management': return <LeaveManagement />;
-      case 'shared-calendar': return <SharedCalendar />;
-      case 'job-postings': return <JobPostings />;
-      case 'manage-ble': return <ManageBLETags />;
-      case 'manage-scanners': return <ManageScanners />;
-      case 'completed-visits': return <CompletedVisits />;
-      
-      case 'location-tracking': return <LocationTracking />;
-      case 'policies': return <Policies />;
-      case 'documents': return <Documents />;
-      case 'audit-logs': return <AuditLogs />;
-      case 'role-management': return <RoleManagement />;
-      case 'manage-reasons': return <ManageReasons />;
-      case 'system-config': return <SystemConfig />;
-      case 'landing-cms': return <LandingPageManagement />;
-      case 'today-visitors': return <TodayVisitors />;
-      case 'payroll': return <Payroll onUnlock={handlePayrollUnlock} adminEmail={adminEmail} />;
-      case 'payroll-main':
-        return (
-          <PayrollMain
-            setView={handleSetView}
-            onLock={handlePayrollLock} 
-            onChangePin={() => openPinModalForAdmin(adminEmail)}
-            onShowHistory={openPayrollHistory}
-          />
-        );
-      case 'payroll-history': return <PayrollHistory />;
-      case 'payroll-summary': return <PayrollSummary />;
-      case 'reports': return <Reports />;
-      case 'compliance-reports': return <ComplianceReports />;
-      case 'employee-management': return <EmployeeManagement onOpenPinChange={openPinModalForAdmin} />;
-      case 'locations': return <LocationsManagement />;
-      case 'courses': return <CoursesManagement />;
-      case 'programs': return <ProgramManagement />;
-      case 'leave-balances': return <LeaveBalancesManagement />;
-      case 'emergency-alerts': return <EmergencyAlerts />;
-      case 'profile': return <Profile />;
-      case 'settings': return <Settings />;
-      default:
-        return (
-          <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }}>
-            <h3 style={{ color: '#111827' }}>Page Not Found</h3>
-            <p style={{ color: '#6B7280' }}>The module you are looking for does not exist or has been moved.</p>
-          </div>
-        );
+    if (showHistoryDetail) {
+      return <RequireRole roles={ROUTE_ROLES.history}><VisitorHistory /></RequireRole>;
     }
+
+    const roles = ROUTE_ROLES[currentView];
+
+    if (!roles) {
+      return (
+        <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }}>
+          <h3 style={{ color: '#111827' }}>Page Not Found</h3>
+          <p style={{ color: '#6B7280' }}>The module you are looking for does not exist or has been moved.</p>
+        </div>
+      );
+    }
+
+    // Dashboard is special — dispatches to a role-specific dashboard component.
+    if (currentView === 'dashboard') {
+      const role = getUserRole();
+      return (
+        <RequireRole roles={roles}>
+          {role === 'admin'    && <AdminDashboard setView={handleSetView} onShowPayrollHistory={openPayrollHistory} />}
+          {role === 'hr_admin' && <HRDashboard setView={handleSetView} />}
+          {role === 'security' && <SecurityDashboard setView={handleSetView} />}
+        </RequireRole>
+      );
+    }
+
+    const renderView = () => {
+      switch (currentView) {
+        case 'manage-request':        return <ManageRequest />;
+        case 'history':               return <History />;
+        case 'track-visitor':         return <BuildingVisitorTracking />;
+        case 'attendance':            return <Attendance />;
+        case 'schedule':              return <Schedule />;
+        case 'attendance-correction': return <AttendanceCorrection />;
+        case 'attendance-appeals':    return <AttendanceAppeals />;
+        case 'overtime-requests':     return <OvertimeRequests />;
+        case 'leave-management':      return <LeaveManagement />;
+        case 'shared-calendar':       return <SharedCalendar />;
+        case 'job-postings':          return <JobPostings />;
+        case 'manage-ble':            return <ManageBLETags />;
+        case 'manage-scanners':       return <ManageScanners />;
+        case 'completed-visits':      return <CompletedVisits />;
+        case 'location-tracking':     return <LocationTracking />;
+       
+        case 'documents':             return <Documents />;
+        case 'audit-logs':            return <AuditLogs />;
+        case 'role-management':       return <RoleManagement />;
+        case 'manage-reasons':        return <ManageReasons />;
+        case 'system-config':         return <SystemConfig />;
+        case 'landing-cms':           return <LandingPageManagement />;
+        case 'today-visitors':        return <TodayVisitors />;
+        case 'payroll':               return <Payroll onUnlock={handlePayrollUnlock} adminEmail={adminEmail} />;
+        case 'payroll-main':
+          return (
+            <PayrollMain
+              setView={handleSetView}
+              onLock={handlePayrollLock}
+              onChangePin={() => openPinModalForAdmin(adminEmail)}
+              onShowHistory={openPayrollHistory}
+            />
+          );
+        case 'payroll-history':       return <PayrollHistory />;
+        case 'payroll-summary':       return <PayrollSummary />;
+        case 'reports':               return <Reports />;
+        case 'compliance-reports':    return <ComplianceReports />;
+        case 'employee-management':   return <EmployeeManagement onOpenPinChange={openPinModalForAdmin} />;
+        case 'locations':             return <LocationsManagement />;
+        case 'courses':               return <CoursesManagement />;
+        case 'programs':              return <ProgramManagement />;
+        case 'leave-balances':        return <LeaveBalancesManagement />;
+        case 'emergency-alerts':      return <EmergencyAlerts />;
+        case 'profile':               return <Profile />;
+        case 'settings':              return <Settings />;
+        default:
+          return (
+            <div style={{ textAlign: 'center', padding: '4rem', background: '#fff', borderRadius: '12px', border: '1px solid #E5E7EB' }}>
+              <h3 style={{ color: '#111827' }}>Page Not Found</h3>
+              <p style={{ color: '#6B7280' }}>The module you are looking for does not exist or has been moved.</p>
+            </div>
+          );
+      }
+    };
+
+    return <RequireRole roles={roles}>{renderView()}</RequireRole>;
   };
 
   const { title } = getHeaderTitle();
@@ -320,7 +381,7 @@ function App() {
           adminEmail={pinAdminEmail}
         />
       )}
-      
+
       {showPayrollHistoryModal && (
         <PayrollHistoryModal
           show={showPayrollHistoryModal}
@@ -337,7 +398,7 @@ function App() {
         rtl={false}
         pauseOnFocusLoss={false}
         draggable
-        pauseOnHover={false}  
+        pauseOnHover={false}
       />
     </NotificationProvider>
   );

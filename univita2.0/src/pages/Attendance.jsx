@@ -1,10 +1,11 @@
 // src/pages/Attendance.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './Attendance.css';
-import { Download, ChevronLeft, ChevronRight, Search, Calendar, Eye, X, Maximize2 } from 'lucide-react';
+import { Printer, ChevronLeft, ChevronRight, Search, CalendarDays, Eye, X, Maximize2, RefreshCw, Users, UserCheck, UserX, Clock3, Timer, ClipboardList } from 'lucide-react';
 import axios from 'axios';
 import FormalModal from '../components/FormalModal';
-import { API_BASE } from '../api';
+import { API_BASE, fetchC12WebRecovery, fetchC13RecoveryQueue } from '../api';
+import { useRole } from '../permissions';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
@@ -12,7 +13,6 @@ const getAuthHeaders = () => ({
 
 const STATIC_BASE = API_BASE.replace(/\/api$/, '');
 
-/* ---------------- date helpers (timezone-safe) ---------------- */
 const startOfDay = (d) => {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -30,8 +30,6 @@ const toISODate = (d) => {
 
 const toISOMonth = (d) => toISODate(d).slice(0, 7);
 
-// Strictly validates YYYY-MM-DD (daily) or YYYY-MM (monthly).
-// Returns a local-midnight Date or null on any invalid input.
 const parseDateInput = (value, mode) => {
   if (!value) return null;
   if (mode === 'monthly') {
@@ -48,7 +46,6 @@ const parseDateInput = (value, mode) => {
   const month = Number(m[2]);
   const day = Number(m[3]);
   const d = new Date(year, month - 1, day);
-  // Rejects overflow such as 2024-02-31 rolling into March
   if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
     return null;
   }
@@ -76,7 +73,6 @@ const addMinutes = (timeStr, minutes) => {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
 };
 
-// Debounce helper for the search field
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -86,10 +82,62 @@ const useDebouncedValue = (value, delay = 300) => {
   return debounced;
 };
 
+// C10 legacy-data visibility: flag possible missing stored hours; never infer payable hours.
+const hasStoredHoursDiscrepancy = (record) => {
+  const valid = value => /^\d{1,2}:\d{2}(?::\d{2})?$/.test(String(value || ''));
+  if (!valid(record?.time_in) || !valid(record?.time_out)) return false;
+  return Number(record?.total_hours) === 0 && record.time_in !== record.time_out;
+};
+
+// C13 Web: these are HR/Admin explanations, NOT instructions to the instructor.
+// Preserve the backend's mobile guidance. A scheduled shift ending does not
+// mean the employee attended or that an HR request was submitted.
+const getHrRecoveryStateLabel = (row) => {
+  switch (String(row?.recovery_state || '').toUpperCase()) {
+    case 'NEEDS_CORRECTION': return 'MISSING CLOCK-OUT';
+    case 'NEEDS_REVIEW': return 'NO ATTENDANCE RECORDED';
+    case 'AWAITING_HR': return 'PENDING HR REVIEW';
+    case 'RESOLVED': return 'RESOLVED';
+    case 'IN_PROGRESS': return 'SHIFT IN PROGRESS';
+    default: return 'STATUS NOT VERIFIED';
+  }
+};
+
+
+const getHrRecoveryGuidance = (row) => {
+  switch (String(row?.recovery_state || '').toUpperCase()) {
+    case 'NEEDS_CORRECTION':
+      return 'Clock In recorded, but Clock Out is missing.';
+
+    case 'AWAITING_HR':
+      return 'Attendance correction or appeal awaiting HR approval.';
+
+    case 'NEEDS_REVIEW':
+      return 'No Clock In or Clock Out recorded for this shift.';
+
+    case 'RESOLVED':
+      return 'No outstanding attendance issue.';
+
+    case 'IN_PROGRESS':
+      return 'Instructor has clocked in and the shift is ongoing.';
+
+    default:
+      return 'Attendance recovery status is unavailable.';
+  }
+};
+
+
 const Attendance = () => {
+  useRole(); // Attendance access is guarded by the existing route permissions.
   const [view, setView] = useState('daily');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [attendanceData, setAttendanceData] = useState([]);
+  const [c12Recovery, setC12Recovery] = useState([]);
+  const [c13Queue, setC13Queue] = useState([]);
+  const [c13QueueError, setC13QueueError] = useState('');
+  const [c13Filter, setC13Filter] = useState('open');
+  // Keep records and recovery as separate workspaces, without duplicating HR approval pages.
+  const [attendanceTab, setAttendanceTab] = useState('records');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All Status');
   const [stats, setStats] = useState({ present: 0, absent: 0, late: 0, overtime: 0 });
@@ -106,7 +154,6 @@ const Attendance = () => {
 
   const debouncedSearch = useDebouncedValue(searchTerm.trim(), 300);
 
-  // "Now" limits — the UI cannot navigate past today / current month
   const now = new Date();
   const maxDaily = startOfDay(now);
   const maxMonthly = startOfMonth(now);
@@ -138,6 +185,30 @@ const Attendance = () => {
 
       const response = await axios.get(endpoint, { ...getAuthHeaders(), signal });
       const rawData = Array.isArray(response.data) ? response.data : [];
+      // Recovery monitoring is best-effort; never suppress the existing report if unavailable.
+      let recoveryRows = [];
+      try {
+        const rangeStart = view === 'daily' ? dateStr : `${monthStr}-01`;
+        const rangeEnd = view === 'daily' ? dateStr : toISODate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0));
+        const recovery = await fetchC12WebRecovery(rangeStart, rangeEnd);
+        recoveryRows = Array.isArray(recovery?.data) ? recovery.data : [];
+        if (!signal?.aborted) setC12Recovery(recoveryRows);
+      } catch { if (!signal?.aborted) setC12Recovery([]); }
+      // C13: Read-only HR recovery queue; never hide attendance if unavailable.
+      try {
+        const rangeStart = view === 'daily' ? dateStr : `${monthStr}-01`;
+        const rangeEnd = view === 'daily' ? dateStr : toISODate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0));
+        const result = await fetchC13RecoveryQueue(rangeStart, rangeEnd);
+        if (!signal?.aborted) {
+          setC13Queue(Array.isArray(result?.data) ? result.data : []);
+          setC13QueueError(result?.truncated ? 'Results are limited to 500 schedules. Select a shorter period for a complete count.' : '');
+        }
+      } catch (error) {
+        if (!signal?.aborted) {
+          setC13Queue([]);
+          setC13QueueError(error?.response?.data?.message || 'Recovery queue unavailable. Attendance records are still accessible.');
+        }
+      }
 
       if (view === 'daily') {
         const nowInner = new Date();
@@ -145,8 +216,10 @@ const Attendance = () => {
         const isToday = startOfDay(currentDate).getTime() === startOfDay(nowInner).getTime();
         const isPastDay = startOfDay(currentDate) < startOfDay(nowInner);
 
+        const recoveryBySchedule = new Map(recoveryRows.map(r => [String(r.schedule_id), r]));
         const processed = rawData.map(record => {
           let calcStatus = '';
+          const c12 = recoveryBySchedule.get(String(record.schedule_id));
           const sStart = record.start_time || record.scheduled_start;
           const sEnd = record.end_time || record.scheduled_end;
 
@@ -166,7 +239,11 @@ const Attendance = () => {
           }
           return {
             ...record,
-            status: calcStatus,
+            status: c12?.status === 'MISSING_CLOCK_OUT' ? 'Missing Clock-Out'
+              : c12?.status === 'IN_PROGRESS' ? 'In Progress'
+              : ['PENDING_HR_REVIEW', 'OFFLINE_PENDING_REVIEW'].includes(c12?.status) ? 'Pending HR Review'
+              : c12?.status === 'ON_LEAVE' ? 'On Leave'
+              : ['Missing Clock-Out','In Progress','Pending'].includes(record.status) ? record.status : calcStatus,
             start_time: sStart,
             end_time: sEnd,
             location: (record.time_in && record.time_in !== '--:--') ? (record.location || 'Main Campus') : '--',
@@ -229,7 +306,6 @@ const Attendance = () => {
         const summary = Array.from(summaryMap.values());
         setAttendanceData(summary);
 
-        // Fix: monthly stats were previously left stale from daily view
         const monthlyStats = summary.reduce(
           (acc, emp) => ({
             present: acc.present + emp.present_days,
@@ -242,7 +318,6 @@ const Attendance = () => {
         setStats(monthlyStats);
       }
     } catch (error) {
-      // Ignore aborted requests (user switched date/view mid-flight)
       if (
         axios.isCancel?.(error) ||
         error?.code === 'ERR_CANCELED' ||
@@ -264,10 +339,8 @@ const Attendance = () => {
     const controller = new AbortController();
     fetchAttendance(controller.signal);
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchAttendance, reloadKey]);
 
-  // ESC closes the enlarged selfie
   useEffect(() => {
     if (!expandedSelfie) return undefined;
     const onKey = (e) => { if (e.key === 'Escape') setExpandedSelfie(null); };
@@ -292,18 +365,18 @@ const Attendance = () => {
     const newDate = new Date(currentDate);
     if (view === 'daily') {
       newDate.setDate(newDate.getDate() + offset);
-      if (startOfDay(newDate) > maxDaily) return; // block future days
+      if (startOfDay(newDate) > maxDaily) return;
     } else {
       newDate.setDate(1);
       newDate.setMonth(newDate.getMonth() + offset);
-      if (startOfMonth(newDate) > maxMonthly) return; // block future months
+      if (startOfMonth(newDate) > maxMonthly) return;
     }
     setCurrentDate(newDate);
   };
 
   const handleDateSelect = (e) => {
     const parsed = parseDateInput(e.target.value, view);
-    if (!parsed) return; // invalid / empty input — keep current selection
+    if (!parsed) return;
     if (view === 'daily' && parsed > maxDaily) return;
     if (view === 'monthly' && parsed > maxMonthly) return;
     setCurrentDate(parsed);
@@ -334,139 +407,133 @@ const Attendance = () => {
     });
   }, [attendanceData, debouncedSearch, statusFilter, view]);
 
-  const canGoForward = !isFuture;
+  // C13.1: Clicking a recovery counter opens the queue. Selecting a record
+  // also focuses its day and employee in existing attendance management.
+  const c13Missing = c13Queue.filter(r => r.recovery_state === 'NEEDS_CORRECTION');
+  const c13Pending = c13Queue.filter(r => r.recovery_state === 'AWAITING_HR');
+  const c13Filtered = c13Queue.filter(r => c13Filter === 'all' ||
+    (c13Filter === 'open' && ['NEEDS_CORRECTION', 'NEEDS_REVIEW', 'AWAITING_HR'].includes(r.recovery_state)) ||
+    (c13Filter === 'missing' && r.recovery_state === 'NEEDS_CORRECTION') ||
+    (c13Filter === 'pending' && r.recovery_state === 'AWAITING_HR') ||
+    (c13Filter === 'resolved' && r.recovery_state === 'RESOLVED'));
+  const c13Focus = row => {
+    const match = /^\d{4}-\d{2}-\d{2}$/.test(String(row.date || ''));
+    if (!match) return;
+    const [y, m, d] = row.date.split('-').map(Number);
+    setCurrentDate(new Date(y, m - 1, d));
+    setView('daily');
+    setAttendanceTab('records');
+    setSearchTerm(row.full_name || '');
+    setStatusFilter('All Status');
+  };
+  const c13OpenQueue = filter => { setAttendanceTab('recovery'); setC13Filter(filter); };
+
+  const canGoForward = view === 'daily' ? startOfDay(currentDate) < maxDaily : startOfMonth(currentDate) < maxMonthly;
   const colSpan = view === 'daily' ? 6 : 5;
 
   const statCards = view === 'daily'
     ? [
-        { label: 'Present Today', value: isFuture ? 0 : stats.present, border: 'border-green' },
-        { label: 'Absent Today', value: isFuture ? 0 : stats.absent, border: 'border-red' },
-        { label: 'Late Arrivals', value: isFuture ? 0 : stats.late, border: 'border-orange' },
-        { label: 'Overtime', value: isFuture ? 0 : stats.overtime, border: 'border-purple' },
+        { label: 'Present Today', value: isFuture ? 0 : stats.present, color: 'green' },
+        { label: 'Absent Today', value: isFuture ? 0 : stats.absent, color: 'red' },
+        { label: 'Late Arrivals', value: isFuture ? 0 : stats.late, color: 'orange' },
+        { label: 'Overtime', value: isFuture ? 0 : stats.overtime, color: 'purple' },
       ]
     : [
-        { label: 'Present (Month)', value: stats.present, border: 'border-green' },
-        { label: 'Absent (Month)', value: stats.absent, border: 'border-red' },
-        { label: 'Late (Month)', value: stats.late, border: 'border-orange' },
-        { label: 'Overtime Days', value: stats.overtime, border: 'border-purple' },
+        { label: 'Present (Month)', value: stats.present, color: 'green' },
+        { label: 'Absent (Month)', value: stats.absent, color: 'red' },
+        { label: 'Late (Month)', value: stats.late, color: 'orange' },
+        { label: 'Overtime Days', value: stats.overtime, color: 'purple' },
       ];
 
+  const metricIcons = [UserCheck, UserX, Clock3, Timer];
+  const periodLabel = view === 'daily'
+    ? currentDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    : currentDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
+
   return (
-    <div className="attendance-container">
-      <div className="att-header-row">
-        <div>
-          <p className="att-page-subtitle">Monitor and review employee attendance records and activity summaries.</p>
+    <div className="att-container">
+      <header className="att-header-row">
+        <div className="att-page-heading">
+          
+          <p className="att-page-subtitle">Review daily time logs, monthly attendance summaries, and employee clock-in evidence.</p>
         </div>
+        <div className="att-header-actions">
+          <button type="button" className="att-btn-neutral" onClick={retryFetch} disabled={loading}>
+            <RefreshCw size={16} className={loading ? 'att-spinning' : ''} /> Refresh
+          </button>
+          {attendanceTab === 'records' && <button type="button" className="att-btn-export" onClick={() => window.print()}>
+            <Printer size={16} /> Print Report
+          </button>}
+        </div>
+      </header>
+
+      <div className="att-main-tabs" role="tablist" aria-label="Attendance sections">
+        <button type="button" id="att-tab-records" role="tab" aria-controls="att-panel-records"
+          aria-selected={attendanceTab === 'records'} className={`att-main-tab ${attendanceTab === 'records' ? 'active' : ''}`}
+          onClick={() => setAttendanceTab('records')}>
+         Attendance Records
+        </button>
+        <button type="button" id="att-tab-recovery" role="tab" aria-controls="att-panel-recovery"
+          aria-selected={attendanceTab === 'recovery'} className={`att-main-tab ${attendanceTab === 'recovery' ? 'active' : ''}`}
+          onClick={() => setAttendanceTab('recovery')}>
+           Attendance Recovery
+        </button>
       </div>
 
-      <div className="att-stats-row">
-        {statCards.map((stat, idx) => (
-          <div key={idx} className={`att-stat-card ${stat.border}`}>
-            <p className="att-stat-label">{stat.label}</p>
-            <p className="att-stat-value">{stat.value}</p>
+      {attendanceTab === 'records' && <div id="att-panel-records" role="tabpanel" aria-labelledby="att-tab-records" className="att-tab-panel">
+      <div className="att-stats-row" aria-label="Attendance metrics">
+        {statCards.map((stat, idx) => {
+          const Icon = metricIcons[idx];
+          return (
+            <section key={stat.label} className={`att-stat-card border-${stat.color}`}>
+              <div className="att-stat-top"><span className="att-stat-label">{stat.label}</span><Icon size={17} aria-hidden="true" /></div>
+              <p className="att-stat-value">{loading ? '—' : stat.value}</p>
+              <p className="att-stat-caption">{view === 'daily' ? 'Selected day' : 'Selected month'}</p>
+            </section>
+          );
+        })}
+      </div>
+
+      <section className="att-main-card" aria-label="Attendance records">
+        <div className="att-workspace-header">
+          <div className="att-workspace-title">
+           
+            <div><h2>Attendance Records</h2><p>{view === 'daily' ? 'Daily clock-in and clock-out records' : 'Monthly attendance totals by employee'}</p></div>
           </div>
-        ))}
-      </div>
+          <span className="att-record-count">{loading ? 'Loading' : `${filteredData.length} record${filteredData.length === 1 ? '' : 's'}`}</span>
+        </div>
 
-      <div className="att-main-card">
         <div className="att-controls">
-          <div className="view-toggles">
-            <button
-              className={`btn-toggle ${view === 'daily' ? 'active' : ''}`}
-              aria-pressed={view === 'daily'}
-              onClick={() => setView('daily')}
-            >
-              Daily View
-            </button>
-            <button
-              className={`btn-toggle ${view === 'monthly' ? 'active' : ''}`}
-              aria-pressed={view === 'monthly'}
-              onClick={() => setView('monthly')}
-            >
-              Monthly View
-            </button>
+          <div className="att-view-toggles" role="group" aria-label="Attendance report period">
+            <button type="button" className={`att-btn-toggle ${view === 'daily' ? 'active' : ''}`} aria-pressed={view === 'daily'} onClick={() => setView('daily')}>Daily records</button>
+            <button type="button" className={`att-btn-toggle ${view === 'monthly' ? 'active' : ''}`} aria-pressed={view === 'monthly'} onClick={() => setView('monthly')}>Monthly summary</button>
           </div>
-
-          <div className="att-actions">
-            <div className="att-search">
-              <Search size={16} className="att-search-icon" />
-              <input
-                type="text"
-                placeholder="Search employee..."
-                aria-label="Search employee"
-                maxLength={100}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+          <div className="att-date-nav" aria-label="Select report date">
+            <button type="button" className="att-nav-arrow" aria-label={view === 'daily' ? 'Previous day' : 'Previous month'} onClick={() => changeDate(-1)}><ChevronLeft size={17} /></button>
+            <div className="att-current-date" role="button" tabIndex={0} onClick={openDatePicker}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePicker(); } }} title="Choose date">
+              <CalendarDays size={16} /><span>{periodLabel}</span>
+              <input type={view === 'daily' ? 'date' : 'month'} ref={dateInputRef} className="att-hidden-date-input"
+                max={view === 'daily' ? toISODate(maxDaily) : toISOMonth(maxMonthly)}
+                onChange={handleDateSelect} value={view === 'daily' ? toISODate(currentDate) : toISOMonth(currentDate)} tabIndex={-1} aria-label="Report date" />
             </div>
-            {view === 'daily' && (
-              <select
-                className="att-select"
-                aria-label="Filter by status"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="All Status">All Status</option>
-                <option value="Present">Present</option>
-                <option value="Late">Late</option>
-                <option value="Absent">Absent</option>
-                <option value="Scheduled">Scheduled</option>
-              </select>
-            )}
-            <button className="btn-export" onClick={() => window.print()}><Download size={16} /> Export</button>
+            <button type="button" className="att-nav-arrow" aria-label={view === 'daily' ? 'Next day' : 'Next month'} onClick={() => changeDate(1)} disabled={!canGoForward}><ChevronRight size={17} /></button>
           </div>
         </div>
 
-        <div className="date-nav">
-          <button
-            className="nav-arrow"
-            aria-label={view === 'daily' ? 'Previous day' : 'Previous month'}
-            onClick={() => changeDate(-1)}
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <div
-            className="current-date-display"
-            role="button"
-            tabIndex={0}
-            aria-label="Open date picker"
-            onClick={openDatePicker}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                openDatePicker();
-              }
-            }}
-          >
-            <Calendar size={18} color="#0D9488" />
-            <span>
-              {view === 'daily'
-                ? currentDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-                : currentDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}
-            </span>
-            <input
-              type={view === 'daily' ? 'date' : 'month'}
-              ref={dateInputRef}
-              className="hidden-date-input"
-              aria-label={view === 'daily' ? 'Select date' : 'Select month'}
-              max={view === 'daily' ? toISODate(maxDaily) : toISOMonth(maxMonthly)}
-              onChange={handleDateSelect}
-              value={view === 'daily' ? toISODate(currentDate) : toISOMonth(currentDate)}
-            />
-          </div>
-          <button
-            className="nav-arrow"
-            aria-label={view === 'daily' ? 'Next day' : 'Next month'}
-            onClick={() => changeDate(1)}
-            disabled={!canGoForward}
-            style={!canGoForward ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-          >
-            <ChevronRight size={20} />
-          </button>
+        <div className="att-filter-bar">
+          <div className="att-search"><Search size={16} className="att-search-icon" /><input type="search" placeholder="Search employee name" maxLength={100}
+            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="att-input" aria-label="Search employee" /></div>
+          {view === 'daily' && <select className="att-select" aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="All Status">All statuses</option><option value="Present">Present</option><option value="Late">Late</option>
+            <option value="Absent">Absent</option><option value="Missing Clock-Out">Missing Clock-Out</option><option value="In Progress">In Progress</option><option value="Pending HR Review">Pending HR Review</option><option value="On Leave">On Leave</option><option value="Scheduled">Scheduled</option><option value="No Schedule">No Schedule</option>
+          </select>}
+          <div className="att-filter-spacer" />
+          <span className="att-filter-hint">Showing {filteredData.length} of {attendanceData.length} employees</span>
         </div>
 
-        <div className="table-container">
-          <table className="custom-table">
+        <div className="att-table-container">
+          <table className="att-table">
             <thead>
               {view === 'daily' ? (
                 <tr>
@@ -489,53 +556,36 @@ const Attendance = () => {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={colSpan} className="empty-row-message">Loading attendance…</td></tr>
+                <tr><td colSpan={colSpan} className="att-empty-cell">Loading attendance…</td></tr>
               ) : fetchError ? (
                 <tr>
-                  <td colSpan={colSpan} className="empty-row-message">
+                  <td colSpan={colSpan} className="att-empty-cell">
                     <span className="text-rose-600">{fetchError}</span>{' '}
-                    <button
-                      type="button"
-                      onClick={retryFetch}
-                      style={{
-                        marginLeft: 8,
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        border: '1px solid #0D9488',
-                        background: '#fff',
-                        color: '#0D9488',
-                        cursor: 'pointer',
-                        fontSize: 13,
-                        fontWeight: 600,
-                      }}
-                    >
-                      Retry
-                    </button>
+                    <button onClick={retryFetch} className="att-retry-btn">Retry</button>
                   </td>
                 </tr>
               ) : (isFuture && view === 'daily') ? (
-                <tr><td colSpan={colSpan} className="empty-row-message">No records available for future dates.</td></tr>
+                <tr><td colSpan={colSpan} className="att-empty-cell">No records available for future dates.</td></tr>
               ) : filteredData.length === 0 ? (
-                <tr><td colSpan={colSpan} className="empty-row-message">No records found for this period.</td></tr>
+                <tr><td colSpan={colSpan} className="att-empty-cell">No records found for this period.</td></tr>
               ) : (
                 filteredData.map((row, idx) => (
                   <tr key={`${row.employee_id}-${idx}`}>
                     {view === 'daily' ? (
                       <>
                         <td>
-                          <div className="emp-name">{row.full_name}</div>
-                          <div className="emp-id">{row.employee_id}</div>
+                          <div className="att-emp-name">{row.full_name}</div>
+                          <div className="att-emp-id">{row.employee_id}</div>
                         </td>
-                        <td><span className={`status-badge ${row.status?.toLowerCase().replace(' ', '-')}`}>{row.status}</span></td>
+                        <td><span className={`att-status-badge ${row.status?.toLowerCase().replace(' ', '-')}`}>{row.status}</span></td>
                         <td>{formatTo12Hour(row.time_in)}</td>
                         <td>{formatTo12Hour(row.time_out)}</td>
-                        <td>{row.total_hours} hrs</td>
+                        <td>{row.total_hours} hrs{hasStoredHoursDiscrepancy(row) && <span title="Recorded clock times differ, but stored hours are zero. Verify with HR before payroll use." style={{ display: 'block', color: '#b45309', fontSize: 11 }}>Review hours</span>}</td>
                         <td className="text-center">
                           <button
-                            className="btn-view-details"
+                            className="att-btn-view"
+                            type="button" aria-label={`View attendance details for ${row.full_name || row.employee_id}`} title="View record"
                             onClick={() => handleViewDetails(row)}
-                            title="View Details"
-                            aria-label={`View details for ${row.full_name || 'employee'}`}
                           >
                             <Eye size={16} />
                           </button>
@@ -544,13 +594,13 @@ const Attendance = () => {
                     ) : (
                       <>
                         <td>
-                          <div className="emp-name">{row.full_name}</div>
-                          <div className="emp-id">{row.employee_id}</div>
+                          <div className="att-emp-name">{row.full_name}</div>
+                          <div className="att-emp-id">{row.employee_id}</div>
                         </td>
                         <td className="text-center font-medium">{row.total_working}</td>
-                        <td className="text-center text-emerald-600 font-semibold">{row.present_days}</td>
-                        <td className="text-center text-rose-600 font-semibold">{row.absent_days}</td>
-                        <td className="text-center text-amber-600 font-semibold">{row.late_days}</td>
+                        <td className="text-center text-emerald font-semibold">{row.present_days}</td>
+                        <td className="text-center text-rose font-semibold">{row.absent_days}</td>
+                        <td className="text-center text-amber font-semibold">{row.late_days}</td>
                       </>
                     )}
                   </tr>
@@ -559,14 +609,68 @@ const Attendance = () => {
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
+      </div>}
 
-      <FormalModal show={showDetailModal} onClose={() => setShowDetailModal(false)} title="Attendance Details" footer={<button className="btn-modal-cancel" onClick={() => setShowDetailModal(false)}>Close</button>}>
+      {attendanceTab === 'recovery' && <div id="att-panel-recovery" role="tabpanel" aria-labelledby="att-tab-recovery" className="att-tab-panel">
+      <section className="c13-monitor" aria-label="Attendance recovery monitoring">
+        <div className="c13-monitor-heading">
+          <div><p>Monitor missing Clock-Outs and requests awaiting HR review. Approvals remain in Attendance Corrections and Appeals.</p></div>
+        </div>
+        <div className="att-controls c13-period-controls">
+          <div className="att-view-toggles" role="group" aria-label="Recovery report period">
+            <button type="button" className={`att-btn-toggle ${view === 'daily' ? 'active' : ''}`} aria-pressed={view === 'daily'} onClick={() => setView('daily')}>Daily records</button>
+            <button type="button" className={`att-btn-toggle ${view === 'monthly' ? 'active' : ''}`} aria-pressed={view === 'monthly'} onClick={() => setView('monthly')}>Monthly summary</button>
+          </div>
+          <div className="att-date-nav" aria-label="Select recovery date">
+            <button type="button" className="att-nav-arrow" aria-label={view === 'daily' ? 'Previous day' : 'Previous month'} onClick={() => changeDate(-1)}><ChevronLeft size={17} /></button>
+            <div className="att-current-date" role="button" tabIndex={0} onClick={openDatePicker}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePicker(); } }} title="Choose date">
+              <CalendarDays size={16} /><span>{periodLabel}</span>
+              <input type={view === 'daily' ? 'date' : 'month'} ref={dateInputRef} className="att-hidden-date-input"
+                max={view === 'daily' ? toISODate(maxDaily) : toISOMonth(maxMonthly)}
+                onChange={handleDateSelect} value={view === 'daily' ? toISODate(currentDate) : toISOMonth(currentDate)} tabIndex={-1} aria-label="Recovery date" />
+            </div>
+            <button type="button" className="att-nav-arrow" aria-label={view === 'daily' ? 'Next day' : 'Next month'} onClick={() => changeDate(1)} disabled={!canGoForward}><ChevronRight size={17} /></button>
+          </div>
+        </div>
+        <div className="c13-counter-row">
+          <button type="button" className="c13-counter" onClick={() => c13OpenQueue('missing')}>
+            <span>Missing Clock-Out</span><strong>{loading || c13QueueError ? "—" : c13Missing.length}</strong><small>View affected shifts</small>
+          </button>
+          <button type="button" className="c13-counter" onClick={() => c13OpenQueue('pending')}>
+            <span>Pending HR Review</span><strong>{loading || c13QueueError ? "—" : c13Pending.length}</strong><small>View correction and appeal requests</small>
+          </button>
+        </div>
+        {c13QueueError && <p role="alert" className="c13-note">{c13QueueError}</p>}
+        <div className="c13-queue">
+          <div className="c13-queue-top">
+            <strong>Recovery Cases</strong>
+            <select aria-label="Recovery queue filter" value={c13Filter} onChange={event => setC13Filter(event.target.value)}>
+              <option value="open">Needs Attention</option><option value="missing">Missing Clock-Out</option>
+              <option value="pending">Pending HR Review</option><option value="resolved">Resolved</option><option value="all">All Records</option>
+            </select>
+          </div>
+          <div className="c13-queue-scroll"><table className="c13-table"><thead><tr><th>Employee</th><th className="c13-date-col">Date</th><th>Issue / State</th><th>Attendance</th></tr></thead><tbody>
+            {loading ? <tr><td colSpan="5">Loading recovery cases…</td></tr> : c13QueueError ? <tr><td colSpan="5">Unable to verify recovery cases for this period.</td></tr> : c13Filtered.length ? c13Filtered.map(row => <tr key={`c13-${row.schedule_id}`}>
+              <td><strong>{row.full_name || row.employee_id}</strong><small>{row.employee_id}</small></td>
+              <td className="c13-date-col">{row.date}</td>
+              <td><span className="c13-state">{getHrRecoveryStateLabel(row)}</span><small>{getHrRecoveryGuidance(row)}</small></td>
+              
+              <td><button className="att-btn-neutral" type="button" onClick={() => c13Focus(row)}>View day</button></td>
+            </tr>) : <tr><td colSpan="5">No matching recovery cases for this period.</td></tr>}
+          </tbody></table></div>
+          <p className="c13-note">This is a read-only monitoring list, not another approval page. 'No attendance recorded' may indicate an ordinary absence and does not mean an HR request is pending. Review approvals only on Attendance Corrections or Attendance Appeals. Phone-only offline events are not visible until submitted.</p>
+        </div>
+      </section>
+      </div>}
+
+      <FormalModal show={showDetailModal} onClose={() => setShowDetailModal(false)} title="Attendance Details" footer={<button type="button" className="btn-modal-cancel" onClick={() => setShowDetailModal(false)}>Close</button>}>
         {selectedRecord && (
           <div className="att-modal-wrapper">
-            <div className="att-user-profile-header">
-              <div className="att-user-info-group">
-                <div className="att-avatar-circle">
+            <div className="att-user-header">
+              <div className="att-user-info">
+                <div className="att-avatar">
                   {selectedRecord.full_name ? selectedRecord.full_name.charAt(0).toUpperCase() : 'E'}
                 </div>
                 <div className="att-user-meta">
@@ -574,54 +678,54 @@ const Attendance = () => {
                   <span className="att-user-id">{selectedRecord.employee_id}</span>
                 </div>
               </div>
-              <span className={`status-badge inline-flex ${selectedRecord.status?.toLowerCase().replace(' ', '-')}`}>
+              <span className={`att-status-badge inline-flex ${selectedRecord.status?.toLowerCase().replace(' ', '-')}`}>
                 {selectedRecord.status}
               </span>
             </div>
 
-            <div className="attendance-detail-grid">
-              <div className="detail-field">
-                <span className="detail-label">Status</span>
-                <span className="detail-value">{selectedRecord.status}</span>
+            <div className="att-detail-grid">
+              <div className="att-detail-field">
+                <span className="att-detail-label">Status</span>
+                <span className="att-detail-value">{selectedRecord.status}</span>
               </div>
-              <div className="detail-field">
-                <span className="detail-label">Total Hours</span>
-                <span className="detail-value">{selectedRecord.total_hours} hrs</span>
+              <div className="att-detail-field">
+                <span className="att-detail-label">Total Hours</span>
+                <span className="att-detail-value">{selectedRecord.total_hours} hrs{hasStoredHoursDiscrepancy(selectedRecord) && <small style={{ display: 'block', color: '#b45309' }}>Stored hours need review; do not assume payable hours.</small>}</span>
               </div>
-              <div className="detail-field">
-                <span className="detail-label">Time In</span>
-                <span className="detail-value">{formatTo12Hour(selectedRecord.time_in)}</span>
+              <div className="att-detail-field">
+                <span className="att-detail-label">Time In</span>
+                <span className="att-detail-value">{formatTo12Hour(selectedRecord.time_in)}</span>
               </div>
-              <div className="detail-field">
-                <span className="detail-label">Time Out</span>
-                <span className="detail-value">{formatTo12Hour(selectedRecord.time_out)}</span>
+              <div className="att-detail-field">
+                <span className="att-detail-label">Time Out</span>
+                <span className="att-detail-value">{formatTo12Hour(selectedRecord.time_out)}</span>
               </div>
-              <div className="detail-field">
-                <span className="detail-label">Clock In Location</span>
-                <span className="detail-value">{selectedRecord.location ? selectedRecord.location.split('(')[0] : '—'}</span>
+              <div className="att-detail-field">
+                <span className="att-detail-label">Clock In Location</span>
+                <span className="att-detail-value">{selectedRecord.location ? selectedRecord.location.split('(')[0] : '—'}</span>
               </div>
-              <div className="detail-field">
-                <span className="detail-label">Clock Out Location</span>
-                <span className="detail-value">{selectedRecord.location && selectedRecord.time_out !== '--:--' ? selectedRecord.location.split('(')[0] : '—'}</span>
+              <div className="att-detail-field">
+                <span className="att-detail-label">Clock Out Location</span>
+                <span className="att-detail-value">{selectedRecord.location && selectedRecord.time_out !== '--:--' ? selectedRecord.location.split('(')[0] : '—'}</span>
               </div>
-              <div className="detail-field">
-                <span className="detail-label">Clock In Selfie</span>
+              <div className="att-detail-field">
+                <span className="att-detail-label">Clock In Selfie</span>
                 {selectedRecord.clock_in_selfie ? (
-                  <button className="selfie-view-btn" onClick={() => setExpandedSelfie(selectedRecord.clock_in_selfie)}>
+                  <button className="att-selfie-btn" type="button" onClick={() => setExpandedSelfie(selectedRecord.clock_in_selfie)}>
                     <Eye size={14} /> View Photo
                   </button>
                 ) : (
-                  <span className="detail-value text-gray">—</span>
+                  <span className="att-detail-value text-gray">—</span>
                 )}
               </div>
-              <div className="detail-field">
-                <span className="detail-label">Clock Out Selfie</span>
+              <div className="att-detail-field">
+                <span className="att-detail-label">Clock Out Selfie</span>
                 {selectedRecord.clock_out_selfie ? (
-                  <button className="selfie-view-btn" onClick={() => setExpandedSelfie(selectedRecord.clock_out_selfie)}>
+                  <button className="att-selfie-btn" type="button" onClick={() => setExpandedSelfie(selectedRecord.clock_out_selfie)}>
                     <Eye size={14} /> View Photo
                   </button>
                 ) : (
-                  <span className="detail-value text-gray">—</span>
+                  <span className="att-detail-value text-gray">—</span>
                 )}
               </div>
             </div>
@@ -631,18 +735,15 @@ const Attendance = () => {
 
       {expandedSelfie && (
         <div
-          className="selfie-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Enlarged selfie"
+          className="att-selfie-overlay" role="presentation"
           onClick={() => setExpandedSelfie(null)}
         >
-          <div className="selfie-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="selfie-close-btn" aria-label="Close photo" onClick={() => setExpandedSelfie(null)}>
+          <div className="att-selfie-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="att-selfie-close" type="button" aria-label="Close photo" onClick={() => setExpandedSelfie(null)}>
               <X size={20} />
             </button>
-            <img src={`${STATIC_BASE}${expandedSelfie}`} alt="Attendance selfie" className="selfie-img-large" />
-            <button className="selfie-fullscreen" onClick={() => window.open(`${STATIC_BASE}${expandedSelfie}`, '_blank')}>
+            <img src={`${STATIC_BASE}${expandedSelfie}`} alt="Attendance selfie" className="att-selfie-img" />
+            <button className="att-selfie-fullscreen" type="button" onClick={() => window.open(`${STATIC_BASE}${expandedSelfie}`, '_blank')}>
               <Maximize2 size={16} /> Open Fullscreen
             </button>
           </div>

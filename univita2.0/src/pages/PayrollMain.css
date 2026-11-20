@@ -436,6 +436,57 @@
   color: #0F172A; 
 }
 
+/* Append these to your existing PayrollMain.css */
+
+/* Govt IDs Box in Modal */
+.pm-govt-ids-box {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.pm-govt-ids-box h5 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pm-govt-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: #0F172A;
+  font-weight: 500;
+}
+
+.pm-govt-grid span {
+  color: #64748B;
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+/* Finalized Badge */
+.pm-badge-finalized {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.85rem;
+  background: #ECFDF5;
+  color: #059669;
+  border: 1px solid #A7F3D0;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  height: 32px;
+  box-sizing: border-box;
+}
+
 /* Responsive Adjustments */
 @media (max-width: 1024px) {
   .pm-metrics-grid { grid-template-columns: repeat(2, 1fr); }
@@ -459,3 +510,60 @@
   .pm-toolbar-actions { flex-direction: column; }
   .pm-toolbar-actions button { width: 100%; }
 }
+
+/* UniVITA Enterprise Payroll — page-specific refinement */
+.pm-container { padding: 5px 10px 10px; min-height: 0; background: #f5f7fa; color: #142435; }
+.pm-page-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; margin: 0 0 12px; }
+.pm-eyebrow { font-size:10px; letter-spacing:.11em; font-weight:750; color:#0d9488; margin-bottom:4px; }
+.pm-page-heading h1 { margin:0; font-size:22px; font-weight:750; letter-spacing:-.035em; color:#102c36; }
+.pm-page-heading p { margin:4px 0 0; font-size:12px; color:#66778a; }
+.pm-heading-status { display:flex; align-items:center; gap:7px; padding:8px 11px; border:1px solid #dae6e8; background:#fff; color:#486674; border-radius:5px; font-size:11px; font-weight:650; }
+.pm-top-bar { padding:10px 12px; background:#fff; border:1px solid #e1e8ee; border-radius:5px; margin-bottom:12px; }
+.pm-date-navigator { border-radius:4px; box-shadow:none; }
+.pm-nav-arrow { padding:8px 11px; }
+.pm-nav-arrow:disabled {opacity:.35;cursor:not-allowed;}
+.pm-current-date { font-size:12px; min-width:160px; justify-content:center; }
+.pm-btn-lock { border-radius:4px; box-shadow:none; font-size:12px; }
+.pm-metrics-grid { gap:10px; margin-bottom:12px; }
+.pm-metric-card { border-radius:5px; box-shadow:none; padding:14px; gap:12px; border-color:#e1e8ee; }
+.pm-metric-icon { height:36px; width:36px; border-radius:4px; background:#f0f7f6; border-color:#d8e9e7; color:#0b716a; }
+.pm-metric-icon svg {width:17px;height:17px;}
+.pm-metric-label {font-size:10px;letter-spacing:.045em;color:#687b8b;}
+.pm-metric-value {font-family:Inter,system-ui,sans-serif;font-size:18px;font-weight:750;letter-spacing:-.025em;}
+.pm-roster-container {border-radius:5px;box-shadow:none;border-color:#e1e8ee;}
+.pm-roster-heading {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 15px 10px;}
+.pm-roster-heading h2 {font-size:14px;font-weight:750;margin:0;color:#173340;}
+.pm-roster-heading p {font-size:11px;color:#728091;margin:4px 0 0;}
+.pm-roster-heading > span {font-size:11px;color:#617484;border:1px solid #e0e8ed;padding:5px 9px;border-radius:4px;white-space:nowrap;}
+.pm-toolbar {padding:10px 15px;gap:9px;}
+.pm-search-box {height:34px;border-radius:4px;}
+.pm-toolbar-actions {gap:7px;}
+.pm-btn-primary,.pm-btn-outline {height:34px;font-size:11px;border-radius:4px;padding:0 11px;}
+.pm-btn-primary {background:#0b3b40;color:white;}
+.pm-btn-primary:hover:not(:disabled) {background:#0d5557;}
+.pm-btn-success,.pm-icon-btn {border-radius:4px;height:30px;}
+.pm-table th {padding:11px 15px;font-size:10px;background:#f8fafc;color:#667b89;}
+.pm-table td {padding:10px 15px;font-size:12px;}
+.pm-emp-name {font-size:12px;}
+.pm-emp-id {font-size:11px;}
+.pm-badge-neutral,.pm-badge-finalized {border-radius:3px;}
+.pm-modal-backdrop {backdrop-filter:none;background:rgba(6,25,35,.60);}
+.pm-modal-card {border-radius:6px;box-shadow:0 18px 60px rgba(9,24,38,.22);}
+.pm-modal-card.wide {max-width:790px;}
+.pm-modal-header {padding:15px 18px;border-radius:6px 6px 0 0;}
+.pm-modal-header h3 {font-family:Inter,system-ui,sans-serif;font-size:15px;}
+.pm-modal-body,.pm-modal-body.bg-gray {padding:17px 18px;}
+.pm-formal-section-header {padding:10px 14px;}
+.pm-formal-row {padding:10px 14px;}
+.pm-formal-input,.pm-input {border-radius:4px;}
+.pm-net-banner {margin-top:12px;padding:14px 16px;border-top-color:#0d9488;}
+.pm-net-amount {font-family:Inter,system-ui,sans-serif;font-size:20px;}
+.pm-pagination {display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 15px;border-top:1px solid #e5eaef;font-size:11px;color:#64748b;}
+.pm-pagination-actions {display:flex;align-items:center;gap:12px;}
+.pm-pagination-actions button {display:flex;align-items:center;gap:4px;background:white;color:#33515b;border:1px solid #d6e0e7;padding:7px 10px;border-radius:4px;font:inherit;cursor:pointer;}
+.pm-pagination-actions button:hover:not(:disabled) {background:#f0f8f7;border-color:#0d9488;}
+.pm-pagination-actions button:disabled {opacity:.45;cursor:not-allowed;}
+.pm-container button:focus-visible,.pm-container input:focus-visible,.pm-container select:focus-visible {outline:2px solid #0d9488;outline-offset:2px;}
+@media (max-width:900px) { .pm-heading-status {display:none;} .pm-metrics-grid {grid-template-columns:repeat(2,minmax(0,1fr));} }
+@media (max-width:640px) { .pm-container {padding:5px 10px 10px;} .pm-page-heading h1 {font-size:19px;} .pm-metrics-grid {grid-template-columns:1fr 1fr;gap:7px;} .pm-metric-card {padding:10px;} .pm-metric-value {font-size:15px;} .pm-top-bar {flex-wrap:wrap;flex-direction:row;} .pm-toolbar-actions {justify-content:flex-start;} .pm-pagination {align-items:flex-start;flex-direction:column;} .pm-modal-card.wide {max-width:100%;} }
+@media (max-width:420px) { .pm-metrics-grid {grid-template-columns:1fr;} .pm-date-navigator {width:100%;} .pm-pagination-actions {gap:6px;} }

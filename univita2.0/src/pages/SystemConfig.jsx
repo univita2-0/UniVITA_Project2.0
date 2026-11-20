@@ -90,7 +90,7 @@ const SystemConfig = () => {
   if (loading) return <div className="expert-loading">Loading system parameters...</div>;
 
   return (
-    <div className="expert-container">
+    <div className="expert-container uv-admin-config">
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
@@ -100,6 +100,7 @@ const SystemConfig = () => {
         </div>
       </div>
 
+      <div className="uv-admin-metadata"><span>Authentication policies</span><span>Location verification</span><span>Visitor safety rules</span></div>
       <div className="expert-card">
         <div className="sc-form-grid">
           <div className="set-form-group">

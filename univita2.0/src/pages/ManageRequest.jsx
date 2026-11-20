@@ -1,10 +1,10 @@
-// src/pages/ManageRequest.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Search, CheckCircle, XCircle, Eye, Calendar, Clock, User, Mail, Phone, Users, X, ClipboardList, ChevronLeft, ChevronRight, Edit3 } from 'lucide-react';
+import { Search, CheckCircle, XCircle, Eye, Calendar, Clock, User, Mail, Phone, Users, X, ClipboardList, ChevronLeft, ChevronRight, Edit3, ShieldAlert, RefreshCw } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 import './ManageRequest.css';
 
 const getAuthHeaders = () => ({
@@ -14,9 +14,7 @@ const getAuthHeaders = () => ({
 const formatDate = (dateStr) => {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
+    month: 'short', day: 'numeric', year: 'numeric'
   });
 };
 
@@ -32,10 +30,15 @@ const formatTime = (timeStr) => {
 };
 
 const ManageRequest = () => {
+  const currentUserRole = getUserRole();
+  const isAdmin = currentUserRole === 'admin';
+  const isSecurity = currentUserRole === 'security';
+  const canWrite = isAdmin || isSecurity; 
+
   const [historyData, setHistoryData] = useState([]);
   const [historySearch, setHistorySearch] = useState('');
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [activeHistoryTab, setActiveHistoryTab] = useState('all'); // NEW: Tab state
+  const [activeHistoryTab, setActiveHistoryTab] = useState('all');
 
   const [pendingData, setPendingData] = useState([]);
   const [pendingSearch, setPendingSearch] = useState('');
@@ -59,7 +62,6 @@ const ManageRequest = () => {
   const [pendingPage, setPendingPage] = useState(1);
   const itemsPerPage = 20;
 
-  // Reset page when tab or search changes
   useEffect(() => { setHistoryPage(1); }, [historySearch, activeHistoryTab]);
   useEffect(() => { setPendingPage(1); }, [pendingSearch]);
 
@@ -114,15 +116,20 @@ const ManageRequest = () => {
   };
 
   const openRejectModal = (request) => {
+    if (!isAdmin) {
+      toast.error('Only System Administrators can reject visit requests.');
+      return;
+    }
     setSelectedRequest(request);
     setRejectionReason('');
     setShowRejectModal(true);
   };
 
-  // -------------------------------------------------------------
-  // OPTIMISTIC UPDATES: Approve & Reject (Instant UI Feedback)
-  // -------------------------------------------------------------
   const handleApprove = async (req) => {
+    if (!isAdmin) {
+      toast.error('Only System Administrators can approve visit requests.');
+      return;
+    }
     const currentAdminId = localStorage.getItem('user_id');
     if (!currentAdminId) return toast.error("Session Error: Please logout and login again.");
 
@@ -149,6 +156,7 @@ const ManageRequest = () => {
   };
 
   const handleRejectConfirm = async () => {
+    if (!isAdmin) return;
     if (!rejectionReason.trim()) return toast.warning('Please provide a reason for rejection.');
     const currentAdminId = localStorage.getItem('user_id');
     if (!currentAdminId) return toast.error("Session Error: Please logout and login again.");
@@ -189,6 +197,10 @@ const ManageRequest = () => {
   };
 
   const openEditScheduleModal = async (appointment) => {
+    if (!isAdmin) {
+      toast.error('Only Administrators can reschedule appointments.');
+      return;
+    }
     setSelectedRequest(appointment);
     const visitDate = appointment.visit_date?.split('T')[0] || '';
     setEditDate(visitDate);
@@ -204,11 +216,16 @@ const ManageRequest = () => {
   };
 
   const handleHistoryUpdate = async () => {
+    if (!isAdmin) return toast.error('Only Administrators can reschedule appointments.');
     if (!editDate || !editTime) return toast.warning('Please provide both date and time.');
+    const [year, month, day] = editDate.split('-').map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    const mins = Number(editTime.slice(0, 2)) * 60 + Number(editTime.slice(3, 5));
+    if (weekday === 0 || mins < 480 || (weekday === 6 ? mins >= 720 : mins >= 1020)) {
+      return toast.warning(weekday === 0 ? 'Appointments are unavailable on Sundays.' : 'Select a time within HCT Academy visiting hours.');
+    }
 
     const targetReq = selectedRequest;
-
-    setShowEditScheduleModal(false);
     toast.info('Updating schedule and notifying visitor...', { autoClose: 2500 });
 
     try {
@@ -219,30 +236,25 @@ const ManageRequest = () => {
       }, getAuthHeaders());
 
       toast.success('Appointment schedule updated!');
+      setShowEditScheduleModal(false);
       fetchHistory();
     } catch (err) {
       console.error(err);
-      toast.error(err.response?.data?.error || 'Failed to update schedule.');
+      toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to update schedule.');
     }
   };
 
-  // NEW: Calculate counts for tabs
   const approvedCount = historyData.filter(item => ['approved', 'completed'].includes(item.status?.toLowerCase())).length;
   const rejectedCount = historyData.filter(item => ['rejected', 'cancelled'].includes(item.status?.toLowerCase())).length;
+  const totalRequests = historyData.length + pendingData.length;
+  const refreshRequests = () => { fetchHistory(); fetchPending(); };
 
   const filteredHistory = historyData.filter(item => {
-    // 1. Filter by Search
     const searchString = `${item.first_name} ${item.last_name} ${item.email} ${item.reason}`.toLowerCase();
     const matchesSearch = !historySearch || searchString.includes(historySearch.toLowerCase());
-
-    // 2. Filter by Tab
     let matchesTab = true;
-    if (activeHistoryTab === 'approved') {
-      matchesTab = ['approved', 'completed'].includes(item.status?.toLowerCase());
-    } else if (activeHistoryTab === 'rejected') {
-      matchesTab = ['rejected', 'cancelled'].includes(item.status?.toLowerCase());
-    }
-
+    if (activeHistoryTab === 'approved') matchesTab = ['approved', 'completed'].includes(item.status?.toLowerCase());
+    else if (activeHistoryTab === 'rejected') matchesTab = ['rejected', 'cancelled'].includes(item.status?.toLowerCase());
     return matchesSearch && matchesTab;
   });
 
@@ -251,45 +263,54 @@ const ManageRequest = () => {
     return !pendingSearch || searchString.includes(pendingSearch.toLowerCase());
   });
 
-  const historyTotalPages = Math.ceil(filteredHistory.length / itemsPerPage);
+  const historyTotalPages = Math.max(1, Math.ceil(filteredHistory.length / itemsPerPage));
   const currentHistory = filteredHistory.slice((historyPage - 1) * itemsPerPage, historyPage * itemsPerPage);
 
-  const pendingTotalPages = Math.ceil(filteredPending.length / itemsPerPage);
+  const pendingTotalPages = Math.max(1, Math.ceil(filteredPending.length / itemsPerPage));
   const currentPending = filteredPending.slice((pendingPage - 1) * itemsPerPage, pendingPage * itemsPerPage);
 
   return (
     <div className="vm-container">
-      <div className="vm-header">
+      <header className="vm-header">
         <div className="vm-title-group">
-          <div>
-            <p className="vm-subtitle">Review, inspect, and manage visitor appointments and campus schedules.</p>
-          </div>
+          
+          <p className="vm-subtitle">Manage appointment submissions, monitor decisions, and maintain accurate visitor schedules.</p>
         </div>
-        <button className="vm-btn-secondary" onClick={() => setShowPendingModal(true)}>
-          <ClipboardList size={16} /> Pending Requests
-          {pendingData.length > 0 && <span className="vm-badge">{pendingData.length}</span>}
-        </button>
-      </div>
+        <div className="vm-header-actions">
+          <button type="button" className="vm-btn-secondary" onClick={refreshRequests} disabled={loadingHistory || loadingPending}>
+            <RefreshCw size={15} /> Refresh
+          </button>
+          <button type="button" className="vm-btn-primary" onClick={() => setShowPendingModal(true)}>
+            <ClipboardList size={16} /> Review Pending <span className="vm-header-count">{pendingData.length}</span>
+          </button>
+        </div>
+      </header>
 
-      {/* UPDATED: Search Card now holds both Tabs and Search Bar */}
+      <section className="vm-metric-grid" aria-label="Visitor request summary">
+        <div className="vm-metric"><div className="vm-metric-top"><span>Total Requests</span><ClipboardList size={16} /></div><strong>{totalRequests}</strong><small>Pending and processed</small></div>
+        <div className="vm-metric"><div className="vm-metric-top"><span>Pending Review</span><Clock size={16} /></div><strong>{pendingData.length}</strong><small>Awaiting decision</small></div>
+        <div className="vm-metric"><div className="vm-metric-top"><span>Approved</span><CheckCircle size={16} /></div><strong>{approvedCount}</strong><small>Accepted appointments</small></div>
+        <div className="vm-metric"><div className="vm-metric-top"><span>Rejected</span><XCircle size={16} /></div><strong>{rejectedCount}</strong><small>Declined or cancelled</small></div>
+      </section>
+
+      <div className="vm-section-heading"><div><p>Search, filter, and review processed visitor appointments.</p></div><span className="vm-record-counter">{filteredHistory.length} records</span></div>
+
+      {!canWrite && (
+        <div className="vm-readonly-banner">
+          <ShieldAlert size={16} />
+          <span>Read-only view. Visitor management is handled by Security and Admin.</span>
+        </div>
+      )}
+
       <div className="vm-search-card">
         <div className="vm-filter-tabs">
-          <button 
-            className={`vm-filter-tab ${activeHistoryTab === 'all' ? 'active' : ''}`} 
-            onClick={() => setActiveHistoryTab('all')}
-          >
+          <button className={`vm-filter-tab ${activeHistoryTab === 'all' ? 'active' : ''}`} onClick={() => setActiveHistoryTab('all')}>
             All <span className="tab-count">{historyData.length}</span>
           </button>
-          <button 
-            className={`vm-filter-tab ${activeHistoryTab === 'approved' ? 'active' : ''}`} 
-            onClick={() => setActiveHistoryTab('approved')}
-          >
+          <button className={`vm-filter-tab ${activeHistoryTab === 'approved' ? 'active' : ''}`} onClick={() => setActiveHistoryTab('approved')}>
             Approved <span className="tab-count">{approvedCount}</span>
           </button>
-          <button 
-            className={`vm-filter-tab ${activeHistoryTab === 'rejected' ? 'active' : ''}`} 
-            onClick={() => setActiveHistoryTab('rejected')}
-          >
+          <button className={`vm-filter-tab ${activeHistoryTab === 'rejected' ? 'active' : ''}`} onClick={() => setActiveHistoryTab('rejected')}>
             Rejected <span className="tab-count">{rejectedCount}</span>
           </button>
         </div>
@@ -303,7 +324,7 @@ const ManageRequest = () => {
             onChange={e => setHistorySearch(e.target.value)}
             className="vm-clean-input"
           />
-          {historySearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setHistorySearch('')} />}
+          {historySearch && <button type="button" className="vm-clear-search" aria-label="Clear visitor search" onClick={() => setHistorySearch('')}><X size={16} /></button>}
         </div>
       </div>
 
@@ -322,7 +343,7 @@ const ManageRequest = () => {
                     <th>Purpose of Visit</th>
                     <th>Schedule</th>
                     <th className="text-center">Status</th>
-                    <th className="text-right">Action</th>
+                    {canWrite && <th className="text-right">Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -338,20 +359,24 @@ const ManageRequest = () => {
                         <div className="text-xs text-muted">{formatTime(item.visit_time)}</div>
                       </td>
                       <td className="text-center">
-                        <span className={`vm-chip ${['approved', 'completed'].includes(item.status?.toLowerCase()) ? 'success' : 'danger'}`}>
+                        <span className={`vm-chip ${['approved', 'completed'].includes(item.status?.toLowerCase()) ? 'success' : ['rejected', 'cancelled'].includes(item.status?.toLowerCase()) ? 'danger' : 'pending'}`}>
                           {item.status}
                         </span>
                       </td>
-                      <td>
-                        <div className="vm-action-group right">
-                          <button className="vm-btn-icon" onClick={() => openHistoryDetails(item)} title="View Final Details">
-                            <Eye size={16} color="#475569" />
-                          </button>
-                          <button className="vm-btn-icon" onClick={() => openEditScheduleModal(item)} title="Edit Schedule">
-                            <Edit3 size={16} color="#0D9488" />
-                          </button>
-                        </div>
-                      </td>
+                      {canWrite && (
+                        <td>
+                          <div className="vm-action-group right">
+                            <button className="vm-btn-icon" onClick={() => openHistoryDetails(item)} title="View Final Details">
+                              <Eye size={16} color="#475569" />
+                            </button>
+                            {isAdmin && ['PENDING', 'APPROVED', 'RESCHEDULED'].includes(item.status) && !item.arrived && !item.returned && !item.no_show && (
+                              <button className="vm-btn-icon" onClick={() => openEditScheduleModal(item)} title="Edit Schedule">
+                                <Edit3 size={16} color="#0D9488" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -361,8 +386,7 @@ const ManageRequest = () => {
             {historyTotalPages > 1 && (
               <div className="vm-pagination">
                 <span className="vm-page-info">
-                  Showing {(historyPage - 1) * itemsPerPage + 1} to{' '}
-                  {Math.min(historyPage * itemsPerPage, filteredHistory.length)} of {filteredHistory.length} entries
+                  Showing {(historyPage - 1) * itemsPerPage + 1} to {Math.min(historyPage * itemsPerPage, filteredHistory.length)} of {filteredHistory.length} entries
                 </span>
                 <div className="vm-page-controls">
                   <button onClick={() => setHistoryPage(p => Math.max(1, p - 1))} disabled={historyPage === 1} className="vm-page-btn">
@@ -379,13 +403,13 @@ const ManageRequest = () => {
         )}
       </div>
 
-      {/* CUSTOMIZED PENDING VISITOR REQUESTS MODAL */}
+      {/* PENDING VISITOR REQUESTS MODAL */}
       {showPendingModal && (
         <div className="vm-custom-modal-backdrop" onClick={() => setShowPendingModal(false)}>
           <div className="vm-custom-modal" onClick={e => e.stopPropagation()}>
             <div className="vm-custom-modal-header">
               <h3>Pending Visitor Requests</h3>
-              <button className="vm-custom-close-btn" onClick={() => setShowPendingModal(false)}>
+              <button className="vm-custom-close-btn" aria-label="Close pending requests" onClick={() => setShowPendingModal(false)}>
                 <X size={18} />
               </button>
             </div>
@@ -399,7 +423,7 @@ const ManageRequest = () => {
                   onChange={e => setPendingSearch(e.target.value)}
                   className="vm-clean-input"
                 />
-                {pendingSearch && <X size={16} className="text-muted cursor-pointer" onClick={() => setPendingSearch('')} />}
+                {pendingSearch && <button type="button" className="vm-clear-search" aria-label="Clear pending search" onClick={() => setPendingSearch('')}><X size={16} /></button>}
               </div>
 
               {loadingPending ? (
@@ -442,8 +466,13 @@ const ManageRequest = () => {
                       </div>
 
                       <div className="vm-minimal-footer">
-                        <button className="vm-btn-min-reject" onClick={() => openRejectModal(req)}>Reject</button>
-                        <button className="vm-btn-min-approve" onClick={() => handleApprove(req)}>Approve</button>
+                        {canWrite && isAdmin && (
+                          <>
+                            <button className="vm-btn-min-reject" onClick={() => openRejectModal(req)}>Reject</button>
+                            <button className="vm-btn-min-approve" onClick={() => handleApprove(req)}>Approve</button>
+                          </>
+                        )}
+                        <button className="vm-btn-secondary" onClick={() => openPendingDetails(req)}>View Details</button>
                       </div>
                     </div>
                   ))}
@@ -454,17 +483,12 @@ const ManageRequest = () => {
             {pendingTotalPages > 1 && (
               <div className="vm-custom-modal-pagination">
                 <span className="vm-page-info">
-                  Showing {(pendingPage - 1) * itemsPerPage + 1} to{' '}
-                  {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}
+                  Showing {(pendingPage - 1) * itemsPerPage + 1} to {Math.min(pendingPage * itemsPerPage, filteredPending.length)} of {filteredPending.length}
                 </span>
                 <div className="vm-page-controls">
-                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="vm-page-btn">
-                    <ChevronLeft size={16} />
-                  </button>
+                  <button onClick={() => setPendingPage(p => Math.max(1, p - 1))} disabled={pendingPage === 1} className="vm-page-btn"><ChevronLeft size={16} /></button>
                   <span className="vm-page-current">{pendingPage} / {pendingTotalPages}</span>
-                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="vm-page-btn">
-                    <ChevronRight size={16} />
-                  </button>
+                  <button onClick={() => setPendingPage(p => Math.min(pendingTotalPages, p + 1))} disabled={pendingPage === pendingTotalPages} className="vm-page-btn"><ChevronRight size={16} /></button>
                 </div>
               </div>
             )}
@@ -476,133 +500,130 @@ const ManageRequest = () => {
         </div>
       )}
 
-      {/* PENDING DETAILS MODAL */}
+      {/* FORMAL PENDING DETAILS MODAL */}
       <FormalModal
         show={showPendingDetailsModal}
         onClose={() => setShowPendingDetailsModal(false)}
         title="Visit Request Details"
-        wide
         footer={
           <>
             <button className="vm-btn-secondary" onClick={() => setShowPendingDetailsModal(false)}>Close</button>
-            <button className="vm-btn-primary bg-red" onClick={() => { setShowPendingDetailsModal(false); openRejectModal(selectedRequest); }}>Reject</button>
-            <button className="vm-btn-primary" onClick={() => handleApprove(selectedRequest)}>Approve Request</button>
+            {canWrite && isAdmin && (
+              <>
+                <button className="vm-btn-primary bg-red" onClick={() => { setShowPendingDetailsModal(false); openRejectModal(selectedRequest); }}>Reject</button>
+                <button className="vm-btn-primary" onClick={() => handleApprove(selectedRequest)}>Approve Request</button>
+              </>
+            )}
           </>
         }
       >
         {selectedRequest && (
-          <div className="vm-details-container">
-            <div className="vm-details-grid-clean">
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><User size={14} /> Visitor</span>
-                <p className="vm-detail-value">{selectedRequest.first_name} {selectedRequest.last_name}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Mail size={14} /> Email</span>
-                <p className="vm-detail-value">{selectedRequest.email}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Phone size={14} /> Phone</span>
-                <p className="vm-detail-value">{selectedRequest.phone || 'N/A'}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><CheckCircle size={14} /> Status</span>
-                <p className="vm-detail-value">
-                  <span className={`vm-chip ${['approved', 'completed'].includes(selectedRequest.status.toLowerCase()) ? 'success' : 'danger'}`}>
-                    {selectedRequest.status}
-                  </span>
-                </p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Calendar size={14} /> Date</span>
-                <p className="vm-detail-value">{formatDate(selectedRequest.visit_date)}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Clock size={14} /> Time</span>
-                <p className="vm-detail-value">{formatTime(selectedRequest.visit_time)}</p>
+          <div className="candidate-formal-layout">
+            <div className="cf-row">
+              <div className="cf-label">Visitor Name</div>
+              <div className="cf-value">{selectedRequest.first_name} {selectedRequest.last_name}</div>
+            </div>
+            <div className="cf-row">
+              <div className="cf-label">Email Address</div>
+              <div className="cf-value">{selectedRequest.email}</div>
+            </div>
+            <div className="cf-row">
+              <div className="cf-label">Phone Number</div>
+              <div className="cf-value">{selectedRequest.phone || '—'}</div>
+            </div>
+            <div className="cf-row">
+              <div className="cf-label">Status</div>
+              <div className="cf-value">
+                <span className={`vm-chip ${['approved', 'completed'].includes((selectedRequest.status || '').toLowerCase()) ? 'success' : 'danger'}`}>
+                  {selectedRequest.status}
+                </span>
               </div>
             </div>
-
-            <div className="vm-section-box">
-              <label>Purpose of Visit</label>
-              <p>{selectedRequest.reason || '—'}</p>
+            <div className="cf-row">
+              <div className="cf-label">Date</div>
+              <div className="cf-value">{formatDate(selectedRequest.visit_date)}</div>
             </div>
-
+            <div className="cf-row">
+              <div className="cf-label">Time</div>
+              <div className="cf-value">{formatTime(selectedRequest.visit_time)}</div>
+            </div>
+            <div className="cf-row vertical">
+              <div className="cf-label">Purpose of Visit</div>
+              <div className="cf-value cf-letter-text">{selectedRequest.reason || '—'}</div>
+            </div>
             {additionalVisitors.length > 0 && (
-              <div className="vm-additional-visitors">
-                <h4><Users size={16} color="#0F172A" /> Additional Visitors</h4>
-                <ul className="vm-visitor-list">
-                  {additionalVisitors.map((v, idx) => (
-                    <li key={idx}>{v.visitor_name}</li>
-                  ))}
-                </ul>
+              <div className="cf-row vertical">
+                <div className="cf-label">Additional Visitors</div>
+                <div className="cf-value">
+                  <ul className="cf-list">
+                    {additionalVisitors.map((v, idx) => (
+                      <li key={idx}>{v.visitor_name}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
           </div>
         )}
       </FormalModal>
 
-      {/* HISTORY FINAL DETAILS MODAL */}
+      {/* FORMAL HISTORY FINAL DETAILS MODAL */}
       <FormalModal
         show={showHistoryDetailsModal}
         onClose={() => setShowHistoryDetailsModal(false)}
         title="Appointment Final Details"
-        wide
         footer={<button className="vm-btn-secondary" onClick={() => setShowHistoryDetailsModal(false)}>Close Window</button>}
       >
         {selectedRequest && (
-          <div className="vm-details-container">
-            <div className="vm-details-grid-clean">
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><User size={14} /> Visitor</span>
-                <p className="vm-detail-value">{selectedRequest.first_name} {selectedRequest.last_name}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Mail size={14} /> Email</span>
-                <p className="vm-detail-value">{selectedRequest.email}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Phone size={14} /> Phone</span>
-                <p className="vm-detail-value">{selectedRequest.phone || 'N/A'}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><CheckCircle size={14} /> Status</span>
-                <p className="vm-detail-value">
-                  <span className={`vm-chip ${['approved', 'completed'].includes(selectedRequest.status.toLowerCase()) ? 'success' : 'danger'}`}>
-                    {selectedRequest.status}
-                  </span>
-                </p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Calendar size={14} /> Date</span>
-                <p className="vm-detail-value">{formatDate(selectedRequest.visit_date)}</p>
-              </div>
-              <div className="vm-detail-box">
-                <span className="vm-detail-label"><Clock size={14} /> Time</span>
-                <p className="vm-detail-value">{formatTime(selectedRequest.visit_time)}</p>
+          <div className="candidate-formal-layout">
+            <div className="cf-row">
+              <div className="cf-label">Visitor Name</div>
+              <div className="cf-value">{selectedRequest.first_name} {selectedRequest.last_name}</div>
+            </div>
+            <div className="cf-row">
+              <div className="cf-label">Email Address</div>
+              <div className="cf-value">{selectedRequest.email}</div>
+            </div>
+            <div className="cf-row">
+              <div className="cf-label">Phone Number</div>
+              <div className="cf-value">{selectedRequest.phone || '—'}</div>
+            </div>
+            <div className="cf-row">
+              <div className="cf-label">Status</div>
+              <div className="cf-value">
+                <span className={`vm-chip ${['approved', 'completed'].includes((selectedRequest.status || '').toLowerCase()) ? 'success' : 'danger'}`}>
+                  {selectedRequest.status}
+                </span>
               </div>
             </div>
-
-            <div className="vm-section-box">
-              <label>Purpose of Visit</label>
-              <p>{selectedRequest.reason || '—'}</p>
+            <div className="cf-row">
+              <div className="cf-label">Date</div>
+              <div className="cf-value">{formatDate(selectedRequest.visit_date)}</div>
             </div>
-
+            <div className="cf-row">
+              <div className="cf-label">Time</div>
+              <div className="cf-value">{formatTime(selectedRequest.visit_time)}</div>
+            </div>
+            <div className="cf-row vertical">
+              <div className="cf-label">Purpose of Visit</div>
+              <div className="cf-value cf-letter-text">{selectedRequest.reason || '—'}</div>
+            </div>
             {additionalVisitors.length > 0 && (
-              <div className="vm-additional-visitors">
-                <h4><Users size={16} color="#0F172A" /> Additional Visitors</h4>
-                <ul className="vm-visitor-list">
-                  {additionalVisitors.map((v, idx) => (
-                    <li key={idx}>{v.visitor_name}</li>
-                  ))}
-                </ul>
+              <div className="cf-row vertical">
+                <div className="cf-label">Additional Visitors</div>
+                <div className="cf-value">
+                  <ul className="cf-list">
+                    {additionalVisitors.map((v, idx) => (
+                      <li key={idx}>{v.visitor_name}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
-
             {selectedRequest.admin_notes && (
-              <div className="vm-section-box">
-                <label>Administrator Notes / Reschedule Reason</label>
-                <p>{selectedRequest.admin_notes}</p>
+              <div className="cf-row vertical">
+                <div className="cf-label">Administrator Notes / Reschedule Reason</div>
+                <div className="cf-value cf-letter-text">{selectedRequest.admin_notes}</div>
               </div>
             )}
           </div>
@@ -617,7 +638,7 @@ const ManageRequest = () => {
         footer={
           <>
             <button className="vm-btn-secondary" onClick={() => setShowEditScheduleModal(false)}>Cancel</button>
-            {!isPastAppointment && (
+            {!isPastAppointment && isAdmin && (
               <button className="vm-btn-primary" onClick={handleHistoryUpdate}>
                 Save & Notify Visitor
               </button>
@@ -627,7 +648,7 @@ const ManageRequest = () => {
       >
         {selectedRequest && (
           <div className="vm-details-container">
-            <div style={{ fontSize: '0.9375rem', color: '#475569' }}>
+            <div style={{ fontSize: '0.9375rem', color: '#475569', marginBottom: '0.5rem' }}>
               Rescheduling appointment for: <strong>{selectedRequest.first_name} {selectedRequest.last_name}</strong>
             </div>
 

@@ -256,9 +256,9 @@ const LandingPageManagement = () => {
   return (
     <div className="lpm-container">
       <div className="lpm-header">
-        <div>
+        <div className="lpm-heading">
           
-          <p>Manage the public appointment page, course directory, facility photos, and campus details.</p>
+          <p>Maintain contact information, training programs, and facilities displayed on the public website.</p>
         </div>
         <button
           className="lpm-btn-secondary"
@@ -274,14 +274,20 @@ const LandingPageManagement = () => {
         </button>
       </div>
 
-      <div className="lpm-tabs-bar">
-        <button className={`lpm-tab-btn ${activeTab === 'contact' ? 'active' : ''}`} onClick={() => setActiveTab('contact')}>
+      <div className="lpm-overview" aria-label="Landing page content summary">
+        <div className="lpm-overview-item"><span>CONTENT SECTIONS</span><strong>03</strong><small>Contact, courses & facilities</small></div>
+        <div className="lpm-overview-item"><span>COURSE CATEGORIES</span><strong>{courses.length}</strong><small>Editable training tracks</small></div>
+        <div className="lpm-overview-item"><span>FACILITY GROUPS</span><strong>{facilities.length}</strong><small>Published photo collections</small></div>
+      </div>
+
+      <div className="lpm-tabs-bar" role="tablist" aria-label="Landing content sections">
+        <button className={`lpm-tab-btn ${activeTab === 'contact' ? 'active' : ''}`} role="tab" aria-selected={activeTab === 'contact'} onClick={() => setActiveTab('contact')}>
           Contact Details & Hours
         </button>
-        <button className={`lpm-tab-btn ${activeTab === 'courses' ? 'active' : ''}`} onClick={() => setActiveTab('courses')}>
+        <button className={`lpm-tab-btn ${activeTab === 'courses' ? 'active' : ''}`} role="tab" aria-selected={activeTab === 'courses'} onClick={() => setActiveTab('courses')}>
           Course Management ({courses.length})
         </button>
-        <button className={`lpm-tab-btn ${activeTab === 'facilities' ? 'active' : ''}`} onClick={() => setActiveTab('facilities')}>
+        <button className={`lpm-tab-btn ${activeTab === 'facilities' ? 'active' : ''}`} role="tab" aria-selected={activeTab === 'facilities'} onClick={() => setActiveTab('facilities')}>
           Facility Galleries ({facilities.length})
         </button>
       </div>

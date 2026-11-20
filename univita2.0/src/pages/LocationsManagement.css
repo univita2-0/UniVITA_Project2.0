@@ -428,3 +428,29 @@
   .expert-stats-badge { align-self: flex-start; }
   .expert-pagination { justify-content: center; }
 }
+
+/* UniVITA Facilities — enterprise workspace additions */
+.facility-page-intro { padding: 3px 0 12px; }
+.facility-page-intro .facility-kicker { color: #0f766e; font-size: 10px; font-weight: 800; letter-spacing: .11em; margin-bottom: 5px; }
+.facility-page-intro h1 { margin: 0; font-size: clamp(19px, 2vw, 24px); line-height: 1.35; font-weight: 750; letter-spacing: -.035em; color: #102a3a; }
+.facility-page-intro p { margin: 4px 0 0; color: #64748b; font-size: 12.5px; }
+.facility-stat-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin: 0 0 13px; }
+.facility-stat-strip > div { background: white; border: 1px solid #e0e7ee; border-radius: 6px; min-height: 66px; padding: 10px 13px; display: flex; flex-direction: column; gap: 4px; }
+.facility-stat-strip span { font-size: 11px; color: #64748b; font-weight: 550; }
+.facility-stat-strip strong { color: #142f3e; font-size: 23px; font-weight: 750; line-height: 1.1; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .facility-stat-strip { grid-template-columns: 1fr; } .facility-stat-strip > div { min-height: 56px; } }
+
+/* Scoped to Facilities > Locations, leaving other expert-container pages unchanged */
+.expert-container.facility-locations { padding: 5px 10px 10px; min-height: 0; background: #f7f9fb; }
+.facility-locations .expert-header { align-items: center; gap: 10px; margin: 0 0 12px; }
+.facility-locations .expert-subtitle { font-size: 12px; }
+.facility-locations .expert-btn-primary { background: #0d746f; border-color: #0d746f; border-radius: 5px; min-height: 35px; padding: 7px 12px; font-size: 12px; }
+.facility-locations .expert-btn-primary:hover { background: #095e5a; }
+.facility-locations .expert-search-card, .facility-locations .expert-card { border: 1px solid #e0e7ee; border-radius: 6px; box-shadow: 0 1px 2px rgba(15,23,42,.03); }
+.facility-locations .expert-search-card { margin-bottom: 10px; }
+.facility-locations .expert-table th { background: #f5f8fa; color: #526576; text-transform: uppercase; letter-spacing: .035em; font-size: 11px; }
+.facility-locations .expert-table td { font-size: 12px; }
+.facility-locations .expert-table th, .facility-locations .expert-table td { padding-top: 11px; padding-bottom: 11px; }
+.facility-locations .expert-btn-icon, .facility-locations .expert-page-btn { border-radius: 4px; }
+.facility-clear-search { border: 0; background: transparent; color: #64748b; display: inline-flex; align-items: center; cursor: pointer; padding: 4px; }
+.facility-clear-search:focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; }

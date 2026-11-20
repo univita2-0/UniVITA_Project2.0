@@ -1,9 +1,10 @@
+// src/pages/ProgramManagement.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Edit3, Trash2, Search, X, AlertCircle, Layers } from 'lucide-react';
+import { Plus, Edit3, Trash2, Search, X, AlertCircle, Layers, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { API_BASE } from '../api';
-// We are reusing your existing Course CSS so it looks identical!
+import { useRole } from '../permissions';
 import './CoursesManagement.css'; 
 
 const getAuthHeaders = () => ({
@@ -11,8 +12,14 @@ const getAuthHeaders = () => ({
 });
 
 const ProgramManagement = () => {
+  const { can, isAdmin } = useRole();
+  const canWrite = can('programs:write');
+
   const [programs, setPrograms] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  useEffect(() => { setCurrentPage(1); }, [searchQuery]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
@@ -50,6 +57,11 @@ const ProgramManagement = () => {
   };
 
   const handleEdit = (program) => {
+    // FIX 10.7 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to edit programs.');
+      return;
+    }
     setEditingProgram(program);
     setProgramName(program.program_name);
     setBadge(program.badge || '');
@@ -59,12 +71,22 @@ const ProgramManagement = () => {
   };
 
   const handleDeleteClick = (id, name) => {
+    // FIX 10.7 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to delete programs.');
+      return;
+    }
     setDeleteTargetId(id);
     setDeleteTargetName(name);
     setShowConfirm(true);
   };
 
   const confirmDelete = async () => {
+    // FIX 10.7 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to delete programs.');
+      return;
+    }
     if (!deleteTargetId) return;
     setProcessing(true);
     try {
@@ -79,6 +101,11 @@ const ProgramManagement = () => {
   };
 
   const handleSave = async () => {
+    // FIX 10.7 — defense-in-depth
+    if (!canWrite) {
+      toast.error('You do not have permission to save programs.');
+      return;
+    }
     if (!programName.trim()) return toast.warning("Program name required");
     
     setProcessing(true);
@@ -112,17 +139,43 @@ const ProgramManagement = () => {
     !searchQuery || p.program_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const totalPages = Math.ceil(filteredPrograms.length / itemsPerPage);
+  const currentPrograms = filteredPrograms.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
-    <div className="cm-container">
+    <div className="cm-container facility-programs">
+      {/* FIX 10.7 — read-only banner for Admin */}
+      {isAdmin && (
+        <div style={{
+          padding: '12px 16px',
+          marginBottom: '20px',
+          background: '#F0FDFA',
+          border: '1px solid #99F6E4',
+          borderRadius: '5px',
+          color: '#0F766E',
+          fontSize: '12px',
+          fontWeight: 500,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
+          <span><strong>Read-only view.</strong> Program management is handled by HR.</span>
+        </div>
+      )}
+
+      <div className="facility-page-intro"><p>Organize academic programs and their associated courses.</p></div>
+      <div className="facility-stat-strip" aria-label="Program summary"><div><span>Total programs</span><strong>{programs.length}</strong></div><div><span>Matching programs</span><strong>{filteredPrograms.length}</strong></div><div><span>Programs with badges</span><strong>{programs.filter(p => Boolean(p.badge)).length}</strong></div></div>
       {/* Header Area */}
       <div className="cm-header">
         <div className="cm-header-left">
-          
           <p className="cm-subtitle">Manage academic programs (e.g., Nursing, MedTech) that contain multiple courses.</p>
         </div>
-        <button className="cm-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-          <Plus size={18} /> Add New Program
-        </button>
+        {canWrite && (
+          <button className="cm-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
+            <Plus size={18} /> Add New Program
+          </button>
+        )}
       </div>
 
       {/* Main Content Card */}
@@ -146,7 +199,7 @@ const ProgramManagement = () => {
             )}
           </div>
           <div className="cm-total-count">
-            Total Programs <span>{programs.length}</span>
+            Showing <span>{filteredPrograms.length} of {programs.length}</span>
           </div>
         </div>
 
@@ -157,9 +210,14 @@ const ProgramManagement = () => {
           <div className="cm-empty">
             <div className="cm-empty-icon-wrap"><Layers size={32} /></div>
             <h3>No programs found</h3>
-            <p>{searchQuery ? "No matching programs." : "Get started by adding your first program."}</p>
+            <p>
+              {searchQuery
+                ? "No matching programs."
+                : (canWrite ? "Get started by adding your first program." : "No programs configured yet.")}
+            </p>
           </div>
         ) : (
+          <>
           <div className="cm-table-wrapper">
             <table className="cm-table">
               <thead>
@@ -167,34 +225,47 @@ const ProgramManagement = () => {
                   <th>Program Name</th>
                   <th>Badge</th>
                   <th>Subtitle</th>
-                  <th className="text-right">Actions</th>
+                  {canWrite && <th className="text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody>
-                {filteredPrograms.map(program => (
+                {currentPrograms.map(program => (
                   <tr key={program.id}>
                     <td><span className="cm-course-name">{program.program_name}</span></td>
                     <td>{program.badge || '-'}</td>
                     <td>{program.subtitle || '-'}</td>
-                    <td>
-                      <div className="cm-action-group">
-                        <button className="cm-action-btn edit" onClick={() => handleEdit(program)}>
-                          <Edit3 size={14} /> Edit
-                        </button>
-                        <button className="cm-action-btn delete" onClick={() => handleDeleteClick(program.id, program.program_name)}>
-                          <Trash2 size={14} /> Delete
-                        </button>
-                      </div>
-                    </td>
+                    {canWrite && (
+                      <td>
+                        <div className="cm-action-group">
+                          <button className="cm-action-btn edit" onClick={() => handleEdit(program)}>
+                            <Edit3 size={14} /> Edit
+                          </button>
+                          <button className="cm-action-btn delete" onClick={() => handleDeleteClick(program.id, program.program_name)}>
+                            <Trash2 size={14} /> Delete
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {totalPages > 1 && (
+            <div className="cm-pagination">
+              <span className="cm-page-info">Showing {(currentPage - 1) * itemsPerPage + 1}–{Math.min(currentPage * itemsPerPage, filteredPrograms.length)} of {filteredPrograms.length} programs</span>
+              <div className="cm-page-controls">
+                <button type="button" className="cm-page-btn" aria-label="Previous programs page" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}><ChevronLeft size={16} /></button>
+                <span className="cm-page-current">Page {currentPage} of {totalPages}</span>
+                <button type="button" className="cm-page-btn" aria-label="Next programs page" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}><ChevronRight size={16} /></button>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* Add/Edit Modal — reachable only via HR-gated openers */}
       {showModal && (
         <div className="cm-custom-modal-backdrop" onClick={() => { setShowModal(false); resetForm(); }}>
           <div className="cm-custom-modal small" onClick={e => e.stopPropagation()}>
@@ -209,7 +280,6 @@ const ProgramManagement = () => {
                 <input type="text" className="cm-clean-input border" value={programName} onChange={e => setProgramName(e.target.value)} placeholder="e.g. BS Nursing" disabled={processing} autoFocus />
               </div>
               
-              {/* UPDATED: Badge Dropdown */}
               <div className="cm-form-group" style={{ marginBottom: '1rem' }}>
                 <label>Badge (Optional)</label>
                 <select 

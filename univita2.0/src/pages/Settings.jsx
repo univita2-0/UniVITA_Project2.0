@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { User, Lock, Eye, EyeOff, Save, ShieldCheck, Check, X } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, ShieldCheck, Check } from 'lucide-react';
 import './Settings.css';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
@@ -12,6 +13,22 @@ const getAuthHeaders = () => ({
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
+
+// Real Email Validation (Matches backend logic)
+const DISPOSABLE_EMAIL_DOMAINS = new Set(['mailinator.com','tempmail.com','temp-mail.org','guerrillamail.com','yopmail.com','10minutemail.com','trashmail.com']);
+const FAKE_EMAIL_LOCAL_PARTS = new Set(['test','dummy','fake','sample','demo','admin','user','guest','asdf','qwerty','abc','xyz','123','1234','temp']);
+const RESERVED_TEST_DOMAINS = new Set(['example.com','example.net','example.org','test.com','test.net','test.org','localhost']);
+
+const isRealEmail = (raw) => {
+  const email = String(raw || '').trim().toLowerCase();
+  if (!EMAIL_REGEX.test(email)) return { ok: false, reason: 'Please enter a valid email address.' };
+  const [local, domain] = email.split('@');
+  if (!domain) return { ok: false, reason: 'Email domain is missing.' };
+  if (RESERVED_TEST_DOMAINS.has(domain)) return { ok: false, reason: `"${domain}" is a test domain.` };
+  if (DISPOSABLE_EMAIL_DOMAINS.has(domain)) return { ok: false, reason: 'Disposable email domains are not allowed.' };
+  if (FAKE_EMAIL_LOCAL_PARTS.has(local)) return { ok: false, reason: `"${local}" is a placeholder local-part.` };
+  return { ok: true };
+};
 
 const Settings = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -50,8 +67,9 @@ const Settings = () => {
   const [showCurrentPin, setShowCurrentPin] = useState(false);
   const [showNewPin, setShowNewPin] = useState(false);
 
-  const userRole = localStorage.getItem('user_role');
-  const canChangePin = userRole === 'admin' || userRole === 'hr_admin';
+  // FIX: Standardized role key
+  const userRole = getUserRole();
+  const canChangePin = userRole === 'hr_admin';
 
   const fetchUserData = useCallback(async (userId) => {
     try {
@@ -85,7 +103,7 @@ const Settings = () => {
         id: userId,
         full_name: localStorage.getItem('user_name'),
         email: localStorage.getItem('user_email'),
-        role: localStorage.getItem('user_role'),
+        role: localStorage.getItem('role'),
         employee_id: localStorage.getItem('employee_id')
       };
       setUser(storedUser);
@@ -103,9 +121,13 @@ const Settings = () => {
     if (!profileData.full_name.trim() || !profileData.email.trim()) {
       return toast.warning('Full name and email are required fields.');
     }
-    if (!EMAIL_REGEX.test(profileData.email.trim())) {
-      return toast.warning('Please enter a valid email address format.');
+    
+    // FIX: Use advanced email validation
+    const emailCheck = isRealEmail(profileData.email);
+    if (!emailCheck.ok) {
+      return toast.warning(emailCheck.reason);
     }
+
     if (profileData.phone.trim() && !PHONE_REGEX.test(profileData.phone.trim())) {
       return toast.warning('Please enter a valid phone number.');
     }
@@ -169,7 +191,7 @@ const Settings = () => {
   const handlePinChange = async (e) => {
     e.preventDefault();
     if (!pinData.currentPin || !pinData.newPin || !pinData.confirmPin) {
-      return toast.warning('All PIN fields are required.');
+      return toast.warning('Current PIN or password, new PIN, and confirmation are required.');
     }
     if (!/^\d{4,6}$/.test(pinData.newPin)) {
       return toast.warning('New PIN must be strictly 4 to 6 numeric digits.');
@@ -206,23 +228,24 @@ const Settings = () => {
       <div className="stx-header">
         <div>
           
-          <p>Manage your preferences, profile details, and security configurations.</p>
+          <p>Manage your profile details, password, and authorized security settings.</p>
         </div>
       </div>
 
       <div className="stx-layout">
-        {/* Left Sidebar Navigation */}
         <aside className="stx-sidebar">
-          <nav className="stx-nav">
+          <nav className="stx-nav" aria-label="Settings sections">
             <button
               className={`stx-nav-item ${activeTab === 'profile' ? 'active' : ''}`}
               onClick={() => setActiveTab('profile')}
+              aria-current={activeTab === 'profile' ? 'page' : undefined}
             >
               <User size={18} /> Profile Information
             </button>
             <button
               className={`stx-nav-item ${activeTab === 'password' ? 'active' : ''}`}
               onClick={() => setActiveTab('password')}
+              aria-current={activeTab === 'password' ? 'page' : undefined}
             >
               <Lock size={18} /> Account Password
             </button>
@@ -230,6 +253,7 @@ const Settings = () => {
               <button
                 className={`stx-nav-item ${activeTab === 'pin' ? 'active' : ''}`}
                 onClick={() => setActiveTab('pin')}
+                aria-current={activeTab === 'pin' ? 'page' : undefined}
               >
                 <ShieldCheck size={18} /> Payroll Security PIN
               </button>
@@ -237,9 +261,7 @@ const Settings = () => {
           </nav>
         </aside>
 
-        {/* Right Main Content Area */}
         <main className="stx-main">
-          {/* PROFILE TAB */}
           {activeTab === 'profile' && (
             <section className="stx-section">
               <div className="stx-section-header">
@@ -293,7 +315,6 @@ const Settings = () => {
             </section>
           )}
 
-          {/* PASSWORD TAB */}
           {activeTab === 'password' && (
             <section className="stx-section">
               <div className="stx-section-header">
@@ -312,7 +333,7 @@ const Settings = () => {
                       onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
                       required
                     />
-                    <button type="button" className="stx-eye-btn" onClick={() => setShowCurrent(!showCurrent)} tabIndex="-1">
+                    <button type="button" className="stx-eye-btn" onClick={() => setShowCurrent(!showCurrent)} aria-label="Toggle visibility">
                       {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
@@ -331,7 +352,7 @@ const Settings = () => {
                         onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
                         required
                       />
-                      <button type="button" className="stx-eye-btn" onClick={() => setShowNew(!showNew)} tabIndex="-1">
+                      <button type="button" className="stx-eye-btn" onClick={() => setShowNew(!showNew)} aria-label="Toggle visibility">
                         {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
                     </div>
@@ -359,7 +380,7 @@ const Settings = () => {
                         onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
                         required
                       />
-                      <button type="button" className="stx-eye-btn" onClick={() => setShowConfirm(!showConfirm)} tabIndex="-1">
+                      <button type="button" className="stx-eye-btn" onClick={() => setShowConfirm(!showConfirm)} aria-label="Toggle visibility">
                         {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
                     </div>
@@ -384,57 +405,78 @@ const Settings = () => {
             </section>
           )}
 
-          {/* SECURITY PIN TAB (Admins/HR Only) */}
           {activeTab === 'pin' && canChangePin && (
             <section className="stx-section">
               <div className="stx-section-header">
                 <div className="stx-header-title-row">
-                  
                   <h3>Payroll Security PIN</h3>
                 </div>
                 <p>Your 4 to 6 digit numerical PIN is required to access sensitive payroll modules and records.</p>
               </div>
 
               {!showPinChange ? (
-                <div className="stx-actions" style={{ marginTop: '0' }}>
-                  <button className="stx-btn-secondary" onClick={() => setShowPinChange(true)}>
-                    Change Security PIN
+                <div className="stx-actions stx-actions-top">
+                  <button type="button" className="stx-btn-secondary" onClick={() => setShowPinChange(true)}>
+                    Set or Change Security PIN
                   </button>
                 </div>
               ) : (
-                <form onSubmit={handlePinChange} className="stx-form">
-                  <div className="stx-form-group" style={{ maxWidth: '48%' }}>
-                    <label>Current PIN <span className="stx-required">*</span></label>
+                <form onSubmit={handlePinChange} className="stx-form stx-pin-form">
+                  <div className="stx-pin-form-intro">
+                    <ShieldCheck size={18} aria-hidden="true" />
+                    <div>
+                      <strong>Secure your payroll access</strong>
+                      <span>Your account password is only needed when setting up your first PIN.</span>
+                    </div>
+                  </div>
+                  <div className="stx-form-group stx-current-credential">
+                    <label htmlFor="payroll-current-credential">
+                      Current PIN or Account Password <span className="stx-required">*</span>
+                    </label>
                     <div className="stx-input-wrapper">
                       <input
+                        id="payroll-current-credential"
                         type={showCurrentPin ? 'text' : 'password'}
                         className="stx-input"
-                        maxLength="6"
                         value={pinData.currentPin}
-                        onChange={(e) => setPinData({ ...pinData, currentPin: e.target.value.replace(/\D/g, '') })}
+                        onChange={(e) => setPinData({ ...pinData, currentPin: e.target.value })}
+                        aria-describedby="payroll-credential-help"
+                        autoComplete="off"
                         required
                       />
-                      <button type="button" className="stx-eye-btn" onClick={() => setShowCurrentPin(!showCurrentPin)} tabIndex="-1">
+                      <button
+                        type="button"
+                        className="stx-eye-btn"
+                        onClick={() => setShowCurrentPin(!showCurrentPin)}
+                        aria-label={showCurrentPin ? 'Hide current credential' : 'Show current credential'}
+                      >
                         {showCurrentPin ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
                     </div>
+                    <p className="stx-hint stx-credential-help" id="payroll-credential-help">
+                      Enter your existing PIN. If this is your first time setting a PIN,
+                      enter your account password instead.
+                    </p>
                   </div>
 
                   <div className="stx-divider"></div>
 
                   <div className="stx-form-row">
                     <div className="stx-form-group">
-                      <label>New PIN <span className="stx-required">*</span></label>
+                      <label htmlFor="payroll-new-pin">New PIN <span className="stx-required">*</span></label>
                       <div className="stx-input-wrapper">
                         <input
+                          id="payroll-new-pin"
                           type={showNewPin ? 'text' : 'password'}
                           className="stx-input"
+                          inputMode="numeric"
+                          autoComplete="off"
                           maxLength="6"
                           value={pinData.newPin}
                           onChange={(e) => setPinData({ ...pinData, newPin: e.target.value.replace(/\D/g, '') })}
                           required
                         />
-                        <button type="button" className="stx-eye-btn" onClick={() => setShowNewPin(!showNewPin)} tabIndex="-1">
+                        <button type="button" className="stx-eye-btn" onClick={() => setShowNewPin(!showNewPin)} aria-label="Toggle visibility">
                           {showNewPin ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                       </div>
@@ -442,8 +484,11 @@ const Settings = () => {
                     </div>
 
                     <div className="stx-form-group">
-                      <label>Confirm New PIN <span className="stx-required">*</span></label>
+                      <label htmlFor="payroll-confirm-pin">Confirm New PIN <span className="stx-required">*</span></label>
                       <input
+                        id="payroll-confirm-pin"
+                        inputMode="numeric"
+                        autoComplete="off"
                         type="password"
                         className="stx-input"
                         maxLength="6"

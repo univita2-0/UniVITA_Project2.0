@@ -1,7 +1,5 @@
-/* src/pages/SystemConfig.css */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
-
-.expert-container {
+@import  url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap");
+.uv-admin-config.expert-container {
   --bg: #F8FAFC;
   --surface: #FFFFFF;
   --border: #E2E8F0;
@@ -24,13 +22,12 @@
   background: var(--bg);
   padding: 2rem;
   min-height: 100vh;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
   color: var(--text);
   font-size: 0.9375rem;
   line-height: 1.5;
 }
-
-.expert-header {
+.uv-admin-config .expert-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -40,10 +37,9 @@
   flex-wrap: wrap;
   gap: 1rem;
 }
-.expert-title-group { display: flex; align-items: center; gap: 1rem; }
-
-.expert-title {
-  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+.uv-admin-config .expert-title-group { display: flex; align-items: center; gap: 1rem; }
+.uv-admin-config .expert-title {
+  font-family: "Plus Jakarta Sans", "Inter", sans-serif;
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--text);
@@ -51,23 +47,21 @@
   letter-spacing: -0.025em;
   line-height: 1.2;
 }
-.expert-subtitle {
+.uv-admin-config .expert-subtitle {
   color: var(--text-muted);
   font-size: 0.9375rem;
   margin: 0;
   max-width: 640px;
   line-height: 1.5;
 }
-
-.expert-card {
+.uv-admin-config .expert-card {
   background: var(--surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
   padding: 1.75rem 2rem;
 }
-
-.expert-loading {
+.uv-admin-config .expert-loading {
   text-align: center;
   padding: 5rem 2rem;
   color: var(--accent);
@@ -75,30 +69,26 @@
   background: var(--bg);
   min-height: 100vh;
 }
-
-.set-form-group {
+.uv-admin-config .set-form-group {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   flex: 1;
 }
-
-.set-form-group label {
+.uv-admin-config .set-form-group label {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-2);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
-
-.set-hint {
+.uv-admin-config .set-hint {
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: 0.15rem;
   line-height: 1.4;
 }
-
-.expert-clean-input.border {
+.uv-admin-config .expert-clean-input.border {
   border: 1px solid #CBD5E1;
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -112,19 +102,17 @@
   transition: border-color 0.15s, box-shadow 0.15s;
   box-sizing: border-box;
 }
-.expert-clean-input.border:focus {
+.uv-admin-config .expert-clean-input.border:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
-
-.sc-form-grid {
+.uv-admin-config .sc-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
   margin-bottom: 1.5rem;
 }
-
-.sc-actions {
+.uv-admin-config .sc-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
@@ -132,8 +120,7 @@
   border-top: 1px solid var(--border);
   flex-wrap: wrap;
 }
-
-.expert-btn-primary, .expert-btn-secondary {
+.uv-admin-config .expert-btn-primary, .uv-admin-config .expert-btn-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -149,35 +136,55 @@
   box-sizing: border-box;
   white-space: nowrap;
 }
-
-.expert-btn-primary {
+.uv-admin-config .expert-btn-primary {
   border: 1px solid transparent;
   background: var(--primary);
   color: #FFFFFF;
 }
-.expert-btn-primary:hover:not(:disabled) {
+.uv-admin-config .expert-btn-primary:hover:not(:disabled) {
   background: var(--primary-hover);
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15);
 }
-.expert-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
-
-.expert-btn-secondary {
+.uv-admin-config .expert-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+.uv-admin-config .expert-btn-secondary {
   border: 1px solid #CBD5E1;
   background: var(--surface);
   color: var(--text-2);
   box-shadow: var(--shadow-sm);
 }
-.expert-btn-secondary:hover:not(:disabled) {
+.uv-admin-config .expert-btn-secondary:hover:not(:disabled) {
   background: #F1F5F9;
   color: var(--text);
   border-color: #94A3B8;
 }
-.expert-btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
+.uv-admin-config .expert-btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
+@media  (max-width: 768px) {.uv-admin-config.expert-container { padding: 1.25rem; }
+.uv-admin-config .expert-card { padding: 1.25rem; }
+.uv-admin-config .sc-form-grid { grid-template-columns: 1fr; }
+.uv-admin-config .sc-actions { flex-direction: column; }
+.uv-admin-config .expert-btn-secondary, .uv-admin-config .expert-btn-primary { width: 100%; }}
 
-@media (max-width: 768px) {
-  .expert-container { padding: 1.25rem; }
-  .expert-card { padding: 1.25rem; }
-  .sc-form-grid { grid-template-columns: 1fr; }
-  .sc-actions { flex-direction: column; }
-  .expert-btn-secondary, .expert-btn-primary { width: 100%; }
-}
+/* UniVITA enterprise design refinements: page-scoped */
+
+.uv-admin-config.expert-container { padding: 5px 10px 10px; min-height: auto; background: #F8FAFC; font-family: Inter, system-ui, sans-serif; color: #142435; }
+.uv-admin-config .expert-header { display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom: 1px solid #DFE7EC; padding: 8px 2px 14px; margin-bottom: 14px; }
+.uv-admin-config .expert-title { font-size: 22px; line-height: 1.25; letter-spacing: -.02em; font-weight: 700; margin:0 0 5px; color:#142435; }
+.uv-admin-config .expert-subtitle { font-size: 13px; line-height: 1.45; color: #64748B; margin:0; }
+.uv-admin-config .expert-card, .uv-admin-config .expert-search-card, .uv-admin-config .rep-stat-box { border-radius: 7px; border:1px solid #DFE7EC; box-shadow: 0 1px 2px rgba(15, 23, 42, .035); background:#fff; }
+.uv-admin-config .expert-card { overflow:hidden; }
+.uv-admin-config .expert-search-card { border:0; border-bottom:1px solid #E4EAF0; border-radius:0; box-shadow:none; background:white; padding:12px 14px; margin:0; }
+.uv-admin-config .expert-table th { background:#F5F8FA; color:#475569; font-size:11px; letter-spacing:.055em; padding:11px 14px; font-weight:700; border-bottom:1px solid #E2E8F0; }
+.uv-admin-config .expert-table td { padding:11px 14px; font-size:13px; border-bottom:1px solid #EDF1F5; }
+.uv-admin-config .expert-table tbody tr:last-child td { border-bottom:0; }
+.uv-admin-config .expert-table tbody tr:hover td { background:#F8FBFB; }
+.uv-admin-config .expert-pagination { padding:10px 14px; background:#FAFCFD; border-top:1px solid #DFE7EC; flex-wrap:wrap; gap:10px; }
+.uv-admin-config .expert-page-btn, .uv-admin-config .expert-btn-secondary, .uv-admin-config .expert-btn-primary { border-radius:5px; }
+.uv-admin-config .expert-btn-primary { background:#0D9488; border-color:#0D9488; }
+.uv-admin-config .expert-btn-primary:hover:not(:disabled) { background:#0F766E; }
+.uv-admin-config input:focus-visible, .uv-admin-config select:focus-visible, .uv-admin-config button:focus-visible { outline:2px solid #0D9488; outline-offset:2px; }
+.uv-admin-config .uv-admin-section-heading { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; padding:13px 14px; border-bottom:1px solid #E4EAF0; font-size:13px; font-weight:650; color:#142435; }
+.uv-admin-config .uv-admin-section-heading span:last-child { font-size:12px; color:#64748B; font-weight:500; }
+.uv-admin-config .uv-admin-metadata { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }
+.uv-admin-config .uv-admin-metadata span { background:white; border:1px solid #DFE7EC; border-radius:5px; padding:8px 12px; font-size:12px; color:#475569; }
+.uv-admin-config .uv-admin-metadata strong { color:#0F766E; }
+@media (max-width: 680px) { .uv-admin-config .expert-title { font-size:19px; } .uv-admin-config .expert-table th, .uv-admin-config .expert-table td { padding:10px; } .uv-admin-config .expert-header { padding-top:5px; } }

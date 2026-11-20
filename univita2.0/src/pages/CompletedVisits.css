@@ -301,3 +301,29 @@
   .btn-export-modern { width: 100%; }
   .cv-pagination-footer { flex-direction: column; align-items: flex-end; gap: 1rem; }
 }
+/* UniVITA enterprise completed visits — scoped page foundation */
+.cv-container {padding:5px 10px 10px;min-height:100%;font-family:Inter,system-ui,sans-serif;background:#f8fafc;color:#142435}
+.cv-header {margin-bottom:13px;align-items:center}
+.cv-title {font-family:Inter,system-ui,sans-serif;font-size:21px;line-height:1.3;margin:0 0 4px;color:#142435}
+.cv-subtitle {font-size:12.5px;line-height:1.6}
+.cv-overview {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:13px}
+.cv-overview-item {background:#fff;border:1px solid #e2e8f0;border-radius:6px;display:flex;flex-direction:column;gap:5px;padding:13px 15px;min-width:0}
+.cv-overview-item>span {font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:650}
+.cv-overview-item>strong {font-size:24px;font-weight:700;color:#142435;line-height:1.2;font-variant-numeric:tabular-nums}
+.cv-overview-item>small {font-size:11px;color:#94a3b8}
+.cv-filters-card {padding:12px 14px;margin-bottom:13px;border-radius:6px;box-shadow:0 1px 2px rgba(15,23,42,.03)}
+.cv-filters-wrapper{gap:10px}
+.cv-date-group label{font-size:10.5px}
+.cv-modern-input {min-height:36px;height:36px;border-radius:5px;font-size:12px}
+.cv-container .btn-export-modern {border-radius:5px;min-height:36px;font-size:12px}
+.cv-table-wrapper {border-radius:6px;box-shadow:0 1px 2px rgba(15,23,42,.03);overflow:hidden}
+.cv-table-scroll {overflow-x:auto}
+.cv-table {min-width:820px}
+.cv-table th {background:#f8fafc;color:#52647a;font-size:10.5px;text-transform:uppercase;letter-spacing:.035em;font-weight:700}
+.cv-table td {font-size:12px;color:#344256}
+.cv-table th,.cv-table td {padding:11px 12px;border-bottom:1px solid #edf1f5}
+.cv-duration-badge {border-radius:4px}
+.cv-pagination-footer {padding:11px 14px}
+.cv-container .cv-page-btn {border-radius:5px}
+.cv-container input:focus-visible,.cv-container button:focus-visible,.cv-container select:focus-visible {outline:2px solid #0d9488;outline-offset:2px}
+@media(max-width:640px){.cv-overview{grid-template-columns:1fr}.cv-filters-wrapper{align-items:stretch}.cv-date-group{flex:1;min-width:125px}.cv-modern-input{min-width:0;width:100%}}

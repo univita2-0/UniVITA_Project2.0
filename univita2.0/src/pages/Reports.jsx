@@ -4,19 +4,41 @@ import './Reports.css';
 import {
   Download, Users, Calendar, DollarSign, PieChart,
   Clock, FileText, TrendingUp, AlertCircle, CheckCircle, XCircle,
-  ClipboardList, ShieldCheck, Printer, Award, Info, Layers, BookOpen
+  ClipboardList, Printer, Layers, BookOpen, ShieldAlert
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, PieChart as RPieChart, Pie, Cell
 } from 'recharts';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+// Export untrusted text as data, not spreadsheet formulas.
+const csvCell = (value) => {
+  const raw = String(value ?? '');
+  const escaped = /^[\s\uFEFF]*[=+@\-\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${escaped.replace(/"/g, '""')}"`;
+};
+
+const calendarDay = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value.slice(0, 10);
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' });
+};
+
 const Reports = () => {
+  // ---- Role detection (Fix 10.12) ----
+  // The JWT-derived role is the source of truth; do not grant HR access by default.
+  const currentUserRole = getUserRole();
+  const isAdmin = currentUserRole === 'admin';
+  const isHR = currentUserRole === 'hr_admin';
+  const canWrite = isHR; // governs Export CSV + Print
+
   const [selectedReport, setSelectedReport] = useState('attendance');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
@@ -25,7 +47,6 @@ const Reports = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // NEW: Program and Course Filter States
   const [programs, setPrograms] = useState([]);
   const [courses, setCourses] = useState([]);
   const [programId, setProgramId] = useState('');
@@ -55,7 +76,21 @@ const Reports = () => {
   const lastDayOfMonth = new Date(parseInt(currentYear, 10), parseInt(currentMonthNum, 10), 0).getDate();
   const lastDayStr = String(lastDayOfMonth).padStart(2, '0');
 
-  // NEW: Fetch Programs and Courses for the dropdowns
+  // ---- Tabs: payroll hidden for Admin ----
+  const allTabs = [
+    { id: 'attendance', label: 'Attendance & Timekeeping', icon: <Clock size={16} /> },
+    { id: 'payroll', label: 'Payroll Status & Earnings', icon: <DollarSign size={16} /> },
+    { id: 'visitor', label: 'Campus Visitor Tracking', icon: <Users size={16} /> },
+    { id: 'scheduling', label: 'Instruction Logistics', icon: <Calendar size={16} /> },
+    { id: 'requests', label: 'Workflow & HR Requests', icon: <ClipboardList size={16} /> }
+  ];
+  const visibleTabs = allTabs.filter(t => (t.id !== 'payroll' || isHR) && (t.id !== 'visitor' || isAdmin)); // HR cannot call the existing visitor-detail API.
+
+  // Guard: if Admin somehow lands on payroll, force back to attendance
+  useEffect(() => {
+    if (!visibleTabs.some(tab => tab.id === selectedReport)) setSelectedReport('attendance');
+  }, [currentUserRole, selectedReport]);
+
   useEffect(() => {
     const fetchFilterData = async () => {
       try {
@@ -65,14 +100,13 @@ const Reports = () => {
         ]);
         setPrograms(progRes.data || []);
         setCourses(courseRes.data || []);
-      } catch (err) { 
-        console.error("Failed to load filter data", err); 
+      } catch (err) {
+        console.error('Failed to load filter data', err);
       }
     };
     fetchFilterData();
   }, []);
 
-  // Updated dependency array to include programId and courseName
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -80,8 +114,8 @@ const Reports = () => {
       try {
         switch (selectedReport) {
           case 'attendance': await fetchAttendanceData(); break;
-          case 'payroll': await fetchPayrollData(); break;
-          case 'visitor': await fetchVisitorData(); break;
+          case 'payroll': if (!isHR) throw new Error('Payroll report is available to HR only.'); await fetchPayrollData(); break;
+          case 'visitor': if (!isAdmin) throw new Error('Detailed visitor report requires Administrator access.'); await fetchVisitorData(); break;
           case 'scheduling': await fetchSchedulingData(); break;
           case 'requests': await fetchRequestsData(); break;
           default: break;
@@ -99,9 +133,9 @@ const Reports = () => {
 
   const fetchAttendanceData = async () => {
     const [year, month] = selectedMonth.split('-');
-    const res = await axios.get(`${API_BASE}/attendance-monthly`, { 
-      params: { month, year, program_id: programId, course: courseName }, // NEW params
-      ...getAuthHeaders() 
+    const res = await axios.get(`${API_BASE}/attendance-monthly`, {
+      params: { month, year, program_id: programId, course: courseName },
+      ...getAuthHeaders()
     });
     const data = res.data || [];
     setAttendanceData(data.map(e => ({
@@ -117,9 +151,8 @@ const Reports = () => {
 
   const fetchPayrollData = async () => {
     const res = await axios.get(`${API_BASE}/payroll/history`, getAuthHeaders());
-    const all = res.data || [];
+    const all = Array.isArray(res.data) ? res.data : [];
     const target = new Date(selectedMonth + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-    // Payroll is filtered by month, global program/course filter doesn't directly apply to finalized payroll batches in this view
     setPayrollData(all.filter(p => p.month_year === target));
   };
 
@@ -135,8 +168,8 @@ const Reports = () => {
     ]);
     const history = histRes.data || [];
     const pending = pendRes.data || [];
-    const monthHist = history.filter(v => v.visit_date >= start && v.visit_date <= end);
-    const monthPend = pending.filter(v => v.visit_date >= start && v.visit_date <= end);
+    const monthHist = history.filter(v => calendarDay(v.visit_date) >= start && calendarDay(v.visit_date) <= end);
+    const monthPend = pending.filter(v => calendarDay(v.visit_date) >= start && calendarDay(v.visit_date) <= end);
 
     setVisitorStats({
       approved: monthHist.filter(v => v.status === 'APPROVED').length,
@@ -149,112 +182,116 @@ const Reports = () => {
   const fetchSchedulingData = async () => {
     const res = await axios.get(`${API_BASE}/schedules`, getAuthHeaders());
     let all = res.data || [];
-    all = all.filter(s => s.schedule_date && s.schedule_date.startsWith(selectedMonth));
-    
-    // NEW: Filter schedules locally by Program/Course
+    all = all.filter(s => calendarDay(s.schedule_date).startsWith(selectedMonth));
+
     if (courseName) {
       all = all.filter(s => s.course === courseName);
     } else if (programId) {
       const validCourses = courses.filter(c => String(c.program_id) === String(programId)).map(c => c.name);
       all = all.filter(s => validCourses.includes(s.course));
     }
-    
     setScheduleData(all);
   };
 
   const fetchRequestsData = async () => {
-    try {
-      const [leavesRes, otAllRes, otPendRes, appHistRes, appPendRes] = await Promise.all([
-        axios.get(`${API_BASE}/leave-requests/grouped`, getAuthHeaders()).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE}/overtime-requests/all`, getAuthHeaders()).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE}/overtime-requests/pending`, getAuthHeaders()).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE}/attendance-appeals/history`, getAuthHeaders()).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders()).catch(() => ({ data: [] }))
-      ]);
-
-      const leaves = leavesRes.data || [];
-      const uniqueOtMap = new Map();
-      [...(otAllRes.data || []), ...(otPendRes.data || [])].forEach(item => uniqueOtMap.set(item.id, item));
-      const allOt = Array.from(uniqueOtMap.values());
-
-      const uniqueAppealsMap = new Map();
-      [...(appHistRes.data || []), ...(appPendRes.data || [])].forEach(item => uniqueAppealsMap.set(item.id, item));
-      const allAppeals = Array.from(uniqueAppealsMap.values());
-
-      const filterByMonth = (items, dateField) => items.filter(item => item[dateField] && item[dateField].startsWith(selectedMonth));
-
-      setRequestsData({
-        leaves: filterByMonth(leaves, 'start_date'),
-        overtime: filterByMonth(allOt, 'date'),
-        appeals: filterByMonth(allAppeals, 'date')
-      });
-    } catch (error) {
-      console.error("Error fetching requests data", error);
-    }
+    // A failed source must not silently produce an authoritative-looking zero report.
+    const [leavesRes, otAllRes, otPendRes, appHistRes, appPendRes] = await Promise.all([
+      axios.get(`${API_BASE}/leave-requests/grouped`, getAuthHeaders()),
+      axios.get(`${API_BASE}/overtime-requests/all`, getAuthHeaders()),
+      axios.get(`${API_BASE}/overtime-requests/pending`, getAuthHeaders()),
+      axios.get(`${API_BASE}/attendance-appeals/history`, getAuthHeaders()),
+      axios.get(`${API_BASE}/attendance-appeals/pending`, getAuthHeaders())
+    ]);
+    const asArray = (response, label) => {
+      if (!Array.isArray(response.data)) throw new Error(`${label} returned an invalid response. Report cannot be completed.`);
+      return response.data;
+    };
+    const leaves = asArray(leavesRes, 'Leave records');
+    const uniqueOtMap = new Map();
+    [...asArray(otAllRes, 'Overtime history'), ...asArray(otPendRes, 'Pending overtime')].forEach(item => uniqueOtMap.set(item.id, item));
+    const uniqueAppealsMap = new Map();
+    [...asArray(appHistRes, 'Appeal history'), ...asArray(appPendRes, 'Pending appeals')].forEach(item => uniqueAppealsMap.set(item.id, item));
+    const filterByMonth = (items, dateField) => items.filter(item => calendarDay(item[dateField]).startsWith(selectedMonth));
+    setRequestsData({
+      leaves: filterByMonth(leaves, 'start_date'),
+      overtime: filterByMonth(Array.from(uniqueOtMap.values()), 'date'),
+      appeals: filterByMonth(Array.from(uniqueAppealsMap.values()), 'date')
+    });
   };
 
   const handleExportCSV = () => {
+    if (!canWrite || loading || error) {
+      alert('Report export is unavailable: check access rights and report load status.');
+      return;
+    }
     let headers = [];
     let rows = [];
     let filename = `Report_${selectedReport}_${selectedMonth}.csv`;
 
     if (selectedReport === 'attendance') {
-      headers = ["Employee ID", "Name", "Regular Hours", "Overtime Hours", "Leave Days"];
-      rows = attendanceData.map(e => [e.employee_id, e.full_name, e.regular_hours, e.overtime_hours, e.leave_days]);
+      headers = ['Employee ID', 'Name', 'Regular Hours', 'Overtime Hours (Unverified)', 'Leave Days (Unverified)'];
+      rows = attendanceData.map(e => [e.employee_id, e.full_name, e.regular_hours, 'Not verified', 'Not verified']);
     } else if (selectedReport === 'payroll') {
-      headers = ["Employee ID", "Name", "Gross Pay", "SSS", "PhilHealth", "Pag-IBIG", "Tax", "Net Pay"];
+      headers = ['Employee ID', 'Name', 'Gross Pay', 'SSS', 'PhilHealth', 'Pag-IBIG', 'Tax', 'Net Pay'];
       rows = payrollData.map(p => [p.employee_id, p.full_name, p.gross_pay, p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.tax_deduction, p.net_pay]);
     } else if (selectedReport === 'requests') {
-      headers = ["Category", "Name", "Date", "Reason", "Status"];
+      headers = ['Category', 'Name', 'Date', 'Reason', 'Status'];
       rows = [
-        ...requestsData.leaves.map(x => ["Leave", x.full_name, x.start_date, x.reason, x.status]),
-        ...requestsData.overtime.map(x => ["Overtime", x.full_name, x.date, x.reason, x.status]),
-        ...requestsData.appeals.map(x => ["Appeal", x.full_name, x.date, x.reason, x.status])
+        ...requestsData.leaves.map(x => ['Leave', x.full_name, x.start_date, x.reason, x.status]),
+        ...requestsData.overtime.map(x => ['Overtime', x.full_name, x.date, x.reason, x.status]),
+        ...requestsData.appeals.map(x => ['Appeal', x.full_name, x.date, x.reason, x.status])
       ];
     } else {
-      return alert("CSV Export not configured for this tab yet.");
+      return alert('CSV Export not configured for this tab yet.');
     }
 
-    const csvContent = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v||'').replace(/"/g, '""')}"`).join(','))].join('\n');
+    const csvContent = [headers.map(csvCell).join(','), ...rows.map(r => r.map(csvCell).join(','))].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
+    const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", filename);
+    link.setAttribute('download', filename);
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   };
 
-  const handleExport = () => window.print();
+  const handleExport = () => {
+    if (!canWrite || loading || error) {
+      alert('Report printing is unavailable: check access rights and report load status.');
+      return;
+    }
+    window.print();
+  };
 
   const chartColors = ['#0F172A', '#0D9488', '#64748B', '#DC2626', '#F59E0B'];
   const tooltipStyle = { borderRadius: '8px', border: '1px solid #E2E8F0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '0.85rem', fontFamily: 'Inter' };
 
   const renderAttendanceReport = () => {
     const totalReg = attendanceData.reduce((s, e) => s + e.regular_hours, 0);
-    const totalOT = attendanceData.reduce((s, e) => s + e.overtime_hours, 0);
-    const totalLeave = attendanceData.reduce((s, e) => s + e.leave_days, 0);
-    const hoursBreakdown = [{ name: 'Regular Hours', value: totalReg }, { name: 'Overtime Hours', value: totalOT }];
+    const totalOT = 0; // Monthly API returns a hard-coded zero; do not claim it as a measured total.
+    const totalLeave = 0; // The current monthly query excludes 'on leave' rows.
+    const hoursBreakdown = [{ name: 'Regular Hours', value: totalReg }]; // The source API does not return reconciled overtime.
     const topEmployees = [...attendanceData]
-      .sort((a, b) => (b.regular_hours + b.overtime_hours) - (a.regular_hours + a.overtime_hours))
+      .sort((a, b) => b.regular_hours - a.regular_hours)
       .slice(0, 10)
       .map(e => ({
         name: e.full_name?.split(' ')[0] || e.employee_id,
-        'Regular': Number(e.regular_hours.toFixed(1)),
-        'Overtime': Number(e.overtime_hours.toFixed(1))
+        Regular: Number(e.regular_hours.toFixed(1)),
+        Overtime: 0
       }));
 
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
           <StatBox label="Total Regular Hours" value={`${totalReg.toFixed(1)} hrs`} icon={<Clock size={18} />} />
-          <StatBox label="Total Overtime Hours" value={`${totalOT.toFixed(1)} hrs`} icon={<TrendingUp size={18} />} />
-          <StatBox label="Approved Leave Days" value={totalLeave} icon={<FileText size={18} />} />
+          <StatBox label="Overtime Hours" value="Not verified" icon={<TrendingUp size={18} />} />
+          <StatBox label="Approved Leave Days" value="Not verified" icon={<FileText size={18} />} />
           <StatBox label="Faculty Tracked" value={attendanceData.length} icon={<Users size={18} />} />
         </div>
         <div className="formal-rep-chart-grid">
           <div className="formal-rep-card">
-            <div className="formal-rep-card-header"><h3>Instruction Hours Ratio</h3></div>
+            <div className="formal-rep-card-header"><h3>Recorded Regular Instruction Hours</h3></div>
             <div className="formal-rep-card-body">
-              {totalReg === 0 && totalOT === 0 ? <div className="formal-rep-empty">No attendance records logged for this month.</div> : (
+              {totalReg === 0 && totalOT === 0 ? <div className="formal-rep-empty">No regular attendance hours returned for this month.</div> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <RPieChart>
                     <Pie data={hoursBreakdown} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={65} outerRadius={95} paddingAngle={4} label>
@@ -268,7 +305,7 @@ const Reports = () => {
             </div>
           </div>
           <div className="formal-rep-card">
-            <div className="formal-rep-card-header"><h3>Rendered Hours by Faculty (Top 10)</h3></div>
+            <div className="formal-rep-card-header"><h3>Recorded Regular Hours by Faculty (Top 10)</h3></div>
             <div className="formal-rep-card-body">
               {topEmployees.length === 0 ? <div className="formal-rep-empty">No faculty hours recorded.</div> : (
                 <ResponsiveContainer width="100%" height={280}>
@@ -279,8 +316,7 @@ const Reports = () => {
                     <Tooltip cursor={{ fill: '#F8FAFC' }} contentStyle={tooltipStyle} />
                     <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '0.85rem' }} />
                     <Bar dataKey="Regular" stackId="a" fill="#0F172A" maxBarSize={32} />
-                    <Bar dataKey="Overtime" stackId="a" fill="#0D9488" radius={[4, 4, 0, 0]} maxBarSize={32} />
-                  </BarChart>
+                    </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
@@ -302,15 +338,15 @@ const Reports = () => {
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
-          <StatBox label="Employees Disbursed" value={payrollData.length} icon={<Users size={18} />} />
+          <StatBox label="Payroll Records" value={payrollData.length} icon={<Users size={18} />} />
           <StatBox label="Total Gross Earnings" value={`₱${grossSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={<DollarSign size={18} />} />
           <StatBox label="Total Net Pay" value={`₱${netSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={<DollarSign size={18} />} />
           <StatBox label="Average Net Salary" value={`₱${(payrollData.length ? netSum / payrollData.length : 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`} icon={<TrendingUp size={18} />} />
         </div>
         <div className="formal-rep-card">
-          <div className="formal-rep-card-header"><h3>Compensation Disbursement Distribution (Top 10)</h3></div>
+          <div className="formal-rep-card-header"><h3>Recorded Gross and Net Payroll (Top 10)</h3></div>
           <div className="formal-rep-card-body">
-            {payrollData.length === 0 ? <div className="formal-rep-empty">No finalized payroll batches found for this month.</div> : (
+            {payrollData.length === 0 ? <div className="formal-rep-empty">No saved payroll records found for this month.</div> : (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={chart} margin={{ top: 10, right: 10, left: 15, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
@@ -332,7 +368,7 @@ const Reports = () => {
   const renderVisitorReport = () => {
     const total = visitorStats.approved + visitorStats.rejected + visitorStats.pending;
     const pieData = [
-      { name: 'Approved Passes', value: visitorStats.approved },
+      { name: 'Approved Appointments', value: visitorStats.approved },
       { name: 'Rejected Passes', value: visitorStats.rejected },
       { name: 'Pending Approvals', value: visitorStats.pending }
     ];
@@ -340,15 +376,15 @@ const Reports = () => {
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
-          <StatBox label="Approved Passes" value={visitorStats.approved} icon={<CheckCircle size={18} />} />
+          <StatBox label="Approved Appointments" value={visitorStats.approved} icon={<CheckCircle size={18} />} />
           <StatBox label="Rejected Requests" value={visitorStats.rejected} icon={<XCircle size={18} />} />
           <StatBox label="Awaiting Approval" value={visitorStats.pending} icon={<AlertCircle size={18} />} />
           <StatBox label="Total Appointments" value={total} icon={<PieChart size={18} />} />
         </div>
         <div className="formal-rep-card">
-          <div className="formal-rep-card-header"><h3>Guest Pass Clearance Breakdown</h3></div>
+          <div className="formal-rep-card-header"><h3>Appointment Decision Breakdown</h3></div>
           <div className="formal-rep-card-body" style={{ display: 'flex', justifyContent: 'center' }}>
-            {total === 0 ? <div className="formal-rep-empty">No visitor access logs recorded for this month.</div> : (
+            {total === 0 ? <div className="formal-rep-empty">No visitor appointments found for this month.</div> : (
               <ResponsiveContainer width="60%" height={290}>
                 <RPieChart>
                   <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={70} outerRadius={100} paddingAngle={3} label>
@@ -416,7 +452,7 @@ const Reports = () => {
       { name: 'Appeals', Pending: countStatus(requestsData.appeals, 'pending'), Approved: countStatus(requestsData.appeals, 'approved'), Rejected: countStatus(requestsData.appeals, 'rejected') },
     ];
     const totalPending = chartData.reduce((acc, curr) => acc + curr.Pending, 0);
-    
+
     const today = new Date();
     const addDaysPending = (req, type) => {
       const created = new Date(req.created_at || req.submitted_at || req.date);
@@ -493,7 +529,7 @@ const Reports = () => {
         <div>
           <h1 className="print-brand-title">HCT ACADEMY</h1>
           <p className="print-brand-sub">Healthcare Training Center & Clinical Simulation Laboratories</p>
-          <p className="print-brand-contact">HCT Academy 611 Shaw Blvd 1550, Pasig, Metro Manila | ISO 9001 / ISMS Compliant</p>
+          <p className="print-brand-contact">HCT Academy 611 Shaw Blvd 1550, Pasig, Metro Manila | UniVITA Internal Report</p>
         </div>
         <div className="print-audit-box">
           <div className="print-dcn">DCN: {reportCode}-{currentYear}{currentMonthNum}-{Date.now().toString().slice(-4)}</div>
@@ -502,13 +538,11 @@ const Reports = () => {
           <div><strong>Generated:</strong> {new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}</div>
         </div>
       </div>
-
       <div className="print-divider" />
       <h2 className="print-doc-title">{title}</h2>
-
       {methodologyText && (
         <div className="print-methodology-box">
-          <strong>METHODOLOGY & STATUTORY DTR BASIS:</strong> {methodologyText}
+          <strong>REPORT METHODOLOGY:</strong> {methodologyText}
         </div>
       )}
     </div>
@@ -519,34 +553,25 @@ const Reports = () => {
       <div className="print-signatures">
         <div className="sig-block">
           <div className="sig-line" />
-          <span className="sig-name">HR Compliance Officer</span>
-          <span className="sig-title">Timekeeping & Records Division</span>
+          <span className="sig-name">HR Representative</span>
+          <span className="sig-title">Name / Signature</span>
           <span className="sig-date">Date: ________________________</span>
         </div>
         <div className="sig-block">
           <div className="sig-line" />
-          <span className="sig-name">Head of Clinical Training</span>
-          <span className="sig-title">Academic & Simulation Faculty</span>
+          <span className="sig-name">Designated Supervisor</span>
+          <span className="sig-title">Name / Signature</span>
           <span className="sig-date">Date: ________________________</span>
         </div>
         <div className="sig-block">
           <div className="sig-line" />
-          <span className="sig-name">Executive Vice President</span>
-          <span className="sig-title">Office of the Directorate</span>
+          <span className="sig-name">Authorized Signatory</span>
+          <span className="sig-title">Name / Signature</span>
           <span className="sig-date">Date: ________________________</span>
         </div>
       </div>
-
-      <div className="print-employee-ack">
-        <div className="sig-block" style={{ width: '33.33%', textAlign: 'left' }}>
-          <div className="sig-line" style={{ width: '100%' }} />
-          <span className="sig-name">EMPLOYEE ACKNOWLEDGMENT</span>
-          <span className="sig-title">Faculty Member Signature | Date: ____________</span>
-        </div>
-      </div>
-
-      <div className="print-privacy-banner">
-        <strong>CONFIDENTIAL - AUTHORIZED INTERNAL AUDIT & MANAGEMENT USE ONLY</strong><br />
+<div className="print-privacy-banner">
+        <strong>CONFIDENTIAL — AUTHORIZED INTERNAL HR AND MANAGEMENT USE ONLY</strong><br />
         This document contains employee personal and work-related information. Retain, process, and disclose strictly in accordance with HCT Academy records retention schedules and the Philippine Data Privacy Act of 2012 (Republic Act No. 10173).
       </div>
     </div>
@@ -556,35 +581,37 @@ const Reports = () => {
     <div className="formal-rep-container">
       <div className="formal-rep-header">
         <div className="formal-rep-title-block">
-          {/* Empty block maintained from original */}
+          
+          <p>
+            {isAdmin
+              ? 'Read-only view of operational reports. Payroll reports and internal report exports are managed by HR.'
+              : 'Generate, review, and export institutional reports across timekeeping, payroll, security, and HR workflows.'}
+          </p>
         </div>
 
         <div className="formal-rep-controls">
-          
-          {/* NEW: Program Filter */}
           <div className="formal-rep-input-wrapper">
             <Layers size={16} className="formal-rep-icon" />
-            <select 
-              className="formal-rep-select" 
-              style={{ minWidth: '160px' }} 
-              value={programId} 
-              onChange={e => { setProgramId(e.target.value); setCourseName(''); }} 
-              disabled={loading}
+            <select
+              className="formal-rep-select"
+              style={{ minWidth: '160px' }}
+              value={programId}
+              onChange={e => { setProgramId(e.target.value); setCourseName(''); }}
+              disabled={loading || !['attendance', 'scheduling'].includes(selectedReport)}
             >
               <option value="">All Programs</option>
               {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
             </select>
           </div>
 
-          {/* NEW: Course Filter */}
           <div className="formal-rep-input-wrapper">
             <BookOpen size={16} className="formal-rep-icon" />
-            <select 
-              className="formal-rep-select" 
-              style={{ minWidth: '160px' }} 
-              value={courseName} 
-              onChange={e => setCourseName(e.target.value)} 
-              disabled={loading}
+            <select
+              className="formal-rep-select"
+              style={{ minWidth: '160px' }}
+              value={courseName}
+              onChange={e => setCourseName(e.target.value)}
+              disabled={loading || !['attendance', 'scheduling'].includes(selectedReport)}
             >
               <option value="">All Courses</option>
               {courses.filter(c => !programId || String(c.program_id) === String(programId)).map(c => (
@@ -599,24 +626,36 @@ const Reports = () => {
               {availableMonths.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </div>
-          <button className="formal-rep-btn-outline" onClick={handleExportCSV} disabled={loading}>
-            <Download size={16} /> Export CSV
-          </button>
-          <button className="formal-rep-btn-primary" onClick={handleExport} disabled={loading}>
-            <Printer size={16} /> Print Official Document
-          </button>
+
+          {/* ---- Export CSV & Print — HR only ---- */}
+          {canWrite && (
+            <>
+              <button className="formal-rep-btn-outline" onClick={handleExportCSV} disabled={loading || Boolean(error) || !['attendance', 'payroll', 'requests'].includes(selectedReport)}>
+                <Download size={16} /> Export CSV
+              </button>
+              <button className="formal-rep-btn-primary" onClick={handleExport} disabled={loading || Boolean(error)}>
+                <Printer size={16} /> Print Internal Report
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="formal-rep-tabs">
-        {[
-          { id:'attendance', label:'Attendance & Timekeeping', icon: <Clock size={16} /> },
-          { id:'payroll', label:'Payroll Disbursement', icon: <DollarSign size={16} /> },
-          { id:'visitor', label:'Campus Visitor Tracking', icon: <Users size={16} /> },
-          { id:'scheduling', label:'Instruction Logistics', icon: <Calendar size={16} /> },
-          { id:'requests', label:'Workflow & HR Requests', icon: <ClipboardList size={16} /> }
-        ].map(tab => (
-          <button key={tab.id} className={`formal-rep-tab-btn ${selectedReport === tab.id ? 'active' : ''}`} onClick={() => setSelectedReport(tab.id)}>
+      {/* ---- Read-only banner ---- */}
+      {isAdmin && (
+        <div className="formal-rep-readonly-banner">
+          <ShieldAlert size={16} />
+          <span>Read-only view. Payroll reports are restricted to HR. Internal report exports are disabled.</span>
+        </div>
+      )}
+
+      <div className="formal-rep-section-heading">
+        <div><h2>Report categories</h2></div>
+        <span className="formal-rep-period-tag"><Calendar size={14} /> {monthLabel}</span>
+      </div>
+      <div className="formal-rep-tabs" role="tablist" aria-label="Report category">
+        {visibleTabs.map(tab => (
+          <button key={tab.id} type="button" role="tab" aria-selected={selectedReport === tab.id} className={`formal-rep-tab-btn ${selectedReport === tab.id ? 'active' : ''}`} onClick={() => setSelectedReport(tab.id)}>
             {tab.icon} {tab.label}
           </button>
         ))}
@@ -635,21 +674,20 @@ const Reports = () => {
         }
       </div>
 
-      {selectedReport === 'attendance' && (
+      {/* ---- Print-only sections (all gated to HR via canWrite) ---- */}
+      {canWrite && selectedReport === 'attendance' && (
         <div className="print-only">
           <PrintableHeader
             title="MONTHLY FACULTY TIMEKEEPING & ATTENDANCE REGISTER"
             reportCode="REP-DTR"
-            methodologyText="Compiled from Daily Time Records (DTR), biometrics, and geofence verification pursuant to DOLE Omnibus Rules Implementing the Labor Code. Expected attendance excludes approved, authorized leaves."
+            methodologyText="Compiled from the monthly attendance source. Overtime and approved leave totals are unavailable from this feed. This register is an internal summary, not an individual DTR or audited certification."
           />
-
           <div className="print-kpi-row">
             <div className="print-kpi-cell">Total Tracked: <strong>{attendanceData.length} Instructors</strong></div>
             <div className="print-kpi-cell">Total Rendered: <strong>{attendanceData.reduce((s, e) => s + e.regular_hours, 0).toFixed(1)} hrs</strong></div>
-            <div className="print-kpi-cell">Total Overtime: <strong>{attendanceData.reduce((s, e) => s + e.overtime_hours, 0).toFixed(1)} hrs</strong></div>
-            <div className="print-kpi-cell">Authorized Leaves: <strong>{attendanceData.reduce((s, e) => s + e.leave_days, 0)} days</strong></div>
+            <div className="print-kpi-cell">Overtime: <strong>Unavailable in monthly source</strong></div>
+            <div className="print-kpi-cell">Approved Leave: <strong>Unavailable in monthly source</strong></div>
           </div>
-
           <table className="formal-print-table">
             <thead>
               <tr>
@@ -659,7 +697,7 @@ const Reports = () => {
                 <th style={{ width: '14%' }}>Regular Hours</th>
                 <th style={{ width: '14%' }}>Overtime Hours</th>
                 <th style={{ width: '14%' }}>Approved Leave</th>
-                <th style={{ width: '14%' }}>DTR Audit Status</th>
+                <th style={{ width: '14%' }}>Record Verification Status</th>
               </tr>
             </thead>
             <tbody>
@@ -669,32 +707,31 @@ const Reports = () => {
                   <td className="font-mono">{emp.employee_id}</td>
                   <td><strong>{emp.full_name}</strong></td>
                   <td className="text-right">{emp.regular_hours.toFixed(1)}h</td>
-                  <td className="text-right">{emp.overtime_hours.toFixed(1)}h</td>
-                  <td className="text-center">{emp.leave_days} d</td>
-                  <td className="text-center">{emp.regular_hours > 0 ? 'VERIFIED' : emp.leave_days > 0 ? 'ON LEAVE' : 'NO SHIFTS'}</td>
+                  <td className="text-right">Unavailable</td>
+                  <td className="text-center">Unavailable</td>
+                  <td className="text-center">{emp.regular_hours > 0 ? 'RECORDED' : 'NO HOURS IN SOURCE'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="print-legend">Regular hours are taken from the monthly attendance source. Overtime and approved leave are unavailable from this feed. A displayed zero may indicate an unrecorded schedule rather than confirmed absence. Record verification requires individual DTR reconciliation.</p>
           <PrintableFooter />
         </div>
       )}
 
-      {selectedReport === 'payroll' && (
+      {canWrite && selectedReport === 'payroll' && (
         <div className="print-only">
           <PrintableHeader
-            title="MONTHLY PAYROLL DISBURSEMENT REGISTER & COMPENSATION AUDIT"
+            title="MONTHLY PAYROLL REGISTER & COMPENSATION REVIEW"
             reportCode="REP-PAY"
-            methodologyText="Authorized net compensation computations audited against verified rendered instruction hours, standard tax tables, and Philippine statutory benefit schedules (SSS, PhilHealth, Pag-IBIG)."
+            methodologyText="Saved payroll calculations for the selected period. Finalized records may be pending payment; verify payment status independently."
           />
-
           <div className="print-kpi-row">
-            <div className="print-kpi-cell">Total Disbursed: <strong>{payrollData.length} Personnel</strong></div>
+            <div className="print-kpi-cell">Payroll Records: <strong>{payrollData.length} Personnel</strong></div>
             <div className="print-kpi-cell">Gross Payroll: <strong>₱{payrollData.reduce((s, p) => s + (parseFloat(p.gross_pay) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
-            <div className="print-kpi-cell">Total Deductions: <strong>₱{payrollData.reduce((s, p) => s + (parseFloat(p.tax_deduction) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
-            <div className="print-kpi-cell">Net Disbursement: <strong>₱{payrollData.reduce((s, p) => s + (parseFloat(p.net_pay) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
+            <div className="print-kpi-cell">Total Deductions: <strong>₱{payrollData.reduce((s, p) => s + Math.max(0, (parseFloat(p.gross_pay) || 0) - (parseFloat(p.net_pay) || 0)), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
+            <div className="print-kpi-cell">Total Net Payroll: <strong>₱{payrollData.reduce((s, p) => s + (parseFloat(p.net_pay) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
           </div>
-
           <table className="formal-print-table">
             <thead>
               <tr>
@@ -729,21 +766,19 @@ const Reports = () => {
         </div>
       )}
 
-      {selectedReport === 'visitor' && (
+      {canWrite && selectedReport === 'visitor' && (
         <div className="print-only">
           <PrintableHeader
             title="CAMPUS VISITOR & GUEST CLEARANCE LOG"
             reportCode="REP-VIS"
-            methodologyText="Physical security access logs maintained pursuant to campus safety standards. Guest passes reflect security checkpoint validation, purpose limitation, and reception desk sign-ins."
+            methodologyText="Appointment approval statuses for the selected month; approval does not mean physical check-in."
           />
-
           <div className="print-kpi-row">
             <div className="print-kpi-cell">Approved Entries: <strong>{visitorStats.approved}</strong></div>
-            <div className="print-kpi-cell">Access Denied: <strong>{visitorStats.rejected}</strong></div>
+            <div className="print-kpi-cell">Rejected Requests: <strong>{visitorStats.rejected}</strong></div>
             <div className="print-kpi-cell">Pending Approval: <strong>{visitorStats.pending}</strong></div>
             <div className="print-kpi-cell">Total Transactions: <strong>{visitorList.length}</strong></div>
           </div>
-
           <table className="formal-print-table">
             <thead>
               <tr>
@@ -774,20 +809,18 @@ const Reports = () => {
         </div>
       )}
 
-      {selectedReport === 'scheduling' && (
+      {canWrite && selectedReport === 'scheduling' && (
         <div className="print-only">
           <PrintableHeader
             title="CLINICAL SIMULATION & INSTRUCTION SCHEDULE ROSTER"
             reportCode="REP-SCHED"
-            methodologyText="Official faculty assignment matrix for clinical simulation rooms and lecture halls. Timings define shift expectations for attendance compliance and DTR validation."
+            methodologyText="Faculty assignment matrix for clinical simulation rooms and lecture halls. Timings define shift expectations for attendance compliance and DTR validation."
           />
-
           <div className="print-kpi-row">
             <div className="print-kpi-cell">Total Shift Deployments: <strong>{scheduleData.length}</strong></div>
             <div className="print-kpi-cell">Assigned Faculty: <strong>{new Set(scheduleData.map(s => s.employee_id || s.user_id)).size} Instructors</strong></div>
             <div className="print-kpi-cell">Period Coverage: <strong>{monthLabel} {currentYear}</strong></div>
           </div>
-
           <table className="formal-print-table">
             <thead>
               <tr>
@@ -816,14 +849,13 @@ const Reports = () => {
         </div>
       )}
 
-      {selectedReport === 'requests' && (
+      {canWrite && selectedReport === 'requests' && (
         <div className="print-only">
           <PrintableHeader
             title="HUMAN RESOURCES REQUESTS & ATTENDANCE APPEALS AUDIT"
             reportCode="REP-REQ"
             methodologyText="Formal record of employee exception requests, leave filings, overtime claim validations, and attendance correction appeals submitted through UniVITA portal workflows."
           />
-
           <table className="formal-print-table">
             <thead>
               <tr>

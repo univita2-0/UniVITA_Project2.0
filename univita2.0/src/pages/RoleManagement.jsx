@@ -1,30 +1,37 @@
-// src/pages/RoleManagement.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Users, Shield, Search, Filter, ShieldCheck, UserCheck, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, Search, ShieldCheck, UserCheck, ChevronLeft, ChevronRight, ShieldAlert } from 'lucide-react';
 import './RoleManagement.css';
 import { API_BASE } from '../api';
+import { getUserRole, decodeJwtPayload } from '../permissions';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
 const RoleManagement = () => {
+  const currentUserRole = getUserRole();
+  const isAdmin = currentUserRole === 'admin';
+
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  
   const currentUserId = useMemo(() => {
     try {
+      const signedId = decodeJwtPayload(localStorage.getItem('auth_token'))?.id;
+      if (signedId !== undefined && signedId !== null) return signedId;
+      const idStr = localStorage.getItem('user_id');
+      if (idStr) return parseInt(idStr, 10);
+      
       const userStr = localStorage.getItem('user');
       if (userStr) {
         const parsed = JSON.parse(userStr);
         if (parsed && parsed.id) return parsed.id;
       }
-      const idStr = localStorage.getItem('user_id');
-      if (idStr) return parseInt(idStr, 10);
       return 0;
     } catch (e) {
       console.warn("Failed to parse user ID from localStorage", e);
@@ -42,7 +49,7 @@ const RoleManagement = () => {
   const fetchUsers = async () => {
     try {
       const res = await axios.get(`${API_BASE}/employees`, getAuthHeaders());
-      const activeUsers = res.data.filter(user => user.status === 'active');
+      const activeUsers = (Array.isArray(res.data) ? res.data : []).filter(user => user.status === 'active');
       setUsers(activeUsers);
     } catch (err) {
       console.error('Failed to fetch users', err);
@@ -53,11 +60,18 @@ const RoleManagement = () => {
   };
 
   const handleRoleChange = async (userId, newRole) => {
-    if (userId === currentUserId) {
+    if (!isAdmin) {
+      toast.error('Only System Administrators can change user roles.');
+      return;
+    }
+    if (String(userId) === String(currentUserId)) {
       toast.error('You cannot change your own role.');
       return;
     }
 
+    const target = users.find(u => String(u.id) === String(userId));
+    if (!target || target.role === newRole) return;
+    if (!window.confirm(`Reassign ${target.full_name} from ${target.role} to ${newRole}? This changes access to the web and mobile applications.`)) return;
     setUpdating(userId);
 
     try {
@@ -70,7 +84,7 @@ const RoleManagement = () => {
     } catch (err) {
       const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Role update failed.';
       toast.error(errorMsg);
-      setUsers([...users]);
+      setUsers([...users]); // Revert on failure
     } finally {
       setUpdating(null);
     }
@@ -100,7 +114,7 @@ const RoleManagement = () => {
   }, [users, searchTerm, roleFilter]);
 
   const totalUsers = filteredUsers.length;
-  const totalPages = Math.ceil(totalUsers / rowsPerPage);
+  const totalPages = Math.max(1, Math.ceil(totalUsers / rowsPerPage));
   const paginatedUsers = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
     return filteredUsers.slice(start, start + rowsPerPage);
@@ -119,7 +133,7 @@ const RoleManagement = () => {
   if (loading) return <div className="expert-loading">Loading users and access privileges...</div>;
 
   return (
-    <div className="expert-container">
+    <div className="expert-container uv-admin-roles">
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
@@ -128,6 +142,13 @@ const RoleManagement = () => {
           </div>
         </div>
       </div>
+
+      {!isAdmin && (
+        <div className="rm-readonly-banner">
+          <ShieldAlert size={16} />
+          <span>Read-only view. Role assignments are restricted to System Administrators.</span>
+        </div>
+      )}
 
       <div className="rep-stats-row">
         <div className="rep-stat-box">
@@ -154,26 +175,23 @@ const RoleManagement = () => {
       </div>
 
       <div className="expert-card">
+        <div className="uv-admin-section-heading"><span>Account directory</span><span>{totalUsers} matching accounts</span></div>
         <div className="expert-search-card">
-          <div className="al-filters-wrapper">
-            <div className="al-filter-group search">
-              <label>Search Users</label>
-              <div className="expert-search-input-group">
-                <Search size={16} className="text-muted" />
-                <input
-                  type="text"
-                  placeholder="Search by name, ID, or email..."
-                  value={searchTerm}
-                  onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                  className="expert-clean-input"
-                />
-              </div>
+          <div className="rm-filters">
+            <div className="rm-search-group">
+              <Search size={18} className="text-muted" />
+              <input
+                type="text"
+                placeholder="Search by name, ID, or email..."
+                value={searchTerm}
+                onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                className="expert-clean-input"
+              />
             </div>
 
-            <div className="al-filter-group action">
-              <label>Filter by Role</label>
+            <div className="rm-filter-group">
               <select
-                className="expert-clean-input border"
+                className="rm-select-filter"
                 value={roleFilter}
                 onChange={e => { setRoleFilter(e.target.value); setCurrentPage(1); }}
               >
@@ -224,8 +242,9 @@ const RoleManagement = () => {
                         <select
                           value={user.role}
                           onChange={e => handleRoleChange(user.id, e.target.value)}
-                          disabled={updating === user.id || user.id === currentUserId}
+                          disabled={updating === user.id || String(user.id) === String(currentUserId) || !isAdmin}
                           className="rm-select"
+                          title={String(user.id) === String(currentUserId) ? "You cannot change your own role" : ""}
                         >
                           <option value="admin">Admin</option>
                           <option value="hr_admin">HR</option>

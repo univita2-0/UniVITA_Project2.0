@@ -3,6 +3,7 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 import { Plus, Trash2, Tag, Search, X, ChevronLeft, ChevronRight, ShieldAlert, Edit2 } from 'lucide-react';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 import FormalModal from '../components/FormalModal';
 import './ManageBLETags.css';
 
@@ -11,6 +12,11 @@ const getAuthHeaders = () => ({
 });
 
 const ManageBLETags = () => {
+  const currentUserRole = getUserRole();
+  const isAdmin = currentUserRole === 'admin';
+  const isSecurity = currentUserRole === 'security';
+  const canWrite = isAdmin || isSecurity;
+
   const [bleTags, setBleTags] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -34,6 +40,7 @@ const ManageBLETags = () => {
   const [editBleMac, setEditBleMac] = useState('');
 
   const triggerEdit = (tag) => {
+    if (!canWrite) return;
     setEditTagId(tag.id);
     setEditBleId(tag.ble_id);
     setEditBleLabel(tag.label || '');
@@ -43,15 +50,11 @@ const ManageBLETags = () => {
 
   const handleEdit = async (e) => {
     e.preventDefault();
+    if (!canWrite) return toast.error('Permission denied.');
+
     const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
-    if (!macRegex.test(editBleMac.trim())) {
-      toast.warning('Invalid MAC Address format. Please use the format XX:XX:XX:XX:XX:XX');
-      return;
-    }
-    if (!editBleId.trim() || !editBleLabel.trim()) {
-      toast.warning('BLE ID and Label are required fields.');
-      return;
-    }
+    if (!macRegex.test(editBleMac.trim())) return toast.warning('Invalid MAC Address format. Please use the format XX:XX:XX:XX:XX:XX');
+    if (!editBleId.trim() || !editBleLabel.trim()) return toast.warning('BLE ID and Label are required fields.');
 
     setLoading(true);
     try {
@@ -91,17 +94,11 @@ const ManageBLETags = () => {
 
   const handleAdd = async (e) => {
     e.preventDefault();
+    if (!canWrite) return toast.error('Permission denied.');
 
     const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
-    if (!macRegex.test(newBleMac.trim())) {
-      toast.warning('Invalid MAC Address format. Please use the format XX:XX:XX:XX:XX:XX');
-      return;
-    }
-
-    if (!newBleId.trim() || !newBleLabel.trim()) {
-      toast.warning('BLE ID and Label are required fields.');
-      return;
-    }
+    if (!macRegex.test(newBleMac.trim())) return toast.warning('Invalid MAC Address format. Please use the format XX:XX:XX:XX:XX:XX');
+    if (!newBleId.trim() || !newBleLabel.trim()) return toast.warning('BLE ID and Label are required fields.');
 
     setLoading(true);
     try {
@@ -119,9 +116,7 @@ const ManageBLETags = () => {
       fetchBleTags();
     } catch (err) {
       const serverMessage = err.response?.data?.message || err.response?.data?.error;
-      const errorMsg = serverMessage
-        ? `Failed to register BLE tag: ${serverMessage}`
-        : 'Failed to register BLE tag.';
+      const errorMsg = serverMessage ? `Failed to register BLE tag: ${serverMessage}` : 'Failed to register BLE tag.';
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -129,7 +124,9 @@ const ManageBLETags = () => {
   };
 
   const confirmDelete = async () => {
+    if (!canWrite) return toast.error('Permission denied.');
     if (!tagToDelete) return;
+    
     setLoading(true);
     try {
       await axios.delete(`${API_BASE}/ble-tags/${tagToDelete.id}`, getAuthHeaders());
@@ -145,6 +142,7 @@ const ManageBLETags = () => {
   };
 
   const triggerDelete = (tag) => {
+    if (!canWrite) return;
     setTagToDelete(tag);
     setShowDeleteModal(true);
   };
@@ -155,21 +153,40 @@ const ManageBLETags = () => {
   });
 
   const totalPages = Math.ceil(filteredTags.length / itemsPerPage);
+  useEffect(() => { setCurrentPage(page => Math.min(page, Math.max(1, totalPages))); }, [totalPages]);
   const currentTags = filteredTags.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
-    <div className="expert-container">
+    <div className="expert-container univita-ble-page">
       <div className="expert-header">
         <div className="expert-title-group">
           <div>
-           
+            
             <p className="expert-subtitle">Register and manage hardware BLE tags for tracking.</p>
           </div>
         </div>
-        <button className="expert-btn-primary" onClick={() => setShowAddModal(true)}>
-          <Plus size={16} /> Register New Tag
-        </button>
+        <div className="uv-hardware-header-actions">
+          <button className="expert-btn-secondary" type="button" onClick={fetchBleTags} disabled={initialLoad || loading}>Refresh</button>
+        {canWrite && (
+          <button className="expert-btn-primary" onClick={() => setShowAddModal(true)}>
+            <Plus size={16} /> Register New Tag
+          </button>
+        )}
+        </div>
       </div>
+
+      {!canWrite && (
+        <div className="expert-readonly-banner">
+          <ShieldAlert size={16} />
+          <span>Read-only view. Hardware tags are managed by Security and Admin.</span>
+        </div>
+      )}
+
+      <section className="uv-hardware-metrics" aria-label="BLE tag inventory summary">
+        <div className="uv-hardware-metric"><span>Registered tags</span><strong>{bleTags.length}</strong><small>All hardware records</small></div>
+        <div className="uv-hardware-metric"><span>In use</span><strong>{bleTags.filter(tag => String(tag.current_status || '').toUpperCase() === 'IN USE').length}</strong><small>Currently assigned</small></div>
+        <div className="uv-hardware-metric"><span>Available</span><strong>{bleTags.filter(tag => String(tag.current_status || '').toUpperCase() === 'AVAILABLE').length}</strong><small>Ready for assignment</small></div>
+      </section>
 
       <div className="expert-search-card">
         <div className="expert-search-row">
@@ -182,10 +199,10 @@ const ManageBLETags = () => {
               onChange={e => setSearchQuery(e.target.value)}
               className="expert-clean-input"
             />
-            {searchQuery && <X size={16} className="text-muted cursor-pointer" onClick={() => setSearchQuery('')} />}
+            {searchQuery && <button type="button" className="uv-search-clear" aria-label="Clear search" onClick={() => setSearchQuery('')}><X size={16} /></button>}
           </div>
           <div className="expert-stats-badge">
-            Total Active Tags: <strong>{bleTags.length}</strong>
+            Registered Tags: <strong>{bleTags.length}</strong>
           </div>
         </div>
       </div>
@@ -197,9 +214,7 @@ const ManageBLETags = () => {
           <div className="expert-empty">
             <Tag size={48} className="text-muted" />
             <p>No BLE Tags Found</p>
-            {searchQuery
-              ? <span>Try adjusting your search criteria.</span>
-              : <span>Click "Register New Tag" to add hardware.</span>}
+            {searchQuery ? <span>Try adjusting your search criteria.</span> : canWrite && <span>Click "Register New Tag" to add hardware.</span>}
           </div>
         ) : (
           <>
@@ -210,7 +225,7 @@ const ManageBLETags = () => {
                     <th>BLE ID Code</th>
                     <th>Assigned Label</th>
                     <th>MAC Address</th>
-                    <th className="text-right">Actions</th>
+                    {canWrite && <th className="text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -219,16 +234,18 @@ const ManageBLETags = () => {
                       <td><strong className="text-dark">{tag.ble_id}</strong></td>
                       <td>{tag.label || '—'}</td>
                       <td><span className="bt-mac-badge">{tag.mac_address}</span></td>
-                      <td>
-                        <div className="expert-action-group right">
-                          <button className="expert-btn-icon" onClick={() => triggerEdit(tag)} title="Edit Tag">
-                            <Edit2 size={18} />
-                          </button>
-                          <button className="expert-btn-icon danger" onClick={() => triggerDelete(tag)} title="Delete Tag">
-                            <Trash2 size={18} color="#EF4444" />
-                          </button>
-                        </div>
-                      </td>
+                      {canWrite && (
+                        <td>
+                          <div className="expert-action-group right">
+                            <button className="expert-btn-icon" onClick={() => triggerEdit(tag)} title="Edit Tag">
+                              <Edit2 size={18} />
+                            </button>
+                            <button className="expert-btn-icon danger" onClick={() => triggerDelete(tag)} title="Delete Tag">
+                              <Trash2 size={18} color="#EF4444" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -238,17 +255,12 @@ const ManageBLETags = () => {
             {totalPages > 1 && (
               <div className="expert-pagination">
                 <span className="expert-page-info">
-                  Showing {(currentPage - 1) * itemsPerPage + 1} to{' '}
-                  {Math.min(currentPage * itemsPerPage, filteredTags.length)} of {filteredTags.length} entries
+                  Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, filteredTags.length)} of {filteredTags.length} entries
                 </span>
                 <div className="expert-page-controls">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn">
-                    <ChevronLeft size={16} /> Prev
-                  </button>
+                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="expert-page-btn"><ChevronLeft size={16} /> Prev</button>
                   <span className="expert-page-current">{currentPage} / {totalPages}</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">
-                    Next <ChevronRight size={16} />
-                  </button>
+                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="expert-page-btn">Next <ChevronRight size={16} /></button>
                 </div>
               </div>
             )}
@@ -256,133 +268,134 @@ const ManageBLETags = () => {
         )}
       </div>
 
-      {/* Add Tag Modal */}
-      <FormalModal
-        show={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        title="Register BLE Hardware Tag"
-        footer={
-          <>
-            <button className="expert-btn-secondary" onClick={() => setShowAddModal(false)} disabled={loading}>Cancel</button>
-            <button className="expert-btn-primary" onClick={handleAdd} disabled={loading}>
-              {loading ? 'Registering...' : 'Register Tag'}
-            </button>
-          </>
-        }
-      >
-        <div className="expert-form-stack">
-          <div className="expert-form-group">
-            <label>Hardware BLE ID <span className="text-danger">*</span></label>
-            <input
-              type="text"
-              placeholder="e.g. BLE-3F-01"
-              value={newBleId}
-              onChange={e => setNewBleId(e.target.value)}
-              disabled={loading}
-              className="expert-clean-input border"
-              autoFocus
-            />
-          </div>
-          <div className="expert-form-group">
-            <label>Assigned Label / Name <span className="text-danger">*</span></label>
-            <input
-              type="text"
-              placeholder="e.g. Visitor Badge 1"
-              value={newBleLabel}
-              onChange={e => setNewBleLabel(e.target.value)}
-              disabled={loading}
-              className="expert-clean-input border"
-            />
-          </div>
-          <div className="expert-form-group">
-            <label>MAC Address <span className="text-danger">*</span></label>
-            <input
-              type="text"
-              placeholder="00:1A:2B:3C:4D:5E"
-              value={newBleMac}
-              onChange={e => setNewBleMac(e.target.value)}
-              disabled={loading}
-              className="expert-clean-input border font-mono"
-            />
-          </div>
-        </div>
-      </FormalModal>
+      {canWrite && (
+        <>
+          <FormalModal
+            show={showAddModal}
+            onClose={() => setShowAddModal(false)}
+            title="Register BLE Hardware Tag"
+            footer={
+              <>
+                <button className="expert-btn-secondary" onClick={() => setShowAddModal(false)} disabled={loading}>Cancel</button>
+                <button className="expert-btn-primary" onClick={handleAdd} disabled={loading}>
+                  {loading ? 'Registering...' : 'Register Tag'}
+                </button>
+              </>
+            }
+          >
+            <div className="expert-form-stack">
+              <div className="expert-form-group">
+                <label>Hardware BLE ID <span className="text-danger">*</span></label>
+                <input
+                  type="text"
+                  placeholder="e.g. BLE-3F-01"
+                  value={newBleId}
+                  onChange={e => setNewBleId(e.target.value)}
+                  disabled={loading}
+                  className="expert-clean-input border"
+                  autoFocus
+                />
+              </div>
+              <div className="expert-form-group">
+                <label>Assigned Label / Name <span className="text-danger">*</span></label>
+                <input
+                  type="text"
+                  placeholder="e.g. Visitor Badge 1"
+                  value={newBleLabel}
+                  onChange={e => setNewBleLabel(e.target.value)}
+                  disabled={loading}
+                  className="expert-clean-input border"
+                />
+              </div>
+              <div className="expert-form-group">
+                <label>MAC Address <span className="text-danger">*</span></label>
+                <input
+                  type="text"
+                  placeholder="00:1A:2B:3C:4D:5E"
+                  value={newBleMac}
+                  onChange={e => setNewBleMac(e.target.value)}
+                  disabled={loading}
+                  className="expert-clean-input border font-mono"
+                />
+              </div>
+            </div>
+          </FormalModal>
 
-      {/* Delete Confirmation Modal */}
-      <FormalModal
-        show={showDeleteModal}
-        onClose={() => setShowDeleteModal(false)}
-        title="Delete Hardware Tag"
-        footer={
-          <>
-            <button className="expert-btn-secondary" onClick={() => setShowDeleteModal(false)} disabled={loading}>Cancel</button>
-            <button className="expert-btn-primary bg-red" onClick={confirmDelete} disabled={loading}>
-              {loading ? 'Processing...' : 'Yes, Remove Tag'}
-            </button>
-          </>
-        }
-      >
-        <div className="expert-confirm-body">
-          <ShieldAlert size={48} color="#DC2626" />
-          <p className="expert-confirm-title">
-            Are you sure you want to permanently delete the BLE tag <strong>{tagToDelete?.ble_id}</strong>?
-          </p>
-          <div className="expert-confirm-note">
-            <p>
-              Removing this hardware tag will unassign it from any active visitors
-              and prevent it from being tracked by the campus receivers.
-            </p>
-          </div>
-        </div>
-      </FormalModal>
+          <FormalModal
+            show={showEditModal}
+            onClose={() => setShowEditModal(false)}
+            title="Edit BLE Hardware Tag"
+            footer={
+              <>
+                <button className="expert-btn-secondary" onClick={() => setShowEditModal(false)} disabled={loading}>Cancel</button>
+                <button className="expert-btn-primary" onClick={handleEdit} disabled={loading}>
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </>
+            }
+          >
+            <div className="expert-form-stack">
+              <div className="expert-form-group">
+                <label>Hardware BLE ID <span className="text-danger">*</span></label>
+                <input
+                  type="text"
+                  value={editBleId}
+                  onChange={e => setEditBleId(e.target.value)}
+                  disabled={loading}
+                  className="expert-clean-input border"
+                />
+              </div>
+              <div className="expert-form-group">
+                <label>Assigned Label / Name <span className="text-danger">*</span></label>
+                <input
+                  type="text"
+                  value={editBleLabel}
+                  onChange={e => setEditBleLabel(e.target.value)}
+                  disabled={loading}
+                  className="expert-clean-input border"
+                />
+              </div>
+              <div className="expert-form-group">
+                <label>MAC Address <span className="text-danger">*</span></label>
+                <input
+                  type="text"
+                  value={editBleMac}
+                  onChange={e => setEditBleMac(e.target.value)}
+                  disabled={loading}
+                  className="expert-clean-input border font-mono"
+                />
+              </div>
+            </div>
+          </FormalModal>
 
-      {/* Edit Tag Modal */}
-      <FormalModal
-        show={showEditModal}
-        onClose={() => setShowEditModal(false)}
-        title="Edit BLE Hardware Tag"
-        footer={
-          <>
-            <button className="expert-btn-secondary" onClick={() => setShowEditModal(false)} disabled={loading}>Cancel</button>
-            <button className="expert-btn-primary" onClick={handleEdit} disabled={loading}>
-              {loading ? 'Saving...' : 'Save Changes'}
-            </button>
-          </>
-        }
-      >
-        <div className="expert-form-stack">
-          <div className="expert-form-group">
-            <label>Hardware BLE ID <span className="text-danger">*</span></label>
-            <input
-              type="text"
-              value={editBleId}
-              onChange={e => setEditBleId(e.target.value)}
-              disabled={loading}
-              className="expert-clean-input border"
-            />
-          </div>
-          <div className="expert-form-group">
-            <label>Assigned Label / Name <span className="text-danger">*</span></label>
-            <input
-              type="text"
-              value={editBleLabel}
-              onChange={e => setEditBleLabel(e.target.value)}
-              disabled={loading}
-              className="expert-clean-input border"
-            />
-          </div>
-          <div className="expert-form-group">
-            <label>MAC Address <span className="text-danger">*</span></label>
-            <input
-              type="text"
-              value={editBleMac}
-              onChange={e => setEditBleMac(e.target.value)}
-              disabled={loading}
-              className="expert-clean-input border font-mono"
-            />
-          </div>
-        </div>
-      </FormalModal>
+          <FormalModal
+            show={showDeleteModal}
+            onClose={() => setShowDeleteModal(false)}
+            title="Delete Hardware Tag"
+            footer={
+              <>
+                <button className="expert-btn-secondary" onClick={() => setShowDeleteModal(false)} disabled={loading}>Cancel</button>
+                <button className="expert-btn-primary bg-red" onClick={confirmDelete} disabled={loading}>
+                  {loading ? 'Processing...' : 'Yes, Remove Tag'}
+                </button>
+              </>
+            }
+          >
+            <div className="expert-confirm-body">
+              <ShieldAlert size={48} color="#DC2626" />
+              <p className="expert-confirm-title">
+                Are you sure you want to permanently delete the BLE tag <strong>{tagToDelete?.ble_id}</strong>?
+              </p>
+              <div className="expert-confirm-note">
+                <p>
+                  Removing this hardware tag will unassign it from any active visitors
+                  and prevent it from being tracked by the campus receivers.
+                </p>
+              </div>
+            </div>
+          </FormalModal>
+        </>
+      )}
     </div>
   );
 };

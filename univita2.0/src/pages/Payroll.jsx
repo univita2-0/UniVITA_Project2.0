@@ -72,21 +72,26 @@ const Payroll = ({ onUnlock, adminEmail }) => {
   return (
     // 🟢 FIXED: Using classes that actually exist in Payroll.css (pr-*)
     <div className="pr-container">
+      
       <div className="pr-auth-card">
-        <div className="pr-icon-wrapper">
-          <ShieldCheck size={32} color="#0D9488" />
-        </div>
         
-        <h2 className="pr-title">Security Clearance</h2>
+        
+        
+        <h2 className="pr-title">Verify your identity</h2>
         <p className="pr-subtitle">
           Payroll data is restricted.<br />
           Enter your administrative PIN.
         </p>
 
         <form onSubmit={handleUnlock} className="pr-form">
+          <label className="pr-field-label" htmlFor="pr-payroll-pin">Administrative PIN</label>
           <div className="pr-input-container">
             <Lock size={18} className="pr-input-icon" />
             <input
+              id="pr-payroll-pin"
+              aria-invalid={Boolean(error)}
+              autoComplete="off"
+              inputMode="numeric"
               type="password"
               className={`pr-input ${error ? 'locked' : ''}`}
               placeholder="••••"

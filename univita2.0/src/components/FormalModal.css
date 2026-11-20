@@ -1,142 +1,293 @@
-/* FormalModal.css – Strict Enterprise Sizing & Modern Styling */
+/* UniVITA — Shared enterprise modal
+   All selectors are scoped to the formal-modal component to minimize collisions.
+   Existing component and form/button class names remain compatible. */
 
 .formal-modal-overlay {
+  --fm-ink: #142435;
+  --fm-muted: #64748b;
+  --fm-border: #dce4ea;
+  --fm-teal: #0d9488;
+  --fm-teal-dark: #0f766e;
+  --fm-danger: #dc2626;
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background-color: rgba(17, 24, 39, 0.6);
-  backdrop-filter: blur(4px);
+  inset: 0;
+  z-index: 9999;
   display: flex;
-  justify-content: center;
   align-items: center;
-  z-index: 9999; /* Ensure it sits on top of all other navigation/elements */
-  animation: fadeInOverlay 0.2s ease-out;
-  padding: 1rem;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(10, 25, 40, 0.58);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  box-sizing: border-box;
+  animation: fm-overlay-in 180ms ease-out both;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-@keyframes fadeInOverlay {
+.formal-modal-overlay *,
+.formal-modal-overlay *::before,
+.formal-modal-overlay *::after {
+  box-sizing: border-box;
+}
+
+@keyframes fm-overlay-in {
   from { opacity: 0; }
-  to   { opacity: 1; }
+  to { opacity: 1; }
+}
+
+@keyframes fm-dialog-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .formal-modal-content {
-  background: #ffffff;
-  border-radius: 12px;
-  
-  /* Dynamic Height keeps it from breaking off the screen */
-  height: fit-content;
-  max-height: 90vh;
-  
-  /* Flex layout keeps header/footer locked while body scrolls */
   display: flex;
-  flex-direction: column; 
-  
-  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.2);
+  flex-direction: column;
+  min-width: 0;
+  max-height: min(90vh, 920px);
+  max-height: min(90dvh, 920px);
+  overflow: hidden;
   padding: 0;
-  animation: slideUpModal 0.25s ease-out;
-}
-
-@keyframes slideUpModal {
-  from { transform: translateY(20px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
+  color: var(--fm-ink);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 24px 64px rgba(7, 23, 37, 0.22), 0 3px 10px rgba(7, 23, 37, 0.08);
+  animation: fm-dialog-in 210ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .formal-modal-header {
   display: flex;
-  justify-content: space-between;
+  flex: 0 0 auto;
   align-items: center;
-  padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid #E5E7EB;
-  flex-shrink: 0; 
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 68px;
+  padding: 17px 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--fm-border);
 }
 
 .formal-modal-title {
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: #111827;
+  min-width: 0;
   margin: 0;
-  letter-spacing: -0.01em;
+  color: var(--fm-ink);
+  font: 700 17px/1.4 'Inter', system-ui, sans-serif;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
 }
 
 .formal-close-btn {
-  background: none;
-  border: none;
-  font-size: 1.4rem;
-  cursor: pointer;
-  color: #9CA3AF;
-  padding: 6px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  display: flex;
+  display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  line-height: 1;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: #64748b;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
 .formal-close-btn:hover {
-  background: #F3F4F6;
-  color: #111827;
+  color: var(--fm-ink);
+  background: #f1f5f9;
+  border-color: #e2e8f0;
 }
 
-/* Body scrolls automatically if the content is too tall or too wide */
+.formal-close-btn:focus-visible,
+.formal-modal-overlay button:focus-visible,
+.formal-modal-overlay input:focus-visible,
+.formal-modal-overlay select:focus-visible,
+.formal-modal-overlay textarea:focus-visible {
+  outline: 2px solid var(--fm-teal);
+  outline-offset: 2px;
+}
+
 .formal-modal-body {
-  padding: 1.5rem;
-  overflow-y: auto; 
-  overflow-x: auto; 
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 24px;
+  overflow: auto;
+  background: #fff;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 .formal-modal-body p {
-  margin: 0 0 16px 0;
-  color: #4B5563;
-  font-size: 0.95rem;
-  line-height: 1.6;
+  margin: 0 0 16px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.formal-modal-body p:last-child {
+  margin-bottom: 0;
 }
 
 .formal-modal-footer {
-  padding: 1rem 1.5rem;
-  border-top: 1px solid #E5E7EB;
   display: flex;
+  flex: 0 0 auto;
+  align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  flex-shrink: 0; 
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 72px;
+  padding: 16px 24px;
+  background: #fbfcfd;
+  border-top: 1px solid var(--fm-border);
 }
 
-/* Base Form styles for usage inside the modal body */
-.formal-modal-body .modal-form-group { margin-bottom: 18px; }
-.formal-modal-body .modal-label { display: block; font-size: 0.85rem; font-weight: 600; color: #374151; margin-bottom: 6px; }
-.formal-modal-body .modal-input, .formal-modal-body .modal-select {
-  width: 100%; padding: 10px 14px; border: 1px solid #D1D5DB; border-radius: 8px;
-  font-size: 0.9rem; color: #111827; background-color: #FFFFFF; outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s; box-sizing: border-box;
+/* Shared form classes retained for existing administrative dialogs. */
+.formal-modal-body .modal-form-group {
+  margin-bottom: 18px;
 }
-.formal-modal-body .modal-input:focus, .formal-modal-body .modal-select:focus {
-  border-color: #0D9488; box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
+
+.formal-modal-body .modal-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
 }
+
+.formal-modal-body .modal-input,
+.formal-modal-body .modal-select {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 12px;
+  color: var(--fm-ink);
+  background-color: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.formal-modal-body .modal-input::placeholder {
+  color: #94a3b8;
+}
+
+.formal-modal-body .modal-input:hover,
+.formal-modal-body .modal-select:hover {
+  border-color: #94a3b8;
+}
+
+.formal-modal-body .modal-input:focus,
+.formal-modal-body .modal-select:focus {
+  border-color: var(--fm-teal);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+}
+
+.formal-modal-body .modal-input:disabled,
+.formal-modal-body .modal-select:disabled {
+  color: #94a3b8;
+  background-color: #f1f5f9;
+  cursor: not-allowed;
+}
+
 .formal-modal-body .modal-select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
-  background-repeat: no-repeat; background-position: right 12px center; background-size: 1.25em; padding-right: 36px;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 18px;
 }
 
-/* Footer Buttons */
 .formal-modal-footer .btn-modal-cancel,
 .formal-modal-footer .btn-modal-submit {
-  padding: 0.6rem 1.25rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem;
-  border: 1px solid transparent; cursor: pointer; transition: all 0.2s ease;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
-.formal-modal-footer .btn-modal-cancel { background: #FFFFFF; border-color: #D1D5DB; color: #374151; }
-.formal-modal-footer .btn-modal-cancel:hover { background: #F9FAFB; border-color: #9CA3AF; }
 
-.formal-modal-footer .btn-modal-submit { background: #111827; color: #ffffff; }
-.formal-modal-footer .btn-modal-submit:hover { background: #374151; }
+.formal-modal-footer .btn-modal-cancel {
+  color: #334155;
+  background: #fff;
+  border-color: #cbd5e1;
+}
 
-.formal-modal-footer .btn-modal-submit.danger { background: #DC2626; }
-.formal-modal-footer .btn-modal-submit.danger:hover { background: #B91C1C; }
+.formal-modal-footer .btn-modal-cancel:hover {
+  color: var(--fm-ink);
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
 
-.formal-modal-footer .btn-modal-submit:disabled { background: #9CA3AF; cursor: not-allowed; }
+.formal-modal-footer .btn-modal-submit {
+  color: #fff;
+  background: var(--fm-teal);
+  border-color: var(--fm-teal);
+}
 
-/* Responsive adjustments */
+.formal-modal-footer .btn-modal-submit:hover:not(:disabled) {
+  background: var(--fm-teal-dark);
+  border-color: var(--fm-teal-dark);
+}
+
+.formal-modal-footer .btn-modal-submit.danger {
+  color: #fff;
+  background: var(--fm-danger);
+  border-color: var(--fm-danger);
+}
+
+.formal-modal-footer .btn-modal-submit.danger:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.formal-modal-footer .btn-modal-submit:disabled,
+.formal-modal-footer .btn-modal-cancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 @media (max-width: 768px) {
-  .formal-modal-content { max-width: 100% !important; }
-  .formal-modal-header, .formal-modal-body, .formal-modal-footer { padding: 1.25rem; }
+  .formal-modal-overlay { padding: 14px; }
+  .formal-modal-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 28px);
+  }
+  .formal-modal-header { min-height: 60px; padding: 14px 18px; }
+  .formal-modal-body { padding: 18px; }
+  .formal-modal-footer { padding: 14px 18px; }
+}
+
+@media (max-width: 420px) {
+  .formal-modal-overlay { padding: 8px; }
+  .formal-modal-content { max-height: calc(100dvh - 16px); }
+  .formal-modal-title { font-size: 15px; }
+  .formal-modal-header { padding: 12px 14px; }
+  .formal-modal-body { padding: 16px 14px; }
+  .formal-modal-footer { padding: 12px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .formal-modal-overlay,
+  .formal-modal-content { animation: none; }
+  .formal-modal-overlay *,
+  .formal-modal-overlay *::before,
+  .formal-modal-overlay *::after { transition-duration: 0.01ms !important; }
 }

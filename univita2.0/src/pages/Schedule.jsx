@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
+import { getUserRole } from '../permissions';
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
@@ -19,13 +20,17 @@ const formatTo12Hour = (timeStr) => {
   const minutes = parts[1] || '00';
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12;
-  hours = hours ? hours : 12; 
+  hours = hours ? hours : 12;
   return `${hours}:${minutes} ${ampm}`;
 };
 
 const Schedule = () => {
-  const userRole = localStorage.getItem('user_role') || 'instructor';
-  const canEdit = userRole === 'admin' || userRole === 'hr_admin';
+  // ---- Role detection (Fix 10.10: use consistent 'role' key with fallback) ----
+  const currentUserRole = getUserRole();
+  const isHR = currentUserRole === 'hr_admin';
+  const isAdmin = currentUserRole === 'admin';
+  // Schedules are HR-owned. Admin is READ-ONLY. Instructors never reach this page.
+  const canWrite = isHR;
 
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -34,11 +39,10 @@ const Schedule = () => {
   const [schedules, setSchedules] = useState([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [schoolLocations, setSchoolLocations] = useState([]);
-  
-  // NEW: Programs and Courses States
+
   const [programs, setPrograms] = useState([]);
   const [courses, setCourses] = useState([]);
-  
+
   const [loading, setLoading] = useState(true);
 
   const [conflicts, setConflicts] = useState([]);
@@ -54,14 +58,16 @@ const Schedule = () => {
   const [manualBulkRows, setManualBulkRows] = useState([]);
   const [isUploadingBulk, setIsUploadingBulk] = useState(false);
 
-  // NEW: Added program_id to formData
   const [formData, setFormData] = useState({
-    user_id: '', date: '', place: '', 
+    user_id: '', date: '', place: '',
     program_id: '', course: '',
     start_time: '08:00', end_time: '17:00', status: 'Scheduled'
   });
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  })();
 
   const getManualDateString = (dateObj) => {
     const y = dateObj.getFullYear(),
@@ -94,13 +100,12 @@ const Schedule = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      // NEW: Added fetch for /programs
       const [empRes, schedRes, locRes, courseRes, progRes] = await Promise.all([
         axios.get(`${API_BASE}/employees`, getAuthHeaders()),
         axios.get(`${API_BASE}/schedules`, getAuthHeaders()),
         axios.get(`${API_BASE}/school-locations`, getAuthHeaders()),
         axios.get(`${API_BASE}/courses`, getAuthHeaders()),
-        axios.get(`${API_BASE}/programs`, getAuthHeaders()) 
+        axios.get(`${API_BASE}/programs`, getAuthHeaders())
       ]);
       const instList = empRes.data.filter(u => u.role.toLowerCase() === 'instructor' && u.status === 'active');
       setInstructors(instList);
@@ -151,7 +156,6 @@ const Schedule = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    // If Program changes, reset the Course
     if (name === 'program_id') {
       setFormData(prev => ({ ...prev, program_id: value, course: '' }));
     } else {
@@ -159,19 +163,23 @@ const Schedule = () => {
     }
   };
 
+  // ---- Handlers: defense-in-depth canWrite guards ----
   const handleEditClick = (session) => {
+    if (!canWrite) {
+      toast.error('You do not have permission to edit schedules.');
+      return;
+    }
     const now = new Date();
     const currentLocalDate = now.toLocaleDateString('en-CA');
-    const currentTimeStr = now.toTimeString().substring(0, 5); 
+    const currentTimeStr = now.toTimeString().substring(0, 5);
     const sessionDateStr = session.schedule_date ? session.schedule_date.split('T')[0] : '';
     const sessionEndTime = session.end_time ? session.end_time.substring(0, 5) : '';
 
     if (sessionDateStr < currentLocalDate || (sessionDateStr === currentLocalDate && sessionEndTime < currentTimeStr)) {
-       toast.warning("This schedule has already passed and cannot be edited.");
-       return;
+      toast.warning('This schedule has already passed and cannot be edited.');
+      return;
     }
 
-    // Find the program_id based on the existing course name
     const matchedCourse = courses.find(c => c.name === session.course);
 
     setFormData({
@@ -190,6 +198,10 @@ const Schedule = () => {
   };
 
   const handleQuickAdd = (instructor, dateStr) => {
+    if (!canWrite) {
+      toast.error('You do not have permission to create schedules.');
+      return;
+    }
     setFormData({
       user_id: instructor.employee_id,
       date: dateStr,
@@ -217,35 +229,38 @@ const Schedule = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!canWrite) {
+      toast.error('You do not have permission to save schedules.');
+      return;
+    }
 
     const isCompletelyEmpty = !formData.user_id && !formData.date && !formData.place && !formData.course;
-    if (isCompletelyEmpty) return toast.warning("All fields are required!");
-    if (!formData.user_id) return toast.warning("Instructor is required!");
-    if (!formData.date) return toast.warning("Date is required!");
-    if (!formData.place) return toast.warning("School Location is required!");
-    if (!formData.program_id) return toast.warning("Program is required!");
-    if (!formData.course) return toast.warning("Course / Subject is required!");
-    if (!formData.start_time) return toast.warning("Start Time is required!");
-    if (!formData.end_time) return toast.warning("End Time is required!");
+    if (isCompletelyEmpty) return toast.warning('All fields are required!');
+    if (!formData.user_id) return toast.warning('Instructor is required!');
+    if (!formData.date) return toast.warning('Date is required!');
+    if (!formData.place) return toast.warning('School Location is required!');
+    if (!formData.program_id) return toast.warning('Program is required!');
+    if (!formData.course) return toast.warning('Course / Subject is required!');
+    if (!formData.start_time) return toast.warning('Start Time is required!');
+    if (!formData.end_time) return toast.warning('End Time is required!');
 
     const userSchedules = schedules.filter(s => String(s.employee_id).trim() === String(formData.user_id).trim() && String(s.schedule_date).split('T')[0] === formData.date);
     const isOnLeave = userSchedules.some(s => s.course === 'On Leave' || s.place === 'Remote/Leave');
-    
-    if (isOnLeave) return toast.error("Cannot assign a schedule. The employee is on leave on this date.");
-    if (hasConflict) return toast.warning("Time conflict – please adjust.");
+
+    if (isOnLeave) return toast.error('Cannot assign a schedule. The employee is on leave on this date.');
+    if (hasConflict) return toast.warning('Time conflict – please adjust.');
 
     const now = new Date();
     const currentLocalDate = now.toLocaleDateString('en-CA');
-    const currentTimeStr = now.toTimeString().substring(0, 5); 
+    const currentTimeStr = now.toTimeString().substring(0, 5);
 
-    if (formData.date < currentLocalDate) return toast.warning("Cannot schedule for a past date.");
-    if (formData.date === currentLocalDate && formData.start_time < currentTimeStr) return toast.warning("Cannot schedule a start time that has already passed today.");
-    if (formData.start_time >= formData.end_time) return toast.warning("End time must be after start time.");
+    if (formData.date < currentLocalDate) return toast.warning('Cannot schedule for a past date.');
+    if (formData.date === currentLocalDate && formData.start_time < currentTimeStr) return toast.warning('Cannot schedule a start time that has already passed today.');
+    if (formData.start_time >= formData.end_time) return toast.warning('End time must be after start time.');
 
     try {
       const url = isEditing ? `${API_BASE}/schedules/${currentScheduleId}` : `${API_BASE}/schedules`;
-      
-      // Clean payload (backend doesn't need program_id, just the course name)
+
       const payload = {
         user_id: formData.user_id,
         date: formData.date,
@@ -268,15 +283,19 @@ const Schedule = () => {
   };
 
   const openDeleteConfirm = (session) => {
+    if (!canWrite) {
+      toast.error('You do not have permission to delete schedules.');
+      return;
+    }
     const now = new Date();
     const currentLocalDate = now.toLocaleDateString('en-CA');
-    const currentTimeStr = now.toTimeString().substring(0, 5); 
+    const currentTimeStr = now.toTimeString().substring(0, 5);
     const sessionDateStr = session.schedule_date ? session.schedule_date.split('T')[0] : '';
     const sessionEndTime = session.end_time ? session.end_time.substring(0, 5) : '';
 
     if (sessionDateStr < currentLocalDate || (sessionDateStr === currentLocalDate && sessionEndTime < currentTimeStr)) {
-       toast.warning("This schedule has already passed and cannot be deleted.");
-       return;
+      toast.warning('This schedule has already passed and cannot be deleted.');
+      return;
     }
 
     setDeleteTargetId(session.schedule_id);
@@ -284,6 +303,11 @@ const Schedule = () => {
   };
 
   const confirmDelete = async () => {
+    if (!canWrite) {
+      toast.error('You do not have permission to delete schedules.');
+      setShowDeleteConfirm(false);
+      return;
+    }
     if (!deleteTargetId) return;
     try {
       await axios.delete(`${API_BASE}/schedules/${deleteTargetId}`, getAuthHeaders());
@@ -299,12 +323,13 @@ const Schedule = () => {
 
   // --- BULK ROW LOGIC ---
   const addManualBulkRow = () => {
+    if (!canWrite) return;
     setManualBulkRows([...manualBulkRows, {
       id: Date.now() + Math.random(),
       employee_id: '',
       date: '',
       place: schoolLocations[0]?.name || '',
-      program_id: '', // NEW
+      program_id: '',
       course: '',
       start_time: '08:00',
       end_time: '17:00'
@@ -312,13 +337,14 @@ const Schedule = () => {
   };
 
   const removeManualBulkRow = (id) => {
+    if (!canWrite) return;
     setManualBulkRows(manualBulkRows.filter(row => row.id !== id));
   };
 
   const updateManualBulkRow = (id, field, value) => {
+    if (!canWrite) return;
     setManualBulkRows(manualBulkRows.map(row => {
       if (row.id === id) {
-        // If program changes, clear the course
         if (field === 'program_id') {
           return { ...row, program_id: value, course: '' };
         }
@@ -329,21 +355,24 @@ const Schedule = () => {
   };
 
   const submitInteractiveBulk = async () => {
+    if (!canWrite) {
+      toast.error('You do not have permission to bulk assign schedules.');
+      return;
+    }
     for (let i = 0; i < manualBulkRows.length; i++) {
       const r = manualBulkRows[i];
       const isRowEmpty = !r.employee_id && !r.date && !r.place && !r.course;
-      
+
       if (isRowEmpty) return toast.warning(`Row ${i + 1}: All fields are required!`);
       if (!r.employee_id) return toast.warning(`Row ${i + 1}: Instructor is required!`);
       if (!r.date) return toast.warning(`Row ${i + 1}: Date is required!`);
       if (!r.place) return toast.warning(`Row ${i + 1}: Location is required!`);
-      if (!r.program_id) return toast.warning(`Row ${i + 1}: Program is required!`); // NEW
+      if (!r.program_id) return toast.warning(`Row ${i + 1}: Program is required!`);
       if (!r.course) return toast.warning(`Row ${i + 1}: Course is required!`);
       if (!r.start_time) return toast.warning(`Row ${i + 1}: Start Time is required!`);
       if (!r.end_time) return toast.warning(`Row ${i + 1}: End Time is required!`);
     }
 
-    // Clean the payload to only send what the backend expects
     const validRows = manualBulkRows.map(r => ({
       employee_id: r.employee_id,
       date: r.date,
@@ -352,8 +381,8 @@ const Schedule = () => {
       start_time: r.start_time,
       end_time: r.end_time
     }));
-    
-    if (validRows.length === 0) return toast.warning("Please add at least one row.");
+
+    if (validRows.length === 0) return toast.warning('Please add at least one row.');
 
     setIsUploadingBulk(true);
     try {
@@ -367,19 +396,23 @@ const Schedule = () => {
       setManualBulkRows([]);
       await loadData();
     } catch (error) {
-      toast.error(error.response?.data?.error || "Error processing schedules.");
+      toast.error(error.response?.data?.error || 'Error processing schedules.');
     } finally {
       setIsUploadingBulk(false);
     }
   };
 
   const openBulkModal = () => {
+    if (!canWrite) {
+      toast.error('You do not have permission to bulk assign schedules.');
+      return;
+    }
     setManualBulkRows([{
       id: Date.now(),
       employee_id: '',
       date: '',
       place: schoolLocations[0]?.name || '',
-      program_id: '', // NEW
+      program_id: '',
       course: '',
       start_time: '08:00',
       end_time: '17:00'
@@ -387,23 +420,34 @@ const Schedule = () => {
     setShowBulkModal(true);
   };
 
+  const weekStart = getManualDateString(weekDaysDates[0]);
+  const weekEnd = getManualDateString(weekDaysDates[6]);
+  const weekSessions = schedules.filter(item => item.schedule_date >= weekStart && item.schedule_date <= weekEnd);
+  const assignedInstructors = new Set(weekSessions.map(item => String(item.employee_id)));
+
   return (
     <div className="sch-container">
       <div className="sch-header">
         <div className="sch-title-area">
-          <p className="sch-subtitle">Manage instructor class schedules, physical locations, and course assignments.</p>
+          
+          <p className="sch-subtitle">
+            {isAdmin
+              ? 'Read-only view of instructor class schedules, locations, and course assignments.'
+              : 'Manage instructor class schedules, physical locations, and course assignments.'}
+          </p>
         </div>
-        
+
         <div className="sch-actions">
-          {canEdit && (
+          <button type="button" className="btn-sch-outline" onClick={loadData} disabled={loading} title="Refresh schedule data">Refresh</button>
+          {canWrite && (
             <>
               <button className="btn-sch-outline" onClick={openBulkModal}>
-                <Calendar size={16} /> 
+                <Calendar size={16} />
                 <span>Bulk Assign</span>
               </button>
 
               <button className="btn-sch-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-                <Plus size={16} /> 
+                <Plus size={16} />
                 <span>Add Schedule</span>
               </button>
             </>
@@ -411,8 +455,24 @@ const Schedule = () => {
         </div>
       </div>
 
+      {/* ---- Read-only banner for Admin ---- */}
+      {isAdmin && (
+        <div className="sch-readonly-banner">
+          <ShieldAlert size={16} />
+          <span>Read-only view. Schedule management is handled by HR.</span>
+        </div>
+      )}
+
+      <div className="sch-overview" aria-label="Schedule summary">
+        <div className="sch-overview-item"><span>Active instructors</span><strong>{instructors.length}</strong></div>
+        <div className="sch-overview-item"><span>Sessions this week</span><strong>{weekSessions.length}</strong></div>
+        <div className="sch-overview-item"><span>Instructors assigned</span><strong>{assignedInstructors.size}</strong></div>
+        <div className="sch-overview-item"><span>Current view</span><strong>Weekly roster</strong></div>
+      </div>
+
       <div className="sch-card">
         <div className="sch-toolbar">
+          <div className="sch-toolbar-title"><strong>Weekly Assignment Board</strong><span>Instructor-by-day schedule</span></div>
           <div className="sch-date-nav">
             <button className="sch-nav-btn" onClick={() => {
               const prev = new Date(currentDate);
@@ -433,6 +493,7 @@ const Schedule = () => {
               <ChevronRight size={18} />
             </button>
           </div>
+          <button type="button" className="btn-sch-outline sch-today-btn" onClick={() => setCurrentDate(new Date())}>This week</button>
         </div>
 
         {loading ? (
@@ -461,7 +522,7 @@ const Schedule = () => {
                       <div className="sch-emp-name">{inst.full_name}</div>
                       <div className="sch-emp-id">{inst.employee_id}</div>
                     </td>
-                    
+
                     {weekDaysDates.map((dateObj) => {
                       const colDateStr = getManualDateString(dateObj);
                       const daySessions = schedules.filter(s =>
@@ -470,7 +531,7 @@ const Schedule = () => {
                       );
 
                       const leaveSession = daySessions.find(s => s.course === 'On Leave' || s.place === 'Remote/Leave');
-                      
+
                       if (leaveSession) {
                         return (
                           <td key={colDateStr} className="sch-cell">
@@ -485,8 +546,11 @@ const Schedule = () => {
                       if (daySessions.length === 0) {
                         return (
                           <td key={colDateStr} className="sch-cell">
-                            <div className="sch-empty-slot" onClick={() => canEdit && handleQuickAdd(inst, colDateStr)}>
-                              {canEdit ? <><Plus size={14} /> Add</> : 'No Schedule'}
+                            <div
+                              className={`sch-empty-slot ${!canWrite ? 'readonly' : ''}`}
+                              onClick={() => canWrite && handleQuickAdd(inst, colDateStr)}
+                            >
+                              {canWrite ? <><Plus size={14} /> Add</> : 'No Schedule'}
                             </div>
                           </td>
                         );
@@ -499,19 +563,19 @@ const Schedule = () => {
 
                       return (
                         <td key={colDateStr} className="sch-cell">
-                          <div 
+                          <div
                             className={`sch-session-block ${isCompleted ? 'completed' : 'active'}`}
                             onClick={() => { setDetailSession(daySessions); setShowDetailModal(true); }}
                           >
                             {totalCount > 1 && (
                               <div className="sch-multi-badge">{totalCount}</div>
                             )}
-                            
+
                             <div className="sch-session-header">
                               <span className="sch-session-time">
                                 {formatTo12Hour(displaySession.start_time)} – {formatTo12Hour(displaySession.end_time)}
                               </span>
-                              {canEdit && (
+                              {canWrite && (
                                 <div className="sch-session-actions">
                                   <Edit3 size={13} className="sch-action-icon edit" onClick={(e) => { e.stopPropagation(); handleEditClick(displaySession); }} />
                                   <Trash2 size={13} className="sch-action-icon delete" onClick={(e) => { e.stopPropagation(); openDeleteConfirm(displaySession); }} />
@@ -534,7 +598,8 @@ const Schedule = () => {
         )}
       </div>
 
-      {canEdit && (
+      {/* ---- Add / Edit Modal — HR only ---- */}
+      {canWrite && (
         <FormalModal
           show={showModal}
           onClose={() => { setShowModal(false); resetForm(); }}
@@ -576,7 +641,6 @@ const Schedule = () => {
               </div>
             </div>
 
-            {/* NEW: Cascading Program and Course */}
             <div className="sch-form-row">
               <div className="sch-form-group">
                 <label>Program</label>
@@ -591,7 +655,6 @@ const Schedule = () => {
                 <label>Course / Subject</label>
                 <select name="course" className="sch-input" value={formData.course} onChange={handleInputChange} required disabled={!formData.program_id}>
                   <option value="">{formData.program_id ? 'Select Course' : 'Select Program First'}</option>
-                  {/* Filter courses by selected program */}
                   {courses.filter(c => String(c.program_id) === String(formData.program_id)).map(c => (
                     <option key={c.id} value={c.name}>{c.name}</option>
                   ))}
@@ -620,8 +683,8 @@ const Schedule = () => {
         </FormalModal>
       )}
 
-      {/* BULK MODAL */}
-      {canEdit && (
+      {/* ---- Bulk Modal — HR only ---- */}
+      {canWrite && (
         <FormalModal
           show={showBulkModal}
           onClose={() => {
@@ -633,9 +696,9 @@ const Schedule = () => {
           footer={
             <>
               <button className="btn-sch-cancel" onClick={() => setShowBulkModal(false)}>Cancel</button>
-              <button 
-                className="btn-sch-primary" 
-                onClick={submitInteractiveBulk} 
+              <button
+                className="btn-sch-primary"
+                onClick={submitInteractiveBulk}
                 disabled={isUploadingBulk || manualBulkRows.length === 0}
               >
                 {isUploadingBulk ? 'Processing...' : `Assign Schedules`}
@@ -646,7 +709,7 @@ const Schedule = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="sch-interactive-grid-container">
               <p className="sch-bulk-desc">Add multiple schedules using the interactive rows below. Ensure all dropdown fields are filled before submitting.</p>
-              
+
               <div className="sch-interactive-table-wrapper">
                 <table className="sch-interactive-table">
                   <thead>
@@ -654,7 +717,7 @@ const Schedule = () => {
                       <th>Instructor</th>
                       <th>Date</th>
                       <th>Location</th>
-                      <th>Program</th> {/* NEW */}
+                      <th>Program</th>
                       <th>Course</th>
                       <th>Start</th>
                       <th>End</th>
@@ -679,23 +742,18 @@ const Schedule = () => {
                             {schoolLocations.map(loc => <option key={loc.id} value={loc.name}>{loc.name}</option>)}
                           </select>
                         </td>
-                        
-                        {/* NEW: Bulk Program Dropdown */}
                         <td>
                           <select className="sch-input-small" value={row.program_id} onChange={(e) => updateManualBulkRow(row.id, 'program_id', e.target.value)}>
                             <option value="">Select...</option>
                             {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
                           </select>
                         </td>
-
-                        {/* NEW: Bulk Course Dropdown (Filtered) */}
                         <td>
                           <select className="sch-input-small" value={row.course} onChange={(e) => updateManualBulkRow(row.id, 'course', e.target.value)} disabled={!row.program_id}>
                             <option value="">{row.program_id ? 'Select...' : 'Pick Program First'}</option>
                             {courses.filter(c => String(c.program_id) === String(row.program_id)).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                           </select>
                         </td>
-
                         <td>
                           <input type="time" className="sch-input-small" value={row.start_time} onChange={(e) => updateManualBulkRow(row.id, 'start_time', e.target.value)} />
                         </td>
@@ -721,10 +779,11 @@ const Schedule = () => {
         </FormalModal>
       )}
 
-      <FormalModal 
-        show={showDetailModal} 
-        onClose={() => setShowDetailModal(false)} 
-        title="Daily Schedule Overview" 
+      {/* ---- Detail Modal — read-only, visible to both roles ---- */}
+      <FormalModal
+        show={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+        title="Daily Schedule Overview"
         wide
         footer={<button className="btn-sch-cancel" onClick={() => setShowDetailModal(false)}>Close</button>}
       >
@@ -736,18 +795,18 @@ const Schedule = () => {
               const startTime = new Date(`${scheduleDateStr}T${s.start_time}`);
               const endTime = new Date(`${scheduleDateStr}T${s.end_time}`);
               let finalStatus = s.attendance_status || 'SCHEDULED';
-              
+
               if (finalStatus.toUpperCase() === 'IN PROGRESS' && now > endTime) {
-                finalStatus = 'MISSING CLOCK-OUT'; 
+                finalStatus = 'MISSING CLOCK-OUT';
               } else if (finalStatus.toUpperCase() === 'SCHEDULED' && now > endTime) {
                 finalStatus = 'MISSED SHIFT';
               } else if (finalStatus.toUpperCase() === 'SCHEDULED' && now >= startTime && now <= endTime) {
                 finalStatus = 'LATE / PENDING';
               }
 
-              const statusClass = 
-                finalStatus === 'COMPLETED' ? 'status-completed' : 
-                finalStatus === 'IN PROGRESS' ? 'status-inprogress' : 
+              const statusClass =
+                finalStatus === 'COMPLETED' ? 'status-completed' :
+                finalStatus === 'IN PROGRESS' ? 'status-inprogress' :
                 finalStatus === 'MISSING CLOCK-OUT' || finalStatus === 'MISSED SHIFT' ? 'status-danger' :
                 finalStatus === 'LATE / PENDING' ? 'status-warning' :
                 'status-scheduled';
@@ -779,19 +838,22 @@ const Schedule = () => {
         </div>
       </FormalModal>
 
-      <FormalModal
-        show={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        title="Delete Schedule"
-        footer={
-          <>
-            <button className="btn-sch-cancel" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
-            <button className="btn-sch-danger" onClick={confirmDelete}>Yes, Delete</button>
-          </>
-        }
-      >
-        <p className="sch-confirm-text">Are you sure you want to permanently delete this schedule? This action cannot be undone.</p>
-      </FormalModal>
+      {/* ---- Delete Confirm Modal — HR only ---- */}
+      {canWrite && (
+        <FormalModal
+          show={showDeleteConfirm}
+          onClose={() => setShowDeleteConfirm(false)}
+          title="Delete Schedule"
+          footer={
+            <>
+              <button className="btn-sch-cancel" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+              <button className="btn-sch-danger" onClick={confirmDelete}>Yes, Delete</button>
+            </>
+          }
+        >
+          <p className="sch-confirm-text">Are you sure you want to permanently delete this schedule? This action cannot be undone.</p>
+        </FormalModal>
+      )}
     </div>
   );
 };

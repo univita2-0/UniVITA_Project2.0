@@ -1,6 +1,6 @@
 // App.js
 import React, { useEffect, useState, useRef, useContext, Suspense, useCallback  } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar, Alert, AppState  } from 'react-native';
+import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar, Alert, AppState, DeviceEventEmitter } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -251,19 +251,98 @@ function AppContent() {
   const activeAlertId = useRef(null);
   const gpsPromptShown = useRef(false);
 
+  // C11.3: Authentication errors are definitive HTTP 401 responses.
+  // Preserve @attendance_queue and persistent offline selfies for later login.
   useEffect(() => {
-    let cancelled = false;
-    const unsubscribe = NetInfo.addEventListener(state => {
-      if (!state.isConnected || cancelled) return;
-      AsyncStorage.getItem('auth_token').then(token => {
-        if (!token || cancelled) return;
-        syncOfflineQueue().then(count => {
-          if (count > 0 && !cancelled) setRefreshTrigger(prev => prev + 1);
-        });
-      });
-    });
-    return () => { cancelled = true; unsubscribe(); };
+    const listener = DeviceEventEmitter.addListener(
+      'univita:session-expired', async () => {
+        try {
+          await AsyncStorage.multiRemove(['auth_token', 'user', 'employee_id']);
+        } catch (error) {
+          console.warn('C11: Unable to clear expired session:', error);
+        }
+        setUserId(null);
+        Alert.alert('Session Expired', 'Please log in again to continue. Your offline attendance remains saved.');
+      }
+    );
+    return () => listener.remove();
   }, []);
+
+  
+useEffect(() => {
+  let cancelled = false;
+
+  // C09: Synchronize pending attendance when online.
+  const trySyncAttendance = async () => {
+    if (cancelled) return;
+
+    try {
+      const network = await NetInfo.fetch();
+
+      // Require an actual network connection.
+      if (
+        !network.isConnected ||
+        network.isInternetReachable === false
+      ) {
+        return;
+      }
+
+      const token = await AsyncStorage.getItem(
+        'auth_token'
+      );
+
+      if (!token || cancelled) return;
+
+      const count = await syncOfflineQueue();
+
+      if (count > 0 && !cancelled) {
+        DeviceEventEmitter.emit('univita:c12-attendance-updated');
+        console.log(
+          `C09: ${count} attendance event(s) acknowledged by server.`
+        );
+
+        setRefreshTrigger(prev => prev + 1);
+      }
+    } catch (error) {
+      console.warn(
+        'C09 attendance sync failed:',
+        error?.message || error
+      );
+    }
+  };
+
+  // 1. Sync when internet connectivity changes.
+  const unsubscribe = NetInfo.addEventListener(
+    state => {
+      if (
+        state.isConnected &&
+        state.isInternetReachable !== false
+      ) {
+        trySyncAttendance();
+      }
+    }
+  );
+
+  // 2. Sync when the app returns to foreground.
+  const appSubscription = AppState.addEventListener(
+    'change',
+    state => {
+      if (state === 'active') {
+        trySyncAttendance();
+      }
+    }
+  );
+
+  // 3. Check pending attendance when the app starts.
+  trySyncAttendance();
+
+  return () => {
+    cancelled = true;
+    unsubscribe();
+    appSubscription.remove();
+  };
+}, []);
+
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {

@@ -1,7 +1,5 @@
-/* src/pages/RoleManagement.css */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
-
-.expert-container {
+@import  url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap");
+.uv-admin-roles.expert-container {
   --bg: #F8FAFC;
   --surface: #FFFFFF;
   --border: #E2E8F0;
@@ -24,13 +22,12 @@
   background: var(--bg);
   padding: 2rem;
   min-height: 100vh;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
   color: var(--text);
   font-size: 0.9375rem;
   line-height: 1.5;
 }
-
-.expert-header {
+.uv-admin-roles .expert-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -40,10 +37,9 @@
   flex-wrap: wrap;
   gap: 1rem;
 }
-.expert-title-group { display: flex; align-items: center; gap: 1rem; }
-
-.expert-title {
-  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+.uv-admin-roles .expert-title-group { display: flex; align-items: center; gap: 1rem; }
+.uv-admin-roles .expert-title {
+  font-family: "Plus Jakarta Sans", "Inter", sans-serif;
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--text);
@@ -51,22 +47,33 @@
   letter-spacing: -0.025em;
   line-height: 1.2;
 }
-.expert-subtitle {
+.uv-admin-roles .expert-subtitle {
   color: var(--text-muted);
   font-size: 0.9375rem;
   margin: 0;
   max-width: 640px;
   line-height: 1.5;
 }
-
-/* Stats Row */
-.rep-stats-row {
+.uv-admin-roles .rm-readonly-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  background: #F0FDFA;
+  border: 1px solid #99F6E4;
+  border-radius: var(--radius-md);
+  color: #0F766E;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 1.5rem;
+}
+.uv-admin-roles .rep-stats-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
-.rep-stat-box {
+.uv-admin-roles .rep-stat-box {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -76,7 +83,7 @@
   gap: 1rem;
   box-shadow: var(--shadow-sm);
 }
-.rep-stat-icon {
+.uv-admin-roles .rep-stat-icon {
   color: var(--accent-hover);
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
@@ -88,8 +95,8 @@
   justify-content: center;
   flex-shrink: 0;
 }
-.rep-stat-info { display: flex; flex-direction: column; min-width: 0; }
-.rep-stat-label {
+.uv-admin-roles .rep-stat-info { display: flex; flex-direction: column; min-width: 0; }
+.uv-admin-roles .rep-stat-label {
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -97,64 +104,52 @@
   color: var(--text-muted);
   margin-bottom: 0.25rem;
 }
-.rep-stat-value {
-  font-family: 'Plus Jakarta Sans', sans-serif;
+.uv-admin-roles .rep-stat-value {
+  font-family: "Plus Jakarta Sans", sans-serif;
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--text);
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
-
-/* Card & Filters */
-.expert-card {
+.uv-admin-roles .expert-card {
   background: var(--surface);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
   overflow: hidden;
 }
-.expert-search-card {
+.uv-admin-roles .expert-search-card {
   background: var(--surface);
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border-soft);
 }
-.al-filters-wrapper {
+.uv-admin-roles .rm-filters {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
 }
-.al-filter-group { display: flex; flex-direction: column; gap: 0.4rem; }
-.al-filter-group.search { flex: 2; min-width: 260px; }
-.al-filter-group.action { flex: 1; min-width: 180px; }
-.al-filter-group label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.expert-search-input-group {
+.uv-admin-roles .rm-search-group {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  width: 100%;
+  flex: 2;
+  min-width: 260px;
   background: #F8FAFC;
   border: 1px solid #CBD5E1;
   border-radius: var(--radius-md);
   padding: 0 0.875rem;
   height: 40px;
   box-sizing: border-box;
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  transition: all 0.15s ease;
 }
-.expert-search-input-group:focus-within {
+.uv-admin-roles .rm-search-group:focus-within {
   border-color: var(--accent);
   background: var(--surface);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
-.expert-clean-input {
+.uv-admin-roles .expert-clean-input {
   border: none;
   background: transparent;
   padding: 0.5rem 0;
@@ -164,28 +159,32 @@
   width: 100%;
   outline: none;
 }
-.expert-clean-input.border {
+.uv-admin-roles .rm-filter-group {
+  flex: 1;
+  min-width: 180px;
+}
+.uv-admin-roles .rm-select-filter {
+  width: 100%;
+  padding: 0 0.875rem;
+  height: 40px;
   border: 1px solid #CBD5E1;
   border-radius: var(--radius-md);
   background: var(--surface);
-  padding: 0.55rem 0.875rem;
-  height: 40px;
-  box-sizing: border-box;
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
   font-size: 0.9375rem;
   font-weight: 500;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
-.expert-clean-input.border:focus {
+.uv-admin-roles .rm-select-filter:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
-  outline: none;
 }
-
-/* Table */
-.expert-table-wrapper { overflow-x: auto; width: 100%; }
-.expert-table { width: 100%; border-collapse: collapse; text-align: left; }
-.expert-table th {
+.uv-admin-roles .expert-table-wrapper { overflow-x: auto; width: 100%; }
+.uv-admin-roles .expert-table { width: 100%; border-collapse: collapse; text-align: left; }
+.uv-admin-roles .expert-table th {
   background: #F8FAFC;
   padding: 0.875rem 1.25rem;
   font-size: 0.75rem;
@@ -196,35 +195,29 @@
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
-.expert-table td {
+.uv-admin-roles .expert-table td {
   padding: 1rem 1.25rem;
   font-size: 0.9375rem;
   color: var(--text-2);
   border-bottom: 1px solid var(--border-soft);
   vertical-align: middle;
 }
-.expert-table tr:hover td { background: #F8FAFC; }
-.expert-table tr:last-child td { border-bottom: none; }
-
-.font-mono { font-family: 'SF Mono', ui-monospace, monospace; font-size: 0.85rem; }
-.font-semibold { font-weight: 600; }
-.text-dark { color: var(--text); }
-.text-muted { color: var(--text-muted); }
-.text-right { text-align: right !important; }
-
-.rm-emp-name {
+.uv-admin-roles .expert-table tr:hover td { background: #F8FAFC; }
+.uv-admin-roles .expert-table tr:last-child td { border-bottom: none; }
+.uv-admin-roles .font-mono { font-family: "SF Mono", ui-monospace, monospace; font-size: 0.85rem; }
+.uv-admin-roles .text-muted { color: var(--text-muted); }
+.uv-admin-roles .text-right { text-align: right !important; }
+.uv-admin-roles .rm-emp-name {
   font-weight: 600;
   color: var(--text);
   margin-bottom: 0.15rem;
   font-size: 0.9375rem;
 }
-.rm-emp-email {
+.uv-admin-roles .rm-emp-email {
   font-size: 0.8125rem;
   color: var(--text-muted);
 }
-
-/* Badges */
-.rm-badge {
+.uv-admin-roles .rm-badge {
   display: inline-flex;
   align-items: center;
   padding: 0.3rem 0.65rem;
@@ -234,15 +227,13 @@
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-.rm-badge-admin { background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; }
-.rm-badge-hr { background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; }
-.rm-badge-security { background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; }
-.rm-badge-instructor { background: #F1F5F9; color: var(--text-2); border: 1px solid var(--border); }
-.rm-badge-default { background: #F8FAFC; color: #94A3B8; border: 1px solid var(--border); }
-
-/* Select */
-.rm-select-wrapper { display: inline-block; position: relative; }
-.rm-select {
+.uv-admin-roles .rm-badge-admin { background: #EEF2FF; color: #4338CA; border: 1px solid #C7D2FE; }
+.uv-admin-roles .rm-badge-hr { background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; }
+.uv-admin-roles .rm-badge-security { background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; }
+.uv-admin-roles .rm-badge-instructor { background: #F1F5F9; color: var(--text-2); border: 1px solid var(--border); }
+.uv-admin-roles .rm-badge-default { background: #F8FAFC; color: #94A3B8; border: 1px solid var(--border); }
+.uv-admin-roles .rm-select-wrapper { display: inline-block; position: relative; }
+.uv-admin-roles .rm-select {
   padding: 0.5rem 2.25rem 0.5rem 1rem;
   border: 1px solid #CBD5E1;
   border-radius: var(--radius-md);
@@ -261,18 +252,16 @@
   transition: all 0.15s ease;
   min-width: 140px;
 }
-.rm-select:focus {
+.uv-admin-roles .rm-select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
-.rm-select:disabled {
+.uv-admin-roles .rm-select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   background: #F8FAFC;
 }
-
-/* Pagination */
-.expert-pagination {
+.uv-admin-roles .expert-pagination {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -282,9 +271,9 @@
   flex-wrap: wrap;
   gap: 1rem;
 }
-.expert-page-info { font-size: 0.8125rem; color: var(--text-muted); font-weight: 500; }
-.expert-page-controls { display: flex; align-items: center; gap: 0.75rem; }
-.expert-page-btn {
+.uv-admin-roles .expert-page-info { font-size: 0.8125rem; color: var(--text-muted); font-weight: 500; }
+.uv-admin-roles .expert-page-controls { display: flex; align-items: center; gap: 0.75rem; }
+.uv-admin-roles .expert-page-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -299,16 +288,15 @@
   cursor: pointer;
   transition: all 0.15s;
 }
-.expert-page-btn:hover:not(:disabled) {
+.uv-admin-roles .expert-page-btn:hover:not(:disabled) {
   background: #F1F5F9;
   color: var(--text);
   border-color: #94A3B8;
 }
-.expert-page-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.expert-page-current { font-size: 0.8125rem; font-weight: 700; color: var(--text); }
-
-.al-rows-selector { display: flex; align-items: center; gap: 0.65rem; }
-.al-select-small {
+.uv-admin-roles .expert-page-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.uv-admin-roles .expert-page-current { font-size: 0.8125rem; font-weight: 700; color: var(--text); }
+.uv-admin-roles .al-rows-selector { display: flex; align-items: center; gap: 0.65rem; }
+.uv-admin-roles .al-select-small {
   padding: 0.4rem 1.75rem 0.4rem 0.7rem;
   border: 1px solid #CBD5E1;
   border-radius: var(--radius-sm);
@@ -325,8 +313,7 @@
   background-position: right 0.5rem center;
   background-size: 1em 1em;
 }
-
-.expert-empty {
+.uv-admin-roles .expert-empty {
   padding: 4rem 2rem;
   text-align: center;
   color: var(--text-muted);
@@ -335,16 +322,15 @@
   width: 100%;
   box-sizing: border-box;
 }
-.expert-empty p {
-  font-family: 'Plus Jakarta Sans', sans-serif;
+.uv-admin-roles .expert-empty p {
+  font-family: "Plus Jakarta Sans", sans-serif;
   font-size: 1.0625rem;
   color: var(--text);
   font-weight: 600;
   margin: 0.5rem 0 0.25rem 0;
 }
-.expert-empty span { font-size: 0.875rem; }
-
-.expert-loading {
+.uv-admin-roles .expert-empty span { font-size: 0.875rem; }
+.uv-admin-roles .expert-loading {
   text-align: center;
   padding: 5rem 2rem;
   color: var(--accent);
@@ -352,11 +338,35 @@
   background: var(--bg);
   min-height: 100vh;
 }
+@media  (max-width: 768px) {.uv-admin-roles.expert-container { padding: 1.25rem; }
+.uv-admin-roles .expert-header { flex-direction: column; align-items: stretch; }
+.uv-admin-roles .rm-filters { flex-direction: column; align-items: stretch; }
+.uv-admin-roles .rm-search-group, .uv-admin-roles .rm-filter-group { width: 100%; min-width: 100%; }
+.uv-admin-roles .expert-pagination { justify-content: center; }}
 
-@media (max-width: 768px) {
-  .expert-container { padding: 1.25rem; }
-  .expert-header { flex-direction: column; align-items: stretch; }
-  .al-filters-wrapper { flex-direction: column; align-items: stretch; }
-  .al-filter-group.search, .al-filter-group.action { width: 100%; min-width: 100%; }
-  .expert-pagination { justify-content: center; }
-}
+/* UniVITA enterprise design refinements: page-scoped */
+
+.uv-admin-roles.expert-container { padding: 5px 10px 10px; min-height: auto; background: #F8FAFC; font-family: Inter, system-ui, sans-serif; color: #142435; }
+.uv-admin-roles .expert-header { display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom: 1px solid #DFE7EC; padding: 8px 2px 14px; margin-bottom: 14px; }
+.uv-admin-roles .expert-title { font-size: 22px; line-height: 1.25; letter-spacing: -.02em; font-weight: 700; margin:0 0 5px; color:#142435; }
+.uv-admin-roles .expert-subtitle { font-size: 13px; line-height: 1.45; color: #64748B; margin:0; }
+.uv-admin-roles .expert-card, .uv-admin-roles .expert-search-card, .uv-admin-roles .rep-stat-box { border-radius: 7px; border:1px solid #DFE7EC; box-shadow: 0 1px 2px rgba(15, 23, 42, .035); background:#fff; }
+.uv-admin-roles .expert-card { overflow:hidden; }
+.uv-admin-roles .expert-search-card { border:0; border-bottom:1px solid #E4EAF0; border-radius:0; box-shadow:none; background:white; padding:12px 14px; margin:0; }
+.uv-admin-roles .expert-table th { background:#F5F8FA; color:#475569; font-size:11px; letter-spacing:.055em; padding:11px 14px; font-weight:700; border-bottom:1px solid #E2E8F0; }
+.uv-admin-roles .expert-table td { padding:11px 14px; font-size:13px; border-bottom:1px solid #EDF1F5; }
+.uv-admin-roles .expert-table tbody tr:last-child td { border-bottom:0; }
+.uv-admin-roles .expert-table tbody tr:hover td { background:#F8FBFB; }
+.uv-admin-roles .expert-pagination { padding:10px 14px; background:#FAFCFD; border-top:1px solid #DFE7EC; flex-wrap:wrap; gap:10px; }
+.uv-admin-roles .expert-page-btn, .uv-admin-roles .expert-btn-secondary, .uv-admin-roles .expert-btn-primary { border-radius:5px; }
+.uv-admin-roles .expert-btn-primary { background:#0D9488; border-color:#0D9488; }
+.uv-admin-roles .expert-btn-primary:hover:not(:disabled) { background:#0F766E; }
+.uv-admin-roles input:focus-visible, .uv-admin-roles select:focus-visible, .uv-admin-roles button:focus-visible { outline:2px solid #0D9488; outline-offset:2px; }
+.uv-admin-roles .uv-admin-section-heading { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center; padding:13px 14px; border-bottom:1px solid #E4EAF0; font-size:13px; font-weight:650; color:#142435; }
+.uv-admin-roles .uv-admin-section-heading span:last-child { font-size:12px; color:#64748B; font-weight:500; }
+.uv-admin-roles .uv-admin-metadata { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:12px; }
+.uv-admin-roles .uv-admin-metadata span { background:white; border:1px solid #DFE7EC; border-radius:5px; padding:8px 12px; font-size:12px; color:#475569; }
+.uv-admin-roles .uv-admin-metadata strong { color:#0F766E; }
+@media (max-width: 680px) { .uv-admin-roles .expert-title { font-size:19px; } .uv-admin-roles .expert-table th, .uv-admin-roles .expert-table td { padding:10px; } .uv-admin-roles .expert-header { padding-top:5px; } }
+
+.uv-admin-roles.expert-container { padding: 5px 10px 10px; }

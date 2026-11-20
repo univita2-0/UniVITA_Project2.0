@@ -108,7 +108,7 @@ const getStatusTheme = (status, isLight) => {
 
 const ITEMS_PER_PAGE = 10;
 
-export default function AppealHistoryScreen({ navigation }) {
+export default function AppealHistoryScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
@@ -133,6 +133,34 @@ export default function AppealHistoryScreen({ navigation }) {
   const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => { loadHistory(); }, []);
+
+  // C15: Locate the request referenced by a notification, including older months.
+  useEffect(() => {
+    const target = route?.params?.targetId;
+    if (!target || allHistory.length === 0) return;
+    const index = allHistory.findIndex(item => String(item.id) === String(target));
+    if (index < 0) return;
+    const item = allHistory[index];
+    const day = String(item.date || '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      const [y, m] = day.split('-').map(Number);
+      setFilterDate(new Date(y, m - 1, 1));
+    }
+    const status = String(item.status || '').toLowerCase();
+    setActiveTab(status === 'pending' ? 'pending' : 'history');
+    setExpandedId(item.id);
+    // Show enough results for the target without changing existing pagination.
+    const matching = allHistory.filter(r => {
+      const d = String(r.date || '').slice(0, 7);
+      const s = String(r.status || 'pending').toLowerCase();
+      return d === day.slice(0, 7) && (status === 'pending' ? s === 'pending' : s !== 'pending');
+    });
+    const targetIndex = matching.findIndex(r => String(r.id) === String(target));
+    setPage(Math.max(1, Math.ceil((targetIndex + 1) / ITEMS_PER_PAGE)));
+    navigation.setParams({ targetId: undefined });
+  }, [allHistory, route?.params?.targetId]);
+
+
 
   const loadHistory = async () => {
     setLoadError('');
