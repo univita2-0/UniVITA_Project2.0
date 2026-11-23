@@ -6,6 +6,34 @@ import { API_BASE } from '../api';
 import { useRole } from '../permissions';
 import './LeaveManagement.css';
 
+
+// Presentation only: use consistent labels and semantic status colors.
+const getDisplayStatus = (status) => {
+  const normalized = String(status || '').trim().toLowerCase();
+
+  const labels = {
+    pending: 'Pending',
+    approved: 'Approved',
+    rejected: 'Rejected',
+    cancelled: 'Cancelled'
+  };
+
+  return labels[normalized] || (status ? String(status) : '—');
+};
+
+const getDisplayStatusTone = (status) => {
+  switch (String(status || '').trim().toLowerCase()) {
+    case 'approved':
+      return 'success';
+    case 'rejected':
+      return 'danger';
+    case 'pending':
+      return 'warning';
+    default:
+      return 'default';
+  }
+};
+
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
@@ -18,7 +46,7 @@ const LEAVE_STATUS_TABS = [
 ];
 
 const LeaveManagement = () => {
-  const { can, isAdmin } = useRole();
+  const { can } = useRole();
 
   const [historyGroups, setHistoryGroups] = useState([]);
   const [pendingGroups, setPendingGroups] = useState([]);
@@ -55,8 +83,8 @@ const LeaveManagement = () => {
       const res = await axios.get(`${API_BASE}/leave-requests/grouped`, getAuthHeaders());
       const all = res.data || [];
 
-      const pending = all.filter(g => g.status === 'Pending').sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
-      const history = all.filter(g => g.status !== 'Pending').sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+      const pending = all.filter(g => String(g.status || '').toLowerCase() === 'pending').sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+      const history = all.filter(g => String(g.status || '').toLowerCase() !== 'pending').sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
 
       setPendingGroups(pending);
       setHistoryGroups(history);
@@ -76,8 +104,8 @@ const LeaveManagement = () => {
 
   const openActionModal = (group, action) => {
     // FIX 10.2 — defense-in-depth: only HR can open the approve/reject modal
-    if (!can('leaves:batch')) {
-      toast.error('You do not have permission to approve or reject leave requests.');
+    if (!can('leaves:batch') || !can(String(action).toLowerCase() === 'approved' ? 'leaves:approve' : 'leaves:reject')) {
+      toast.error('You do not have permission to perform this request action.');
       return;
     }
     setSelectedGroup(group);
@@ -93,11 +121,11 @@ const LeaveManagement = () => {
 
   const handleBatchAction = async () => {
     // FIX 10.2 — defense-in-depth: reject API call if role lacks permission
-    if (!can('leaves:batch')) {
-      toast.error('You do not have permission to approve or reject leave requests.');
+    if (!can('leaves:batch') || !can(String(actionType).toLowerCase() === 'approved' ? 'leaves:approve' : 'leaves:reject')) {
+      toast.error('You do not have permission to perform this request action.');
       return;
     }
-    if (!selectedGroup) return;
+    if (!selectedGroup || processing) return;
     setProcessing(true);
     try {
       await axios.put(
@@ -182,29 +210,13 @@ const LeaveManagement = () => {
   const currentPending = filteredPending.slice((pendingPage - 1) * itemsPerPage, pendingPage * itemsPerPage);
 
   // FIX 10.2 — single boolean for both action buttons (both are hr_admin only)
-  const canDecide = can('leaves:approve') && can('leaves:reject');
+  const canApprove = can('leaves:batch') && can('leaves:approve');
+  const canReject = can('leaves:batch') && can('leaves:reject');
+  const canDecide = canApprove || canReject;
 
   return (
     <div className="expert-container lm-page">
-      {/* FIX 10.2 — read-only banner for Admin */}
-      {isAdmin && (
-        <div style={{
-          padding: '12px 16px',
-          marginBottom: '20px',
-          background: '#F0FDFA',
-          border: '1px solid #99F6E4',
-          borderRadius: '5px',
-          color: '#0F766E',
-          fontSize: '12px',
-          fontWeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
-          <span><strong>Read-only view.</strong> Leave approvals are handled by HR.</span>
-        </div>
-      )}
+      
 
       <div className="expert-header">
         <div className="expert-title-group">
@@ -214,22 +226,19 @@ const LeaveManagement = () => {
           </div>
         </div>
         <div className="expert-header-actions">
-          <button className="expert-btn-secondary" onClick={fetchData} title="Refresh Data">
-            <RefreshCw size={15} className={loading ? "spin-icon" : ""} /> Refresh
-          </button>
           
           <button className="expert-btn-secondary" onClick={() => setShowPendingModal(true)}>
-            <ClipboardList size={16} /> Pending Requests
+            Pending Requests
             {pendingCount > 0 && <span className="lm-badge-count">{pendingCount}</span>}
           </button>
         </div>
       </div>
 
       <section className="lm-summary-grid" aria-label="Leave request overview">
-        <div className="lm-summary-card"><div className="lm-summary-symbol"><Layers3 size={17} /></div><div><span>All Requests</span><strong>{historyGroups.length + pendingGroups.length}</strong><small>Grouped submissions</small></div></div>
-        <div className="lm-summary-card"><div className="lm-summary-symbol pending"><ClipboardList size={17} /></div><div><span>Awaiting Review</span><strong>{pendingCount}</strong><small>Pending HR action</small></div></div>
-        <div className="lm-summary-card"><div className="lm-summary-symbol approved"><CalendarCheck2 size={17} /></div><div><span>Approved</span><strong>{historyGroups.filter(g => g.status?.toLowerCase() === 'approved').length}</strong><small>Resolved submissions</small></div></div>
-        <div className="lm-summary-card"><div className="lm-summary-symbol rejected"><Ban size={17} /></div><div><span>Rejected / Cancelled</span><strong>{historyGroups.filter(g => ['rejected','cancelled'].includes(g.status?.toLowerCase())).length}</strong><small>Closed submissions</small></div></div>
+        <div className="lm-summary-card"><div><span>All Requests</span><strong>{historyGroups.length + pendingGroups.length}</strong></div></div>
+        <div className="lm-summary-card"><div><span>Awaiting Review</span><strong>{pendingCount}</strong></div></div>
+        <div className="lm-summary-card"><div><span>Approved</span><strong>{historyGroups.filter(g => g.status?.toLowerCase() === 'approved').length}</strong></div></div>
+        <div className="lm-summary-card"><div><span>Rejected / Cancelled</span><strong>{historyGroups.filter(g => ['rejected','cancelled'].includes(g.status?.toLowerCase())).length}</strong></div></div>
       </section>
 
       {/* STATUS TABS */}
@@ -298,14 +307,13 @@ const LeaveManagement = () => {
                         <span className="expert-chip default">{group.type || 'Leave'}</span>
                       </td>
                       <td className="text-center whitespace-nowrap">
-                        <span className={`expert-chip ${group.status?.toLowerCase() === 'approved' ? 'success' : group.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
-                          {group.status?.toUpperCase()}
+                        <span className={`expert-chip ${getDisplayStatusTone(group.status)}`}>
+                          {getDisplayStatus(group.status)}
                         </span>
                       </td>
                       <td className="text-right whitespace-nowrap">
                         <button className="lm-btn-icon" onClick={() => openDetailsModal(group)} title="View Details">
-                          <Eye size={15} />
-                          <span>View Details</span>
+                          View
                         </button>
                       </td>
                     </tr>
@@ -357,8 +365,8 @@ const LeaveManagement = () => {
                     <span className="lm-detail-id">ID: {selectedGroup.employee_id || '—'}</span>
                   </div>
                 </div>
-                <span className={`expert-chip ${selectedGroup.status?.toLowerCase() === 'approved' ? 'success' : selectedGroup.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
-                  {selectedGroup.status?.toUpperCase()}
+                <span className={`expert-chip ${getDisplayStatusTone(selectedGroup.status)}`}>
+                  {getDisplayStatus(selectedGroup.status)}
                 </span>
               </div>
 
@@ -366,28 +374,28 @@ const LeaveManagement = () => {
                 <div className="lm-detail-grid-2col">
                   <div className="lm-detail-card-item">
                     <div className="lm-detail-label">
-                      <FileText size={14} /> Leave Type
+                      Leave Type
                     </div>
                     <div className="lm-detail-value font-semibold">{selectedGroup.type || 'Leave'}</div>
                   </div>
 
                   <div className="lm-detail-card-item">
                     <div className="lm-detail-label">
-                      <Clock size={14} /> Total Duration
+                      Total Duration
                     </div>
                     <div className="lm-detail-value font-semibold">{selectedGroup.request_count || 1} Day(s)</div>
                   </div>
 
                   <div className="lm-detail-card-item">
                     <div className="lm-detail-label">
-                      <Calendar size={14} /> Date Range
+                      Date Range
                     </div>
                     <div className="lm-detail-value font-medium">{formatDateRange(selectedGroup.start_date, selectedGroup.end_date)}</div>
                   </div>
 
                   <div className="lm-detail-card-item">
                     <div className="lm-detail-label">
-                      <Clock size={14} /> Submitted On
+                      Submitted On
                     </div>
                     <div className="lm-detail-value font-medium">{formatDateTime12Hour(selectedGroup.submitted_at || selectedGroup.created_at)}</div>
                   </div>
@@ -395,7 +403,7 @@ const LeaveManagement = () => {
 
                 <div className="lm-detail-block">
                   <div className="lm-detail-label">
-                    <MessageSquare size={14} /> Reason for Leave
+                    Reason for Leave
                   </div>
                   <div className="lm-detail-text-box">
                     {selectedGroup.reason || 'No specific reason provided.'}
@@ -404,7 +412,7 @@ const LeaveManagement = () => {
 
                 <div className="lm-detail-block">
                   <div className="lm-detail-label">
-                    <User size={14} /> Administrator Remarks
+                    Administrator Remarks
                   </div>
                   <div className="lm-detail-text-box admin-remarks">
                     {selectedGroup.admin_remarks || 'No remarks recorded.'}
@@ -414,7 +422,7 @@ const LeaveManagement = () => {
                 {selectedGroup.image_url && (
                   <div className="lm-detail-block">
                     <div className="lm-detail-label">
-                      <ExternalLink size={14} /> Attached Proof / Document
+                      Attached Proof / Document
                     </div>
                     <a
                       href={`${API_BASE.replace(/\/api$/, '')}${selectedGroup.image_url}`}
@@ -422,7 +430,7 @@ const LeaveManagement = () => {
                       rel="noopener noreferrer"
                       className="lm-attachment-link"
                     >
-                      <ExternalLink size={14} /> View Supporting Document
+                      View Supporting Document
                     </a>
                   </div>
                 )}
@@ -431,14 +439,14 @@ const LeaveManagement = () => {
 
             <div className="lm-custom-modal-footer">
               {/* FIX 10.2 — Approve/Reject only for HR */}
-              {selectedGroup.status === 'Pending' && canDecide && (
+              {String(selectedGroup.status || '').toLowerCase() === 'pending' && canDecide && (
                 <>
-                  <button className="lm-btn-reject-custom" onClick={() => { setShowDetailsModal(false); openActionModal(selectedGroup, 'Rejected'); }}>
+                  {canReject && <button className="lm-btn-reject-custom" onClick={() => { setShowDetailsModal(false); openActionModal(selectedGroup, 'Rejected'); }}>
                     <XCircle size={16} /> Reject
-                  </button>
-                  <button className="lm-btn-approve-custom" onClick={() => { setShowDetailsModal(false); openActionModal(selectedGroup, 'Approved'); }}>
+                  </button>}
+                  {canApprove && <button className="lm-btn-approve-custom" onClick={() => { setShowDetailsModal(false); openActionModal(selectedGroup, 'Approved'); }}>
                     <CheckCircle size={16} /> Approve
-                  </button>
+                  </button>}
                 </>
               )}
               <button className="expert-btn-secondary" onClick={() => setShowDetailsModal(false)}>Close Window</button>
@@ -512,7 +520,7 @@ const LeaveManagement = () => {
                         {group.image_url && (
                           <div className="lm-minimal-field full-width">
                             <a href={`${API_BASE.replace(/\/api$/, '')}${group.image_url}`} target="_blank" rel="noopener noreferrer" className="lm-minimal-link">
-                              <ExternalLink size={14} /> View Attached Document / Proof
+                              View Attached Document / Proof
                             </a>
                           </div>
                         )}
@@ -521,8 +529,8 @@ const LeaveManagement = () => {
                       {/* FIX 10.2 — Approve/Reject only for HR; read-only hint for Admin */}
                       {canDecide ? (
                         <div className="lm-minimal-footer">
-                          <button className="lm-btn-min-reject" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Rejected'); }}>Reject</button>
-                          <button className="lm-btn-min-approve" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Approved'); }}>Approve</button>
+                          {canReject && <button className="lm-btn-min-reject" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Rejected'); }}>Reject</button>}
+                          {canApprove && <button className="lm-btn-min-approve" onClick={() => { setShowPendingModal(false); openActionModal(group, 'Approved'); }}>Approve</button>}
                         </div>
                       ) : (
                         <div className="lm-minimal-footer" style={{ justifyContent: 'center' }}>

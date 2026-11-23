@@ -111,8 +111,8 @@ const LeaveBalancesManagement = () => {
         return {
           leave_type_id: lt.id,
           leave_type: lt.name,
-          remaining_days: existing ? parseFloat(existing.remaining_days) : parseFloat(lt.annual_quota || 15),
-          annual_quota: parseFloat(lt.annual_quota || 15),
+          remaining_days: existing ? (existing.remaining_days == null ? null : Number(existing.remaining_days)) : (lt.annual_quota !== null && lt.annual_quota !== undefined && lt.annual_quota !== '' ? Number(lt.annual_quota) : null),
+          annual_quota: (lt.annual_quota !== null && lt.annual_quota !== undefined && lt.annual_quota !== '' ? Number(lt.annual_quota) : null),
         };
       });
       setBalances(enriched);
@@ -131,7 +131,8 @@ const LeaveBalancesManagement = () => {
     setBalances([]);
     setEditingBalance(null);
     setShowBalanceModal(true);
-    await fetchBalances(employee.id, selectedYear);
+    // Opening the modal triggers the existing effect once.
+
   };
 
   useEffect(() => {
@@ -146,7 +147,7 @@ const LeaveBalancesManagement = () => {
       return;
     }
     setEditingBalance(balance.leave_type_id);
-    setTempValue(balance.remaining_days.toString());
+    setTempValue(balance.remaining_days == null ? '' : String(balance.remaining_days));
   };
 
   const handleSaveBalance = async (balance) => {
@@ -154,8 +155,8 @@ const LeaveBalancesManagement = () => {
       toast.error('You do not have permission to edit leave balances.');
       return;
     }
-    const newValue = parseFloat(tempValue);
-    if (isNaN(newValue) || newValue < 0) {
+    const newValue = Number(String(tempValue).trim());
+    if (!String(tempValue).trim() || !Number.isFinite(newValue) || newValue < 0) {
       toast.warning('Please enter a valid non-negative number.');
       return;
     }
@@ -214,8 +215,8 @@ const LeaveBalancesManagement = () => {
       toast.error('You do not have permission to adjust CTO credits.');
       return;
     }
-    const rawVal = parseFloat(ctoAdjustment);
-    if (isNaN(rawVal) || rawVal <= 0) {
+    const rawVal = Number(String(ctoAdjustment).trim());
+    if (!String(ctoAdjustment).trim() || !Number.isFinite(rawVal) || rawVal <= 0) {
       toast.warning('Please enter a valid positive adjustment value.');
       return;
     }
@@ -278,8 +279,8 @@ const LeaveBalancesManagement = () => {
       toast.warning('Please provide a leave type name.');
       return;
     }
-    const quotaVal = parseFloat(newTypeQuota);
-    if (isNaN(quotaVal) || quotaVal < 0) {
+    const quotaVal = Number(String(newTypeQuota).trim());
+    if (!String(newTypeQuota).trim() || !Number.isFinite(quotaVal) || quotaVal < 0) {
       toast.warning('Please enter a valid non-negative annual quota.');
       return;
     }
@@ -338,20 +339,14 @@ const LeaveBalancesManagement = () => {
            
             <p className="lbm-subtitle">
               {isAdmin 
-                ? 'Read-only view of annual leave quotas, CTO conversions, and leave types.'
+                ? 'View annual leave quotas, CTO credits, and leave types.'
                 : 'Monitor annual leave quotas, manage overtime CTO conversions, and configure leave types.'}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Read-only banner for Admin */}
-      {isAdmin && (
-        <div className="lbm-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Leave balance adjustments and policy configurations are managed by HR.</span>
-        </div>
-      )}
+      
 
       <section className="lbm-overview" aria-label="Leave credits overview">
         <div className="lbm-overview-item"><span>Active instructors</span><strong>{employees.length}</strong><small>Eligible employee accounts</small></div>
@@ -386,9 +381,6 @@ const LeaveBalancesManagement = () => {
               </select>
             </div>
           )}
-          <button className="lbm-btn-outline" onClick={loadEmployees} disabled={loading}>
-            <RefreshCw size={14} className={loading ? "spin-icon" : ""} /> Refresh
-          </button>
         </div>
       </div>
 

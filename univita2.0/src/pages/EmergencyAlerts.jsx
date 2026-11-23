@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
-  Send, RefreshCw, Search, AlertTriangle,
-  Info, AlertOctagon, History, Calendar
+  Search
 } from 'lucide-react';
 import './EmergencyAlerts.css';
 import FormalModal from '../components/FormalModal';
@@ -157,14 +156,6 @@ const EmergencyAlerts = () => {
   const safeHistoryPage = Math.min(historyPage, historyPageCount);
   const pagedAlerts = filteredAlerts.slice((safeHistoryPage - 1) * HISTORY_PAGE_SIZE, safeHistoryPage * HISTORY_PAGE_SIZE);
 
-  const getSeverityIcon = (sev) => {
-    switch (sev) {
-      case 'critical': return <AlertOctagon size={14} />;
-      case 'warning': return <AlertTriangle size={14} />;
-      default: return <Info size={14} />;
-    }
-  };
-
   const formatRoles = (roles) => {
     try {
       let arr = typeof roles === 'string' ? JSON.parse(roles) : roles;
@@ -200,7 +191,7 @@ const EmergencyAlerts = () => {
           <p className="ea-subtitle">Create organization-wide notices and review past broadcasts.</p>
         </div>
         <button className="btn-view-history" onClick={openHistoryModal}>
-          <History size={16} />
+          
           <span>View Alert History</span>
         </button>
       </div>
@@ -299,7 +290,7 @@ const EmergencyAlerts = () => {
               disabled={sending || noRolesSelected}
               title={noRolesSelected ? 'Select at least one target role' : ''}
             >
-              <Send size={16} />
+              
               <span>{sending ? 'Broadcasting...' : 'Broadcast Alert'}</span>
             </button>
           </div>
@@ -362,9 +353,6 @@ const EmergencyAlerts = () => {
               <button className="btn-clear-filters" onClick={clearFilters} title="Clear Filters">
                 Clear
               </button>
-              <button className="btn-refresh" onClick={fetchAlerts} title="Refresh History">
-                <RefreshCw size={16} />
-              </button>
             </div>
           </div>
         </div>
@@ -373,7 +361,7 @@ const EmergencyAlerts = () => {
           <div className="ea-state-message">Loading alert history...</div>
         ) : filteredAlerts.length === 0 ? (
           <div className="ea-state-message">
-            <Calendar size={40} className="empty-icon" />
+            
             <p>No alerts found matching your criteria.</p>
           </div>
         ) : (
@@ -396,7 +384,7 @@ const EmergencyAlerts = () => {
                     <td className="ea-message-cell">{alert.message}</td>
                     <td>
                       <span className={`ea-severity-badge ${alert.severity}`}>
-                        {getSeverityIcon(alert.severity)}
+                        
                         <span>{alert.severity}</span>
                       </span>
                     </td>

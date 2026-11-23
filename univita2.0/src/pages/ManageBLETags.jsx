@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Tag, Search, X, ChevronLeft, ChevronRight, ShieldAlert, Edit2 } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_BASE } from '../api';
 import { getUserRole } from '../permissions';
 import FormalModal from '../components/FormalModal';
@@ -166,20 +166,16 @@ const ManageBLETags = () => {
           </div>
         </div>
         <div className="uv-hardware-header-actions">
-          <button className="expert-btn-secondary" type="button" onClick={fetchBleTags} disabled={initialLoad || loading}>Refresh</button>
         {canWrite && (
           <button className="expert-btn-primary" onClick={() => setShowAddModal(true)}>
-            <Plus size={16} /> Register New Tag
+            Register New Tag
           </button>
         )}
         </div>
       </div>
 
       {!canWrite && (
-        <div className="expert-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Hardware tags are managed by Security and Admin.</span>
-        </div>
+        <p className="expert-readonly-banner" role="note">View-only access</p>
       )}
 
       <section className="uv-hardware-metrics" aria-label="BLE tag inventory summary">
@@ -202,7 +198,7 @@ const ManageBLETags = () => {
             {searchQuery && <button type="button" className="uv-search-clear" aria-label="Clear search" onClick={() => setSearchQuery('')}><X size={16} /></button>}
           </div>
           <div className="expert-stats-badge">
-            Registered Tags: <strong>{bleTags.length}</strong>
+            Showing <strong>{filteredTags.length}</strong> of {bleTags.length}
           </div>
         </div>
       </div>
@@ -212,7 +208,6 @@ const ManageBLETags = () => {
           <div className="expert-loading">Loading BLE tags...</div>
         ) : filteredTags.length === 0 ? (
           <div className="expert-empty">
-            <Tag size={48} className="text-muted" />
             <p>No BLE Tags Found</p>
             {searchQuery ? <span>Try adjusting your search criteria.</span> : canWrite && <span>Click "Register New Tag" to add hardware.</span>}
           </div>
@@ -237,12 +232,8 @@ const ManageBLETags = () => {
                       {canWrite && (
                         <td>
                           <div className="expert-action-group right">
-                            <button className="expert-btn-icon" onClick={() => triggerEdit(tag)} title="Edit Tag">
-                              <Edit2 size={18} />
-                            </button>
-                            <button className="expert-btn-icon danger" onClick={() => triggerDelete(tag)} title="Delete Tag">
-                              <Trash2 size={18} color="#EF4444" />
-                            </button>
+                            <button type="button" className="expert-btn-icon" onClick={() => triggerEdit(tag)} title="Edit Tag">Edit</button>
+                            <button type="button" className="expert-btn-icon danger" onClick={() => triggerDelete(tag)} title="Delete Tag">Delete</button>
                           </div>
                         </td>
                       )}
@@ -382,7 +373,6 @@ const ManageBLETags = () => {
             }
           >
             <div className="expert-confirm-body">
-              <ShieldAlert size={48} color="#DC2626" />
               <p className="expert-confirm-title">
                 Are you sure you want to permanently delete the BLE tag <strong>{tagToDelete?.ble_id}</strong>?
               </p>

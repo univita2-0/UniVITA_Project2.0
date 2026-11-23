@@ -145,24 +145,14 @@ const ComplianceReports = () => {
       <div className="formal-cr-header">
         <div className="formal-cr-title-block">
           
-          <p>
-            {isAdmin
-              ? 'Read-only reference view. Compliance report generation is handled by HR.'
-              : 'Prepare internal HR attendance and timekeeping summaries for review and printing.'}
-          </p>
+          <p>Prepare internal HR attendance and timekeeping summaries for review and printing.</p>
         </div>
-        <div className="formal-cr-security-badge">
-          <ShieldCheck size={16} />
-          <span>Controlled PDF Export</span>
-        </div>
+        <span className="formal-cr-security-badge">Internal report</span>
       </div>
 
       {/* ---- Read-only banner ---- */}
       {isAdmin && (
-        <div className="formal-cr-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Compliance report generation is restricted to HR.</span>
-        </div>
+        <p className="formal-cr-readonly-banner">View-only access</p>
       )}
 
       <div className="formal-cr-grid">
@@ -176,7 +166,6 @@ const ComplianceReports = () => {
               <div className="formal-cr-form-group">
                 <label>Program Filter (Optional)</label>
                 <div className="formal-cr-input-wrapper">
-                  <Layers size={16} className="formal-cr-icon" />
                   <select value={programId} onChange={e => { setProgramId(e.target.value); setCourseName(''); }} disabled={loading || !canWrite}>
                     <option value="">All Programs</option>
                     {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
@@ -187,7 +176,6 @@ const ComplianceReports = () => {
               <div className="formal-cr-form-group">
                 <label>Course Filter (Optional)</label>
                 <div className="formal-cr-input-wrapper">
-                  <BookOpen size={16} className="formal-cr-icon" />
                   <select value={courseName} onChange={e => setCourseName(e.target.value)} disabled={loading || !canWrite}>
                     <option value="">All Courses</option>
                     {filteredCourses.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -200,7 +188,6 @@ const ComplianceReports = () => {
               <div className="formal-cr-form-group">
                 <label>Target Month</label>
                 <div className="formal-cr-input-wrapper">
-                  <Calendar size={16} className="formal-cr-icon" />
                   <select value={month} onChange={e => setMonth(parseInt(e.target.value, 10))} disabled={loading || !canWrite}>
                     {monthNames.map((name, idx) => (
                       <option key={idx + 1} value={idx + 1}>{name}</option>
@@ -212,7 +199,6 @@ const ComplianceReports = () => {
               <div className="formal-cr-form-group">
                 <label>Fiscal Year</label>
                 <div className="formal-cr-input-wrapper">
-                  <Calendar size={16} className="formal-cr-icon" />
                   <select value={year} onChange={e => setYear(parseInt(e.target.value, 10))} disabled={loading || !canWrite}>
                     {years.map(y => (
                       <option key={y} value={y}>{y}</option>
@@ -227,12 +213,10 @@ const ComplianceReports = () => {
             <div className="formal-cr-status-area">
               {lastGenerated ? (
                 <div className="formal-cr-status success">
-                  <CheckCircle size={16} />
                   <span>Last exported: {lastGenerated.toLocaleString()}</span>
                 </div>
               ) : (
                 <div className="formal-cr-status neutral">
-                  <Clock size={16} />
                   <span>No recent exports on this device.</span>
                 </div>
               )}
@@ -243,7 +227,7 @@ const ComplianceReports = () => {
                   {loading ? (
                     <><span className="formal-cr-spinner"></span> Preparing Internal Report...</>
                   ) : (
-                    <><Download size={16} /> Print / Save as PDF</>
+                    <>Print / Save as PDF</>
                   )}
                 </button>
               )}
@@ -263,28 +247,24 @@ const ComplianceReports = () => {
 
             <ul className="formal-cr-specs-list">
               <li>
-                <Award size={18} className="specs-icon" />
                 <div>
                   <strong>Approved Leave Adjustment</strong>
                   <span>Source formula: Present shifts ÷ (Scheduled shifts − Approved leave days) × 100. Reconcile leave-unit differences and source records before formal sign-off.</span>
                 </div>
               </li>
               <li>
-                <FileText size={18} className="specs-icon" />
                 <div>
                   <strong>Undertime & Equivalent Days</strong>
                   <span>Displays recorded undertime and equivalent days from the report source. Validate calculations and employment rules before using the data for payroll.</span>
                 </div>
               </li>
               <li>
-                <Users size={18} className="specs-icon" />
                 <div>
                   <strong>Unexcused Absence Itemization</strong>
                   <span>Separates authorized leaves from unexcused absences and records late arrivals independently.</span>
                 </div>
               </li>
               <li>
-                <ShieldAlert size={18} className="specs-icon" />
                 <div>
                   <strong>Timekeeping Source & Privacy Notice</strong>
                   <span>Includes a confidential handling notice and document review fields; individual employee DTR acknowledgment is recorded separately.</span>

@@ -1,144 +1,177 @@
-// src/pages/Profile.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import './Profile.css';
+// src/pages/Profile.jsx — UniVITA authenticated web account profile
+import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { API_BASE } from '../api';
 import { getUserRole } from '../permissions';
+import './Profile.css';
 
-const getAuthHeaders = () => ({
-  headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
-});
+const ROLE_LABELS = {
+  admin: 'System Administrator',
+  hr_admin: 'HR Administrator',
+  security: 'Security Personnel',
+  instructor: 'Instructor'
+};
 
-const Profile = () => {
-  const [user, setUser] = useState({
+const textOr = (value, fallback = 'Not available') => {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
+  return text || fallback;
+};
+
+const initialsFor = (name) => {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length ? parts.slice(0, 2).map(part => part[0].toUpperCase()).join('') : 'UV';
+};
+
+const ProfileRow = ({ label, value, muted = false, children }) => (
+  <div className="pro-detail-row">
+    <dt>{label}</dt>
+    <dd className={muted ? 'pro-detail-muted' : undefined}>{children || value}</dd>
+  </div>
+);
+
+const ProfilePanel = ({ id, title, subtitle, children, className = '' }) => (
+  <section className={`pro-panel ${className}`} aria-labelledby={id}>
+    <div className="pro-panel-head">
+      <div>
+        <h3 id={id}>{title}</h3>
+        <p>{subtitle}</p>
+      </div>
+    </div>
+    {children}
+  </section>
+);
+
+function Profile() {
+  const [user, setUser] = useState(() => ({
     id: localStorage.getItem('user_id') || '',
     name: localStorage.getItem('user_name') || '',
     email: localStorage.getItem('user_email') || '',
-    role: getUserRole() || '',
     employeeId: localStorage.getItem('employee_id') || '',
     phone: '',
     position: '',
-    lastLogin: localStorage.getItem('last_login') || 'Not available'
-  });
+    role: getUserRole() || '',
+    lastLogin: localStorage.getItem('last_login') || ''
+  }));
+  const [loading, setLoading] = useState(Boolean(localStorage.getItem('user_id')));
+  const [loadError, setLoadError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
 
-  const fetchUserDetails = useCallback(async () => {
-    if (!user.id) return;
+  const fetchUserDetails = useCallback(async (signal) => {
+    const id = localStorage.getItem('user_id') || '';
+    if (!id) {
+      setLoading(false);
+      setLoadError('Your account identifier is unavailable. Sign in again to retrieve your profile.');
+      return;
+    }
+
+    setLoading(true);
+    setLoadError('');
     try {
-      const res = await axios.get(`${API_BASE}/employees/${user.id}`, getAuthHeaders());
-      const data = res.data;
+      const response = await axios.get(`${API_BASE}/employees/${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
+        ...(signal ? { signal } : {})
+      });
+      const payload = response.data || {};
+      const data = payload.employee && typeof payload.employee === 'object'
+        ? payload.employee : payload;
+      if (data.success === false) throw new Error(data.message || 'Profile could not be retrieved.');
+      if (signal?.aborted) return;
+
       setUser(prev => ({
         ...prev,
-        name: data.full_name || prev.name,
-        email: data.email || prev.email,
-        phone: data.phone_number || '',
-        position: data.position_level || data.position || '',
+        name: textOr(data.full_name, prev.name),
+        email: textOr(data.email, prev.email),
+        phone: textOr(data.phone_number, ''),
+        position: textOr(data.position_level || data.position, ''),
+        employeeId: textOr(data.employee_id, prev.employeeId)
       }));
-    } catch (err) {
-      console.error('Failed to load user details', err);
+      setLastUpdated(new Date());
+    } catch (error) {
+      if (signal?.aborted || error?.code === 'ERR_CANCELED') return;
+      console.error('Profile request failed:', error);
+      setLoadError('Profile details could not be refreshed. Previously saved account information is shown where available.');
+    } finally {
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [user.id]);
+  }, []);
 
   useEffect(() => {
-    fetchUserDetails();
+    const controller = new AbortController();
+    fetchUserDetails(controller.signal);
+    return () => controller.abort();
   }, [fetchUserDetails]);
 
-  const getRoleLabel = (role) => {
-    const labels = {
-      admin: 'System Administrator',
-      hr_admin: 'HR Administrator',
-      security: 'Security Personnel',
-      instructor: 'Instructor'
-    };
-    return labels[role] || role;
-  };
-
-  const getDisplayPosition = () => {
-    if (user.role === 'hr_admin') return 'HR Administrator';
-    if (user.role === 'security') return 'Security Personnel';
-    if (user.role === 'admin') return 'System Administrator';
-    return user.position || 'Not assigned';
-  };
+  const roleLabel = ROLE_LABELS[user.role] || textOr(user.role);
+  const hasSession = Boolean(localStorage.getItem('auth_token'));
+  const designation = textOr(user.position, 'Not assigned');
+  const savedSignIn = textOr(user.lastLogin);
 
   return (
-    <div className="pro-container">
-      {/* Page Header */}
-      <header className="pro-header">
+    <main className="pro-container">
+      <div className="pro-toolbar">
         <div>
-         
-          <p className="pro-subtitle">Account identity, contact information, and access details.</p>
+          <div className="pro-eyebrow">ACCOUNT PROFILE</div>
+          
         </div>
-        <div className="pro-status-badge">
-          <span className="pro-dot"></span>
-          Account Profile
-        </div>
-      </header>
+        
+      </div>
 
-      {/* Identity Hero */}
-      <section className="pro-hero">
-        <div className="pro-avatar" aria-hidden="true">
-          {user.name ? user.name.charAt(0).toUpperCase() : '?'}
+      <section className="pro-profile-hero" aria-label="Profile summary">
+        <div className="pro-avatar" aria-hidden="true">{initialsFor(user.name)}</div>
+        <div className="pro-hero-text">
+          <h2>{textOr(user.name, 'Account Profile')}</h2>
+          <div className="pro-hero-subtitle">{roleLabel}</div>
+          <div className="pro-hero-meta">
+            <span>Employee ID: {textOr(user.employeeId)}</span>
+            {user.email && <span>{user.email}</span>}
+          </div>
         </div>
-        <div className="pro-hero-info">
-          <h2 className="pro-name">{user.name || 'Unknown User'}</h2>
-          <p className="pro-role">{getRoleLabel(user.role)}</p>
+        <div className={`pro-session ${hasSession ? 'pro-session-active' : 'pro-session-off'}`}>
+          <span className="pro-session-dot" />
+          {hasSession ? 'Active session' : 'Session unavailable'}
         </div>
       </section>
 
-      {/* Detailed Information Grid */}
-      <div className="pro-grid" aria-label="Account information">
-        
-        {/* Personal Information */}
-        <article className="pro-card">
-          <h3 className="pro-card-title">Personal Information</h3>
-          <div className="pro-card-body">
-            <div className="pro-row">
-              <span className="pro-label">Employee ID</span>
-              <span className="pro-value mono">{user.employeeId || 'N/A'}</span>
-            </div>
-            <div className="pro-row">
-              <span className="pro-label">Designation</span>
-              <span className="pro-value">{getDisplayPosition()}</span>
-            </div>
-          </div>
-        </article>
+      {loadError && <div className="pro-notice pro-notice-error" role="alert">{loadError}</div>}
 
-        {/* Contact Information */}
-        <article className="pro-card">
-          <h3 className="pro-card-title">Contact Information</h3>
-          <div className="pro-card-body">
-            <div className="pro-row">
-              <span className="pro-label">Email Address</span>
-              <span className="pro-value">{user.email || '—'}</span>
-            </div>
-            <div className="pro-row">
-              <span className="pro-label">Phone Number</span>
-              <span className="pro-value">{user.phone || 'Not registered'}</span>
-            </div>
-          </div>
-        </article>
+      <div className="pro-columns">
+        <div className="pro-main-column">
+          <ProfilePanel id="pro-personal-heading" title="Personal Information" >
+            <dl className="pro-detail-list">
+              <ProfileRow label="Full name" value={textOr(user.name)} />
+              <ProfileRow label="Email address" value={textOr(user.email)} />
+              <ProfileRow label="Phone number" value={textOr(user.phone, 'Not registered')} />
+            </dl>
+          </ProfilePanel>
 
-        {/* Security & Access */}
-        <article className="pro-card">
-          <h3 className="pro-card-title">Security & Access</h3>
-          <div className="pro-card-body">
-            <div className="pro-row">
-              <span className="pro-label">Authorization Tier</span>
-              <span className="pro-value">{(user.role || 'USER').toUpperCase()} LEVEL</span>
-            </div>
-            <div className="pro-row">
-              <span className="pro-label">Last Authentication</span>
-              <span className="pro-value">{user.lastLogin}</span>
-            </div>
-            <div className="pro-row">
-              <span className="pro-label">Session</span>
-              <span className="pro-value text-success">Signed in</span>
-            </div>
-          </div>
-        </article>
+          <ProfilePanel id="pro-employment-heading" title="Employment Information" >
+            <dl className="pro-detail-list">
+              <ProfileRow label="Employee ID" value={textOr(user.employeeId)} />
+              <ProfileRow label="Position / designation" value={designation} muted={!user.position} />
+              <ProfileRow label="System role" value={roleLabel} />
+            </dl>
+          </ProfilePanel>
+        </div>
 
+        <aside className="pro-aside-column">
+          <ProfilePanel id="pro-access-heading" title="Account & Access" >
+            <dl className="pro-detail-list">
+              <ProfileRow label="Assigned role" value={roleLabel} />
+              <ProfileRow label="Session status"><span className={`pro-inline-status ${hasSession ? 'is-on' : 'is-off'}`}><span className="pro-session-dot" />{hasSession ? 'Signed in' : 'Unavailable'}</span></ProfileRow>
+              <ProfileRow label="Last sign-in (saved)" value={savedSignIn} muted={!user.lastLogin} />
+            </dl>
+          </ProfilePanel>
+
+          <section className="pro-info-panel" aria-label="Profile management information">
+            <div className="pro-info-heading"><strong>Profile management</strong></div>
+            <p>Account information shown here is read-only. Use the Settings page for supported profile or password changes. Contact an authorized administrator if your employment details are incorrect.</p>
+          </section>
+          <div className="pro-refresh-note" role="status">{loading ? 'Retrieving current profile information…' : lastUpdated ? `Profile retrieved at ${lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Showing available profile information'}</div>
+        </aside>
       </div>
-    </div>
+    </main>
   );
-};
+}
 
 export default Profile;

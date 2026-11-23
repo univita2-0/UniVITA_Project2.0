@@ -19,11 +19,18 @@ const ACTION_ROLES = Object.freeze({
 
   'attendance:update':        ['hr_admin'],
 
-  'employees:create':         ['admin', 'hr_admin'],
-  'employees:edit':           ['hr_admin'],
-  'employees:deactivate':     ['hr_admin'],
-  'employees:archive':        ['hr_admin'],
-  'employees:delete':         ['admin'],
+  // HR owns personnel information; Admin owns accounts and roles.
+  'employees:view':          ['admin', 'hr_admin'],
+  'employees:create':        ['hr_admin'],
+  'employees:edit':          ['hr_admin'],
+  'employees:change-status': ['hr_admin'],
+
+  'accounts:view':           ['admin', 'hr_admin'],
+  'accounts:provision':      ['admin'],
+  'accounts:activate':       ['admin'],
+  'accounts:deactivate':     ['admin'],
+
+  // Legacy destructive actions intentionally have no registered permission.
 
   'programs:write':           ['hr_admin'],
   'courses:write':            ['hr_admin'],
@@ -42,7 +49,6 @@ const ACTION_ROLES = Object.freeze({
 
   'roles:assign':             ['admin'],
   'accounts:reset-password':  ['admin'],
-  'accounts:delete':          ['admin'],
 
   'system:config':            ['admin'],
   'system:landing-cms':       ['admin'],
@@ -60,27 +66,50 @@ const ACTION_ROLES = Object.freeze({
   'scanners:write':           ['admin', 'security'],
 });
 
-const VALID_ROLES = Object.freeze(['admin','hr_admin','security','instructor']);
+const VALID_ROLES = Object.freeze([
+  'admin',
+  'hr_admin',
+  'security',
+  'instructor'
+]);
 
 function allowRoles(...roles) {
   if (roles.length === 0 || roles.some(role => !VALID_ROLES.includes(role))) {
     throw new Error('Invalid route role policy');
   }
+
   return (req, res, next) => {
     if (!req.user || !req.user.id || !VALID_ROLES.includes(req.user.role)) {
-      return res.status(403).json({ success: false, message: 'Forbidden: authenticated role required.' });
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: authenticated role required.'
+      });
     }
+
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ success: false, message: 'Forbidden: insufficient role permissions.' });
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: insufficient role permissions.'
+      });
     }
+
     next();
   };
 }
 
 function requireAction(action) {
   const allowed = ACTION_ROLES[action];
-  if (!allowed) throw new Error(`Unrecognized RBAC action: ${action}`);
+
+  if (!allowed) {
+    throw new Error(`Unrecognized RBAC action: ${action}`);
+  }
+
   return allowRoles(...allowed);
 }
 
-module.exports = { ACTION_ROLES, VALID_ROLES, allowRoles, requireAction };
+module.exports = {
+  ACTION_ROLES,
+  VALID_ROLES,
+  allowRoles,
+  requireAction
+};

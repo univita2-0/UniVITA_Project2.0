@@ -58,7 +58,7 @@ const DEFAULT_COURSES = sortCourseModules([
   },
   {
     title: "AHA BLS & ACLS Training",
-    badge: "Official AHA Certified",
+    badge: "AHA Programs",
     subtitle: "American Heart Association certified life support programs.",
     description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and official AHA certification upon completion.",
     courses: [
@@ -80,7 +80,7 @@ const DEFAULT_COURSES = sortCourseModules([
   },
   {
     title: "PRC - CPD Courses",
-    badge: "PRC Accredited Units",
+    badge: "PRC-CPD Programs",
     subtitle: "Continuing professional development for licensed medical practitioners.",
     description: "Fulfill your professional regulatory commission requirements with accredited CPD units and advanced clinical seminars.",
     courses: [
@@ -97,16 +97,24 @@ const DEFAULT_FACILITIES = [
 ];
 
 const DEFAULT_CONTACT = {
-  address: '3F & 5F Westar Building, Shaw Boulevard\nPasig City, Metro Manila',
-  phone_secondary: '+63 912 345 6789',
-  email_admissions: 'admissions@hct.ph',
-  hours_weekday: 'Mon - Fri: 8:00 AM – 5:00 PM',
-  hours_weekend: 'Saturday: 8:00 AM – 12:00 PM',
-  hours_sunday: 'Sunday: CLOSED'
+  address: '3rd and 5th Floors, Westar Building, 611 Shaw Boulevard, Pasig City, Metro Manila',
+  phone_secondary: '+63 917 106 4106',
+  email_admissions: 'inquiries@hct.edu.ph',
+  hours_weekday: 'Monday–Friday: 9:00 AM–5:00 PM',
+  hours_weekend: 'Saturday: Closed',
+  hours_sunday: 'Sunday: Closed',
+  hero_eyebrow: 'Healthcare education and simulation-based training',
+  hero_line1: 'Shaping Tomorrow’s',
+  hero_line2: 'Healthcare Professionals',
+  hero_description: 'Explore hands-on training, professional development, and healthcare learning opportunities at HCT Academy.',
+  about_title: 'Practical Training for Healthcare Professionals',
+  about_description: 'Founded in 2007 as Healthcare Advantage Institute, HCT Academy supports healthcare professionals through simulation-based training, life-support education, and continuing professional development.',
+  careers_title: 'Find Your Place in Healthcare Education',
+  careers_description: 'Explore career opportunities across our clinical, instructional, administrative, and support teams.'
 };
 
 const LandingPageManagement = () => {
-  const [activeTab, setActiveTab] = useState('contact');
+  const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -126,10 +134,10 @@ const LandingPageManagement = () => {
         if (res.data.contact_details && Object.keys(res.data.contact_details).length > 0) {
           setContact(prev => ({ ...prev, ...res.data.contact_details }));
         }
-        if (Array.isArray(res.data.courses_catalog) && res.data.courses_catalog.length > 0) {
+        if (Array.isArray(res.data.courses_catalog)) {
           setCourses(sortCourseModules(res.data.courses_catalog));
         }
-        if (Array.isArray(res.data.facilities_gallery) && res.data.facilities_gallery.length > 0) {
+        if (Array.isArray(res.data.facilities_gallery)) {
           setFacilities(res.data.facilities_gallery);
         }
       }
@@ -143,21 +151,27 @@ const LandingPageManagement = () => {
   const saveSection = async (key, data, silent = false) => {
     if (key === 'contact_details') {
       if (data.email_admissions && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email_admissions)) {
-        return toast.error('Please provide a valid admissions email address.');
+        toast.error('Please provide a valid admissions email address.'); return false;
       }
       if (data.address && data.address.length > 500) {
-        return toast.error('Campus address is too long (maximum 500 characters).');
+        toast.error('Campus address is too long (maximum 500 characters).'); return false;
       }
     }
 
+    if (key === 'courses_catalog' && (!Array.isArray(data) || data.some(c => !c.title?.trim()))) {
+      toast.error('Every program category requires a title.'); return false;
+    }
+    if (key === 'facilities_gallery' && (!Array.isArray(data) || data.some(f => !f.name?.trim()))) {
+      toast.error('Every facility requires a name.'); return false;
+    }
     setSaving(true);
     try {
-      await axios.put(`${API_BASE}/admin/landing-content/${key}`, { data }, getAuthHeaders());
-      if (!silent) {
-        toast.success('Saved successfully!');
-      }
+      await axios.put(`${API_BASE}/admin/landing-content/${key}`, { data: key === 'contact_details' ? (({ privacy_url, ...rest }) => rest)(data) : data }, getAuthHeaders());
+      if (!silent) toast.success('Saved and published to the landing page.');
+      return true;
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to save changes.');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -165,10 +179,11 @@ const LandingPageManagement = () => {
 
   const handleUploadFacilityImages = async (facilityIndex, fileList) => {
     if (!fileList || fileList.length === 0) return;
+    if (fileList.length > 20) { toast.error('Upload a maximum of 20 photos at once.'); return; }
 
     for (let file of fileList) {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`"${file.name}" is not a valid image file.`);
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        toast.error(`"${file.name}" must be JPEG, PNG, or WebP.`);
         return;
       }
       if (file.size > 10 * 1024 * 1024) {
@@ -195,9 +210,9 @@ const LandingPageManagement = () => {
           idx === facilityIndex ? { ...fac, images: updatedImages } : fac
         );
 
+        const saved = await saveSection('facilities_gallery', updatedFacilities, true);
+        if (!saved) return;
         setFacilities(updatedFacilities);
-        await saveSection('facilities_gallery', updatedFacilities, true);
-
         toast.success(
           uploadedUrls.length > 1
             ? `Added ${uploadedUrls.length} photos to ${targetFacility.name}.`
@@ -218,9 +233,8 @@ const LandingPageManagement = () => {
       idx === facilityIndex ? { ...fac, images: updatedImages } : fac
     );
 
-    setFacilities(updatedFacilities);
-    await saveSection('facilities_gallery', updatedFacilities, true);
-    toast.info('Photo removed.');
+    const saved = await saveSection('facilities_gallery', updatedFacilities, true);
+    if (saved) { setFacilities(updatedFacilities); toast.info('Photo removed from public gallery.'); }
   };
 
   const addCourseCategory = () => {
@@ -258,15 +272,16 @@ const LandingPageManagement = () => {
       <div className="lpm-header">
         <div className="lpm-heading">
           
-          <p>Maintain contact information, training programs, and facilities displayed on the public website.</p>
+          <p>Manage homepage and Careers messaging, campus information, training programs, and facility galleries.</p>
         </div>
         <button
           className="lpm-btn-secondary"
           onClick={() => {
+            if (!window.confirm('Replace all unsaved landing page edits with default content? This does not publish changes until you save each section.')) return;
             setContact(DEFAULT_CONTACT);
             setCourses(DEFAULT_COURSES);
             setFacilities(DEFAULT_FACILITIES);
-            toast.info('Restored default values. Click Save to commit.');
+            toast.info('Defaults loaded into the editor. Save each section to publish.');
           }}
           title="Restore baseline defaults"
         >
@@ -274,13 +289,15 @@ const LandingPageManagement = () => {
         </button>
       </div>
 
+      <div className="lpm-publish-hint"><span><strong>Publishing:</strong> Changes appear on the public landing page after saving and refreshing it. Booking and Careers records remain managed in their respective modules.</span><button className="lpm-btn-secondary" onClick={() => window.open(window.location.origin, '_blank', 'noopener,noreferrer')}>Preview Public Site</button></div>
       <div className="lpm-overview" aria-label="Landing page content summary">
-        <div className="lpm-overview-item"><span>CONTENT SECTIONS</span><strong>03</strong><small>Contact, courses & facilities</small></div>
+        <div className="lpm-overview-item"><span>CONTENT SECTIONS</span><strong>04</strong><small>Homepage & Careers, contact, courses, facilities</small></div>
         <div className="lpm-overview-item"><span>COURSE CATEGORIES</span><strong>{courses.length}</strong><small>Editable training tracks</small></div>
         <div className="lpm-overview-item"><span>FACILITY GROUPS</span><strong>{facilities.length}</strong><small>Published photo collections</small></div>
       </div>
 
       <div className="lpm-tabs-bar" role="tablist" aria-label="Landing content sections">
+        <button className={`lpm-tab-btn ${activeTab === 'overview' ? 'active' : ''}`} role="tab" aria-selected={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>Homepage & Careers</button>
         <button className={`lpm-tab-btn ${activeTab === 'contact' ? 'active' : ''}`} role="tab" aria-selected={activeTab === 'contact'} onClick={() => setActiveTab('contact')}>
           Contact Details & Hours
         </button>
@@ -292,6 +309,30 @@ const LandingPageManagement = () => {
         </button>
       </div>
 
+      {activeTab === 'overview' && (
+        <div className="lpm-card">
+          <div className="lpm-card-header"><h3>Public Homepage and Careers — Introduction Content</h3><span className="lpm-tag">Synced to Public Page</span></div>
+          <p className="lpm-section-help">These fields are published through the existing contact_details CMS record, so no database schema change is required.</p>
+          <div className="lpm-form-grid">
+            {[
+              ['hero_eyebrow', 'Hero Eyebrow'], ['hero_line1', 'Hero Title — First Line'],
+              ['hero_line2', 'Hero Title — Accent Line'], ['hero_description', 'Hero Description'],
+              ['about_title', 'About Section Heading'], ['about_description', 'About Section Description'],
+              ['careers_title', 'Careers Page Heading'], ['careers_description', 'Careers Page Introduction']
+            ].map(([key, label]) => (
+              <div className={`lpm-form-group ${['hero_description', 'about_description', 'careers_description'].includes(key) ? 'full-width' : ''}`} key={key}>
+                <label htmlFor={`lpm-${key}`}>{label}</label>
+                {['hero_description', 'about_description', 'careers_description'].includes(key) ?
+                  <textarea id={`lpm-${key}`} rows="3" value={contact[key] || ''} onChange={e => setContact(prev => ({ ...prev, [key]: e.target.value }))} maxLength={800}/> :
+                  <input id={`lpm-${key}`} value={contact[key] || ''} onChange={e => setContact(prev => ({ ...prev, [key]: e.target.value }))} maxLength={200}/>
+                }
+              </div>
+            ))}
+          </div>
+          <div className="lpm-card-actions"><button className="lpm-btn-primary" onClick={() => saveSection('contact_details', contact)} disabled={saving}>{saving ? 'Publishing...' : 'Save & Publish Homepage'}</button></div>
+        </div>
+      )}
+
       {/* TAB 1: CONTACT DETAILS */}
       {activeTab === 'contact' && (
         <div className="lpm-card">
@@ -300,6 +341,7 @@ const LandingPageManagement = () => {
             <span className="lpm-tag">Live Public Section</span>
           </div>
 
+          <div className="lpm-official-contact-action"><span>Use preset campus contact details when appropriate. Existing saved information is not automatically overwritten.</span><button type="button" className="lpm-btn-secondary" onClick={() => setContact(prev => ({ ...prev, address: DEFAULT_CONTACT.address, phone_secondary: DEFAULT_CONTACT.phone_secondary, email_admissions: DEFAULT_CONTACT.email_admissions, hours_weekday: DEFAULT_CONTACT.hours_weekday, hours_weekend: DEFAULT_CONTACT.hours_weekend, hours_sunday: DEFAULT_CONTACT.hours_sunday }))}>Load Contact Preset</button></div>
           <div className="lpm-form-grid">
             <div className="lpm-form-group full-width">
               <label>Campus Physical Address</label>
@@ -405,7 +447,7 @@ const LandingPageManagement = () => {
                   <label>Curriculum Badge / Accreditation</label>
                   <input
                     value={cat.badge || ''}
-                    placeholder="e.g. Official AHA Certified"
+                    placeholder="e.g. AHA Programs"
                     onChange={e => {
                       const updated = [...courses];
                       updated[idx].badge = e.target.value;
@@ -508,6 +550,8 @@ const LandingPageManagement = () => {
                     {(fac.images || []).length} photos in gallery
                   </span>
                 </div>
+                <div className="lpm-facility-actions">
+                <button type="button" className="lpm-btn-danger-icon" title="Remove facility group" aria-label={`Remove ${fac.name}`} onClick={() => { if (window.confirm(`Remove ${fac.name} from the public gallery after saving?`)) setFacilities(prev => prev.filter((_, i) => i !== idx)); }}><Trash2 size={16}/></button>
                 <label className="lpm-btn-secondary" style={{ cursor: 'pointer' }}>
                   <Upload size={16} /> Upload Photos
                   <input
@@ -522,9 +566,13 @@ const LandingPageManagement = () => {
                       }
                     }}
                   />
-                </label>
+                </label></div>
               </div>
 
+              <div className="lpm-form-grid lpm-facility-fields">
+                <div className="lpm-form-group"><label>Facility Name</label><input value={fac.name || ''} maxLength={100} onChange={e => setFacilities(prev => prev.map((item, i) => i === idx ? { ...item, name: e.target.value } : item))}/></div>
+                <div className="lpm-form-group"><label>Public Gallery Description</label><input value={fac.description || ''} maxLength={250} placeholder="Short description of this learning space" onChange={e => setFacilities(prev => prev.map((item, i) => i === idx ? { ...item, description: e.target.value } : item))}/></div>
+              </div>
               <div className="lpm-facility-photos-grid">
                 {(fac.images || []).length === 0 ? (
                   <div className="lpm-no-photos">
@@ -538,7 +586,8 @@ const LandingPageManagement = () => {
                         src={resolveImageSrc(imgUrl)}
                         alt={`${fac.name} ${imgIdx + 1}`}
                         onError={(e) => {
-                          e.currentTarget.style.opacity = '0.3';
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.parentElement?.classList.add('lpm-image-failed');
                         }}
                       />
                       <button
@@ -558,6 +607,7 @@ const LandingPageManagement = () => {
           ))}
 
           <div className="lpm-bottom-actions">
+            <button className="lpm-btn-secondary" type="button" onClick={() => setFacilities(prev => [...prev, { name: 'New Facility', description: '', images: [] }])}><Plus size={16}/> Add Facility Group</button>
             <button className="lpm-btn-primary" onClick={() => saveSection('facilities_gallery', facilities)} disabled={saving}>
               {saving ? 'Saving...' : 'Save Changes'}
             </button>

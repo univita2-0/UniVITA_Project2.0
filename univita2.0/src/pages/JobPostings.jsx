@@ -29,6 +29,17 @@ const formatDateTime = (dateStr) => {
   });
 };
 
+const NEXT_APPLICANT_STATUS = {
+  new: ['reviewed', 'rejected'],
+  reviewed: ['shortlisted', 'rejected'],
+  shortlisted: ['hired', 'rejected'],
+  rejected: [],
+  hired: []
+};
+
+const getRecruitmentError = (err, fallback) =>
+  err.response?.data?.message || err.response?.data?.error || fallback;
+
 const needsOnboardingDocs = (app) =>
   app?.status === 'hired' &&
   !(app.nbi_verified && app.csc_form_verified && app.medical_verified);
@@ -68,9 +79,15 @@ const JobPostings = () => {
   const [showInterviewModal, setShowInterviewModal] = useState(false);
   const [interviewApplicant, setInterviewApplicant] = useState(null);
   const [interviewForm, setInterviewForm] = useState({ date: '', time: '', notes: '' });
+  const [interviewRecord, setInterviewRecord] = useState(null);
+  const [loadingInterview, setLoadingInterview] = useState(false);
+  const [showInterviewResultModal, setShowInterviewResultModal] = useState(false);
+  const [interviewOutcome, setInterviewOutcome] = useState('passed');
+  const [interviewNotes, setInterviewNotes] = useState('');
+  const [showCandidateDecision, setShowCandidateDecision] = useState(false);
+  const [candidateDecisionStatus, setCandidateDecisionStatus] = useState('');
+  const [candidateDecisionReason, setCandidateDecisionReason] = useState('');
 
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteJobId, setDeleteJobId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -143,7 +160,14 @@ const JobPostings = () => {
     if (jobForm.salary_min === '' || jobForm.salary_max === '') {
       return toast.warning('Salary minimum and maximum are required.');
     }
-    if (Number(jobForm.salary_max) < Number(jobForm.salary_min)) {
+    const salaryMin = Number(jobForm.salary_min);
+    const salaryMax = Number(jobForm.salary_max);
+    if (!Number.isFinite(salaryMin) || !Number.isFinite(salaryMax) || salaryMin < 0 || salaryMax < 0 ||
+        !/^\d+(?:\.\d{1,2})?$/.test(String(jobForm.salary_min)) ||
+        !/^\d+(?:\.\d{1,2})?$/.test(String(jobForm.salary_max))) {
+      return toast.warning('Enter valid non-negative salaries (up to two decimal places).');
+    }
+    if (salaryMax < salaryMin) {
       return toast.warning('Maximum salary must be greater than or equal to minimum salary.');
     }
 
@@ -199,22 +223,6 @@ const JobPostings = () => {
     }
   };
 
-  const confirmDelete = async () => {
-    if (!can('jobs:delete')) return;
-    setSaving(true);
-    try {
-      await axios.delete(`${API_BASE}/jobs/${deleteJobId}`, getAuthHeaders());
-      toast.success('Job deleted permanently.');
-      fetchJobs();
-    } catch (err) {
-      toast.error('Failed to delete job.');
-    } finally {
-      setShowDeleteConfirm(false);
-      setDeleteJobId(null);
-      setSaving(false);
-    }
-  };
-
   const viewApplicants = async (job) => {
     setCurrentJobForApplicants(job);
     setApplicantsPage(1);
@@ -229,101 +237,145 @@ const JobPostings = () => {
     }
   };
 
-  const openApplicantDetails = async (applicant) => {
-    setSelectedApplicant(applicant);
-    setShowApplicantDetailsModal(true);
-
-    if (can('applicants:update') && applicant.status === 'new') {
-      try {
-        await axios.put(`${API_BASE}/applicants/${applicant.id}`, { status: 'reviewed' }, getAuthHeaders());
-        setApplicants(prev => prev.map(a => a.id === applicant.id ? { ...a, status: 'reviewed' } : a));
-        setSelectedApplicant(prev => ({ ...prev, status: 'reviewed' }));
-        fetchJobs();
-      } catch (err) {
-        console.error('Status auto-update failed.');
-      }
+  const loadApplicantInterview = async (applicantId) => {
+    setLoadingInterview(true);
+    setInterviewRecord(null);
+    try {
+      const response = await axios.get(`${API_BASE}/recruitment/interviews/applicant/${applicantId}`, getAuthHeaders());
+      setInterviewRecord(response.data?.interview || null);
+    } catch (error) {
+      // The applicant can still be reviewed when interview history is unavailable.
+      toast.error(getRecruitmentError(error, 'Unable to retrieve interview details.'));
+    } finally {
+      setLoadingInterview(false);
     }
   };
 
-  const updateApplicantStatus = async (applicantId, newStatus) => {
-    if (!can('applicants:update')) return;
-    try {
-      await axios.put(`${API_BASE}/applicants/${applicantId}`, { status: newStatus }, getAuthHeaders());
-      const res = await axios.get(`${API_BASE}/jobs/${currentJobForApplicants.id}/applicants`, getAuthHeaders());
-      setApplicants(res.data);
-      if (selectedApplicant && selectedApplicant.id === applicantId) {
-        setSelectedApplicant({ ...selectedApplicant, status: newStatus });
-      }
-      fetchJobs();
-      toast.success('Candidate status updated.');
-    } catch (err) {
-      toast.error('Failed to transition candidate.');
+  const openApplicantDetails = async (applicant) => {
+    // Opening an application must never change its screening status.
+    setSelectedApplicant(applicant);
+    setShowApplicantDetailsModal(true);
+    await loadApplicantInterview(applicant.id);
+  };
+
+  const refreshApplicant = async (applicantId) => {
+    const res = await axios.get(`${API_BASE}/jobs/${currentJobForApplicants.id}/applicants`, getAuthHeaders());
+    setApplicants(res.data);
+    const latest = res.data.find(a => Number(a.id) === Number(applicantId));
+    if (latest) setSelectedApplicant(latest);
+    await fetchJobs();
+    return latest;
+  };
+
+  const updateApplicantStatus = async (applicantId, newStatus, reason = '') => {
+    if (!can('applicants:update') || saving) return;
+    const current = applicants.find(a => Number(a.id) === Number(applicantId));
+    if (!current || !(NEXT_APPLICANT_STATUS[current.status] || []).includes(newStatus)) {
+      toast.error('This candidate status change is not permitted.');
+      return;
     }
+    if (newStatus === 'rejected' && reason.trim().length < 5) {
+      toast.warning('Provide a brief internal reason for rejection (at least 5 characters).');
+      return;
+    }
+    if (newStatus === 'hired' && (interviewRecord?.outcome !== 'passed' || Number(interviewRecord?.applicant_id) !== Number(applicantId))) {
+      toast.warning('Record a passed interview before confirming a hire.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await axios.put(`${API_BASE}/applicants/${applicantId}`,
+        { status: newStatus, decision_reason: reason.trim() || null }, getAuthHeaders());
+      await refreshApplicant(applicantId);
+      setShowCandidateDecision(false);
+      setCandidateDecisionReason('');
+      toast.success(`Candidate status updated to ${newStatus}.`);
+    } catch (err) {
+      toast.error(getRecruitmentError(err, 'Failed to update candidate status.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const requestStatusChange = (newStatus) => {
+    if (!selectedApplicant || newStatus === selectedApplicant.status) return;
+    if (!(NEXT_APPLICANT_STATUS[selectedApplicant.status] || []).includes(newStatus)) return;
+    if (newStatus === 'rejected' || newStatus === 'hired') {
+      setCandidateDecisionStatus(newStatus);
+      setCandidateDecisionReason('');
+      setShowCandidateDecision(true);
+      return;
+    }
+    updateApplicantStatus(selectedApplicant.id, newStatus);
   };
 
   const handleOnboardingToggle = async (field, value) => {
-    if (!can('applicants:update')) return;
-    if (!selectedApplicant || selectedApplicant.status !== 'hired') return;
-
+    if (!can('applicants:update') || savingOnboarding || !selectedApplicant || selectedApplicant.status !== 'hired') return;
     const previous = selectedApplicant;
     const updated = { ...selectedApplicant, [field]: value ? 1 : 0 };
-
     setSelectedApplicant(updated);
     setApplicants(prev => prev.map(a => a.id === updated.id ? { ...a, [field]: value ? 1 : 0 } : a));
-
     setSavingOnboarding(true);
     try {
-      await axios.put(
-        `${API_BASE}/applicants/${updated.id}/onboarding`,
-        {
-          nbi_verified: updated.nbi_verified,
-          csc_form_verified: updated.csc_form_verified,
-          medical_verified: updated.medical_verified
-        },
-        getAuthHeaders()
-      );
+      await axios.put(`${API_BASE}/applicants/${updated.id}/onboarding`, {
+        nbi_verified: updated.nbi_verified,
+        csc_form_verified: updated.csc_form_verified,
+        medical_verified: updated.medical_verified
+      }, getAuthHeaders());
       toast.success('Onboarding checklist updated.');
     } catch (err) {
       setSelectedApplicant(previous);
       setApplicants(prev => prev.map(a => a.id === previous.id ? previous : a));
-      toast.error(err.response?.data?.message || 'Failed to update onboarding checklist.');
+      toast.error(getRecruitmentError(err, 'Failed to update onboarding checklist.'));
     } finally {
       setSavingOnboarding(false);
     }
   };
 
   const openScheduleInterview = (applicant) => {
-    if (!can('applicants:update') || ['rejected', 'hired'].includes(applicant.status)) return;
+    if (!can('applicants:update') || applicant.status !== 'shortlisted') return;
     setInterviewApplicant(applicant);
-    setInterviewForm({ date: '', time: '', notes: `Interview for ${currentJobForApplicants?.title}` });
+    setInterviewForm({ date: '', time: '', notes: '' });
     setShowInterviewModal(true);
   };
 
   const scheduleInterview = async () => {
-    if (!can('applicants:update')) return;
+    if (!can('applicants:update') || !interviewApplicant || saving) return;
     if (!interviewForm.date || !interviewForm.time) return toast.warning('Date and time are required.');
-
-    if (new Date(`${interviewForm.date}T${interviewForm.time}`) < new Date()) {
-      return toast.warning('Cannot schedule interviews in the past.');
+    if (new Date(`${interviewForm.date}T${interviewForm.time}`).getTime() <= Date.now()) {
+      return toast.warning('Choose a future interview date and time.');
     }
-
     setSaving(true);
     try {
-      const nameParts = interviewApplicant.full_name.split(' ');
-      await axios.post(`${API_BASE}/appointments/book`, {
-        firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || '',
-        email: interviewApplicant.email, phone: interviewApplicant.phone || '',
-        date: interviewForm.date, time: interviewForm.time,
-        reason: interviewForm.notes, primaryBleId: null, additionalVisitors: []
+      await axios.post(`${API_BASE}/recruitment/interviews`, {
+        applicant_id: interviewApplicant.id,
+        date: interviewForm.date,
+        time: interviewForm.time,
+        notes: interviewForm.notes.trim()
       }, getAuthHeaders());
-
-      toast.success('Interview scheduled. System email sent.');
+      toast.success('Interview scheduled and saved.');
       setShowInterviewModal(false);
-      if (interviewApplicant.status !== 'shortlisted') {
-        await updateApplicantStatus(interviewApplicant.id, 'shortlisted');
-      }
+      await loadApplicantInterview(interviewApplicant.id);
     } catch (err) {
-      toast.error('Failed to dispatch interview.');
+      toast.error(getRecruitmentError(err, 'Unable to schedule interview.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const recordInterviewOutcome = async () => {
+    if (!can('applicants:update') || !interviewRecord || saving) return;
+    if (interviewNotes.trim().length < 5) return toast.warning('Add an interview assessment of at least 5 characters.');
+    setSaving(true);
+    try {
+      await axios.put(`${API_BASE}/recruitment/interviews/${interviewRecord.id}/outcome`,
+        { outcome: interviewOutcome, notes: interviewNotes.trim() }, getAuthHeaders());
+      setShowInterviewResultModal(false);
+      setInterviewNotes('');
+      await loadApplicantInterview(interviewRecord.applicant_id);
+      toast.success('Interview outcome recorded.');
+    } catch (err) {
+      toast.error(getRecruitmentError(err, 'Unable to save interview assessment.'));
     } finally {
       setSaving(false);
     }
@@ -350,21 +402,15 @@ const JobPostings = () => {
   return (
     <div className="jp-wrapper">
       {isAdmin && (
-        <div className="jp-readonly-banner">
-          <ShieldAlert size={16} />
-          <span><strong>Read-only view.</strong> Job posting and applicant management are handled by HR.</span>
-        </div>
+        <p className="jp-readonly-banner">View-only access</p>
       )}
 
       <header className="jp-header">
         <div className="jp-heading-block">
           
-          <p className="jp-subtitle">Manage recruitment openings and track candidate applications.</p>
+         
         </div>
         <div className="jp-header-actions">
-          <button type="button" className="jp-btn-cancel jp-refresh" onClick={fetchJobs} disabled={loading}>
-            <RefreshCw size={15} /> Refresh
-          </button>
           {can('jobs:create') && (
             <button type="button" className="jp-btn-primary" onClick={() => openJobForm()}>
               <Plus size={16} /> Create Job Post
@@ -375,20 +421,20 @@ const JobPostings = () => {
 
       <section className="jp-metric-grid" aria-label="Recruitment summary">
         <div className="jp-metric-card">
-          <div className="jp-metric-heading"><span>All job postings</span><Briefcase size={17} /></div>
-          <strong>{jobs.length}</strong><small>Recruitment opportunities</small>
+          <div className="jp-metric-heading"><span>All job postings</span></div>
+          <strong>{jobs.length}</strong>
         </div>
         <div className="jp-metric-card">
-          <div className="jp-metric-heading"><span>Active openings</span><CheckCircle size={17} /></div>
-          <strong>{activeCount}</strong><small>Accepting applications</small>
+          <div className="jp-metric-heading"><span>Active openings</span></div>
+          <strong>{activeCount}</strong>
         </div>
         <div className="jp-metric-card">
-          <div className="jp-metric-heading"><span>Closed postings</span><XCircle size={17} /></div>
-          <strong>{closedCount}</strong><small>Not accepting applications</small>
+          <div className="jp-metric-heading"><span>Closed postings</span></div>
+          <strong>{closedCount}</strong>
         </div>
         <div className="jp-metric-card">
-          <div className="jp-metric-heading"><span>Total applicants</span><Users size={17} /></div>
-          <strong>{applicantCount}</strong><small>Across listed positions</small>
+          <div className="jp-metric-heading"><span>Total applicants</span></div>
+          <strong>{applicantCount}</strong>
         </div>
       </section>
 
@@ -438,7 +484,7 @@ const JobPostings = () => {
                   <tr>
                     <td colSpan="5">
                       <div className="jp-empty">
-                        <Briefcase size={36} className="text-muted" />
+                        
                         <p>No job postings found.</p>
                       </div>
                     </td>
@@ -453,23 +499,22 @@ const JobPostings = () => {
                       <td>
                         <div className="jp-cell-tags">
                           <span className="jp-tag">{job.employment_type}</span>
-                          <span className="jp-tag"><MapPin size={12} /> {job.location_type}</span>
+                          <span className="jp-tag">{job.location_type}</span>
                           {!!job.requires_prc && (
                             <span className="jp-tag prc">
-                              <ShieldCheck size={12} /> PRC Required
+                              PRC Required
                             </span>
                           )}
                         </div>
                       </td>
                       <td>
                         <span className={`jp-status ${job.status}`}>
-                          {job.status.toUpperCase()}
+                          {job.status === 'open' ? 'Open' : 'Closed'}
                         </span>
                       </td>
                       <td>
                         <div className="jp-applicant-count">
-                          <Users size={16} />
-                          <strong>{Number(job.applicant_count) || 0}</strong>
+                                                    <strong>{Number(job.applicant_count) || 0}</strong>
                         </div>
                       </td>
                       <td className="text-right">
@@ -479,21 +524,11 @@ const JobPostings = () => {
                           </button>
 
                           {can('jobs:edit') && (
-                            <button className="jp-btn-icon" onClick={() => openJobForm(job)} title="Edit Job">
-                              <Edit3 size={16} />
-                            </button>
+                            <button className="jp-btn-icon" onClick={() => openJobForm(job)} title="Edit Job">Edit</button>
                           )}
 
                           {can('jobs:edit') && (
-                            <button className={`jp-btn-icon ${job.status === 'open' ? 'warning' : 'success'}`} onClick={() => handleToggleClick(job)} title={job.status === 'open' ? 'Close Job' : 'Reopen Job'}>
-                              <Power size={16} />
-                            </button>
-                          )}
-
-                          {can('jobs:delete') && (
-                            <button className="jp-btn-icon danger" onClick={() => { setDeleteJobId(job.id); setShowDeleteConfirm(true); }} title="Delete Job">
-                              <Trash2 size={16} />
-                            </button>
+                            <button className={`jp-btn-icon ${job.status === 'open' ? 'warning' : 'success'}`} onClick={() => handleToggleClick(job)} title={job.status === 'open' ? 'Close job and retain applicants' : 'Reopen job posting'}>{job.status === 'open' ? 'Close' : 'Reopen'}</button>
                           )}
                         </div>
                       </td>
@@ -639,7 +674,6 @@ const JobPostings = () => {
                         <span className="jp-ats-name-text">{app.full_name}</span>
                         {needsOnboardingDocs(app) && (
                           <span title="Hired but onboarding documents are incomplete">
-                            <AlertTriangle size={14} className="jp-warn-icon" />
                           </span>
                         )}
                       </div>
@@ -677,7 +711,7 @@ const JobPostings = () => {
         footer={
           <>
             <button className="jp-btn-cancel" onClick={() => setShowApplicantDetailsModal(false)}>Close</button>
-            {can('applicants:update') && selectedApplicant && !['rejected', 'hired'].includes(selectedApplicant.status) && (
+            {can('applicants:update') && selectedApplicant?.status === 'shortlisted' && !interviewRecord?.id && !loadingInterview && (
               <button
                 className="jp-btn-primary"
                 onClick={() => { setShowApplicantDetailsModal(false); openScheduleInterview(selectedApplicant); }}
@@ -757,17 +791,18 @@ const JobPostings = () => {
             <div className="cf-row">
               <div className="cf-label">Status</div>
               <div className="cf-value">
-                {can('applicants:update') ? (
+                {can('applicants:update') && (NEXT_APPLICANT_STATUS[selectedApplicant.status] || []).length > 0 ? (
                   <select
+                    aria-label="Update candidate status"
                     className={`jp-input select small ${selectedApplicant.status}`}
                     value={selectedApplicant.status}
-                    onChange={e => updateApplicantStatus(selectedApplicant.id, e.target.value)}
+                    disabled={saving}
+                    onChange={e => requestStatusChange(e.target.value)}
                   >
-                    <option value="new">New</option>
-                    <option value="reviewed">Reviewed</option>
-                    <option value="shortlisted">Shortlisted</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="hired">Hired</option>
+                    <option value={selectedApplicant.status}>{selectedApplicant.status.charAt(0).toUpperCase() + selectedApplicant.status.slice(1)}</option>
+                    {(NEXT_APPLICANT_STATUS[selectedApplicant.status] || []).map(next => (
+                      <option key={next} value={next}>{next.charAt(0).toUpperCase() + next.slice(1)}</option>
+                    ))}
                   </select>
                 ) : (
                   <span className={`jp-badge-status ${selectedApplicant.status}`}>
@@ -777,6 +812,31 @@ const JobPostings = () => {
               </div>
             </div>
 
+            <div className="cf-section-label">Interview Record</div>
+            <div className="cf-row">
+              <div className="cf-label">Interview Status</div>
+              <div className="cf-value">
+                {loadingInterview ? 'Loading…' : interviewRecord ?
+                  `${interviewRecord.status === 'completed' ? 'Completed' : 'Scheduled'} — ${interviewRecord.outcome || 'Awaiting assessment'}` :
+                  'No interview scheduled'}
+              </div>
+            </div>
+            {interviewRecord && (
+              <>
+                <div className="cf-row">
+                  <div className="cf-label">Schedule</div>
+                  <div className="cf-value">{interviewRecord.interview_date} · {String(interviewRecord.interview_time).slice(0,5)}</div>
+                </div>
+                {interviewRecord.assessment_notes && <div className="cf-row vertical"><div className="cf-label">Interview Assessment</div><div className="cf-value">{interviewRecord.assessment_notes}</div></div>}
+                {can('applicants:update') && selectedApplicant.status === 'shortlisted' && interviewRecord.status === 'scheduled' && (
+                  <div className="cf-row">
+                    <div className="cf-label">HR Decision</div>
+                    <div className="cf-value"><button type="button" className="jp-btn-cancel" onClick={() => { setInterviewOutcome('passed'); setInterviewNotes(''); setShowInterviewResultModal(true); }}>Record Interview Outcome</button></div>
+                  </div>
+                )}
+              </>
+            )}
+
             {selectedApplicant.status === 'hired' && (
               <>
                 <div className="cf-section-label">
@@ -785,7 +845,6 @@ const JobPostings = () => {
 
                 {!allDocsVerified && (
                   <div className="cf-onboard-alert">
-                    <AlertTriangle size={16} />
                     <span>
                       Onboarding documents are <strong>incomplete</strong>. All three government
                       documents must be received and verified before the employee&apos;s 201 file
@@ -796,14 +855,12 @@ const JobPostings = () => {
 
                 {allDocsVerified && (
                   <div className="cf-onboard-success">
-                    <CheckCircle size={16} />
                     <span>All onboarding documents verified. 201 file is complete.</span>
                   </div>
                 )}
 
                 <div className="cf-onboard-row">
-                  <div className="cf-onboard-label">
-                    <ShieldCheck size={16} /> NBI Clearance Received
+                  <div className="cf-onboard-label"> NBI Clearance Received
                   </div>
                   <label className="cf-toggle">
                     <input
@@ -817,8 +874,7 @@ const JobPostings = () => {
                 </div>
 
                 <div className="cf-onboard-row">
-                  <div className="cf-onboard-label">
-                    <FileText size={16} /> CSC Form 212 Received
+                  <div className="cf-onboard-label"> CSC Form 212 Received
                   </div>
                   <label className="cf-toggle">
                     <input
@@ -832,8 +888,7 @@ const JobPostings = () => {
                 </div>
 
                 <div className="cf-onboard-row">
-                  <div className="cf-onboard-label">
-                    <Stethoscope size={16} /> Medical Certificate Received
+                  <div className="cf-onboard-label"> Medical Certificate Received
                   </div>
                   <label className="cf-toggle">
                     <input
@@ -881,24 +936,55 @@ const JobPostings = () => {
             <input type="text" className="jp-input" value={interviewForm.notes} onChange={e => setInterviewForm({ ...interviewForm, notes: e.target.value })} placeholder="e.g. Zoom link or meeting room" />
           </div>
           <div className="jp-alert info">
-            <CheckCircle size={16} />
-            <span>The system will automatically email the invitation to {interviewApplicant?.email}.</span>
+            <span>Scheduling records the interview in Recruitment. Confirm the invitation with the applicant through your approved communication channel.</span>
           </div>
         </div>
       </FormalModal>
 
-      {/* --- DELETE CONFIRM MODAL --- */}
-      <FormalModal show={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Confirm Deletion" footer={
-        <>
-          <button className="jp-btn-cancel" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
-          <button className="jp-btn-primary danger" onClick={confirmDelete} disabled={saving}>{saving ? 'Deleting...' : 'Delete Job'}</button>
-        </>
-      }>
-        <div className="jp-alert danger">
-          <XCircle size={20} />
-          <div>
-            <strong>Are you sure you want to delete this job?</strong>
-            <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>This action cannot be undone. All applicant data and resumes attached to this posting will be purged.</p>
+      <FormalModal
+        show={showCandidateDecision}
+        onClose={() => !saving && setShowCandidateDecision(false)}
+        title={candidateDecisionStatus === 'hired' ? 'Confirm Hiring Decision' : 'Confirm Applicant Rejection'}
+        footer={<>
+          <button type="button" className="jp-btn-cancel" onClick={() => setShowCandidateDecision(false)} disabled={saving}>Cancel</button>
+          <button type="button" className={`jp-btn-primary ${candidateDecisionStatus === 'rejected' ? 'danger' : ''}`}
+            onClick={() => updateApplicantStatus(selectedApplicant.id, candidateDecisionStatus, candidateDecisionReason)} disabled={saving}>
+            {saving ? 'Saving…' : candidateDecisionStatus === 'hired' ? 'Confirm Hire' : 'Confirm Rejection'}
+          </button>
+        </>}
+      >
+        <div className="jp-form">
+          <p className="jp-decision-intro">{candidateDecisionStatus === 'hired' ?
+            'Confirm the final hiring decision. The applicant must have a passed interview on record.' :
+            'Record the internal reason for rejecting this application.'}</p>
+          <div className="jp-form-group">
+            <label htmlFor="candidate-decision-reason">Internal Decision Notes {candidateDecisionStatus === 'rejected' ? '*' : '(optional)'}</label>
+            <textarea id="candidate-decision-reason" className="jp-input jp-textarea" maxLength={500} rows={3}
+              value={candidateDecisionReason} onChange={e => setCandidateDecisionReason(e.target.value)} />
+          </div>
+        </div>
+      </FormalModal>
+
+      <FormalModal
+        show={showInterviewResultModal}
+        onClose={() => !saving && setShowInterviewResultModal(false)}
+        title="Record Interview Assessment"
+        footer={<>
+          <button type="button" className="jp-btn-cancel" disabled={saving} onClick={() => setShowInterviewResultModal(false)}>Cancel</button>
+          <button type="button" className="jp-btn-primary" disabled={saving} onClick={recordInterviewOutcome}>{saving ? 'Saving…' : 'Save Assessment'}</button>
+        </>}
+      >
+        <div className="jp-form">
+          <div className="jp-form-group">
+            <label htmlFor="interview-outcome">Interview Outcome</label>
+            <select id="interview-outcome" className="jp-input select" value={interviewOutcome} onChange={e => setInterviewOutcome(e.target.value)}>
+              <option value="passed">Passed</option><option value="failed">Did Not Pass</option>
+            </select>
+          </div>
+          <div className="jp-form-group">
+            <label htmlFor="interview-assessment">Assessment / Remarks *</label>
+            <textarea id="interview-assessment" className="jp-input jp-textarea" rows={4} maxLength={2000}
+              value={interviewNotes} onChange={e => setInterviewNotes(e.target.value)} />
           </div>
         </div>
       </FormalModal>
@@ -912,7 +998,7 @@ const JobPostings = () => {
           </button>
         </>
       }>
-        <p style={{ margin: 0 }}>Are you sure you want to {jobToToggle?.status === 'open' ? 'close' : 'reopen'} the posting for <strong>{jobToToggle?.title}</strong>?</p>
+        <p style={{ margin: 0 }}>Are you sure you want to {jobToToggle?.status === 'open' ? 'close' : 'reopen'} the posting for <strong>{jobToToggle?.title}</strong>? Closed jobs remain available to HR with their applicant history preserved.</p>
       </FormalModal>
     </div>
   );

@@ -144,39 +144,33 @@ const ProgramManagement = () => {
 
   return (
     <div className="cm-container facility-programs">
-      {/* FIX 10.7 — read-only banner for Admin */}
       {isAdmin && (
-        <div style={{
-          padding: '12px 16px',
-          marginBottom: '20px',
-          background: '#F0FDFA',
-          border: '1px solid #99F6E4',
-          borderRadius: '5px',
-          color: '#0F766E',
-          fontSize: '12px',
-          fontWeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
-          <span><strong>Read-only view.</strong> Program management is handled by HR.</span>
-        </div>
+        <p className="facility-view-only" role="note">View-only access</p>
       )}
 
-      <div className="facility-page-intro"><p>Organize academic programs and their associated courses.</p></div>
-      <div className="facility-stat-strip" aria-label="Program summary"><div><span>Total programs</span><strong>{programs.length}</strong></div><div><span>Matching programs</span><strong>{filteredPrograms.length}</strong></div><div><span>Programs with badges</span><strong>{programs.filter(p => Boolean(p.badge)).length}</strong></div></div>
-      {/* Header Area */}
-      <div className="cm-header">
-        <div className="cm-header-left">
-          <p className="cm-subtitle">Manage academic programs (e.g., Nursing, MedTech) that contain multiple courses.</p>
+     
+      <section className="facility-stat-strip" aria-label="Program summary">
+        <div className="facility-stat-card">
+          <span>Total programs</span>
+          <strong>{programs.length}</strong>
         </div>
-        {canWrite && (
+        <div className="facility-stat-card">
+          <span>Matching programs</span>
+          <strong>{filteredPrograms.length}</strong>
+        </div>
+        <div className="facility-stat-card">
+          <span>Programs with badges</span>
+          <strong>{programs.filter(p => Boolean(p.badge)).length}</strong>
+        </div>
+      </section>
+      {/* Header Area */}
+      {canWrite && (
+        <div className="cm-header facility-header-actions">
           <button className="cm-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-            <Plus size={18} /> Add New Program
+            Add New Program
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Main Content Card */}
       <div className="cm-content-card">
@@ -208,7 +202,6 @@ const ProgramManagement = () => {
           <div className="cm-loading">Loading programs...</div>
         ) : filteredPrograms.length === 0 ? (
           <div className="cm-empty">
-            <div className="cm-empty-icon-wrap"><Layers size={32} /></div>
             <h3>No programs found</h3>
             <p>
               {searchQuery
@@ -238,10 +231,10 @@ const ProgramManagement = () => {
                       <td>
                         <div className="cm-action-group">
                           <button className="cm-action-btn edit" onClick={() => handleEdit(program)}>
-                            <Edit3 size={14} /> Edit
+                            Edit
                           </button>
                           <button className="cm-action-btn delete" onClick={() => handleDeleteClick(program.id, program.program_name)}>
-                            <Trash2 size={14} /> Delete
+                            Delete
                           </button>
                         </div>
                       </td>
@@ -337,7 +330,6 @@ const ProgramManagement = () => {
             <div className="cm-custom-modal-body">
               <p className="cm-delete-text">Are you sure you want to permanently delete <strong>"{deleteTargetName}"</strong>?</p>
               <div className="cm-alert-box danger">
-                <AlertCircle size={18} />
                 <span>Warning: You cannot delete a program if it still has courses assigned to it.</span>
               </div>
             </div>

@@ -28,7 +28,7 @@ export const ROUTE_ROLES = {
   settings:                ['admin', 'hr_admin'],
 
   'audit-logs':            ['admin'],
-  'role-management':       ['admin'],
+  'role-management':       ['admin', 'hr_admin'],
   'system-config':         ['admin'],
   'landing-cms':           ['admin'],
   'manage-request':        ['admin'],
@@ -49,6 +49,7 @@ export const ROUTE_ROLES = {
   'payroll-summary':       ['hr_admin'],
 
   'employee-management':   ['admin', 'hr_admin'],
+  'account-management':    ['admin', 'hr_admin'],
   attendance:              ['admin', 'hr_admin'],
   'attendance-correction': ['admin', 'hr_admin'],
   'attendance-appeals':    ['admin', 'hr_admin'],
@@ -58,7 +59,7 @@ export const ROUTE_ROLES = {
   schedule:                ['admin', 'hr_admin'],
   'shared-calendar':       ['admin', 'hr_admin'],
   'location-tracking':     ['admin', 'hr_admin'],
-  reports:                 ['admin', 'hr_admin'],
+  reports:                 ['admin', 'hr_admin', 'security'],
   'compliance-reports':    ['admin', 'hr_admin'],
   locations:               ['admin', 'hr_admin'],
   programs:                ['admin', 'hr_admin'],
@@ -87,11 +88,16 @@ export const ACTION_ROLES = {
 
   'attendance:update':        ['hr_admin'],
 
-  'employees:create':         ['admin', 'hr_admin'],
-  'employees:edit':           ['hr_admin'],
-  'employees:deactivate':     ['hr_admin'],
-  'employees:archive':        ['hr_admin'],
-  'employees:delete':         ['admin'],
+  // HR owns employee information. Admin owns account access and role changes.
+  'employees:view':          ['admin', 'hr_admin'],
+  'employees:create':        ['hr_admin'],
+  'employees:edit':          ['hr_admin'],
+  'employees:change-status': ['hr_admin'],
+
+  'accounts:view':           ['admin', 'hr_admin'],
+  'accounts:provision':      ['admin'],
+  'accounts:activate':       ['admin'],
+  'accounts:deactivate':     ['admin'],
 
   'programs:write':           ['hr_admin'],
   'courses:write':            ['hr_admin'],
@@ -110,12 +116,21 @@ export const ACTION_ROLES = {
 
   'roles:assign':             ['admin'],
   'accounts:reset-password':  ['admin'],
-  'accounts:delete':          ['admin'],
 
   'system:config':            ['admin'],
   'system:landing-cms':       ['admin'],
   'system:audit-log':         ['admin'],
   'system:visit-reasons':     ['admin'],
+
+  // Reports: category-specific rights (enforced in UI and by API RBAC).
+  'reports:attendance:view': ['admin', 'hr_admin'],
+  'reports:requests:view':   ['admin', 'hr_admin'],
+  'reports:schedule:view':   ['admin', 'hr_admin'],
+  'reports:payroll:view':    ['hr_admin'],
+  'reports:visitor:view':    ['admin', 'security'],
+  'reports:workforce:export': ['hr_admin'],
+  'reports:visitor:export': ['security'],
+  'reports:formal:generate': ['hr_admin'],
 
   'alerts:broadcast':         ['admin', 'hr_admin'],
 

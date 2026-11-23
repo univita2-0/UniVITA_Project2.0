@@ -1,0 +1,92 @@
+/* src/pages/ReportsWorkspace.css */
+/* Scoped report workspace navigation; print templates remain untouched. */
+.rw-page {
+  width: 100%;
+  min-width: 0;
+  padding: 1px 5px 5px;
+  color: #0F172A;
+  font-family: Inter, system-ui, sans-serif;
+  box-sizing: border-box;
+}
+
+.rw-page * {
+  box-sizing: border-box;
+}
+
+
+
+.rw-tabs {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid #E2E8F0;
+  margin-bottom: 10px;
+}
+
+.rw-tab {
+  appearance: none;
+  position: relative;
+  min-height: 38px;
+  padding: 8px 3px 11px;
+  border: 0;
+  background: transparent;
+  color: #64748B;
+  font: 600 12px/1.4 Inter, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.rw-tab:hover {
+  color: #0F172A;
+}
+
+.rw-tab.active {
+  color: #0B3B40;
+}
+
+.rw-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #0D9488;
+}
+
+.rw-tab:focus-visible {
+  outline: 2px solid #0D9488;
+  outline-offset: 2px;
+}
+
+.rw-content {
+  min-width: 0;
+}
+
+/* Avoid doubling the standard page padding within the parent workspace. */
+.rw-content > .formal-rep-container,
+.rw-content > .formal-cr-container {
+  padding: 0;
+}
+
+@media (max-width: 580px) {
+  .rw-tabs {
+    gap: 14px;
+    overflow-x: auto;
+  }
+
+  .rw-tab {
+    white-space: nowrap;
+  }
+}
+
+@media print {
+  .rw-header,
+  .rw-tabs {
+    display: none !important;
+  }
+
+  .rw-page,
+  .rw-content {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+}

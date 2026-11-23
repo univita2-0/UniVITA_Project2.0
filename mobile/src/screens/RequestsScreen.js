@@ -547,20 +547,18 @@ export default function RequestsScreen({ navigation, route }) {
       });
     }
 
-    // 🚨 FIX: Smart balance check (Allows 1.5 days to cover a 2-day range)
-    let totalCost = dates.length;
+    // Do not change requested leave durations without explicit employee selection.
+    // Step 2 allows the instructor to choose half-day durations when needed.
+    const totalCost = dates.length;
     if (totalCost > currentSelectedBalance) {
-      if ((totalCost - 0.5) <= currentSelectedBalance) {
-        // They are short exactly 0.5 days, so auto-convert the last day to Half Day
-        dates[dates.length - 1].duration = '1st Half';
-        totalCost -= 0.5;
-      } else {
-        Alert.alert(
-          'Insufficient Balance',
-          `You are requesting ${dates.length} day(s), but only have ${currentSelectedBalance.toFixed(2)} day(s) remaining for "${leaveType}".`
-        );
-        return;
-      }
+      Alert.alert(
+        'Review Leave Duration',
+        `The selected dates total ${totalCost} day(s), but your remaining balance is ${currentSelectedBalance.toFixed(2)} day(s). You may select a half-day duration on the next screen.`,
+        [{ text: 'Continue to Duration Selection', onPress: () => setLeaveBreakdown(dates) }]
+      );
+      setLeaveBreakdown(dates);
+      setLeaveStep(2);
+      return;
     }
 
     // Recalculate the "isPaid" flag based on the corrected durations

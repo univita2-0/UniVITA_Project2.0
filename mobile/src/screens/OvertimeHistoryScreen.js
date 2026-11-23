@@ -122,8 +122,8 @@ export default function OvertimeHistoryScreen({ navigation }) {
   };
 
   const handleCancelRequest = async () => {
-    if (!cancelReason.trim()) {
-      Alert.alert("Reason Required", "Please enter a reason for cancellation.");
+    if (cancelReason.trim().length > 500) {
+      Alert.alert('Invalid Reason', 'Cancellation reason must not exceed 500 characters.');
       return;
     }
     setCancelling(true);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Cpu, Search, X, ChevronLeft, ChevronRight, ShieldAlert, Edit2 } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_BASE } from '../api';
 import { getUserRole } from '../permissions';
 import FormalModal from '../components/FormalModal';
@@ -143,20 +143,16 @@ const ManageScanners = () => {
           </div>
         </div>
         <div className="uv-hardware-header-actions">
-          <button className="expert-btn-secondary" type="button" onClick={fetchScanners} disabled={initialLoad || loading}>Refresh</button>
         {canWrite && (
           <button className="expert-btn-primary" onClick={() => { setEditScannerId(null); handleFloorChange('5'); setShowAddModal(true); }}>
-            <Plus size={16} /> Assign Scanner
+            Assign Scanner
           </button>
         )}
         </div>
       </div>
 
       {!canWrite && (
-        <div className="expert-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Scanner configurations are managed by Security and Admin.</span>
-        </div>
+        <p className="expert-readonly-banner" role="note">View-only access</p>
       )}
 
       <section className="uv-hardware-metrics" aria-label="Scanner inventory summary">
@@ -179,7 +175,7 @@ const ManageScanners = () => {
             {searchQuery && <button type="button" className="uv-search-clear" aria-label="Clear search" onClick={() => setSearchQuery('')}><X size={16} /></button>}
           </div>
           <div className="expert-stats-badge">
-            Registered Scanners: <strong>{scanners.length}</strong>
+            Showing <strong>{filteredScanners.length}</strong> of {scanners.length}
           </div>
         </div>
       </div>
@@ -225,11 +221,9 @@ const ManageScanners = () => {
                                 setShowAddModal(true);
                               }}
                             >
-                              <Edit2 size={18} />
-                            </button>
+                              Edit</button>
                             <button className="expert-btn-icon danger" onClick={() => triggerDelete(scanner)} title="Remove Scanner">
-                              <Trash2 size={18} color="#EF4444" />
-                            </button>
+                              Delete</button>
                           </div>
                         </td>
                       )}
@@ -340,7 +334,6 @@ const ManageScanners = () => {
             }
           >
             <div className="expert-confirm-body">
-              <ShieldAlert size={48} color="#DC2626" />
               <p className="expert-confirm-title">
                 Are you sure you want to delete scanner <strong>{scannerToDelete?.scanner_id}</strong>?
               </p>

@@ -42,7 +42,6 @@ const AppealHistoryScreen = React.lazy(() => import('./src/screens/AppealHistory
 const OvertimeHistoryScreen = React.lazy(() => import('./src/screens/OvertimeHistoryScreen'));
 const CorrectionHistoryScreen = React.lazy(() => import('./src/screens/CorrectionHistoryScreen'));
 const ChatScreen = React.lazy(() => import('./src/screens/ChatScreen'));
-const AlertsScreen = React.lazy(() => import('./src/screens/AlertsScreen'));
 const RequestsScreen = React.lazy(() => import('./src/screens/RequestsScreen'));
 const MyPayrollScreen = React.lazy(() => import('./src/screens/MyPayrollScreen'));
 const LeaveHistoryScreen = React.lazy(() => import('./src/screens/LeaveHistoryScreen'));
@@ -115,7 +114,6 @@ function ProfileStack() {
       }}
     >
       <Stack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Alerts" component={AlertsScreen} options={{ title: 'Emergency Alerts' }} />
       <Stack.Screen name="HelpAndTerms" component={HelpAndTermsScreen} options={{ title: 'Help & Terms' }} />
     </Stack.Navigator>
   );

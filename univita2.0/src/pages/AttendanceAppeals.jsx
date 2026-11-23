@@ -8,6 +8,34 @@ import { API_BASE, getWebApiErrorMessage } from '../api';
 import { useRole } from '../permissions';
 import './AttendanceAppeals.css';
 
+
+// Presentation only: use consistent labels and semantic status colors.
+const getDisplayStatus = (status) => {
+  const normalized = String(status || '').trim().toLowerCase();
+
+  const labels = {
+    pending: 'Pending',
+    approved: 'Approved',
+    rejected: 'Rejected',
+    cancelled: 'Cancelled'
+  };
+
+  return labels[normalized] || (status ? String(status) : '—');
+};
+
+const getDisplayStatusTone = (status) => {
+  switch (String(status || '').trim().toLowerCase()) {
+    case 'approved':
+      return 'success';
+    case 'rejected':
+      return 'danger';
+    case 'pending':
+      return 'warning';
+    default:
+      return 'default';
+  }
+};
+
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
@@ -47,7 +75,7 @@ const STATUS_TABS = [
 ];
 
 const AttendanceAppeals = () => {
-  const { can, isAdmin } = useRole();
+  const { can } = useRole();
   const canReviewAppeals = can('appeals:review');
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,9 +124,6 @@ const AttendanceAppeals = () => {
     fetchPendingAppeals();
   }, []);
 
-  useEffect(() => {
-    if (showPendingModal) fetchPendingAppeals();
-  }, [showPendingModal]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -183,10 +208,8 @@ const AttendanceAppeals = () => {
       toast.error('You do not have permission to review attendance appeals.');
       return;
     }
-    const label = action === 'approved' ? 'approve' : 'reject';
-    if (window.confirm(`Are you sure you want to ${label} this appeal for ${appeal.full_name} (${appeal.employee_id})?`)) {
-      openRemarkModal(appeal, action);
-    }
+    // The review modal provides the single, explicit final confirmation.
+    openRemarkModal(appeal, action);
   };
 
   const updateAppealStatus = async () => {
@@ -198,8 +221,8 @@ const AttendanceAppeals = () => {
     }
     if (!selectedAppeal) return;
 
-    if (adminRemarks && adminRemarks.length > 1000) {
-      toast.error('Remarks are too long (max 1000 characters).');
+    if (adminRemarks.trim().length > 500) {
+      toast.error('Remarks are too long (max 500 characters).');
       return;
     }
 
@@ -257,42 +280,23 @@ const AttendanceAppeals = () => {
 
   return (
     <div className="aa-container">
-      {/* FIX 10.4 — read-only banner for Admin */}
-      {isAdmin && (
-        <div style={{
-          padding: '12px 16px',
-          marginBottom: '20px',
-          background: '#F0FDFA',
-          border: '1px solid #99F6E4',
-          borderRadius: '5px',
-          color: '#0F766E',
-          fontSize: '12px',
-          fontWeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
-          <span><strong>Read-only view.</strong> Attendance appeal reviews are handled by HR.</span>
-        </div>
-      )}
-
+      
       <header className="aa-header">
         <div className="aa-title-group">
           
           <p className="aa-subtitle">Review employee disputes, supporting evidence, and finalized decisions.</p>
         </div>
-        <button type="button" className="aa-btn-secondary aa-review-cta" onClick={() => setShowPendingModal(true)}>
+        <button type="button" className="aa-btn-secondary aa-review-cta" onClick={() => { setShowPendingModal(true); fetchPendingAppeals(); }}>
           Pending requests
           {pendingCount > 0 && <span className="aa-badge-count">{pendingCount}</span>}
         </button>
       </header>
 
       <section className="aa-summary" aria-label="Appeals overview">
-        <div className="aa-summary-item"><span>Total resolved</span><strong>{historyAppeals.length}</strong><small>Historical records</small></div>
-        <div className="aa-summary-item"><span>Pending review</span><strong>{pendingCount}</strong><small>Awaiting HR decision</small></div>
-        <div className="aa-summary-item"><span>Approved</span><strong>{historyAppeals.filter(a => a.status?.toLowerCase() === 'approved').length}</strong><small>Resolved appeals</small></div>
-        <div className="aa-summary-item"><span>Rejected</span><strong>{historyAppeals.filter(a => a.status?.toLowerCase() === 'rejected').length}</strong><small>Resolved appeals</small></div>
+        <div className="aa-summary-item"><span>Total resolved</span><strong>{historyAppeals.length}</strong></div>
+        <div className="aa-summary-item"><span>Pending review</span><strong>{pendingCount}</strong></div>
+        <div className="aa-summary-item"><span>Approved</span><strong>{historyAppeals.filter(a => a.status?.toLowerCase() === 'approved').length}</strong></div>
+        <div className="aa-summary-item"><span>Rejected</span><strong>{historyAppeals.filter(a => a.status?.toLowerCase() === 'rejected').length}</strong></div>
       </section>
       <div className="aa-section-intro"><div><p>Filter and inspect submitted attendance appeals.</p></div><span>{filteredHistory.length} records</span></div>
 
@@ -358,13 +362,13 @@ const AttendanceAppeals = () => {
                       <td className="font-semibold text-dark whitespace-nowrap">{appeal.full_name}</td>
                       <td className="font-medium text-dark whitespace-nowrap">{formatDate(appeal.date)}</td>
                       <td className="text-center whitespace-nowrap">
-                        <span className={`aa-chip ${appeal.status?.toLowerCase() === 'approved' ? 'success' : appeal.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
-                          {appeal.status?.toUpperCase()}
+                        <span className={`aa-chip ${getDisplayStatusTone(appeal.status)}`}>
+                          {getDisplayStatus(appeal.status)}
                         </span>
                       </td>
                       <td className="text-center whitespace-nowrap">
                         <button className="aa-action-inspect-btn" onClick={() => setViewingAppeal(appeal)} title="View Details">
-                          <Eye size={16} color="#475569" />
+                          View
                         </button>
                       </td>
                     </tr>
@@ -409,8 +413,8 @@ const AttendanceAppeals = () => {
                       <span className="aa-user-id">{viewingAppeal.employee_id}</span>
                     </div>
                   </div>
-                  <span className={`aa-chip ${viewingAppeal.status?.toLowerCase() === 'approved' ? 'success' : viewingAppeal.status?.toLowerCase() === 'cancelled' ? 'default' : 'danger'}`}>
-                    {viewingAppeal.status?.toUpperCase()}
+                  <span className={`aa-chip ${getDisplayStatusTone(viewingAppeal.status)}`}>
+                    {getDisplayStatus(viewingAppeal.status)}
                   </span>
                 </div>
 
@@ -444,7 +448,7 @@ const AttendanceAppeals = () => {
                       <label>Supporting Evidence</label>
                       <div>
                         <a href={`${API_BASE.replace(/\/api$/, '')}${viewingAppeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-proof-action-btn">
-                          <ExternalLink size={14} /> View Supporting Image
+                          View Supporting Image
                         </a>
                       </div>
                     </div>
@@ -540,7 +544,7 @@ const AttendanceAppeals = () => {
                         {appeal.image_url && (
                           <div className="aa-minimal-field full-width">
                             <a href={`${API_BASE.replace(/\/api$/, '')}${appeal.image_url}`} target="_blank" rel="noopener noreferrer" className="aa-minimal-link">
-                              <ExternalLink size={14} /> View Supporting Image
+                              View Supporting Image
                             </a>
                           </div>
                         )}
@@ -591,10 +595,10 @@ const AttendanceAppeals = () => {
         </>
       }>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Admin Remarks (Optional, max 1000 chars)</label>
+          <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Review Remarks (Optional, max 500 characters)</label>
           <textarea
             rows="4"
-            maxLength={1000}
+            maxLength={500}
             placeholder="Enter justification or remarks..."
             value={adminRemarks}
             onChange={(e) => setAdminRemarks(e.target.value)}

@@ -1,0 +1,647 @@
+
+.ac4-page {
+  width: 100%;
+  padding: 0.5px 5px 5px;
+  background: transparent;
+  color: #0f172a;
+  font: 13px/1.5 Inter, system-ui, sans-serif;
+}
+
+.ac4-page *,
+.ac4-page *::before,
+.ac4-page *::after {
+  box-sizing: border-box;
+}
+
+
+
+
+
+
+.ac4-notice {
+  margin: 0 0 12px 2px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 2. Reusable buttons */
+.ac4-button,
+.ac4-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 35px;
+  padding: 7px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  color: #334155;
+  font: 600 12px/1.4 Inter, system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ac4-button:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.ac4-primary {
+  border-color: #0d9488;
+  background: #0d9488;
+  color: #fff;
+}
+
+.ac4-primary:hover:not(:disabled) {
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
+.ac4-page button:disabled,
+.ac4-action-menu button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 3. Summary cards */
+.ac4-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ac4-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ac4-stats strong {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac4-stats span {
+  color: #64748b;
+  font-size: 11.5px;
+}
+
+/* 4. Directory panel, category tabs, and filters */
+.ac4-panel {
+  overflow: hidden;
+  border: 1px solid #dfe7ec;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.ac4-directory-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 8px;
+}
+
+.ac4-directory-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ac4-directory-heading > span {
+  color: #64748b;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.ac4-directory-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  padding: 0 18px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.ac4-directory-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 43px;
+  padding: 9px 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #64748b;
+  font: 600 12px/1.3 Inter, system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ac4-directory-tab:hover {
+  color: #0f766e;
+}
+
+.ac4-directory-tab.active {
+  border-bottom-color: #0d9488;
+  color: #0f766e;
+}
+
+.ac4-tab-count {
+  color: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.ac4-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.ac4-search {
+  display: flex;
+  align-items: center;
+  flex: 1 1 340px;
+  min-width: 0;
+  gap: 10px;
+  height: 37px;
+  padding: 0 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  color: #94a3b8;
+  background: #fff;
+}
+
+.ac4-search input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  color: #0f172a;
+  background: transparent;
+  font: inherit;
+}
+
+.ac4-search input::placeholder {
+  color: #94a3b8;
+}
+
+.ac4-toolbar select {
+  flex: 0 1 238px;
+  min-width: 180px;
+  height: 37px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+}
+
+/* 5. Account table */
+.ac4-table-wrap {
+  overflow-x: auto;
+}
+
+.ac4-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  table-layout: auto;
+  text-align: left;
+}
+
+.ac4-table th {
+  padding: 11px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f6f8fa;
+  color: #526377;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ac4-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #edf1f5;
+  color: #334155;
+  font-size: 12.5px;
+  vertical-align: middle;
+}
+
+.ac4-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ac4-table tbody tr:hover td {
+  background: #f8fbfa;
+}
+
+.ac4-table td strong,
+.ac4-table td small {
+  display: block;
+}
+
+.ac4-employee-cell {
+  min-width: 190px;
+}
+
+.ac4-employee-cell strong {
+  color: #0f172a;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.ac4-employee-cell small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.ac4-code {
+  color: #52677d !important;
+  font: 600 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace !important;
+  white-space: nowrap;
+}
+
+.ac4-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.ac4-pill.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ac4-pill.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ac4-pill.muted {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.ac4-empty {
+  padding: 35px 16px !important;
+  color: #64748b !important;
+  text-align: center;
+}
+
+/* 6. Minimalist actions menu (portal mounted at document.body) */
+.ac4-actions-heading,
+.ac4-action-cell {
+  width: 82px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ac4-action-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #d9e2e9;
+  border-radius: 5px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ac4-action-trigger:hover,
+.ac4-action-trigger[aria-expanded='true'] {
+  border-color: #99c9c2;
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.ac4-action-menu {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 196px;
+  padding: 5px;
+  border: 1px solid #dbe3ea;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+}
+
+.ac4-action-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #334155;
+  font: 500 12px/1.3 Inter, system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ac4-action-menu button:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.ac4-action-menu .ac4-action-danger {
+  color: #b91c1c;
+}
+
+.ac4-action-menu .ac4-action-danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+/* 7. Pagination */
+.ac4-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 11.5px;
+}
+
+.ac4-pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ac4-pagination button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 29px;
+  padding: 0;
+  border: 1px solid #dbe3ea;
+  border-radius: 5px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ac4-pagination button:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+/* 8. Details and credential dialogs */
+.ac4-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.ac4-dialog {
+  width: min(540px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
+}
+
+.ac4-dialog header,
+.ac4-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.ac4-dialog header h2 {
+  margin: 0 0 3px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.ac4-dialog header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ac4-dialog header button {
+  display: inline-flex;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.ac4-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+}
+
+.ac4-detail {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.ac4-detail span {
+  color: #64748b;
+}
+
+.ac4-detail strong {
+  max-width: 60%;
+  color: #0f172a;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ac4-hint {
+  margin: 5px 0;
+  padding: 10px 11px;
+  border-radius: 5px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+}
+
+.ac4-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ac4-field > input,
+.ac4-password {
+  min-height: 39px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+}
+
+.ac4-field > input {
+  padding: 9px 11px;
+  font: inherit;
+}
+
+.ac4-password {
+  display: flex;
+  align-items: center;
+}
+
+.ac4-password input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 0;
+  outline: 0;
+  font: inherit;
+}
+
+.ac4-password button {
+  display: inline-flex;
+  padding: 9px;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.ac4-dialog-body > small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.ac4-dialog footer {
+  justify-content: flex-end;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 0;
+}
+
+/* 9. Focus and responsive layouts */
+.ac4-page button:focus-visible,
+.ac4-page input:focus-visible,
+.ac4-page select:focus-visible,
+.ac4-action-menu button:focus-visible {
+  outline: 2px solid #0d9488;
+  outline-offset: 2px;
+}
+
+@media (max-width: 850px) {
+  .ac4-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ac4-header {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .ac4-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ac4-header > button {
+    align-self: flex-start;
+  }
+
+  .ac4-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .ac4-search {
+    flex: none;
+  }
+
+  .ac4-toolbar select {
+    flex: none;
+    width: 100%;
+  }
+
+  .ac4-directory-heading {
+    padding-inline: 12px;
+  }
+
+  .ac4-directory-tabs {
+    gap: 15px;
+    padding-inline: 12px;
+    overflow-x: auto;
+  }
+
+  .ac4-pagination {
+    padding-inline: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ac4-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .ac4-stats > div {
+    padding: 12px;
+  }
+
+  .ac4-detail {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .ac4-detail strong {
+    max-width: 100%;
+    text-align: left;
+  }
+}

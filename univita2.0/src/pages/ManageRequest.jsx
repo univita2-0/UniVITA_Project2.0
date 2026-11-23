@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Search, CheckCircle, XCircle, Eye, Calendar, Clock, User, Mail, Phone, Users, X, ClipboardList, ChevronLeft, ChevronRight, Edit3, ShieldAlert, RefreshCw } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
 import { API_BASE } from '../api';
 import { getUserRole } from '../permissions';
@@ -27,6 +27,20 @@ const formatTime = (timeStr) => {
   hours = hours % 12;
   hours = hours ? hours : 12;
   return `${hours}:${minutes} ${ampm}`;
+};
+
+
+// Display-only status presentation: API status values remain unchanged.
+const getDisplayStatus = (value) => {
+  const normalized = String(value || 'pending').trim().toLowerCase();
+  return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1).replace(/_/g, ' ') : 'Pending';
+};
+
+const getStatusTone = (value) => {
+  const status = String(value || 'pending').trim().toLowerCase();
+  if (['approved', 'completed'].includes(status)) return 'success';
+  if (['rejected', 'cancelled'].includes(status)) return 'danger';
+  return 'pending';
 };
 
 const ManageRequest = () => {
@@ -247,7 +261,6 @@ const ManageRequest = () => {
   const approvedCount = historyData.filter(item => ['approved', 'completed'].includes(item.status?.toLowerCase())).length;
   const rejectedCount = historyData.filter(item => ['rejected', 'cancelled'].includes(item.status?.toLowerCase())).length;
   const totalRequests = historyData.length + pendingData.length;
-  const refreshRequests = () => { fetchHistory(); fetchPending(); };
 
   const filteredHistory = historyData.filter(item => {
     const searchString = `${item.first_name} ${item.last_name} ${item.email} ${item.reason}`.toLowerCase();
@@ -277,29 +290,23 @@ const ManageRequest = () => {
           <p className="vm-subtitle">Manage appointment submissions, monitor decisions, and maintain accurate visitor schedules.</p>
         </div>
         <div className="vm-header-actions">
-          <button type="button" className="vm-btn-secondary" onClick={refreshRequests} disabled={loadingHistory || loadingPending}>
-            <RefreshCw size={15} /> Refresh
-          </button>
           <button type="button" className="vm-btn-primary" onClick={() => setShowPendingModal(true)}>
-            <ClipboardList size={16} /> Review Pending <span className="vm-header-count">{pendingData.length}</span>
+            Pending Requests <span className="vm-header-count">{pendingData.length}</span>
           </button>
         </div>
       </header>
 
       <section className="vm-metric-grid" aria-label="Visitor request summary">
-        <div className="vm-metric"><div className="vm-metric-top"><span>Total Requests</span><ClipboardList size={16} /></div><strong>{totalRequests}</strong><small>Pending and processed</small></div>
-        <div className="vm-metric"><div className="vm-metric-top"><span>Pending Review</span><Clock size={16} /></div><strong>{pendingData.length}</strong><small>Awaiting decision</small></div>
-        <div className="vm-metric"><div className="vm-metric-top"><span>Approved</span><CheckCircle size={16} /></div><strong>{approvedCount}</strong><small>Accepted appointments</small></div>
-        <div className="vm-metric"><div className="vm-metric-top"><span>Rejected</span><XCircle size={16} /></div><strong>{rejectedCount}</strong><small>Declined or cancelled</small></div>
+        <div className="vm-metric"><div className="vm-metric-top"><span>Total Requests</span></div><strong>{totalRequests}</strong><small>Pending and processed</small></div>
+        <div className="vm-metric"><div className="vm-metric-top"><span>Pending Review</span></div><strong>{pendingData.length}</strong><small>Awaiting decision</small></div>
+        <div className="vm-metric"><div className="vm-metric-top"><span>Approved</span></div><strong>{approvedCount}</strong><small>Accepted appointments</small></div>
+        <div className="vm-metric"><div className="vm-metric-top"><span>Rejected</span></div><strong>{rejectedCount}</strong><small>Declined or cancelled</small></div>
       </section>
 
       <div className="vm-section-heading"><div><p>Search, filter, and review processed visitor appointments.</p></div><span className="vm-record-counter">{filteredHistory.length} records</span></div>
 
       {!canWrite && (
-        <div className="vm-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Visitor management is handled by Security and Admin.</span>
-        </div>
+        <p className="vm-readonly-banner" role="note">View-only access</p>
       )}
 
       <div className="vm-search-card">
@@ -359,19 +366,19 @@ const ManageRequest = () => {
                         <div className="text-xs text-muted">{formatTime(item.visit_time)}</div>
                       </td>
                       <td className="text-center">
-                        <span className={`vm-chip ${['approved', 'completed'].includes(item.status?.toLowerCase()) ? 'success' : ['rejected', 'cancelled'].includes(item.status?.toLowerCase()) ? 'danger' : 'pending'}`}>
-                          {item.status}
+                        <span className={`vm-chip ${getStatusTone(item.status)}`}>
+                          {getDisplayStatus(item.status)}
                         </span>
                       </td>
                       {canWrite && (
                         <td>
                           <div className="vm-action-group right">
-                            <button className="vm-btn-icon" onClick={() => openHistoryDetails(item)} title="View Final Details">
-                              <Eye size={16} color="#475569" />
+                            <button className="vm-btn-icon" onClick={() => openHistoryDetails(item)} title="View Details">
+                              View
                             </button>
                             {isAdmin && ['PENDING', 'APPROVED', 'RESCHEDULED'].includes(item.status) && !item.arrived && !item.returned && !item.no_show && (
                               <button className="vm-btn-icon" onClick={() => openEditScheduleModal(item)} title="Edit Schedule">
-                                <Edit3 size={16} color="#0D9488" />
+                                Edit
                               </button>
                             )}
                           </div>
@@ -436,9 +443,6 @@ const ManageRequest = () => {
                     <div key={req.id} className="vm-minimal-card">
                       <div className="vm-minimal-header">
                         <div className="vm-minimal-user">
-                          <div className="vm-minimal-avatar">
-                            {req.first_name ? req.first_name.charAt(0).toUpperCase() : 'V'}
-                          </div>
                           <div className="vm-minimal-user-info">
                             <span className="vm-minimal-name">{req.first_name} {req.last_name}</span>
                             <span className="vm-minimal-id">{req.email}</span>
@@ -472,7 +476,7 @@ const ManageRequest = () => {
                             <button className="vm-btn-min-approve" onClick={() => handleApprove(req)}>Approve</button>
                           </>
                         )}
-                        <button className="vm-btn-secondary" onClick={() => openPendingDetails(req)}>View Details</button>
+                        <button className="vm-btn-secondary" onClick={() => openPendingDetails(req)}>View</button>
                       </div>
                     </div>
                   ))}
@@ -494,7 +498,7 @@ const ManageRequest = () => {
             )}
 
             <div className="vm-custom-modal-footer">
-              <button className="vm-btn-secondary" onClick={() => setShowPendingModal(false)}>Close Window</button>
+              <button className="vm-btn-secondary" onClick={() => setShowPendingModal(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -534,8 +538,8 @@ const ManageRequest = () => {
             <div className="cf-row">
               <div className="cf-label">Status</div>
               <div className="cf-value">
-                <span className={`vm-chip ${['approved', 'completed'].includes((selectedRequest.status || '').toLowerCase()) ? 'success' : 'danger'}`}>
-                  {selectedRequest.status}
+                <span className={`vm-chip ${getStatusTone(selectedRequest.status)}`}>
+                  {getDisplayStatus(selectedRequest.status)}
                 </span>
               </div>
             </div>
@@ -572,7 +576,7 @@ const ManageRequest = () => {
         show={showHistoryDetailsModal}
         onClose={() => setShowHistoryDetailsModal(false)}
         title="Appointment Final Details"
-        footer={<button className="vm-btn-secondary" onClick={() => setShowHistoryDetailsModal(false)}>Close Window</button>}
+        footer={<button className="vm-btn-secondary" onClick={() => setShowHistoryDetailsModal(false)}>Close</button>}
       >
         {selectedRequest && (
           <div className="candidate-formal-layout">
@@ -591,8 +595,8 @@ const ManageRequest = () => {
             <div className="cf-row">
               <div className="cf-label">Status</div>
               <div className="cf-value">
-                <span className={`vm-chip ${['approved', 'completed'].includes((selectedRequest.status || '').toLowerCase()) ? 'success' : 'danger'}`}>
-                  {selectedRequest.status}
+                <span className={`vm-chip ${getStatusTone(selectedRequest.status)}`}>
+                  {getDisplayStatus(selectedRequest.status)}
                 </span>
               </div>
             </div>
@@ -654,7 +658,6 @@ const ManageRequest = () => {
 
             {isPastAppointment ? (
               <div className="vm-alert-box">
-                <Clock size={16} />
                 <span>This appointment is in the past and its schedule cannot be modified.</span>
               </div>
             ) : (
@@ -663,7 +666,7 @@ const ManageRequest = () => {
                   <label>New Schedule Details</label>
                   <div className="vm-form-row">
                     <div className="vm-form-group">
-                      <span className="vm-form-label"><Calendar size={14} /> Date</span>
+                      <span className="vm-form-label">Date</span>
                       <input
                         type="date"
                         className="vm-clean-input border"
@@ -673,7 +676,7 @@ const ManageRequest = () => {
                       />
                     </div>
                     <div className="vm-form-group">
-                      <span className="vm-form-label"><Clock size={14} /> Time</span>
+                      <span className="vm-form-label">Time</span>
                       <input
                         type="time"
                         className="vm-clean-input border"

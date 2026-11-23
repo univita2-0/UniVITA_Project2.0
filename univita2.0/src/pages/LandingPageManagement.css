@@ -466,3 +466,13 @@
 .lpm-container .lpm-btn-primary {background:#0B3B40;border-radius:4px;}
 .lpm-container .lpm-btn-primary:hover:not(:disabled) {background:#0F5257;}
 @media(max-width:700px){.lpm-container{padding:5px 10px 10px;}.lpm-overview{grid-template-columns:1fr;}.lpm-header{align-items:stretch;}.lpm-card{padding:13px;}}
+
+/* CMS publishing clarity, official source information, editable facilities */
+.lpm-container .lpm-publish-hint,.lpm-container .lpm-official-contact-action {display:flex;justify-content:space-between;align-items:center;gap:15px;background:#F0FDFA;color:#0F766E;border:1px solid #CCEDE7;border-radius:7px;padding:11px 14px;margin:0 0 13px;font-size:12px;line-height:1.65;}
+.lpm-container .lpm-official-contact-action {background:#F8FAFC;color:#475569;border-color:#E2E8F0;margin-bottom:20px;}
+.lpm-container .lpm-publish-hint .lpm-btn-secondary,.lpm-container .lpm-official-contact-action .lpm-btn-secondary {flex-shrink:0;}
+.lpm-container .lpm-section-help {font-size:12px;color:#64748B;margin:0 0 18px;}
+.lpm-container .lpm-facility-actions {display:flex;align-items:center;gap:10px;}
+.lpm-container .lpm-facility-fields {margin:14px 0 18px;}
+.lpm-container .lpm-photo-box.lpm-image-failed:after {content:'Image unavailable — check upload path';position:absolute;inset:0;background:#F1F5F9;color:#64748B;font-size:12px;display:grid;place-items:center;text-align:center;padding:10px;pointer-events:none;}
+@media(max-width:700px){.lpm-container .lpm-publish-hint,.lpm-container .lpm-official-contact-action {flex-direction:column;align-items:stretch;}}

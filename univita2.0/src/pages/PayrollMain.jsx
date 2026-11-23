@@ -2,9 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import './PayrollMain.css';
 import {
-  ChevronLeft, ChevronRight, Search, CalendarDays,
-  Download, Eye, DollarSign, Users, TrendingUp, Wallet, CheckCircle,
-  ShieldCheck, X, Lock, FileText
+  ChevronLeft, ChevronRight, Search, X
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -526,78 +524,106 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
   return (
     <div className="pm-container">
       <header className="pm-page-heading">
-        <div><p>Prepare, review and finalize instructor payroll for each period.</p></div>
-        <div className="pm-heading-status"><ShieldCheck size={16} /> Restricted financial workspace</div>
+        <div>
+         
+          <p>Review instructor payroll, finalize calculated records, and confirm disbursements.</p>
+        </div>
+        <span className="pm-access-note">Authorized HR access</span>
       </header>
       <div className="pm-top-bar">
-        <div className="pm-date-navigator">
-          <button className="pm-nav-arrow" aria-label="Previous payroll month" onClick={() => {
-            setRosterPage(1); if (selectedMonth === 1) { setSelectedMonth(12); setSelectedYear(selectedYear - 1); }
-            else { setSelectedMonth(selectedMonth - 1); }
-          }}><ChevronLeft size={18}/></button>
-          <div className="pm-current-date"><CalendarDays size={16} /><span>{monthName} {selectedYear}</span></div>
-          <button className="pm-nav-arrow" aria-label="Next payroll month" disabled={isFutureMonth || (selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1)} onClick={() => {
-            setRosterPage(1); if (selectedMonth === 12) { setSelectedMonth(1); setSelectedYear(selectedYear + 1); }
-            else { setSelectedMonth(selectedMonth + 1); }
-          }}><ChevronRight size={18}/></button>
+        <div className="pm-period-group">
+          <span className="pm-period-label">Payroll period</span>
+          <div className="pm-date-navigator">
+            <button className="pm-nav-arrow" aria-label="Previous payroll month" onClick={() => {
+              setRosterPage(1);
+              if (selectedMonth === 1) {
+                setSelectedMonth(12);
+                setSelectedYear(selectedYear - 1);
+              } else {
+                setSelectedMonth(selectedMonth - 1);
+              }
+            }}><ChevronLeft size={18}/></button>
+            <div className="pm-current-date"><span>{monthName} {selectedYear}</span></div>
+            <button className="pm-nav-arrow" aria-label="Next payroll month" disabled={isFutureMonth || (selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1)} onClick={() => {
+              setRosterPage(1);
+              if (selectedMonth === 12) {
+                setSelectedMonth(1);
+                setSelectedYear(selectedYear + 1);
+              } else {
+                setSelectedMonth(selectedMonth + 1);
+              }
+            }}><ChevronRight size={18}/></button>
+          </div>
         </div>
-        <button className="pm-btn-lock" onClick={handleLockModule} title="Lock Payroll Module"><Lock size={15} /> Lock Access</button>
+        <div className="pm-period-actions">
+          <span className="pm-period-helper">Select a month to review payroll records.</span>
+          <button type="button" className="pm-btn-lock" onClick={handleLockModule} title="Lock Payroll Module">Lock Payroll</button>
+        </div>
       </div>
 
       {isFutureMonth ? (
         <div className="pm-empty-state">
-          <CalendarDays size={40} className="pm-empty-icon" />
           <h3>Future Period</h3>
           <p>Payroll data is not available for future dates. Please select the current or a past month.</p>
         </div>
       ) : (
         <>
-          <div className="pm-metrics-grid">
+          <section className="pm-metrics-grid" aria-label="Payroll summary">
             <div className="pm-metric-card">
-              <div className="pm-metric-icon"><Users size={20} /></div>
-              <div className="pm-metric-data"><span className="pm-metric-label">Instructors in View</span><span className="pm-metric-value">{summary.totalEmployees}</span></div>
+              <span className="pm-metric-label">Instructors in View</span>
+              <strong className="pm-metric-value">{summary.totalEmployees}</strong>
+              <span className="pm-metric-note">Matching payroll records</span>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon"><Wallet size={20} /></div>
-              <div className="pm-metric-data"><span className="pm-metric-label">Total Gross Pay</span><span className="pm-metric-value">₱{summary.totalGross.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
+              <span className="pm-metric-label">Total Gross Pay</span>
+              <strong className="pm-metric-value">₱{summary.totalGross.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+              <span className="pm-metric-note">Before deductions</span>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon"><TrendingUp size={20} /></div>
-              <div className="pm-metric-data"><span className="pm-metric-label">Tax Withheld</span><span className="pm-metric-value">₱{summary.totalTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
+              <span className="pm-metric-label">Tax Withheld</span>
+              <strong className="pm-metric-value">₱{summary.totalTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+              <span className="pm-metric-note">Calculated withholding tax</span>
             </div>
             <div className="pm-metric-card">
-              <div className="pm-metric-icon"><DollarSign size={20} /></div>
-              <div className="pm-metric-data"><span className="pm-metric-label">Total Net Pay</span><span className="pm-metric-value text-success">₱{summary.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
+              <span className="pm-metric-label">Total Net Pay</span>
+              <strong className="pm-metric-value">₱{summary.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
+              <span className="pm-metric-note">After deductions</span>
             </div>
-          </div>
+          </section>
 
           <div className="pm-roster-container">
-            <div className="pm-roster-heading"><div><p>Review pay details and finalize individual records.</p></div><span>{filteredEmployees.length} record{filteredEmployees.length !== 1 ? "s" : ""}</span></div>
+            <div className="pm-roster-heading">
+              <div>
+                <h2>Instructor Payroll Register</h2>
+                <p>Review individual calculations and payment status for the selected period.</p>
+              </div>
+              <span>{filteredEmployees.length} record{filteredEmployees.length !== 1 ? 's' : ''}</span>
+            </div>
             <div className="pm-toolbar">
               <div className="pm-search-box">
-                <Search size={16} />
-                <input type="text" placeholder="Search employee..." value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setRosterPage(1); }} />
+                <Search size={15} aria-hidden="true" />
+                <input type="text" aria-label="Search by instructor name or employee ID" placeholder="Search by name or employee ID" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setRosterPage(1); }} />
               </div>
               <div className="pm-toolbar-actions">
-                <button className="pm-btn-outline" onClick={exportToCSV}><Download size={15} /> Payroll CSV</button>
-                <button className="pm-btn-outline" onClick={exportRemittance} title="Export SSS, PhilHealth, Pag-IBIG spreadsheet"><FileText size={15} /> Govt Remittance</button>
-                <button className="pm-btn-primary" onClick={() => setShowMonthlyModal(true)}><CalendarDays size={15} /> Run Batch</button>
+                <button className="pm-btn-outline" type="button" onClick={exportToCSV}>Export Payroll CSV</button>
+                <button className="pm-btn-outline" type="button" onClick={exportRemittance} title="Export SSS, PhilHealth and Pag-IBIG remittance data">Export Remittance</button>
+                <button className="pm-btn-primary" type="button" onClick={() => setShowMonthlyModal(true)}>Run Monthly Payroll</button>
               </div>
             </div>
 
             <div className="pm-table-wrapper">
               {loading ? (
-                <div className="pm-empty-state"><ShieldCheck size={32} className="pm-empty-icon animate-pulse" /><p>Calculating Payroll Data...</p></div>
+                <div className="pm-empty-state"><p>Loading payroll records...</p></div>
               ) : (
                 <table className="pm-table">
                   <thead>
                     <tr>
-                      <th>Employee ID</th><th>Employee Name</th><th>Position</th><th>Type</th><th className="text-right">Actions</th>
+                      <th>Employee ID</th><th>Instructor</th><th>Position</th><th>Employment Type</th><th>Status</th><th className="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredEmployees.length === 0 ? (
-                      <tr><td colSpan="5"><div className="pm-empty-state"><p>No matching employees found.</p></div></td></tr>
+                      <tr><td colSpan="6"><div className="pm-empty-state"><p>No matching employees found.</p></div></td></tr>
                     ) : (
                       visibleEmployees.map(emp => {
                         const isFinalized = finalizedPayrolls[emp.id];
@@ -607,16 +633,24 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
                             <td><span className="pm-emp-name">{emp.full_name}</span></td>
                             <td><span className="pm-text-regular">{emp.position_level || emp.position || 'N/A'}</span></td>
                             <td><span className="pm-badge-neutral">{emp.employment_type || emp.contract_type || 'Full-time'}</span></td>
+                            <td>
+                              <span className={`pm-status ${isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'paid' : 'pending') : 'draft'}`}>
+                                {isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'Paid' : 'Awaiting Payment') : 'Not Finalized'}
+                              </span>
+                            </td>
                             <td className="text-right">
                               <div className="pm-action-group">
-                                <button className="pm-icon-btn" onClick={() => openPayslip(emp)} title="Review Payslip"><Eye size={16} /></button>
+                                <button type="button" className="pm-btn-outline pm-table-action" onClick={() => openPayslip(emp)}>View</button>
                                 {isFinalized ? (
-                                  <>
-                                    <span className="pm-badge-finalized"><CheckCircle size={14} /> {savedPayrolls[emp.id]?.status === 'paid' ? 'Paid' : 'Finalized · Awaiting payment'}</span>
-                                    {savedPayrolls[emp.id]?.status === 'pending' && <button className="pm-btn-outline" disabled={confirmingPaidId !== null} onClick={() => handleMarkPaid(emp)}>{confirmingPaidId === savedPayrolls[emp.id].id ? 'Saving...' : 'Confirm Paid'}</button>}
-                                  </>
+                                  savedPayrolls[emp.id]?.status === 'pending' && (
+                                    <button type="button" className="pm-btn-primary pm-table-action" disabled={confirmingPaidId !== null} onClick={() => handleMarkPaid(emp)}>
+                                      {confirmingPaidId === savedPayrolls[emp.id].id ? 'Saving...' : 'Confirm Paid'}
+                                    </button>
+                                  )
                                 ) : (
-                                  <button className="pm-btn-success" onClick={() => handleFinalize(emp)} disabled={finalizingEmployeeId !== null}><CheckCircle size={14} /> Finalize</button>
+                                  <button type="button" className="pm-btn-primary pm-table-action" onClick={() => handleFinalize(emp)} disabled={finalizingEmployeeId !== null}>
+                                    {finalizingEmployeeId === emp.id ? 'Finalizing...' : 'Finalize'}
+                                  </button>
                                 )}
                               </div>
                             </td>
@@ -647,7 +681,7 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
           <div className="pm-modal-card small" onClick={e => e.stopPropagation()}>
             <div className="pm-modal-header"><h3>Process Monthly Batch</h3><button className="pm-modal-close" onClick={() => setShowMonthlyModal(false)}><X size={18}/></button></div>
             <div className="pm-modal-body">
-              <p className="pm-modal-desc">Calculate and finalize base pay for all active instructors using the recorded attendance logs.</p>
+              <p className="pm-modal-desc">Process the selected payroll period for eligible instructors. Existing finalized records are skipped by the server.</p>
               <div className="pm-form-row">
                 <div className="pm-form-group">
                   <label>Month</label>
@@ -684,17 +718,28 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
             <div className="pm-modal-card wide" onClick={e => e.stopPropagation()}>
               <div className="pm-modal-header">
                 <div>
-                  <h3>Payslip Breakdown</h3>
-                  <span className="pm-modal-subtitle">{emp.full_name} ({emp.employee_id}) • {monthYearStr} {isFinalized && <span style={{color:'#059669', fontWeight:'bold'}}> • {savedPayrolls[emp.id]?.status === 'paid' ? 'PAID' : 'FINALIZED · AWAITING PAYMENT'}</span>}</span>
+                  <h3>Payroll Details</h3>
+                  <span className="pm-modal-subtitle">{emp.full_name} · {emp.employee_id} · {monthYearStr}</span>
                 </div>
                 <button className="pm-modal-close" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}><X size={18}/></button>
               </div>
               
               <div className="pm-modal-body bg-gray">
                 
-                {/* Government IDs Display */}
+                <div className="pm-payslip-summary">
+                  <div><span>Employee</span><strong>{emp.full_name}</strong></div>
+                  <div><span>Payroll Period</span><strong>{monthYearStr}</strong></div>
+                  <div>
+                    <span>Record Status</span>
+                    <strong className={`pm-status ${isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'paid' : 'pending') : 'draft'}`}>
+                      {isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'Paid' : 'Awaiting Payment') : 'Not Finalized'}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Existing government ID fields, retained for HR verification */}
                 <div className="pm-govt-ids-box">
-                  <h5>Government IDs (For Verification)</h5>
+                  <h5>Government Information</h5>
                   <div className="pm-govt-grid">
                     <div><span>SSS No:</span> {info.sss || info.sss_number || '—'}</div>
                     <div><span>PhilHealth No:</span> {info.philhealth || info.philhealth_number || '—'}</div>
@@ -735,7 +780,7 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
 
                   {/* Deductions */}
                   <div className="pm-formal-section mt-4">
-                    <div className="pm-formal-section-header danger"><h4>Taxes & Deductions</h4></div>
+                    <div className="pm-formal-section-header"><h4>Taxes & Deductions</h4></div>
                     <div className="pm-formal-list">
                       <div className="pm-formal-row"><span className="pm-formal-label">Withholding Tax</span><span className="pm-formal-value">₱{calc.tax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
                       <div className="pm-formal-row"><span className="pm-formal-label">Late Deductions ({calc.lateMinutes} mins)</span><span className="pm-formal-value text-danger">-₱{calc.lateDeduction.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
@@ -761,19 +806,19 @@ const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
                         <input type="text" value={extras.other || ''} onChange={e => updateExtras(emp.employee_id, 'other', e.target.value)} className="pm-formal-input" placeholder="0.00" disabled={isFinalized} />
                       </div>
                     </div>
-                    <div className="pm-formal-footer danger"><span>Total Deductions</span><strong>-₱{calc.totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
+                    <div className="pm-formal-footer"><span>Total Deductions</span><strong>-₱{calc.totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
                   </div>
                 </div>
 
                 <div className="pm-net-banner">
-                  <span className="pm-net-label">Total Net Pay</span>
+                  <span className="pm-net-label">Net Take-Home Pay</span>
                   <span className="pm-net-amount">₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                 </div>
               </div>
 
               <div className="pm-modal-footer">
                 <button className="pm-btn-outline" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}>Close</button>
-                <button className="pm-btn-primary" onClick={() => printPayslip(payslipEmployee)}>Print / Export PDF</button>
+                <button className="pm-btn-primary" onClick={() => printPayslip(payslipEmployee)}>Print / Save as PDF</button>
               </div>
             </div>
           </div>

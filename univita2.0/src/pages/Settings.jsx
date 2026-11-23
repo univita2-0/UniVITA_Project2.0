@@ -1,8 +1,8 @@
 // src/pages/Settings.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { User, Lock, Eye, EyeOff, ShieldCheck, Check } from 'lucide-react';
+import { UserRound, LockKeyhole, Eye, EyeOff, ShieldCheck, Check } from 'lucide-react';
 import './Settings.css';
 import { API_BASE } from '../api';
 import { getUserRole } from '../permissions';
@@ -14,7 +14,9 @@ const getAuthHeaders = () => ({
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
 
-// Real Email Validation (Matches backend logic)
+// ------------------------------------------------------------
+// Email validation — preserve existing backend-aligned rules
+// ------------------------------------------------------------
 const DISPOSABLE_EMAIL_DOMAINS = new Set(['mailinator.com','tempmail.com','temp-mail.org','guerrillamail.com','yopmail.com','10minutemail.com','trashmail.com']);
 const FAKE_EMAIL_LOCAL_PARTS = new Set(['test','dummy','fake','sample','demo','admin','user','guest','asdf','qwerty','abc','xyz','123','1234','temp']);
 const RESERVED_TEST_DOMAINS = new Set(['example.com','example.net','example.org','test.com','test.net','test.org','localhost']);
@@ -30,7 +32,12 @@ const isRealEmail = (raw) => {
   return { ok: true };
 };
 
+// ============================================================
+// Settings: authenticated profile and credential management
+// ============================================================
+
 const Settings = () => {
+  // Profile, password, and HR payroll-PIN state
   const [activeTab, setActiveTab] = useState('profile');
   const [user, setUser] = useState(null);
 
@@ -67,10 +74,13 @@ const Settings = () => {
   const [showCurrentPin, setShowCurrentPin] = useState(false);
   const [showNewPin, setShowNewPin] = useState(false);
 
-  // FIX: Standardized role key
+  // Permissions: only HR can manage a payroll security PIN
   const userRole = getUserRole();
   const canChangePin = userRole === 'hr_admin';
 
+  // ----------------------------------------------------------
+  // Load current profile
+  // ----------------------------------------------------------
   const fetchUserData = useCallback(async (userId) => {
     try {
       const res = await axios.get(`${API_BASE}/employees`, getAuthHeaders());
@@ -116,6 +126,9 @@ const Settings = () => {
     }
   }, [fetchUserData]);
 
+  // ----------------------------------------------------------
+  // Profile update
+  // ----------------------------------------------------------
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     if (!profileData.full_name.trim() || !profileData.email.trim()) {
@@ -157,6 +170,9 @@ const Settings = () => {
     }
   };
 
+  // ----------------------------------------------------------
+  // Password change
+  // ----------------------------------------------------------
   const handlePasswordChange = async (e) => {
     e.preventDefault();
     if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
@@ -188,6 +204,9 @@ const Settings = () => {
     }
   };
 
+  // ----------------------------------------------------------
+  // HR payroll PIN change
+  // ----------------------------------------------------------
   const handlePinChange = async (e) => {
     e.preventDefault();
     if (!pinData.currentPin || !pinData.newPin || !pinData.confirmPin) {
@@ -221,52 +240,55 @@ const Settings = () => {
     }
   };
 
-  if (!user) return <div className="stx-loading">Loading settings...</div>;
+  if (!user) {
+    return <div className="stx-loading">Loading settings...</div>;
+  }
 
   return (
     <div className="stx-container">
-      <div className="stx-header">
-        <div>
-          
-          <p>Manage your profile details, password, and authorized security settings.</p>
-        </div>
-      </div>
+      {/* Page introduction: global page title is provided by Layout */}
+      <header className="stx-header">
+        <p>Manage your personal information and account security.</p>
+      </header>
 
       <div className="stx-layout">
-        <aside className="stx-sidebar">
+        <div className="stx-sidebar">
           <nav className="stx-nav" aria-label="Settings sections">
             <button
+              type="button"
               className={`stx-nav-item ${activeTab === 'profile' ? 'active' : ''}`}
               onClick={() => setActiveTab('profile')}
               aria-current={activeTab === 'profile' ? 'page' : undefined}
             >
-              <User size={18} /> Profile Information
+              <UserRound size={16} /> Profile Information
             </button>
             <button
+              type="button"
               className={`stx-nav-item ${activeTab === 'password' ? 'active' : ''}`}
               onClick={() => setActiveTab('password')}
               aria-current={activeTab === 'password' ? 'page' : undefined}
             >
-              <Lock size={18} /> Account Password
+              <LockKeyhole size={16} /> Change Password
             </button>
             {canChangePin && (
               <button
+                type="button"
                 className={`stx-nav-item ${activeTab === 'pin' ? 'active' : ''}`}
                 onClick={() => setActiveTab('pin')}
                 aria-current={activeTab === 'pin' ? 'page' : undefined}
               >
-                <ShieldCheck size={18} /> Payroll Security PIN
+                <ShieldCheck size={16} /> Payroll Security PIN
               </button>
             )}
           </nav>
-        </aside>
+        </div>
 
         <main className="stx-main">
           {activeTab === 'profile' && (
             <section className="stx-section">
               <div className="stx-section-header">
                 <h3>Profile Information</h3>
-                <p>Update your basic profile details and contact information.</p>
+                <p>Keep your contact information accurate and up to date.</p>
               </div>
 
               <form onSubmit={handleProfileUpdate} className="stx-form">
@@ -318,8 +340,8 @@ const Settings = () => {
           {activeTab === 'password' && (
             <section className="stx-section">
               <div className="stx-section-header">
-                <h3>Account Password</h3>
-                <p>Ensure your account is using a long, random password to stay secure.</p>
+                <h3>Change Password</h3>
+                <p>Update your password to keep your account secure.</p>
               </div>
 
               <form onSubmit={handlePasswordChange} className="stx-form">

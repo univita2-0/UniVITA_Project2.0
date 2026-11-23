@@ -10,11 +10,11 @@ import { fetchMyLeaveRequests, API_URL } from './api';
 
 /* ---------------- Fix #8: shared validation + date helpers ---------------- */
 const CANCEL_REASON_MAX_LENGTH = 500;
-const CANCEL_REASON_MIN_LENGTH = 10;
+const CANCEL_REASON_MIN_LENGTH = 0;
 
 const validateCancelReason = (reason) => {
   const trimmed = String(reason || '').trim();
-  if (!trimmed) return 'Please enter a reason for cancellation.';
+  if (!trimmed) return '';
   if (trimmed.length < CANCEL_REASON_MIN_LENGTH) return `Reason must be at least ${CANCEL_REASON_MIN_LENGTH} characters.`;
   if (trimmed.length > CANCEL_REASON_MAX_LENGTH) return `Reason must not exceed ${CANCEL_REASON_MAX_LENGTH} characters.`;
   return '';
@@ -193,7 +193,7 @@ export default function LeaveHistoryScreen({ navigation }) {
   };
 
   const closeCancelModal = () => {
-    if (cancelling) return; // don't allow dismiss while in-flight
+    // The close button is disabled while processing; successful requests may close here.
     setShowCancelModal(false);
     setCancelReason('');
     setCancelError('');
@@ -498,7 +498,7 @@ export default function LeaveHistoryScreen({ navigation }) {
             <View style={styles.calendarModalContent}>
               <Text style={[styles.modalTitle, { marginBottom: 10 }]}>Cancel Request</Text>
               <Text style={{ fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#475569' : colors.textSecondary, marginBottom: 10 }}>
-                Please provide a reason for cancelling this request:
+                Cancellation reason (optional):
               </Text>
               <TextInput
                 style={{

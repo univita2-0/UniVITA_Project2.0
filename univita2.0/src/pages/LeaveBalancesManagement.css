@@ -1,6 +1,6 @@
 .lbm-page { 
   background: #F8FAFC; 
-  padding: 2rem;
+  padding: 5px 10px 10px;
   min-height: 100vh; 
   font-family: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, sans-serif; 
   color: #0F172A;
@@ -543,3 +543,375 @@
 .lbm-page button:focus-visible,.lbm-page input:focus-visible,.lbm-page select:focus-visible,.lbm-page textarea:focus-visible {outline:2px solid #0D9488;outline-offset:2px;}
 @media(max-width:760px){.lbm-page .lbm-overview{grid-template-columns:repeat(2,minmax(0,1fr));}.lbm-page .lbm-toolbar{flex-direction:column;align-items:stretch;}.lbm-page .lbm-actions-group{justify-content:space-between;}}
 @media(max-width:480px){.lbm-page .lbm-overview{grid-template-columns:1fr;}.lbm-page .lbm-overview-item{padding:10px 12px;}.lbm-page .lbm-overview-item small{display:none;}.lbm-page .lbm-actions-group{flex-wrap:wrap;}.lbm-page .lbm-search-row{padding:10px;}}
+
+
+
+.lbm-page {
+  padding: 5px 10px 10px;
+  min-height: 100%;
+  background: transparent;
+  color: #0f172a;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lbm-page *,
+.lbm-page *::before,
+.lbm-page *::after {
+  box-sizing: border-box;
+}
+
+.lbm-page .uv-view-only {
+  display: block;
+  margin: 0 0 12px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.lbm-page .lbm-subtitle {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.lbm-page .lbm-content-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.lbm-page .lbm-table th {
+  padding: 11px 14px;
+  background: #f7f9fb;
+  border-bottom: 1px solid #e2e8f0;
+  color: #526579;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.lbm-page .lbm-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #edf1f5;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+.lbm-page .lbm-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.lbm-page .lbm-status-dot,
+.lbm-page .lbm-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.lbm-page .lbm-status-dot.success,
+.lbm-page .lbm-chip.success,
+.lbm-page .lbm-status-dot.approved,
+.lbm-page .lbm-chip.approved,
+.lbm-page .lbm-status-dot.active,
+.lbm-page .lbm-chip.active {
+  background: #e7f7ee;
+  border: 1px solid #c8ebd5;
+  color: #166534;
+}
+
+.lbm-page .lbm-status-dot.danger,
+.lbm-page .lbm-chip.danger,
+.lbm-page .lbm-status-dot.rejected,
+.lbm-page .lbm-chip.rejected {
+  background: #fef0f0;
+  border: 1px solid #f7d5d5;
+  color: #b42318;
+}
+
+.lbm-page .lbm-status-dot.warning,
+.lbm-page .lbm-chip.warning,
+.lbm-page .lbm-status-dot.pending,
+.lbm-page .lbm-chip.pending {
+  background: #fff5db;
+  border: 1px solid #f4e4b1;
+  color: #92400e;
+}
+
+.lbm-page .lbm-status-dot.default,
+.lbm-page .lbm-chip.default,
+.lbm-page .lbm-status-dot.cancelled,
+.lbm-page .lbm-chip.cancelled,
+.lbm-page .lbm-status-dot.disabled,
+.lbm-page .lbm-chip.disabled {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+}
+
+.lbm-page .lbm-tab {
+  min-height: 39px;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.lbm-page .lbm-tab.active {
+  color: #0f766e;
+  font-weight: 650;
+}
+
+.lbm-page .lbm-btn-primary,
+.lbm-page .lbm-btn-outline,
+.lbm-page .lbm-page-btn {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+.lbm-page button:focus-visible,
+.lbm-page a:focus-visible,
+.lbm-page input:focus-visible,
+.lbm-page select:focus-visible,
+.lbm-page textarea:focus-visible {
+  outline: 2px solid #0d9488;
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .lbm-page .lbm-table th {
+    padding: 10px 12px;
+  }
+
+  .lbm-page .lbm-table td {
+    padding: 10px 12px;
+  }
+}
+
+
+.lbm-page {
+  padding: 5px 10px 10px;
+  min-height: 0;
+  color: #0f172a;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lbm-page button,
+.lbm-page input,
+.lbm-page select,
+.lbm-page textarea {
+  font-family: inherit;
+}
+
+.lbm-page .uv-view-only {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+}
+
+/* B. Action controls: same compact View and Pending Requests buttons */
+.lbm-page .lbm-btn-balances,
+.lbm-page .lbm-btn-cto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  width: auto;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  gap: 5px;
+  border: 1px solid #d6e0e8;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.lbm-page .lbm-btn-balances,
+.lbm-page .lbm-btn-cto:hover {
+  background: #f8fafc;
+  color: #0f766e;
+  border-color: #99bfb9;
+}
+
+.lbm-page .lbm-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 12px;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.lbm-page .lbm-btn-outline:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+/* C. Statistics: no icons, consistent restrained numerals */
+.lbm-page .lbm-overview-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: none;
+  padding: 13px 15px;
+  gap: 4px;
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.lbm-page .lbm-overview-item strong {
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+}
+
+.lbm-page .lbm-overview-item span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.lbm-page .lbm-overview-item small {
+  font-size: 11px;
+  font-weight: 400;
+  color: #64748b;
+}
+
+/* D. Detail dialogs: formal type hierarchy, calm backgrounds, smaller text */
+.lbm-page .lbm-custom-modal {
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  box-shadow: 0 20px 55px rgba(15, 23, 42, 0.18);
+}
+
+.lbm-page .lbm-custom-modal-header {
+  padding: 16px 20px;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.lbm-page .lbm-custom-modal-header h3 {
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  color: #0f172a;
+}
+
+.lbm-page .lbm-custom-modal-body {
+  padding: 18px 20px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.lbm-page .lbm-detail-box {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: none;
+}
+
+.lbm-page .lbm-detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+
+.lbm-page .lbm-detail-value {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: #0f172a;
+}
+
+/* E. Standard status style, title case and readable spacing */
+.lbm-page .uv-status-badge,
+.lbm-page .aa-chip,
+.lbm-page .ac-status-badge,
+.lbm-page .ot-chip,
+.lbm-page .ot-status-dot,
+.lbm-page .expert-chip {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-transform: none;
+  letter-spacing: normal;
+  border-radius: 5px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .lbm-page .lbm-custom-modal-body {
+    padding: 14px;
+  }
+  .lbm-page .lbm-custom-modal-header {
+    padding: 14px;
+  }
+}
+
+.lbm-page { box-sizing: border-box; font-family: 'Inter', system-ui, sans-serif; }
+.lbm-page button:focus-visible,
+.lbm-page input:focus-visible,
+.lbm-page textarea:focus-visible { outline: 2px solid #0D9488; outline-offset: 2px; }
+.lbm-page button:disabled { cursor: not-allowed; opacity: 0.55; }

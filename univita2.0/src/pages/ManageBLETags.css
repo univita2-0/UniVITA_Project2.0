@@ -22,7 +22,6 @@
   --radius-lg: 12px;
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
   --shadow-md: 0 1px 3px rgba(15, 23, 42, 0.06);
-
   background: var(--bg);
   padding: 2rem;
   min-height: 100vh;
@@ -32,96 +31,170 @@
   line-height: 1.5;
 }
 
-
 .univita-ble-page .expert-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
-.univita-ble-page .expert-title-group { display: flex; align-items: center; gap: 1rem; }
+.univita-ble-page .expert-title-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
 
 .univita-ble-page .expert-title {
   font-family: "Plus Jakarta Sans", "Inter", sans-serif;
-  font-size: 1.75rem; font-weight: 700; color: var(--text);
-  margin: 0 0 0.35rem 0; letter-spacing: -0.025em; line-height: 1.2;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 0.35rem 0;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
 
 .univita-ble-page .expert-subtitle {
-  color: var(--text-muted); font-size: 0.9375rem; margin: 0;
-  max-width: 640px; line-height: 1.5;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  margin: 0;
+  max-width: 640px;
+  line-height: 1.5;
 }
 
-
 .univita-ble-page .expert-readonly-banner {
-  display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.75rem 1rem; background: #F0FDFA;
-  border: 1px solid #99F6E4; border-radius: var(--radius-md);
-  color: #0F766E; font-size: 0.875rem; font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  background: #F0FDFA;
+  border: 1px solid #99F6E4;
+  border-radius: var(--radius-md);
+  color: #0F766E;
+  font-size: 0.875rem;
+  font-weight: 500;
   margin-bottom: 1.5rem;
 }
 
-
 .univita-ble-page .expert-btn-primary, .univita-ble-page .expert-btn-secondary {
-  display: inline-flex; align-items: center; justify-content: center;
-  gap: 0.5rem; padding: 0.65rem 1.25rem;
-  border-radius: var(--radius-md); font-family: inherit;
-  font-weight: 600; font-size: 0.875rem; cursor: pointer;
-  transition: all 0.15s ease; border: 1px solid transparent;
-  white-space: nowrap; height: 40px; box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  height: 40px;
+  box-sizing: border-box;
 }
 
-.univita-ble-page .expert-btn-primary { background: var(--primary); color: #FFFFFF; }
+.univita-ble-page .expert-btn-primary {
+  background: var(--primary);
+  color: #FFFFFF;
+}
 
-.univita-ble-page .expert-btn-primary:hover:not(:disabled) { background: var(--primary-hover); box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15); }
+.univita-ble-page .expert-btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15);
+}
 
-.univita-ble-page .expert-btn-primary.bg-red { background: #EF4444; }
+.univita-ble-page .expert-btn-primary.bg-red {
+  background: #EF4444;
+}
 
-.univita-ble-page .expert-btn-primary.bg-red:hover:not(:disabled) { background: var(--danger); }
+.univita-ble-page .expert-btn-primary.bg-red:hover:not(:disabled) {
+  background: var(--danger);
+}
 
-.univita-ble-page .expert-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+.univita-ble-page .expert-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
-.univita-ble-page .expert-btn-secondary { background: var(--surface); color: var(--text-2); border-color: #CBD5E1; box-shadow: var(--shadow-sm); }
+.univita-ble-page .expert-btn-secondary {
+  background: var(--surface);
+  color: var(--text-2);
+  border-color: #CBD5E1;
+  box-shadow: var(--shadow-sm);
+}
 
-.univita-ble-page .expert-btn-secondary:hover:not(:disabled) { background: #F1F5F9; color: var(--text); border-color: #94A3B8; }
+.univita-ble-page .expert-btn-secondary:hover:not(:disabled) {
+  background: #F1F5F9;
+  color: var(--text);
+  border-color: #94A3B8;
+}
 
-.univita-ble-page .expert-btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
-
+.univita-ble-page .expert-btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 .univita-ble-page .expert-search-card {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 1rem 1.25rem;
-  margin-bottom: 1.5rem; box-shadow: var(--shadow-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .univita-ble-page .expert-search-row {
-  display: flex; gap: 1rem; align-items: center;
-  justify-content: space-between; flex-wrap: wrap;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
 }
 
 .univita-ble-page .expert-search-input-group {
-  display: flex; align-items: center; gap: 0.75rem;
-  flex: 1; min-width: 250px; max-width: 500px;
-  background: #F8FAFC; border: 1px solid #CBD5E1;
-  border-radius: var(--radius-md); padding: 0 1rem;
-  height: 40px; box-sizing: border-box; transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 250px;
+  max-width: 500px;
+  background: #F8FAFC;
+  border: 1px solid #CBD5E1;
+  border-radius: var(--radius-md);
+  padding: 0 1rem;
+  height: 40px;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
 }
 
 .univita-ble-page .expert-search-input-group:focus-within {
-  border-color: var(--accent); background: #FFFFFF;
+  border-color: var(--accent);
+  background: #FFFFFF;
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1);
 }
 
 .univita-ble-page .expert-clean-input {
-  border: none; background: transparent; padding: 0.5rem 0;
-  font-size: 0.9375rem; color: var(--text); width: 100%;
-  outline: none; font-family: inherit;
+  border: none;
+  background: transparent;
+  padding: 0.5rem 0;
+  font-size: 0.9375rem;
+  color: var(--text);
+  width: 100%;
+  outline: none;
+  font-family: inherit;
 }
 
 .univita-ble-page .expert-clean-input.border {
-  border: 1px solid #CBD5E1; padding: 0.65rem 0.875rem;
-  border-radius: var(--radius-md); background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  padding: 0.65rem 0.875rem;
+  border-radius: var(--radius-md);
+  background: #FFFFFF;
   transition: border-color 0.15s, box-shadow 0.15s;
-  box-sizing: border-box; height: 40px;
+  box-sizing: border-box;
+  height: 40px;
 }
 
 .univita-ble-page .expert-clean-input.border:focus {
@@ -130,177 +203,319 @@
   outline: none;
 }
 
-.univita-ble-page .cursor-pointer { cursor: pointer; }
-
-
-.univita-ble-page .expert-stats-badge {
-  font-size: 0.8125rem; color: var(--text-2);
-  background: #F1F5F9; padding: 0.5rem 0.9rem;
-  border-radius: 999px; font-weight: 500;
-  border: 1px solid var(--border); white-space: nowrap;
+.univita-ble-page .cursor-pointer {
+  cursor: pointer;
 }
 
-.univita-ble-page .expert-stats-badge strong { color: var(--text); font-weight: 700; margin-left: 0.15rem; }
+.univita-ble-page .expert-stats-badge {
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  background: #F1F5F9;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
 
+.univita-ble-page .expert-stats-badge strong {
+  color: var(--text);
+  font-weight: 700;
+  margin-left: 0.15rem;
+}
 
 .univita-ble-page .expert-card {
-  background: var(--surface); border-radius: var(--radius-lg);
-  border: 1px solid var(--border); box-shadow: var(--shadow-md);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
-.univita-ble-page .expert-table-wrapper { overflow-x: auto; width: 100%; }
+.univita-ble-page .expert-table-wrapper {
+  overflow-x: auto;
+  width: 100%;
+}
 
-.univita-ble-page .expert-table { width: 100%; border-collapse: collapse; text-align: left; }
+.univita-ble-page .expert-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
 
 .univita-ble-page .expert-table th {
-  background: #F8FAFC; padding: 0.875rem 1.25rem;
-  font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: 0.06em;
-  border-bottom: 1px solid var(--border); white-space: nowrap;
+  background: #F8FAFC;
+  padding: 0.875rem 1.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 .univita-ble-page .expert-table td {
-  padding: 1rem 1.25rem; font-size: 0.9375rem;
-  color: var(--text-2); border-bottom: 1px solid var(--border-soft);
+  padding: 1rem 1.25rem;
+  font-size: 0.9375rem;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border-soft);
   vertical-align: middle;
 }
 
-.univita-ble-page .expert-table tr:hover td { background: #F8FAFC; }
+.univita-ble-page .expert-table tr:hover td {
+  background: #F8FAFC;
+}
 
-.univita-ble-page .expert-table tr:last-child td { border-bottom: none; }
+.univita-ble-page .expert-table tr:last-child td {
+  border-bottom: none;
+}
 
+.univita-ble-page .font-semibold {
+  font-weight: 600;
+}
 
-.univita-ble-page .font-semibold { font-weight: 600; }
+.univita-ble-page .font-medium {
+  font-weight: 500;
+}
 
-.univita-ble-page .font-medium { font-weight: 500; }
+.univita-ble-page .font-mono {
+  font-family: "SF Mono", ui-monospace, monospace;
+}
 
-.univita-ble-page .font-mono { font-family: "SF Mono", ui-monospace, monospace; }
+.univita-ble-page .text-dark {
+  color: var(--text);
+}
 
-.univita-ble-page .text-dark { color: var(--text); }
+.univita-ble-page .text-muted {
+  color: var(--text-muted);
+}
 
-.univita-ble-page .text-muted { color: var(--text-muted); }
+.univita-ble-page .text-danger {
+  color: #EF4444;
+}
 
-.univita-ble-page .text-danger { color: #EF4444; }
+.univita-ble-page .text-center {
+  text-align: center;
+}
 
-.univita-ble-page .text-center { text-align: center; }
-
-.univita-ble-page .text-right { text-align: right; }
-
+.univita-ble-page .text-right {
+  text-align: right;
+}
 
 .univita-ble-page .bt-mac-badge {
-  background: #F1F5F9; color: var(--text-2);
-  padding: 0.3rem 0.65rem; border-radius: var(--radius-sm);
+  background: #F1F5F9;
+  color: var(--text-2);
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius-sm);
   font-family: "SF Mono", ui-monospace, monospace;
-  font-size: 0.8125rem; letter-spacing: 0.05em;
-  font-weight: 500; border: 1px solid var(--border);
+  font-size: 0.8125rem;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+  border: 1px solid var(--border);
 }
 
+.univita-ble-page .expert-action-group {
+  display: flex;
+  gap: 0.25rem;
+}
 
-.univita-ble-page .expert-action-group { display: flex; gap: 0.25rem; }
-
-.univita-ble-page .expert-action-group.right { justify-content: flex-end; }
+.univita-ble-page .expert-action-group.right {
+  justify-content: flex-end;
+}
 
 .univita-ble-page .expert-btn-icon {
-  background: transparent; border: 1px solid transparent; cursor: pointer;
-  padding: 0.4rem; border-radius: var(--radius-sm);
-  transition: all 0.15s ease; display: inline-flex;
-  align-items: center; justify-content: center; color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 0.4rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
 }
 
-.univita-ble-page .expert-btn-icon:hover { background: #F1F5F9; border-color: var(--border); color: var(--text); }
+.univita-ble-page .expert-btn-icon:hover {
+  background: #F1F5F9;
+  border-color: var(--border);
+  color: var(--text);
+}
 
-.univita-ble-page .expert-btn-icon.danger:hover { background: var(--danger-soft); border-color: var(--danger-border); }
-
+.univita-ble-page .expert-btn-icon.danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
 
 .univita-ble-page .expert-pagination {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 0.875rem 1.25rem; background: #F8FAFC;
-  border-top: 1px solid var(--border); flex-wrap: wrap; gap: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.875rem 1.25rem;
+  background: #F8FAFC;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
-.univita-ble-page .expert-page-info { font-size: 0.8125rem; color: var(--text-muted); font-weight: 500; }
+.univita-ble-page .expert-page-info {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
 
-.univita-ble-page .expert-page-controls { display: flex; align-items: center; gap: 0.75rem; }
+.univita-ble-page .expert-page-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
 
 .univita-ble-page .expert-page-btn {
-  display: inline-flex; align-items: center; gap: 0.25rem;
-  padding: 0.45rem 0.75rem; background: #FFFFFF;
-  border: 1px solid #CBD5E1; border-radius: var(--radius-sm);
-  font-family: inherit; font-size: 0.8125rem; font-weight: 600;
-  color: var(--text-2); cursor: pointer; transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.45rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-.univita-ble-page .expert-page-btn:hover:not(:disabled) { background: #F1F5F9; color: var(--text); border-color: #94A3B8; }
+.univita-ble-page .expert-page-btn:hover:not(:disabled) {
+  background: #F1F5F9;
+  color: var(--text);
+  border-color: #94A3B8;
+}
 
-.univita-ble-page .expert-page-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.univita-ble-page .expert-page-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
-.univita-ble-page .expert-page-current { font-size: 0.8125rem; font-weight: 700; color: var(--text); }
-
+.univita-ble-page .expert-page-current {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text);
+}
 
 .univita-ble-page .expert-empty {
-  padding: 4rem 2rem; text-align: center;
-  color: var(--text-muted); font-weight: 500;
-  font-size: 0.9375rem; display: flex; flex-direction: column;
-  align-items: center; gap: 0.5rem;
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.9375rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .univita-ble-page .expert-empty p {
   font-family: "Plus Jakarta Sans", sans-serif;
-  font-size: 1.0625rem; color: var(--text); font-weight: 600;
+  font-size: 1.0625rem;
+  color: var(--text);
+  font-weight: 600;
   margin: 0.5rem 0 0 0;
 }
 
-.univita-ble-page .expert-empty span { font-size: 0.875rem; }
+.univita-ble-page .expert-empty span {
+  font-size: 0.875rem;
+}
 
 .univita-ble-page .expert-loading {
-  padding: 4rem 2rem; text-align: center;
-  color: var(--accent); font-weight: 600; font-size: 0.9375rem;
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.9375rem;
 }
 
+.univita-ble-page .expert-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
 
-.univita-ble-page .expert-form-stack { display: flex; flex-direction: column; gap: 1rem; }
-
-.univita-ble-page .expert-form-group { display: flex; flex-direction: column; gap: 0.4rem; }
+.univita-ble-page .expert-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
 
 .univita-ble-page .expert-form-group label {
-  font-size: 0.75rem; font-weight: 600; color: var(--text-2);
-  text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-
 .univita-ble-page .expert-confirm-body {
-  display: flex; flex-direction: column; align-items: center;
-  text-align: center; gap: 0.75rem; padding: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.75rem;
+  padding: 1rem 0;
 }
 
 .univita-ble-page .expert-confirm-title {
-  font-size: 1rem; color: var(--text); margin: 0;
-  font-weight: 500; line-height: 1.5;
+  font-size: 1rem;
+  color: var(--text);
+  margin: 0;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .univita-ble-page .expert-confirm-note {
-  background: #F8FAFC; padding: 1rem; border-radius: var(--radius-md);
-  border: 1px solid var(--border); margin-top: 0.5rem; width: 100%;
+  background: #F8FAFC;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  margin-top: 0.5rem;
+  width: 100%;
 }
 
-.univita-ble-page .expert-confirm-note p { font-size: 0.8125rem; color: var(--text-muted); margin: 0; line-height: 1.5; }
-
+.univita-ble-page .expert-confirm-note p {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
 
 @media (max-width: 768px) {
 
-  .expert-container.univita-ble-page { padding: 1.25rem; }
+  .expert-container.univita-ble-page {
+    padding: 1.25rem;
+  }
 
-  .univita-ble-page .expert-header { flex-direction: column; align-items: stretch; }
+  .univita-ble-page .expert-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-  .univita-ble-page .expert-search-row { flex-direction: column; align-items: stretch; }
+  .univita-ble-page .expert-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-  .univita-ble-page .expert-search-input-group { max-width: 100%; }
+  .univita-ble-page .expert-search-input-group {
+    max-width: 100%;
+  }
 
-  .univita-ble-page .expert-stats-badge { align-self: flex-start; }
+  .univita-ble-page .expert-stats-badge {
+    align-self: flex-start;
+  }
 
-  .univita-ble-page .expert-pagination { justify-content: center; }
-
+  .univita-ble-page .expert-pagination {
+    justify-content: center;
+  }
 }
 
 /* UniVITA enterprise hardware management enhancements */
@@ -317,34 +532,435 @@
   min-height: auto;
   font-family: 'Inter', system-ui, sans-serif;
 }
-.univita-ble-page .expert-header { margin: 8px 0 14px; align-items: center; gap: 12px; }
-.univita-ble-page .expert-title { font-size: 21px; font-family: 'Inter', sans-serif; letter-spacing: -.035em; margin: 2px 0 3px; }
-.univita-ble-page .expert-subtitle { font-size: 12px; line-height: 1.45; }
-.univita-ble-page .uv-section-kicker { font-size: 10px; letter-spacing: .09em; font-weight: 700; color: #0D9488; }
-.univita-ble-page .uv-hardware-header-actions { display:flex; flex-wrap:wrap; gap:8px; }
-.univita-ble-page .uv-hardware-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin: 0 0 12px; }
-.univita-ble-page .uv-hardware-metric { display:flex; flex-direction:column; gap:4px; background:#fff; border:1px solid #DDE6EB; border-radius:7px; padding:13px 15px; box-shadow:0 1px 2px rgba(15,23,42,.025); }
-.univita-ble-page .uv-hardware-metric span { font-size:11px; font-weight:650; color:#64748B; }
-.univita-ble-page .uv-hardware-metric strong { font-size:26px; font-weight:750; letter-spacing:-.045em; color:#183A40; line-height:1.2; }
-.univita-ble-page .uv-hardware-metric small { font-size:10px; color:#8A9AAA; }
-.univita-ble-page .expert-search-card { padding:10px 12px; margin-bottom:12px; border-radius:7px; box-shadow:none; }
-.univita-ble-page .expert-card { border-radius:7px; box-shadow:none; }
-.univita-ble-page .expert-table th { padding:10px 13px; background:#F3F7F8; font-size:10px; letter-spacing:.045em; }
-.univita-ble-page .expert-table td { padding:11px 13px; font-size:12px; }
-.univita-ble-page .expert-btn-primary, .univita-ble-page .expert-btn-secondary { height:34px; padding:0 13px; border-radius:5px; font-size:11px; }
-.univita-ble-page .expert-btn-primary { background:#0B3B40; }
-.univita-ble-page .expert-btn-primary:hover:not(:disabled) { background:#07575A; }
-.univita-ble-page .expert-btn-icon { border:1px solid #E4E9EE; border-radius:5px; padding:6px; }
-.univita-ble-page .expert-search-input-group { height:35px; background:white; padding:0 10px; }
-.univita-ble-page .expert-clean-input { font-size:12px; }
-.univita-ble-page .expert-stats-badge { border-radius:5px; font-size:11px; }
-.univita-ble-page .expert-pagination { padding:10px 13px; background:#fff; }
-.univita-ble-page .uv-search-clear { display:inline-flex; align-items:center; justify-content:center; padding:3px; color:#64748B; background:transparent; border:0; cursor:pointer; }
-.univita-ble-page .uv-search-clear:hover { color:#0B3B40; }
-.univita-ble-page :is(button,input,select):focus-visible { outline:2px solid #0D9488; outline-offset:2px; }
-@media (max-width:700px) {
-  .expert-container.univita-ble-page { padding:5px 10px 10px; }
-  .univita-ble-page .uv-hardware-metrics { grid-template-columns:1fr; }
-  .univita-ble-page .expert-header { align-items:flex-start; }
-  .univita-ble-page .expert-search-input-group { min-width:0; }
+
+.univita-ble-page .expert-header {
+  margin: 8px 0 14px;
+  align-items: center;
+  gap: 12px;
 }
+
+.univita-ble-page .expert-title {
+  font-size: 21px;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: -.035em;
+  margin: 2px 0 3px;
+}
+
+.univita-ble-page .expert-subtitle {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.univita-ble-page .uv-section-kicker {
+  font-size: 10px;
+  letter-spacing: .09em;
+  font-weight: 700;
+  color: #0D9488;
+}
+
+.univita-ble-page .uv-hardware-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.univita-ble-page .uv-hardware-metrics {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.univita-ble-page .uv-hardware-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid #DDE6EB;
+  border-radius: 7px;
+  padding: 13px 15px;
+  box-shadow: 0 1px 2px rgba(15,23,42,.025);
+}
+
+.univita-ble-page .uv-hardware-metric span {
+  font-size: 11px;
+  font-weight: 650;
+  color: #64748B;
+}
+
+.univita-ble-page .uv-hardware-metric strong {
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -.045em;
+  color: #183A40;
+  line-height: 1.2;
+}
+
+.univita-ble-page .uv-hardware-metric small {
+  font-size: 10px;
+  color: #8A9AAA;
+}
+
+.univita-ble-page .expert-search-card {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.univita-ble-page .expert-card {
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.univita-ble-page .expert-table th {
+  padding: 10px 13px;
+  background: #F3F7F8;
+  font-size: 10px;
+  letter-spacing: .045em;
+}
+
+.univita-ble-page .expert-table td {
+  padding: 11px 13px;
+  font-size: 12px;
+}
+
+.univita-ble-page .expert-btn-primary, .univita-ble-page .expert-btn-secondary {
+  height: 34px;
+  padding: 0 13px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.univita-ble-page .expert-btn-primary {
+  background: #0B3B40;
+}
+
+.univita-ble-page .expert-btn-primary:hover:not(:disabled) {
+  background: #07575A;
+}
+
+.univita-ble-page .expert-btn-icon {
+  border: 1px solid #E4E9EE;
+  border-radius: 5px;
+  padding: 6px;
+}
+
+.univita-ble-page .expert-search-input-group {
+  height: 35px;
+  background: white;
+  padding: 0 10px;
+}
+
+.univita-ble-page .expert-clean-input {
+  font-size: 12px;
+}
+
+.univita-ble-page .expert-stats-badge {
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.univita-ble-page .expert-pagination {
+  padding: 10px 13px;
+  background: #fff;
+}
+
+.univita-ble-page .uv-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  color: #64748B;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.univita-ble-page .uv-search-clear:hover {
+  color: #0B3B40;
+}
+
+.univita-ble-page :is(button,input,select):focus-visible {
+  outline: 2px solid #0D9488;
+  outline-offset: 2px;
+}
+
+@media (max-width:700px) {
+
+  .expert-container.univita-ble-page {
+    padding: 5px 10px 10px;
+  }
+
+  .univita-ble-page .uv-hardware-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .univita-ble-page .expert-header {
+    align-items: flex-start;
+  }
+
+  .univita-ble-page .expert-search-input-group {
+    min-width: 0;
+  }
+}
+
+/* ============================================================
+   UniVITA Visitor Management — Consistent enterprise UI
+   Read-only access, metrics, tables, actions, and forms
+   ============================================================ */
+
+.expert-container.univita-ble-page {
+  padding: 5px 10px 10px;
+  background: #F8FAFC;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #0F172A;
+  font-size: 13px;
+}
+
+.univita-ble-page .expert-readonly-banner {
+  display: block;
+  padding: 0;
+  margin: 0 0 12px;
+  color: #64748B;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.univita-ble-page .expert-header {
+  margin: 4px 0 12px;
+  gap: 12px;
+  align-items: center;
+}
+
+.univita-ble-page .expert-subtitle {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748B;
+}
+
+.univita-ble-page .uv-hardware-metrics {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.univita-ble-page .uv-hardware-metric {
+  gap: 5px;
+  padding: 13px 15px;
+  border: 1px solid #E2E8F0;
+  border-radius: 7px;
+  background: #FFFFFF;
+  box-shadow: none;
+}
+
+.univita-ble-page .uv-hardware-metric span {
+  color: #64748B;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.univita-ble-page .uv-hardware-metric strong {
+  color: #0F172A;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.univita-ble-page .uv-hardware-metric small {
+  color: #94A3B8;
+  font-size: 11px;
+}
+
+.univita-ble-page .expert-btn-primary,
+.univita-ble-page .expert-btn-secondary {
+  min-height: 34px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.univita-ble-page .expert-btn-primary {
+  background: #0D9488;
+  border-color: #0D9488;
+}
+
+.univita-ble-page .expert-btn-primary:hover:not(:disabled) {
+  background: #0F766E;
+  border-color: #0F766E;
+  box-shadow: none;
+}
+
+.univita-ble-page .expert-search-card,
+.univita-ble-page .expert-card {
+  border-color: #E2E8F0;
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.univita-ble-page .expert-search-card {
+  padding: 11px 13px;
+  margin-bottom: 10px;
+}
+
+.univita-ble-page .expert-search-input-group {
+  height: 36px;
+  background: #FFFFFF;
+  border-color: #CBD5E1;
+  border-radius: 5px;
+}
+
+.univita-ble-page .expert-stats-badge {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  color: #64748B;
+  font-weight: 500;
+}
+
+.univita-ble-page .expert-table th {
+  padding: 11px 14px;
+  background: #F5F8FA;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+}
+
+.univita-ble-page .expert-table td {
+  padding: 11px 14px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.univita-ble-page .expert-action-group {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.univita-ble-page .expert-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 32px;
+  padding: 0 9px;
+  background: #FFFFFF;
+  border: 1px solid #D8E1E9;
+  border-radius: 5px;
+  color: #334155;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.univita-ble-page .expert-btn-icon:hover {
+  background: #F8FAFC;
+  border-color: #94A3B8;
+}
+
+.univita-ble-page .expert-btn-icon.danger {
+  color: #B42318;
+}
+
+.univita-ble-page .expert-btn-icon.danger:hover {
+  background: #FEF2F2;
+  border-color: #FECACA;
+}
+
+.univita-ble-page .expert-form-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.univita-ble-page .expert-form-stack {
+  gap: 13px;
+}
+
+.univita-ble-page .expert-clean-input.border {
+  height: 38px;
+  padding: 8px 11px;
+  font-size: 13px;
+  border-radius: 5px;
+}
+
+.univita-ble-page .expert-confirm-body {
+  align-items: flex-start;
+  gap: 11px;
+  padding: 0;
+  text-align: left;
+}
+
+.univita-ble-page .expert-confirm-title,
+.univita-ble-page .expert-confirm-note p {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.55;
+}
+
+.univita-ble-page .expert-confirm-note {
+  margin-top: 0;
+  padding: 10px 12px;
+  background: #F8FAFC;
+  border-color: #E2E8F0;
+  border-radius: 5px;
+}
+
+.univita-ble-page .expert-empty {
+  padding: 32px 16px;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.univita-ble-page .expert-empty p {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.univita-ble-page .expert-pagination {
+  padding: 10px 13px;
+  background: #FFFFFF;
+}
+
+.univita-ble-page :is(button, input, select):focus-visible {
+  outline: 2px solid #0D9488;
+  outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+
+  .univita-ble-page .uv-hardware-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .univita-ble-page .expert-search-row,
+  .univita-ble-page .expert-header {
+    align-items: stretch;
+  }
+
+  .univita-ble-page .expert-search-input-group {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+}
+

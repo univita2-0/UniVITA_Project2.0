@@ -14,6 +14,8 @@ import './AppointmentPage.css';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_REGEX = /^[0-9+\-\s()]{7,15}$/;
+const OTHER_VISIT_REASON = '__other_visit_reason__';
+const MAX_CUSTOM_REASON_LENGTH = 200;
 
 const getLocalTodayString = () => {
   const now = new Date();
@@ -21,6 +23,15 @@ const getLocalTodayString = () => {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const getPHBookingNow = () => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date());
+  const get = type => parts.find(p => p.type === type)?.value || '00';
+  return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` };
 };
 
 const getBackendBaseUrl = () => {
@@ -61,23 +72,18 @@ const checkAdmissionsStatus = () => {
     const timeNum = phDate.getHours() + phDate.getMinutes() / 60;
 
     if (day === 0) {
-      return { isOpen: false, text: 'Admissions Closed', note: 'Closed on Sundays • Opens Monday 8:00 AM' };
+      return { isOpen: false, text: 'Office Closed', note: 'Closed on Sundays • Opens Monday 9:00 AM' };
     }
     if (day >= 1 && day <= 5) {
-      if (timeNum >= 8 && timeNum < 17) {
-        return { isOpen: true, text: 'Admissions Open', note: 'Scheduled visits available today' };
+      if (timeNum >= 9 && timeNum < 17) {
+        return { isOpen: true, text: 'Office Open', note: 'Office is currently within its posted weekday hours' };
       }
-      return { isOpen: false, text: 'Admissions Closed', note: timeNum < 8 ? 'Opens today at 8:00 AM' : 'Closed for the day • Opens 8:00 AM tomorrow' };
+      return { isOpen: false, text: 'Office Closed', note: timeNum < 9 ? 'Opens at 9:00 AM' : 'Contact us during weekday office hours' };
     }
-    if (day === 6) {
-      if (timeNum >= 8 && timeNum < 12) {
-        return { isOpen: true, text: 'Admissions Open', note: 'Saturday session until 12:00 PM' };
-      }
-      return { isOpen: false, text: 'Admissions Closed', note: 'Weekend hours concluded • Opens Monday 8:00 AM' };
-    }
-    return { isOpen: false, text: 'Admissions Closed', note: 'Security registration is required at arrival.' };
+    if (day === 6) return { isOpen: false, text: 'Office Closed', note: 'Office reopens Monday at 9:00 AM' };
+    return { isOpen: false, text: 'Office Closed', note: 'Security registration is required at arrival.' };
   } catch (e) {
-    return { isOpen: false, text: 'Admissions Closed', note: 'Security registration is required at arrival.' };
+    return { isOpen: false, text: 'Office Closed', note: 'Security registration is required at arrival.' };
   }
 };
 
@@ -96,9 +102,9 @@ const DEFAULT_COURSES = sortCourseModules([
   },
   {
     title: "AHA BLS & ACLS Training",
-    badge: "AHA Certified",
+    badge: "AHA Programs",
     subtitle: "American Heart Association certified life support programs.",
-    description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and AHA certification upon completion.",
+    description: "Master life-saving resuscitation techniques with hands-on high-fidelity simulation and course completion credentials, according to program.",
     courses: [
       "AHA HeartCode Basic Life Support (BLS)",
       "AHA Traditional Advanced Cardiovascular Life Support (ACLS)",
@@ -109,7 +115,7 @@ const DEFAULT_COURSES = sortCourseModules([
     title: "AHA Heartsaver | First Aid Training",
     badge: "Emergency Certification",
     subtitle: "Emergency response and life-saving first aid certification.",
-    description: "Equip yourself or your team with essential first aid, CPR, and AED response skills certified by the American Heart Association.",
+    description: "Equip yourself or your team with essential first aid, CPR, and AED response skills covering American Heart Association training topics.",
     courses: [
       "AHA Heartsaver First Aid & CPR with AED (HS-CPRFA)",
       "AHA Heartsaver Basic Life Support (HS-BLS)",
@@ -118,7 +124,7 @@ const DEFAULT_COURSES = sortCourseModules([
   },
   {
     title: "PRC - CPD Courses",
-    badge: "PRC Accredited",
+    badge: "PRC-CPD Programs",
     subtitle: "Continuing professional development for licensed medical practitioners.",
     description: "Fulfill regulatory commission requirements with accredited CPD units and advanced clinical seminars.",
     courses: [
@@ -135,12 +141,19 @@ const DEFAULT_FACILITIES = [
 ];
 
 const DEFAULT_CONTACT = {
-  address: '3F & 5F Westar Building, Shaw Boulevard\nPasig City, Metro Manila',
-  phone_secondary: '+63 912 345 6789',
-  email_admissions: 'admissions@hct.ph',
-  hours_weekday: 'Mon - Fri: 8:00 AM – 5:00 PM',
-  hours_weekend: 'Saturday: 8:00 AM – 12:00 PM',
-  hours_sunday: 'Sunday: CLOSED'
+  address: '3rd and 5th Floors, Westar Building, 611 Shaw Boulevard, Pasig City, Metro Manila',
+  phone_secondary: '+63 917 106 4106',
+  email_admissions: 'inquiries@hct.edu.ph',
+  hours_weekday: 'Monday–Friday: 9:00 AM–5:00 PM',
+  hours_weekend: 'Saturday: Closed',
+  hours_sunday: 'Sunday: Closed',
+  hero_eyebrow: 'Healthcare education and simulation-based training',
+  hero_line1: 'Shaping Tomorrow’s',
+  hero_line2: 'Healthcare Professionals',
+  hero_description: 'Explore hands-on training, professional development, and healthcare learning opportunities at HCT Academy.',
+  about_title: 'Practical Training for Healthcare Professionals',
+  about_description: 'Founded in 2007 as Healthcare Advantage Institute, HCT Academy supports healthcare professionals through simulation-based training, life-support education, and continuing professional development.',
+  privacy_url: '/privacy'
 };
 
 // Accepts both 0/1 (from MySQL) and true/false (from JS)
@@ -191,6 +204,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
+  const [customVisitReason, setCustomVisitReason] = useState('');
+  const [visitConfirmation, setVisitConfirmation] = useState(null);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', date: '', time: '', message: '' });
 
   const [showTimeDropdown, setShowTimeDropdown] = useState(false);
@@ -205,12 +220,14 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const [bookedSlots, setBookedSlots] = useState([]);
   useEffect(() => {
     if (!showAppointmentModal) return;
-    axios.get(`${API_BASE}/appointments/booked-slots`)
+    axios.get(`${API_BASE}/appointments/booked-slots`, { params: formData.date ? { date: formData.date } : {} })
       .then(res => setBookedSlots(Array.isArray(res.data) ? res.data : []))
-      .catch(() => {});
-  }, [showAppointmentModal]);
+      .catch(() => setBookedSlots([]));
+  }, [showAppointmentModal, formData.date]);
   const [toastMessage, setToastMessage] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [bookingError, setBookingError] = useState('');
+  const [applicationError, setApplicationError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [jobs, setJobs] = useState([]);
@@ -231,6 +248,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
     resume: null
   });
   const [submittingApplication, setSubmittingApplication] = useState(false);
+  const [applicationConfirmation, setApplicationConfirmation] = useState(null);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -280,14 +299,15 @@ const AppointmentPage = ({ onAdminLogin }) => {
     axios.get(`${API_BASE}/public/landing-content`)
       .then(res => {
         if (res.data) {
-          if (Array.isArray(res.data.courses_catalog) && res.data.courses_catalog.length > 0) {
+          if (Array.isArray(res.data.courses_catalog)) {
             setCourseCategories(sortCourseModules(res.data.courses_catalog));
           }
-          if (Array.isArray(res.data.facilities_gallery) && res.data.facilities_gallery.length > 0) {
+          if (Array.isArray(res.data.facilities_gallery)) {
             const mapped = res.data.facilities_gallery.map(fac => {
               const formattedImages = (fac.images || []).map(img => resolveMediaUrl(img));
               return {
                 name: fac.name,
+                description: fac.description || '',
                 thumbnail: formattedImages[0] || '',
                 images: formattedImages
               };
@@ -347,6 +367,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
   };
 
   const handleChange = (e) => {
+    setBookingError('');
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -425,6 +446,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
   const handleCompanionCSVUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > 100 * 1024) { showToast('Companion CSV must not exceed 100 KB.', true); e.target.value = ''; return; }
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target.result;
@@ -440,6 +462,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
         }
       }
 
+      if (newCompanions.length > 50) { showToast('Maximum of 50 companions per visit. Please shorten the CSV.', true); e.target.value = ''; return; }
+      const normalizedCompanions = newCompanions.map(c => c.name.trim().toLowerCase());
+      if (new Set(normalizedCompanions).size !== normalizedCompanions.length) { showToast('The CSV contains duplicate companion names.', true); e.target.value = ''; return; }
       if (newCompanions.length > 0) {
         setAdditionalVisitors(newCompanions);
         showToast(`Successfully added ${newCompanions.length} companions from CSV.`);
@@ -453,35 +478,46 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setBookingError('');
     const { name, email, phone, date, time, message } = formData;
 
     if (!name.trim() || !email.trim() || !phone.trim() || !date || !time || !message) {
+      setBookingError('Please fill out all required appointment fields.');
       showToast('Please fill out all required appointment fields.', true);
       return;
     }
 
+    if (message === OTHER_VISIT_REASON) {
+      const customReason = customVisitReason.trim().replace(/\s+/g, ' ');
+      if (customReason.length < 5 || customReason.length > MAX_CUSTOM_REASON_LENGTH) {
+        setBookingError('Specify your visit purpose in 5–200 characters.');
+        showToast('Specify your visit purpose in 5–200 characters.', true);
+        return;
+      }
+    }
+
     if (!EMAIL_REGEX.test(email.trim())) {
+      setBookingError('Please provide a valid email address.');
       showToast('Please provide a valid email address.', true);
       return;
     }
 
     if (!PHONE_REGEX.test(phone.trim())) {
+      setBookingError('Please provide a valid phone number.');
       showToast('Please provide a valid phone number.', true);
       return;
     }
 
-    const localToday = getLocalTodayString();
-    const now = new Date();
-    const currentH = now.getHours();
-    const currentM = now.getMinutes();
-    const currentTimeStr = `${String(currentH).padStart(2, '0')}:${String(currentM).padStart(2, '0')}`;
+    const { date: localToday, time: currentTimeStr } = getPHBookingNow();
 
     if (date < localToday) {
+      setBookingError('You cannot book an appointment for a past date.');
       showToast('You cannot book an appointment for a past date.', true);
       return;
     }
 
     if (date === localToday && time <= currentTimeStr) {
+      setBookingError('You cannot select a time that has already passed earlier today.');
       showToast('You cannot select a time that has already passed earlier today.', true);
       return;
     }
@@ -491,9 +527,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
     const weekday = new Date(Date.UTC(yy, mm - 1, dd)).getUTCDay();
     const mins = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
     if (weekday === 0 || mins < 480 || (weekday === 6 ? mins >= 720 : mins >= 1020)) {
-      showToast(weekday === 0 ? 'Appointments are not available on Sundays.' :
+      const scheduleMessage = weekday === 0 ? 'Appointments are not available on Sundays.' :
         weekday === 6 ? 'Saturday appointments: 8:00 AM–11:59 AM.' :
-          'Weekday appointments: 8:00 AM–4:59 PM.', true);
+          'Weekday appointments: 8:00 AM–4:59 PM.';
+      setBookingError(scheduleMessage);
+      showToast(scheduleMessage, true);
       return;
     }
 
@@ -504,11 +542,13 @@ const AppointmentPage = ({ onAdminLogin }) => {
     });
 
     if (isConflict) {
+      setBookingError('This date and time slot is already booked. Please choose another time.');
       showToast('This date and time slot is already booked. Please choose another time.', true);
       return;
     }
 
     if (name.trim().split(/\s+/).length < 2) {
+      setBookingError('Please enter your first and last name.');
       showToast('Please enter your first and last name.', true);
       return;
     }
@@ -516,19 +556,23 @@ const AppointmentPage = ({ onAdminLogin }) => {
       const normalizedNames = [name, ...additionalVisitors.map(v => v.name || '')]
         .map(v => v.trim().replace(/\s+/g, ' ').toLowerCase());
       if (new Set(normalizedNames).size !== normalizedNames.length) {
-        showToast('Each visitor must have a unique full name.', true);
+        setBookingError('Each visitor must have a unique full name.');
+      showToast('Each visitor must have a unique full name.', true);
         return;
       }
       if (additionalVisitors.length > 50) {
-        showToast('Maximum of 50 companions per appointment.', true);
+        setBookingError('Maximum of 50 companions per appointment.');
+      showToast('Maximum of 50 companions per appointment.', true);
         return;
       }
       if (additionalVisitors.length === 0) {
-        showToast('Please add at least one companion name or uncheck the companion option.', true);
+        setBookingError('Please add at least one companion name or uncheck the companion option.');
+      showToast('Please add at least one companion name or uncheck the companion option.', true);
         return;
       }
       if (additionalVisitors.some(v => !v.name.trim())) {
-        showToast('Please provide names for all accompanying visitors.', true);
+        setBookingError('Please provide names for all accompanying visitors.');
+      showToast('Please provide names for all accompanying visitors.', true);
         return;
       }
     }
@@ -539,24 +583,34 @@ const AppointmentPage = ({ onAdminLogin }) => {
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
 
+      const isCustomReason = message === OTHER_VISIT_REASON;
+      const reasonText = isCustomReason
+        ? `Other: ${customVisitReason.trim().replace(/\s+/g, ' ')}`
+        : message;
+
       const payload = {
         firstName, lastName,
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
         date,
         time,
-        reason: message,
+        reason: reasonText,
+        reason_type: isCustomReason ? 'other' : 'predefined',
+        custom_reason: isCustomReason ? customVisitReason.trim().replace(/\s+/g, ' ') : null,
         additionalVisitors: isMultipleVisitors ? additionalVisitors.filter(v => v.name.trim()) : []
       };
 
-      await axios.post(`${API_BASE}/appointments/book`, payload);
-      showToast('Appointment request submitted successfully! Check your email for confirmation.');
+      const response = await axios.post(`${API_BASE}/appointments/book`, payload);
+      setVisitConfirmation({ id: response.data?.appointmentId || null, name, date, time, reason: reasonText });
+      showToast('Visit request received and awaiting staff approval.');
       setFormData({ name: '', email: '', phone: '', date: '', time: '', message: '' });
+      setCustomVisitReason('');
       setIsMultipleVisitors(false);
       setAdditionalVisitors([]);
       setShowAppointmentModal(false);
     } catch (err) {
       console.error(err);
+      setBookingError(err.response?.data?.message || 'Submission failed. Please try again later.');
       showToast(err.response?.data?.message || 'Submission failed. Please try again later.', true);
     } finally {
       setIsSubmitting(false);
@@ -568,6 +622,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
   // ============================================================
   const openApplyModal = (job) => {
     setSelectedJob(job);
+    setPrivacyAccepted(false);
+    setApplicationError('');
     setApplicationForm({
       full_name: '',
       email: '',
@@ -580,6 +636,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
   };
 
   const handleApplicationChange = (e) => {
+    setApplicationError('');
     setApplicationForm({ ...applicationForm, [e.target.name]: e.target.value });
   };
 
@@ -593,12 +650,10 @@ const AppointmentPage = ({ onAdminLogin }) => {
       return;
     }
     const allowedTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      'application/pdf'
     ];
     if (!allowedTypes.includes(file.type)) {
-      showToast('Only PDF, DOC, or DOCX files are allowed.', true);
+      showToast('Please upload a PDF resume.', true);
       e.target.value = '';
       return;
     }
@@ -607,25 +662,36 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
   const submitApplication = async (e) => {
     e.preventDefault();
+    setApplicationError('');
     const { full_name, email, phone, resume, prc_license_no } = applicationForm;
     const prcRequired = jobRequiresPrc(selectedJob);
 
     if (!full_name.trim() || !email.trim() || !phone.trim() || !resume) {
+      setApplicationError('Please fill in all required fields and attach your resume.');
       showToast('Please fill in all required fields and attach your resume.', true);
       return;
     }
 
     if (!EMAIL_REGEX.test(email.trim())) {
+      setApplicationError('Please provide a valid email address.');
       showToast('Please provide a valid email address.', true);
       return;
     }
 
     if (!PHONE_REGEX.test(phone.trim())) {
+      setApplicationError('Please provide a valid phone number.');
       showToast('Please provide a valid phone number.', true);
       return;
     }
 
+    if (!privacyAccepted) {
+      setApplicationError('Please acknowledge the applicant privacy notice.');
+      showToast('Please acknowledge the applicant privacy notice.', true);
+      return;
+    }
+
     if (prcRequired && !prc_license_no.trim()) {
+      setApplicationError('This position requires a PRC License Number. Please provide it.');
       showToast('This position requires a PRC License Number. Please provide it.', true);
       return;
     }
@@ -645,7 +711,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
 
       const res = await axios.post(`${API_BASE}/jobs/apply`, fd);
       if (res.data.success) {
-        showToast('Application submitted successfully!');
+        setApplicationConfirmation({ position: selectedJob.title, reference: res.data?.id || res.data?.applicationId || null });
+        showToast('Application received for HR screening.');
         setShowApplyModal(false);
         setApplicationForm({
           full_name: '',
@@ -656,10 +723,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
           resume: null
         });
       } else {
+        setApplicationError(res.data.message || res.data.error || 'Failed to submit application.');
         showToast(res.data.message || res.data.error || 'Failed to submit application.', true);
       }
     } catch (err) {
       const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'Network error';
+      setApplicationError(msg);
       showToast(`Submission failed: ${msg}`, true);
     } finally {
       setSubmittingApplication(false);
@@ -771,19 +840,17 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <div className="ap-hero-grid">
                 <div className="ap-hero-text">
                   <span className="ap-hero-badge">
-                    <Sparkles size={16} /> Philippines' Premier Healthcare Academy
+                    <Sparkles size={16} /> {contactInfo.hero_eyebrow || DEFAULT_CONTACT.hero_eyebrow}
                   </span>
                   <h1 className="ap-hero-title">
-                    <span className="text-white">Shaping Tomorrow's</span><br />
-                    <span className="text-accent">Healthcare Heroes</span>
+                    <span className="text-white">{contactInfo.hero_line1 || DEFAULT_CONTACT.hero_line1}</span><br />
+                    <span className="text-accent">{contactInfo.hero_line2 || DEFAULT_CONTACT.hero_line2}</span>
                   </h1>
                   <p className="ap-hero-subtitle">
-                    Experience world-class clinical simulation-based training, renowned medical instructors, and a curriculum engineered to produce competent, compassionate healthcare leaders.
+                    {contactInfo.hero_description || DEFAULT_CONTACT.hero_description}
                   </p>
                   <div className="ap-hero-actions">
-                    <button className="btn-ap-primary-large" onClick={() => setShowAppointmentModal(true)}>
-                      <Calendar size={20} /> Schedule a Visit
-                    </button>
+                    
                     <button className="btn-ap-secondary-large" onClick={() => scrollToSection('about')}>
                       Learn More <ArrowRight size={20} />
                     </button>
@@ -795,22 +862,22 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     <div className="ap-floating-item float-1">
                       <div className="ap-float-icon"><ShieldCheck size={30} /></div>
                       <div>
-                        <h2>Safe & Monitored Campus</h2>
-                        <p>BLE-powered visitor positioning & security</p>
+                        <h2>Campus Visit Management</h2>
+                        <p>Visitor requests, registration, and monitored facility access</p>
                       </div>
                     </div>
                     <div className="ap-floating-item float-2">
                       <div className="ap-float-icon"><Users size={30} /></div>
                       <div>
-                        <h2>Expert Medical Faculty</h2>
-                        <p>Actively practicing physicians & nurse clinicians</p>
+                        <h2>Healthcare-Focused Programs</h2>
+                        <p>Life-support training and continuing professional education</p>
                       </div>
                     </div>
                     <div className="ap-floating-item float-3">
                       <div className="ap-float-icon"><GraduationCap size={30} /></div>
                       <div>
-                        <h2>Accredited Simulation Training</h2>
-                        <p>High-fidelity patient simulation laboratories</p>
+                        <h2>Simulation-Based Learning</h2>
+                        <p>Skills-focused instruction and practical training facilities</p>
                       </div>
                     </div>
                   </div>
@@ -823,24 +890,24 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <div className="ap-container">
                 <div className="ap-section-header">
                   <span className="ap-tag">Why HCT Academy</span>
-                  <h2>Building Careers in Healthcare</h2>
-                  <p>Our approach combines cutting-edge simulation labs, experienced medical educators, and strong industry ties.</p>
+                  <h2>{contactInfo.about_title || DEFAULT_CONTACT.about_title}</h2>
+                  <p>{contactInfo.about_description || DEFAULT_CONTACT.about_description}</p>
                 </div>
                 <div className="ap-features-grid">
                   <div className="ap-feature-card stagger-1">
                     <div className="ap-feature-icon"><Award size={24} /></div>
-                    <h3>Accredited Programs</h3>
-                    <p>CHED-recognized curricula meticulously aligned with global healthcare standards and best practices.</p>
+                    <h3>Healthcare Training Programs</h3>
+                    <p>Life support, continuing professional development, enhancement courses, and related learning pathways.</p>
                   </div>
                   <div className="ap-feature-card stagger-2">
                     <div className="ap-feature-icon"><Users size={24} /></div>
-                    <h3>Expert Instructors</h3>
-                    <p>Learn directly from actively practicing doctors and nurses bringing decades of real-world experience.</p>
+                    <h3>Professional Development</h3>
+                    <p>Learning options for nurses, healthcare practitioners, and organizations seeking skills development.</p>
                   </div>
                   <div className="ap-feature-card stagger-3">
                     <div className="ap-feature-icon"><Building2 size={24} /></div>
                     <h3>Modern Facilities</h3>
-                    <p>Immersive learning through state-of-the-art simulation labs, smart classrooms, and clinical equipment.</p>
+                    <p>Simulation-based and practical learning, including healthcare training laboratories and educational technology.</p>
                   </div>
                 </div>
               </div>
@@ -855,6 +922,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <p>Explore accredited clinical certifications, life support programs, and continuing professional development modules.</p>
                 </div>
 
+                <div className="ap-course-track-tabs" role="tablist" aria-label="Training programs">
+                  {courseCategories.map((category, index) => (
+                    <button key={index} type="button" role="tab" aria-selected={currentCourseIndex === index} className={`ap-course-track-tab ${currentCourseIndex === index ? 'active' : ''}`} onClick={() => setCurrentCourseIndex(index)}>{category.title}</button>
+                  ))}
+                </div>
                 {courseCategories.length > 0 && activeCourse && (
                   <div className="ap-clean-showcase-wrap">
                     <button className="ap-arrow-ctrl prev" onClick={prevCourse} aria-label="Previous Program">
@@ -864,7 +936,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     <div className="ap-clean-course-card">
                       <div className="ap-clean-card-meta">
                         <span className="ap-clean-card-badge">{activeCourse.badge || 'Accredited Track'}</span>
-                        <span className="ap-clean-card-count">{(activeCourse.courses || []).length} Modules</span>
+                        <span className="ap-clean-card-count">{(activeCourse.courses || []).length} Courses / Modules</span>
                       </div>
 
                       <div className="ap-clean-card-body">
@@ -921,7 +993,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     const totalCount = hasImages ? fac.images.length : 0;
 
                     return (
-                      <div key={idx} className={`ap-facility-card stagger-${idx + 1}`} onClick={() => setSelectedFacility(fac)}>
+                      <div key={idx} className={`ap-facility-card stagger-${idx + 1}`} role="button" tabIndex={0} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedFacility(fac); } }} onClick={() => setSelectedFacility(fac)}>
                         <div className="ap-facility-img-wrapper">
                           {thumbnailSrc ? (
                             <img
@@ -931,6 +1003,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                               loading="lazy"
                               onError={(e) => {
                                 e.currentTarget.style.display = 'none';
+                                e.currentTarget.parentElement?.classList.add('ap-image-failed');
                               }}
                             />
                           ) : (
@@ -945,7 +1018,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                           </div>
                         </div>
                         <div className="ap-facility-name">
-                          <span>{fac.name}</span>
+                          <span>{fac.name}</span>{fac.description && <small>{fac.description}</small>}
                         </div>
                       </div>
                     );
@@ -954,7 +1027,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
               </div>
             </section>
 
-            {/* EXCLUSIVE INSTRUCTOR MOBILE APP DOWNLOAD SECTION */}
+{/* EXCLUSIVE INSTRUCTOR MOBILE APP DOWNLOAD SECTION */}
             <section className="ap-section ap-bg-white" style={{ padding: '4rem 0' }}>
               <div className="ap-container">
                 <div style={{
@@ -988,7 +1061,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                       Mobile Application
                     </h2>
                     <p style={{ color: '#94A3B8', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
-                      This Android application is strictly for active HCT Academy instructors for geo-verified attendance tracking and scheduling. Please log in with your institutional credentials after installation.
+                      The UniVITA instructor app supports Android and iOS. The APK below is for Android only; iOS users should obtain installation guidance through HCT Academy. Institutional credentials are required.
                     </p>
                   </div>
                   <div>
@@ -1097,122 +1170,70 @@ const AppointmentPage = ({ onAdminLogin }) => {
           </>
         )}
 
-        {/* CAREERS PAGE */}
+        {/* CAREERS — focused recruitment workspace */}
         {activePage === 'careers' && (
-          <div className="ap-careers-page-wrapper">
-            <section className="ap-careers-hero-clean">
-              <div className="ap-container">
-                <div className="ap-careers-header-box">
-                  <span className="ap-tag">Careers at HCT Academy</span>
-                  <h1>Join Our Faculty & Clinical Team</h1>
-                  <p>Help educate and inspire the next generation of healthcare professionals with modern clinical simulation tools and institutional growth opportunities.</p>
+          <div className="ap-careers-redesign">
+            <section className="ap-careers-banner">
+              <div className="ap-container ap-careers-banner-grid">
+                <div className="ap-careers-banner-copy">
+                  <span className="ap-careers-kicker"><Briefcase size={15}/> CAREERS AT HCT ACADEMY</span>
+                  <h1>{contactInfo.careers_title || 'Find Your Place in Healthcare Education'}</h1>
+                  <p>{contactInfo.careers_description || 'Explore career opportunities across our clinical, instructional, administrative, and support teams.'}</p>
+                  <button type="button" className="ap-careers-explore" onClick={() => document.getElementById('ap-open-positions')?.scrollIntoView({behavior:'smooth',block:'start'})}>
+                    Explore openings <ArrowRight size={17}/>
+                  </button>
+                </div>
+                <div className="ap-careers-banner-side" aria-label="Recruitment information">
+                  <div className="ap-careers-side-icon"><Users size={23}/></div>
+                  <strong>Join our team</strong>
+                  <p>Review open positions, check the qualifications, and apply directly through UniVITA.</p>
+                  <div className="ap-careers-banner-stat"><span>Currently accepting applications</span><strong>{jobs.length} {jobs.length === 1 ? 'opening' : 'openings'}</strong></div>
                 </div>
               </div>
             </section>
 
-            <section className="ap-section ap-bg-gray" style={{ paddingTop: '2.5rem' }}>
+            <section id="ap-open-positions" className="ap-careers-main-section">
               <div className="ap-container">
-                <div className="ap-clean-filter-bar">
-                  <div className="ap-clean-search-input">
-                    <Search size={16} className="search-icon" />
-                    <input
-                      type="text"
-                      placeholder="Search roles, skills, or departments..."
-                      value={jobSearchTerm}
-                      onChange={(e) => setJobSearchTerm(e.target.value)}
-                    />
-                    {jobSearchTerm && (
-                      <button className="clear-btn" onClick={() => setJobSearchTerm('')} aria-label="Clear Search">
-                        <X size={14} />
-                      </button>
-                    )}
+                <div className="ap-careers-section-heading">
+                  <div><span className="ap-careers-section-eyebrow">OPPORTUNITIES</span><h2>Open Positions</h2><p>Browse current vacancies and review the qualifications before applying.</p></div>
+                  <span className="ap-careers-count"><Briefcase size={16}/>{filteredJobs.length} {filteredJobs.length === 1 ? 'position' : 'positions'}</span>
+                </div>
+                <div className="ap-careers-board">
+                  <div className="ap-careers-toolbar">
+                    <div className="ap-careers-search">
+                      <Search size={18}/>
+                      <input aria-label="Search job postings" type="search" placeholder="Search job title, skills, or location" value={jobSearchTerm} onChange={e => setJobSearchTerm(e.target.value)}/>
+                    </div>
+                    <div className="ap-careers-filter-label"><span>Department</span><select aria-label="Filter by department" value={jobDepartmentFilter} onChange={e => setJobDepartmentFilter(e.target.value)}>{uniqueDepartments.map(dept => <option key={dept} value={dept}>{dept}</option>)}</select></div>
                   </div>
-
-                  <div className="ap-clean-dept-pills">
-                    {uniqueDepartments.map(dept => (
-                      <button
-                        key={dept}
-                        type="button"
-                        className={`ap-dept-chip ${jobDepartmentFilter === dept ? 'active' : ''}`}
-                        onClick={() => setJobDepartmentFilter(dept)}
-                      >
-                        {dept}
-                      </button>
+                  <div className="ap-careers-list">
+                    {filteredJobs.length === 0 ? (
+                      <div className="ap-careers-no-results"><Briefcase size={28}/><h3>No positions found</h3><p>{jobs.length ? 'Try another search or department.' : 'There are no published openings at the moment.'}</p><button type="button" onClick={() => {setJobSearchTerm('');setJobDepartmentFilter('All');}}>Clear filters</button></div>
+                    ) : filteredJobs.map(job => (
+                      <article key={job.id} className="ap-careers-position">
+                        <div className="ap-careers-position-content">
+                          <div className="ap-careers-position-top"><span className="ap-careers-department">{job.department || 'General'}</span><span className="ap-careers-open-status"><span/>Accepting applications</span></div>
+                          <h3>{job.title}</h3>
+                          <div className="ap-careers-position-meta"><span><Briefcase size={15}/>{job.employment_type || 'Full-time'}</span><span><MapPin size={15}/>{job.location_type || 'On-site'}{job.location ? ` · ${job.location}` : ''}</span>{jobRequiresPrc(job) && <span><ShieldCheck size={15}/>PRC required</span>}</div>
+                          <p className="ap-careers-position-description">{job.description?.length > 190 ? `${job.description.slice(0,190).trim()}…` : job.description}</p>
+                          {job.requirements && <div className="ap-careers-qualification"><strong>Key qualifications</strong><span>{job.requirements.length > 165 ? `${job.requirements.slice(0,165).trim()}…` : job.requirements}</span></div>}
+                        </div>
+                        <div className="ap-careers-position-aside">
+                          <div className="ap-careers-salary"><small>Monthly salary</small><strong>{job.salary_min != null && job.salary_max != null ? `₱${Number(job.salary_min).toLocaleString()} – ₱${Number(job.salary_max).toLocaleString()}` : 'Not specified'}</strong></div>
+                          <button type="button" className="ap-careers-apply-btn" onClick={() => openApplyModal(job)}>Apply for Position <ArrowRight size={16}/></button>
+                          <button type="button" className="ap-careers-details-btn" onClick={() => {setSelectedJobDetails(job);setShowJobDetailsModal(true);}}>View position details</button>
+                        </div>
+                      </article>
                     ))}
                   </div>
                 </div>
-
-                <div className="ap-clean-count-label">
-                  <span>{filteredJobs.length} available position{filteredJobs.length === 1 ? '' : 's'}</span>
+                <div className="ap-careers-process">
+                  <div className="ap-careers-process-heading"><span className="ap-careers-section-eyebrow">APPLICATION GUIDE</span><h2>What happens after you apply?</h2><p>Our recruitment team reviews applications against the requirements of each position.</p></div>
+                  <div className="ap-careers-process-grid">
+                    {[['01','Submit your application','Complete the form and upload your resume.'],['02','Application screening','HR reviews the documents and qualifications.'],['03','Shortlisting and interview','Selected candidates are contacted for the next stage.'],['04','Hiring decision','The recruitment team records the outcome.']].map(([number,title,desc]) => <div className="ap-careers-process-item" key={number}><span>{number}</span><strong>{title}</strong><p>{desc}</p></div>)}
+                  </div>
+                  <p className="ap-careers-process-note"><AlertCircle size={16}/> Submission does not guarantee an interview or job offer. Please ensure your contact information is accurate.</p>
                 </div>
-
-                <div className="ap-clean-jobs-grid">
-                  {filteredJobs.length === 0 ? (
-                    <div className="ap-clean-empty-state">
-                      <Briefcase size={44} className="empty-icon" />
-                      <h4>No Openings Found</h4>
-                      <p>There are currently no job postings matching your selected filters.</p>
-                      <button
-                        className="btn-ap-secondary"
-                        style={{ color: '#0F172A', background: '#F1F5F9', border: '1px solid #CBD5E1' }}
-                        onClick={() => { setJobSearchTerm(''); setJobDepartmentFilter('All'); }}
-                      >
-                        Clear Search Filters
-                      </button>
-                    </div>
-                  ) : (
-                    filteredJobs.map((job) => (
-                      <div key={job.id} className="ap-clean-job-card">
-                        <div className="ap-job-card-top">
-                          <span className="ap-job-dept-tag">{job.department || 'General'}</span>
-                          <span className="ap-job-worktype-tag">{job.employment_type || 'Full-time'}</span>
-                        </div>
-
-                        <h3 className="ap-clean-job-title">{job.title}</h3>
-
-                        <div className="ap-clean-job-details-row">
-                          <span className="ap-clean-meta-item">
-                            <MapPin size={13} /> {job.location_type || 'On-site'} • {job.location || 'Pasig City'}
-                          </span>
-                          {(job.salary_min || job.salary_max) && (
-                            <span className="ap-clean-meta-item salary">
-                              <DollarSign size={13} />
-                              ₱{Number(job.salary_min || 0).toLocaleString()}
-                              {job.salary_max ? ` - ₱${Number(job.salary_max).toLocaleString()}` : ''} / mo
-                            </span>
-                          )}
-                          {jobRequiresPrc(job) && (
-                            <span className="ap-clean-meta-item prc-required">
-                              <ShieldCheck size={13} /> PRC Required
-                            </span>
-                          )}
-                        </div>
-
-                        <p className="ap-clean-job-desc">
-                          {job.description?.length > 130 ? `${job.description.substring(0, 130)}...` : job.description}
-                        </p>
-
-                        <div className="ap-clean-job-actions">
-                          <button
-                            type="button"
-                            className="btn-ap-clean-overview"
-                            onClick={() => { setSelectedJobDetails(job); setShowJobDetailsModal(true); }}
-                          >
-                            View Details
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-ap-clean-apply"
-                            onClick={() => openApplyModal(job)}
-                          >
-                            Apply Now
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
               </div>
             </section>
           </div>
@@ -1227,7 +1248,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <Stethoscope size={28} />
               <h3>HCT Academy</h3>
             </div>
-            <p>Healthcare simulation and training academy providing accredited professional certifications and life-support education.</p>
+            <p>Healthcare education, simulation-based training, and professional skills development.</p>
           </div>
           <div className="ap-footer-links">
             <h3>Quick Links</h3>
@@ -1240,13 +1261,12 @@ const AppointmentPage = ({ onAdminLogin }) => {
             <h3>Portal & Info</h3>
             <a href="#book" onClick={(e) => { e.preventDefault(); setShowAppointmentModal(true); }}>Book Appointment</a>
             <a href="#careers" onClick={(e) => { e.preventDefault(); navigateToCareers(); }}>Careers</a>
-            <a href="#">Privacy Policy</a>
-            <a href="#">Terms of Service</a>
+            <a href="/privacy">Privacy Policy &amp; Terms</a>
           </div>
           <div className="ap-footer-contact">
             <h3>Connect With Us</h3>
-            <p><Mail size={15} /> {contactInfo.email_admissions || 'admissions@hct.ph'}</p>
-            <p><Phone size={15} /> {contactInfo.phone_secondary || '+63 912 345 6789'}</p>
+            <p><Mail size={15} /> {contactInfo.email_admissions || DEFAULT_CONTACT.email_admissions}</p>
+            <p><Phone size={15} /> {contactInfo.phone_secondary || DEFAULT_CONTACT.phone_secondary}</p>
           </div>
         </div>
         <div className="ap-footer-bottom">
@@ -1297,14 +1317,17 @@ const AppointmentPage = ({ onAdminLogin }) => {
       {/* APPOINTMENT BOOKING MODAL */}
       {showAppointmentModal && (
         <div className="ap-modal-overlay" onClick={() => setShowAppointmentModal(false)}>
-          <div className="ap-modal-content" onClick={e => e.stopPropagation()}>
-            <div className="ap-modal-header">
-              <h2>Book a Campus Visit</h2>
+          <div className="ap-modal-content ap-booking-modal" role="dialog" aria-modal="true" aria-labelledby="ap-booking-title" onClick={e => e.stopPropagation()}>
+            <div className="ap-modal-header ap-booking-modal-header">
+              <div className="ap-booking-heading"><div><h2 id="ap-booking-title">Request a Campus Visit</h2><p>Provide your details and preferred visit schedule.</p></div></div>
               <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)} aria-label="Close modal">
                 <X size={20} />
               </button>
             </div>
+            <div className="ap-booking-notice"><ShieldCheck size={17}/><span>Your preferred schedule is subject to staff approval.</span></div>
+            {bookingError && <div className="ap-form-error" role="alert"><AlertCircle size={16}/>{bookingError}</div>}
             <form className="ap-form" onSubmit={handleSubmit}>
+              <div className="ap-booking-section-heading"><strong>Visitor details</strong></div>
               <div className="ap-form-row">
                 <div className="ap-form-group">
                   <label>Full Name <span className="text-danger">*</span></label>
@@ -1322,15 +1345,46 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 </div>
                 <div className="ap-form-group">
                   <label>Reason for Visit <span className="text-danger">*</span></label>
-                  <select name="message" value={formData.message} onChange={handleChange} required>
+                  <select
+                    name="message"
+                    value={formData.message}
+                    onChange={e => {
+                      handleChange(e);
+                      setBookingError('');
+                      if (e.target.value !== OTHER_VISIT_REASON) setCustomVisitReason('');
+                    }}
+                    required
+                  >
                     <option value="">Select a reason...</option>
-                    {visitReasons.map(r => (
+                    {visitReasons.filter(r => r && r.reason_text && r.reason_text.trim().toLowerCase() !== 'other (please specify)').map(r => (
                       <option key={r.id} value={r.reason_text}>{r.reason_text}</option>
                     ))}
+                    <option value={OTHER_VISIT_REASON}>Other (Please Specify)</option>
                   </select>
                 </div>
               </div>
 
+              {formData.message === OTHER_VISIT_REASON && (
+                <div className="ap-custom-visit-reason">
+                  <label htmlFor="ap-custom-visit-reason">Specify Your Reason <span className="text-danger">*</span></label>
+                  <textarea
+                    id="ap-custom-visit-reason"
+                    rows="3"
+                    value={customVisitReason}
+                    onChange={e => { setCustomVisitReason(e.target.value); setBookingError(''); }}
+                    placeholder="Briefly describe the purpose of your visit..."
+                    maxLength={MAX_CUSTOM_REASON_LENGTH}
+                    aria-describedby="ap-custom-visit-reason-hint"
+                    required
+                  />
+                  <div className="ap-custom-visit-reason-footer" id="ap-custom-visit-reason-hint">
+                    <span>5–200 characters. Provide a clear, brief description.</span>
+                    <span>{customVisitReason.length}/{MAX_CUSTOM_REASON_LENGTH}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="ap-booking-section-heading"><strong>Preferred schedule</strong></div>
               <div className="ap-form-row">
                 <div className="ap-form-group">
                   <label>Preferred Date <span className="text-danger">*</span></label>
@@ -1338,8 +1392,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     type="date"
                     name="date"
                     value={formData.date}
-                    onChange={e => { handleChange(e); setFormData(prev => ({ ...prev, time: '' })); }}
-                    min={getLocalTodayString()}
+                    onChange={e => { handleChange(e); setFormData(prev => ({ ...prev, time: '' })); setBookingError(''); }}
+                    min={getPHBookingNow().date}
                     required
                   />
                 </div>
@@ -1348,7 +1402,9 @@ const AppointmentPage = ({ onAdminLogin }) => {
                   <label>Preferred Time <span className="text-danger">*</span></label>
                   <div className="ap-chrome-time-wrapper">
                     <div
+                      role="button" tabIndex={0} aria-expanded={showTimeDropdown} aria-label="Choose visit time"
                       className={`ap-chrome-time-input ${showTimeDropdown ? 'focused' : ''} ${!formData.date ? 'disabled' : ''}`}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (formData.date) setShowTimeDropdown(v => !v); } }}
                       onClick={() => {
                         if (!formData.date) {
                           showToast('Please select a visit date first.', true);
@@ -1373,8 +1429,10 @@ const AppointmentPage = ({ onAdminLogin }) => {
                     </div>
 
                     {showTimeDropdown && (
-                      <div className="ap-chrome-time-dropdown-popover">
-                        <div className="ap-time-col">
+                      <div className="ap-chrome-time-dropdown-popover" role="group" aria-label="Select hour, minute and AM or PM">
+                        <div className="ap-time-picker-header"><strong>Choose preferred time</strong><span>Philippine Time (PHT)</span></div>
+                        <div className="ap-time-picker-columns">
+                        <div className="ap-time-col"><span className="ap-time-column-label">Hour</span>
                           {['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map((h) => (
                             <button
                               key={h}
@@ -1387,7 +1445,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                           ))}
                         </div>
 
-                        <div className="ap-time-col">
+                        <div className="ap-time-col"><span className="ap-time-column-label">Minute</span>
                           {Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0')).map((m) => (
                             <button
                               key={m}
@@ -1400,8 +1458,8 @@ const AppointmentPage = ({ onAdminLogin }) => {
                           ))}
                         </div>
 
-                        <div className="ap-time-col period-col">
-                          {['PM', 'AM'].map((p) => (
+                        <div className="ap-time-col period-col"><span className="ap-time-column-label">Period</span>
+                          {['AM', 'PM'].map((p) => (
                             <button
                               key={p}
                               type="button"
@@ -1412,13 +1470,16 @@ const AppointmentPage = ({ onAdminLogin }) => {
                             </button>
                           ))}
                         </div>
+                        </div>
+                        <button type="button" className="ap-time-picker-done" onClick={() => setShowTimeDropdown(false)}>Done <Check size={15}/></button>
                       </div>
                     )}
                   </div>
-                  <span className="ap-input-hint">Any time can be chosen. Times earlier today are strictly blocked.</span>
+                  <span className="ap-input-hint">Booking hours: Monday–Friday 8:00 AM–4:59 PM; Saturday 8:00–11:59 AM. No Sunday bookings.</span>
                 </div>
               </div>
 
+              <div className="ap-booking-section-heading"><strong>Additional visitors <em>Optional</em></strong></div>
               <div className="ap-checkbox-field">
                 <label>
                   <input
@@ -1510,10 +1571,11 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 </div>
               )}
 
+              <p className="ap-form-privacy-note">Your details are used to process this visit request and security registration. <a href="/privacy">Privacy and data handling policy</a>.</p>
               <div className="ap-modal-footer">
                 <button type="button" className="btn-ap-cancel" onClick={() => setShowAppointmentModal(false)}>Cancel</button>
                 <button type="submit" className="btn-ap-primary" disabled={isSubmitting}>
-                  {isSubmitting ? 'Submitting Request...' : 'Confirm Appointment'}
+                  {isSubmitting ? 'Submitting Request...' : 'Submit Visit Request'}
                 </button>
               </div>
             </form>
@@ -1615,6 +1677,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                 <X size={20} />
               </button>
             </div>
+            {applicationError && <div className="ap-form-error" role="alert"><AlertCircle size={16}/>{applicationError}</div>}
             <form onSubmit={submitApplication} className="ap-form">
               <div className="ap-form-group">
                 <label>Full Name <span className="text-danger">*</span></label>
@@ -1658,7 +1721,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
               <div className="ap-form-group">
                 <label>Resume / CV <span className="text-danger">*</span></label>
                 <div className="ap-file-upload-box">
-                  <input type="file" id="resume-upload" accept=".pdf,.doc,.docx" onChange={handleResumeChange} required className="ap-file-input-hidden" />
+                  <input type="file" id="resume-upload" accept=".pdf,application/pdf" onChange={handleResumeChange} required className="ap-file-input-hidden" />
                   <label htmlFor="resume-upload" className="ap-file-upload-label">
                     <div className="ap-file-icon">
                       <Upload size={24} />
@@ -1667,14 +1730,15 @@ const AppointmentPage = ({ onAdminLogin }) => {
                       {applicationForm.resume ? (
                         <span className="ap-file-name-success"><Check size={16} /> {applicationForm.resume.name}</span>
                       ) : (
-                        <span><span className="text-accent font-semibold">Click to attach file</span> or drag and drop</span>
+                        <span><span className="text-accent font-semibold">Click to attach file</span> from your device</span>
                       )}
                     </div>
-                    <span className="ap-input-hint">Max size: 5MB (PDF, DOC, DOCX).</span>
+                    <span className="ap-input-hint">Maximum size: 5 MB. PDF only.</span>
                   </label>
                 </div>
               </div>
 
+              <label className="ap-applicant-consent"><input type="checkbox" checked={privacyAccepted} onChange={e => setPrivacyAccepted(e.target.checked)} required /> I have read the <a href="/privacy" onClick={e => e.stopPropagation()}>privacy and data handling policy</a> and understand that my application will be reviewed by HCT Academy HR.</label>
               <div className="ap-modal-footer">
                 <button type="button" className="btn-ap-cancel" onClick={() => setShowApplyModal(false)}>Cancel</button>
                 <button type="submit" className="btn-ap-primary" disabled={submittingApplication}>
@@ -1706,6 +1770,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
                       loading="lazy"
                       onError={(e) => {
                         e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement?.classList.add('ap-image-failed');
                       }}
                     />
                   </div>
@@ -1721,6 +1786,32 @@ const AppointmentPage = ({ onAdminLogin }) => {
         </div>
       )}
 
+       {visitConfirmation && (
+         <div className="ap-modal-overlay" role="presentation" onClick={() => setVisitConfirmation(null)}>
+           <div className="ap-modal-content ap-result-modal" role="dialog" aria-modal="true" aria-label="Visit request received" onClick={e => e.stopPropagation()}>
+             <Check size={36} className="ap-result-icon" />
+             <h2>Visit Request Received</h2>
+             <p>Your preferred campus visit has been submitted for staff review. This is <strong>not yet an approved appointment</strong>.</p>
+             {visitConfirmation.id && <div className="ap-result-row"><span>Request ID</span><strong>#{visitConfirmation.id}</strong></div>}
+             <div className="ap-result-row"><span>Visitor</span><strong>{visitConfirmation.name}</strong></div>
+             <div className="ap-result-row"><span>Requested date and time</span><strong>{visitConfirmation.date} · {visitConfirmation.time} PHT</strong></div>
+             <p className="ap-result-footnote">Please await confirmation from HCT Academy. Email delivery may be delayed or unavailable.</p>
+             <button type="button" className="btn-ap-primary" onClick={() => setVisitConfirmation(null)}>Done</button>
+           </div>
+         </div>
+       )}
+       {applicationConfirmation && (
+         <div className="ap-modal-overlay" role="presentation" onClick={() => setApplicationConfirmation(null)}>
+           <div className="ap-modal-content ap-result-modal" role="dialog" aria-modal="true" aria-label="Application received" onClick={e => e.stopPropagation()}>
+             <Check size={36} className="ap-result-icon" />
+             <h2>Application Received</h2>
+             <p>Your application for <strong>{applicationConfirmation.position}</strong> has been received for HR screening.</p>
+             {applicationConfirmation.reference && <div className="ap-result-row"><span>Application reference</span><strong>#{applicationConfirmation.reference}</strong></div>}
+             <p className="ap-result-footnote">Qualified candidates may be contacted by HR. Submission does not guarantee an interview.</p>
+             <button type="button" className="btn-ap-primary" onClick={() => setApplicationConfirmation(null)}>Done</button>
+           </div>
+         </div>
+       )}
       {/* TOAST NOTIFICATION */}
       {toastMessage && (
         <div className={`ap-toast fade-in-up ${toastMessage.isError ? 'error' : 'success'}`}>

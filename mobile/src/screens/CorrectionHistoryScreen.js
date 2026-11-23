@@ -10,11 +10,11 @@ import { fetchCorrectionHistory, API_URL } from './api';
 
 /* ---------------- Fix #8 helpers ---------------- */
 const CANCEL_REASON_MAX_LENGTH = 500;
-const CANCEL_REASON_MIN_LENGTH = 3;
+const CANCEL_REASON_MIN_LENGTH = 0;
 
 const validateCancelReason = (reason) => {
   const trimmed = String(reason || '').trim();
-  if (!trimmed) return 'Please enter a reason for cancellation.';
+  if (!trimmed) return '';
   if (trimmed.length < CANCEL_REASON_MIN_LENGTH) return `Reason must be at least ${CANCEL_REASON_MIN_LENGTH} characters.`;
   if (trimmed.length > CANCEL_REASON_MAX_LENGTH) return `Reason must not exceed ${CANCEL_REASON_MAX_LENGTH} characters.`;
   return '';

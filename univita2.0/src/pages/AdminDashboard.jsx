@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
-  Users, Activity, Clock3, AlertCircle, CheckCircle2, Server,
-  UserRoundMinus, UserRoundCheck, RefreshCw, ShieldCheck,
+  Clock3, AlertCircle, CheckCircle2, RefreshCw,
   ChevronLeft, ChevronRight, ArrowUpRight, CalendarDays,
-  ClipboardList, TrendingUp, CircleDot, Inbox
+  Inbox
 } from 'lucide-react';
 import { API_BASE, fetchRecentActivity, fetchC12WebRecovery } from '../api';
 import './AdminDashboard.css';
@@ -42,11 +41,11 @@ const getClockLabel = (value) => {
 };
 
 const REQUEST_META = {
-  visits: { label: 'Visitor requests', description: 'New appointments awaiting review', icon: UserRoundCheck },
-  leaves: { label: 'Leave requests', description: 'Employee leave decisions', icon: CalendarDays },
-  overtime: { label: 'Overtime requests', description: 'Additional work-hour submissions', icon: Clock3 },
-  appeals: { label: 'Attendance appeals', description: 'Attendance records requiring review', icon: ClipboardList },
-  corrections: { label: 'Correction requests', description: 'Timekeeping correction submissions', icon: CircleDot }
+  visits: { label: 'Visitor requests', description: 'New appointments awaiting review', icon: null },
+  leaves: { label: 'Leave requests', description: 'Employee leave decisions', icon: null },
+  overtime: { label: 'Overtime requests', description: 'Additional work-hour submissions', icon: null },
+  appeals: { label: 'Attendance appeals', description: 'Attendance records requiring review', icon: null },
+  corrections: { label: 'Correction requests', description: 'Timekeeping correction submissions', icon: null }
 };
 
 const AttendanceOverview = ({ stats, recoveryRecords }) => {
@@ -62,7 +61,7 @@ const AttendanceOverview = ({ stats, recoveryRecords }) => {
     <div className="uv-overview-attendance">
       <div className="uv-attendance-heading">
         <div>
-          <span className="uv-overline">TODAY'S ATTENDANCE</span>
+          <span className="uv-overline">Attendance rate</span>
           <div className="uv-attendance-headline">
             <span className="uv-attendance-rate">{percent === null ? '—' : `${percent}%`}</span>
             <span className="uv-attendance-rate-label">Recorded attendance rate</span>
@@ -231,54 +230,60 @@ const AdminDashboard = ({ setView }) => {
   );
 
   return (
-    <main className="uv-overview">
-      <section className="uv-overview-health" aria-label="System health">
-        <div className="uv-health-date"><CalendarDays size={15} /><span>{dateLabel}</span></div>
+    <main className="uv-overview" aria-label="System administrator overview">
+      <header className="uv-overview-intro">
+        <div className="uv-overview-intro-copy">
+          <p>Monitor workforce activity, visitor appointments, attendance and pending requests.</p>
+        </div>
+        <button type="button" className="uv-button uv-button-secondary uv-refresh" disabled={refreshing}
+          onClick={() => loadDashboardData(true)} aria-label="Refresh overview data">
+          <RefreshCw size={15} className={refreshing ? 'uv-spin' : ''} aria-hidden="true" />
+          {refreshing ? 'Refreshing…' : 'Refresh data'}
+        </button>
+      </header>
+
+      <section className="uv-overview-health" aria-label="Reporting information">
+        <div className="uv-health-date"><CalendarDays size={15} aria-hidden="true"/><span>{dateLabel}</span></div>
         <div className="uv-health-right">
-          <span className="uv-health-item"><ShieldCheck size={15} /> Security protocol active</span>
-          <span className={`uv-health-item uv-health-status ${stats.systemStatus === 'Operational' ? 'uv-operational' : 'uv-degraded'}`}>
-            <span className="uv-status-dot" /> System {stats.systemStatus}
+          <span className={`uv-health-status ${stats.systemStatus === 'Operational' ? 'uv-operational' : 'uv-degraded'}`}>
+            <span className="uv-status-dot" aria-hidden="true" />
+            Service: {stats.systemStatus === 'Operational' ? 'Connected' : 'Unavailable'}
           </span>
-          <span className="uv-health-sync"><Clock3 size={14} /> Updated {lastUpdated ? getClockLabel(lastUpdated) : '—'}</span>
+          <span className="uv-health-sync"><Clock3 size={14} aria-hidden="true"/> Updated {lastUpdated ? getClockLabel(lastUpdated) : '—'}</span>
         </div>
       </section>
 
-      <section className="uv-overview-stats" aria-label="Key metrics">
+      <section className="uv-overview-stats" aria-label="Key statistics">
         {[
-          { title: 'Active personnel', value: stats.totalEmployees, note: 'Currently active staff accounts', icon: Users, route: 'employee-management' },
-          { title: "Today's visitors", value: stats.todayVisitors, note: 'Approved visits scheduled today', icon: UserRoundCheck, route: 'manage-request' },
-          { title: 'On leave today', value: stats.onLeaveCount, note: 'Approved leave records for today', icon: UserRoundMinus, route: 'leave-management' }
-        ].map(metric => {
-          const Icon = metric.icon;
-          return (
-            <button type="button" className="uv-metric" key={metric.title} onClick={() => setView(metric.route)}>
-              <span className="uv-metric-header"><span>{metric.title}</span><span className="uv-metric-icon"><Icon size={18} /></span></span>
-              <strong className="uv-metric-value">{metric.value.toLocaleString('en-PH')}</strong>
-              <span className="uv-metric-bottom"><span>{metric.note}</span><ArrowUpRight size={16} /></span>
-            </button>
-          );
-        })}
+          { title: 'Active personnel', value: stats.totalEmployees, note: 'Active employee accounts', route: 'employee-management' },
+          { title: "Today's visitors", value: stats.todayVisitors, note: 'Approved visits scheduled today', route: 'manage-request' },
+          { title: 'On leave today', value: stats.onLeaveCount, note: 'Approved leave records', route: 'leave-management' }
+        ].map(metric => (
+          <button type="button" className="uv-metric" key={metric.title} onClick={() => setView?.(metric.route)}>
+            <span className="uv-metric-header">{metric.title}</span>
+            <strong className="uv-metric-value">{metric.value.toLocaleString('en-PH')}</strong>
+            <span className="uv-metric-bottom"><span>{metric.note}</span><ArrowUpRight size={15} aria-hidden="true"/></span>
+          </button>
+        ))}
       </section>
 
       <section className="uv-overview-workgrid" aria-label="Daily operations">
         <article className="uv-overview-card uv-request-card">
           <header className="uv-card-header">
-            <div><h2>Pending requests</h2></div>
-            <span className="uv-queue-count" aria-label={`${pendingTotal} pending items`}>{pendingTotal} pending</span>
+            <div><h2>Pending requests</h2><p>Items awaiting administrative review</p></div>
+            <span className="uv-queue-count">{pendingTotal} pending</span>
           </header>
           <div className="uv-requests-list">
             {pendingTasks.length === 0 ? (
-              <div className="uv-overview-empty"><CheckCircle2 size={25} /><strong>All caught up</strong><span>No pending requests requiring review.</span></div>
+              <div className="uv-overview-empty"><CheckCircle2 size={24} aria-hidden="true"/><strong>No pending requests</strong><span>There are no requests awaiting review in the loaded records.</span></div>
             ) : pendingTasks.map(task => {
               const meta = REQUEST_META[task.id];
-              const Icon = meta.icon;
               return (
                 <div className="uv-request-row" key={task.id}>
-                  <span className="uv-request-icon"><Icon size={17} /></span>
                   <div className="uv-request-content"><strong>{meta.label}</strong><span>{meta.description}</span></div>
-                  <span className="uv-request-count">{task.count}</span>
-                  <button type="button" className="uv-button uv-button-compact" onClick={() => setView(task.route)} aria-label={`Review ${meta.label}`}>
-                    Review <ChevronRight size={14} />
+                  <span className="uv-request-count" aria-label={`${task.count} ${meta.label}`}>{task.count}</span>
+                  <button type="button" className="uv-button uv-button-compact" onClick={() => setView?.(task.route)} aria-label={`Review ${meta.label}`}>
+                    Review <ChevronRight size={14} aria-hidden="true" />
                   </button>
                 </div>
               );
@@ -286,45 +291,42 @@ const AdminDashboard = ({ setView }) => {
           </div>
         </article>
         <article className="uv-overview-card uv-attendance-card">
-          <header className="uv-card-header">
-            <div><h2>Attendance overview</h2></div>
-            <TrendingUp size={18} className="uv-card-header-icon" />
-          </header>
+          <header className="uv-card-header"><div><h2>Attendance overview</h2><p>Today's classified attendance records</p></div></header>
           <AttendanceOverview stats={attendanceStats} recoveryRecords={c12Monitor} />
         </article>
       </section>
 
       <section className="uv-overview-card uv-activity-card" aria-label="Recent activity">
         <header className="uv-card-header uv-activity-header">
-          <div><h2>Recent activity</h2><p>Latest recorded events today</p></div>
-          
+          <div><h2>Recent activity</h2><p>Latest recorded actions today</p></div>
+          <span className="uv-activity-total">{todayActivities.length} event{todayActivities.length === 1 ? '' : 's'}</span>
         </header>
         <div className="uv-activity-list">
           {displayedActivities.length === 0 ? (
-            <div className="uv-overview-empty"><Inbox size={26} /><strong>No activity yet</strong><span>No activity has been recorded today.</span></div>
+            <div className="uv-overview-empty"><Inbox size={25} aria-hidden="true"/><strong>No activity recorded today</strong><span>Recorded events will appear here when available.</span></div>
           ) : displayedActivities.map((act, index) => {
-            const name = act.actor || act.user_name || act.employee_name || 'System User';
+            const name = act.actor || act.user_name || act.employee_name || 'System user';
             const eventTime = act.occurred_at || act.created_at || act.timestamp;
             return (
               <div className="uv-activity-row" key={act.id || act._id || index}>
                 <div className="uv-activity-avatar" aria-hidden="true">{String(name).charAt(0).toUpperCase()}</div>
-                <div className="uv-activity-main">
-                  <strong>{name}</strong>
-                </div>
+                <div className="uv-activity-main"><strong>{name}</strong></div>
                 <span className="uv-activity-type">{formatActionText(act)}</span>
                 <time className="uv-activity-time" dateTime={eventTime || undefined}>{getClockLabel(eventTime)}</time>
               </div>
             );
           })}
         </div>
-        <footer className="uv-activity-footer">
-          <span>{todayActivities.length === 0 ? '0 events' : `${(currentPage - 1) * ITEMS_PER_PAGE + 1}–${Math.min(currentPage * ITEMS_PER_PAGE, todayActivities.length)} of ${todayActivities.length} events`}</span>
-          <div className="uv-pagination-controls">
-            <button type="button" aria-label="Previous activity page" disabled={currentPage <= 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}><ChevronLeft size={16}/></button>
-            <span>Page {currentPage} of {totalPages}</span>
-            <button type="button" aria-label="Next activity page" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}><ChevronRight size={16}/></button>
-          </div>
-        </footer>
+        {todayActivities.length > ITEMS_PER_PAGE && (
+          <footer className="uv-activity-footer">
+            <span>{`${(currentPage - 1) * ITEMS_PER_PAGE + 1}–${Math.min(currentPage * ITEMS_PER_PAGE, todayActivities.length)} of ${todayActivities.length} events`}</span>
+            <div className="uv-pagination-controls">
+              <button type="button" aria-label="Previous activity page" disabled={currentPage <= 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}><ChevronLeft size={16}/></button>
+              <span>Page {currentPage} of {totalPages}</span>
+              <button type="button" aria-label="Next activity page" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}><ChevronRight size={16}/></button>
+            </div>
+          </footer>
+        )}
       </section>
     </main>
   );

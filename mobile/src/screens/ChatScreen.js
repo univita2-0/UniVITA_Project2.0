@@ -48,6 +48,12 @@ export default function ChatScreen({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [newMsg, setNewMsg] = useState('');
   const [chatError, setChatError] = useState('');
+  const [connectionState, setConnectionState] = useState('offline');
+  const [isSending, setIsSending] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const pendingMessageRef = useRef(null);
+  const historyRequestIdRef = useRef(0);
   const [token, setToken] = useState('');
   const [myUserId, setMyUserId] = useState(null);
   const wsRef = useRef(null);
@@ -83,6 +89,7 @@ export default function ChatScreen({ onClose }) {
   const fetchRooms = async (authToken) => {
     try {
       const res = await fetch(`${API_URL}/chat/rooms`, { headers: { Authorization: `Bearer ${authToken}` } });
+      if (!res.ok) throw new Error('Unable to load conversations');
       const data = await res.json();
       setRooms(Array.isArray(data) ? data : []);
     } catch (err) { setRooms([]); }
@@ -91,6 +98,7 @@ export default function ChatScreen({ onClose }) {
   const fetchAllUsers = async (authToken) => {
     try {
       const res = await fetch(`${API_URL}/employees`, { headers: { Authorization: `Bearer ${authToken}` } });
+      if (!res.ok) throw new Error('Unable to load colleague directory');
       const data = await res.json();
       setAllUsers(Array.isArray(data) ? data : []);
     } catch (err) { setAllUsers([]); }
@@ -99,6 +107,7 @@ export default function ChatScreen({ onClose }) {
   const fetchUnreadCounts = async (authToken) => {
     try {
       const res = await fetch(`${API_URL}/chat/unread-counts`, { headers: { Authorization: `Bearer ${authToken}` } });
+      if (!res.ok) return;
       const data = await res.json();
       const counts = {};
       (Array.isArray(data) ? data : []).forEach(r => { counts[r.room_id] = r.unread; });
@@ -106,24 +115,49 @@ export default function ChatScreen({ onClose }) {
     } catch (err) {}
   };
 
-  // 🟢 Extracted fetch history into useCallback for Retry
+  const markRoomRead = useCallback(async (roomId) => {
+    if (!token || !roomId) return;
+    try {
+      const response = await fetch(`${API_URL}/chat/read/${roomId}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Read update failed');
+      setUnreadCounts(previous => ({ ...previous, [roomId]: 0 }));
+      await fetchUnreadCounts(token);
+    } catch (error) {
+      console.error('Chat read confirmation failed:', error);
+    }
+  }, [token]);
+
   const fetchHistory = useCallback(async () => {
     if (!activeRoom || !token) return;
+    const requestId = ++historyRequestIdRef.current;
+    const selectedRoomId = Number(activeRoom.id);
     setChatError('');
+    setHistoryLoading(true);
     try {
       const res = await fetch(`${API_URL}/chat/history/${activeRoom.id}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setMessages(data);
+      if (requestId !== historyRequestIdRef.current) return;
+      if (res.ok && Array.isArray(data)) {
+        setMessages(previous => {
+          const sameRoomMessages = previous.filter(msg => Number(msg.room_id) === selectedRoomId);
+          const union = new Map([...data, ...sameRoomMessages].map(msg => [Number(msg.id), msg]));
+          return [...union.values()].sort((a, b) => Number(a.id) - Number(b.id));
+        });
+        await markRoomRead(selectedRoomId);
       } else {
         setMessages([]);
         setChatError(data?.message || 'Could not load this conversation. Please try again.');
       }
     } catch (err) {
-      setMessages([]);
-      setChatError(err.message || 'Could not load this conversation. Check your connection and try again.');
+      if (requestId === historyRequestIdRef.current) {
+        setChatError(err.message || 'Could not load this conversation. Check your connection and try again.');
+      }
+    } finally {
+      if (requestId === historyRequestIdRef.current) setHistoryLoading(false);
     }
-  }, [activeRoom, token]);
+  }, [activeRoom?.id, token, markRoomRead]);
 
   useEffect(() => {
     if (!token || !activeRoom) return;
@@ -131,28 +165,51 @@ export default function ChatScreen({ onClose }) {
     if (!WS_URL) return;
 
     try {
-      const ws = new WebSocket(`${WS_URL}?token=${token}`);
+      setConnectionState('connecting');
+      const ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
 
-      ws.onmessage = (e) => {
+      ws.onopen = () => setConnectionState('online');
+      ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(e.data);
-          if (data.type === 'new_message') {
-            if (Number(data.message?.room_id) === Number(activeRoom.id)) {
-              setMessages((prev) => [...prev, data.message]);
+          const data = JSON.parse(event.data);
+          if (data.type === 'new_message' && data.message) {
+            const incoming = data.message;
+            const roomId = Number(incoming.room_id);
+            const ownMessage = Number(incoming.user_id) === Number(myUserId);
+            if (roomId === Number(activeRoom.id)) {
+              setMessages(previous => previous.some(message => Number(message.id) === Number(incoming.id))
+                ? previous : [...previous, incoming]);
+              if (!ownMessage) markRoomRead(roomId);
+            }
+            if (ownMessage && pendingMessageRef.current &&
+              Number(pendingMessageRef.current.roomId) === roomId &&
+              pendingMessageRef.current.content === incoming.message) {
+              setNewMsg('');
+              pendingMessageRef.current = null;
+              setIsSending(false);
             }
             fetchUnreadCounts(token);
           } else if (data.type === 'error') {
-            setChatError(data.message || 'Your message could not be sent. Please try again.');
+            pendingMessageRef.current = null;
+            setIsSending(false);
+            setChatError(data.message || 'Message could not be sent.');
           }
-        } catch (err) {
-          console.error('Chat message could not be read:', err);
-          setChatError('A chat update could not be read. Please reopen the conversation.');
+        } catch (error) {
+          setChatError('Unable to read message update. Open this conversation again.');
         }
       };
-      ws.onerror = () => setChatError('Chat connection failed. Check your internet connection and try again.');
+      ws.onerror = () => {
+        setConnectionState('offline');
+        setChatError('Messages are disconnected. Check your connection.');
+      };
       ws.onclose = () => {
-        if (wsRef.current === ws) setChatError('Chat connection closed. Reopen the conversation to reconnect.');
+        if (wsRef.current === ws) {
+          setConnectionState('offline');
+          setIsSending(false);
+          pendingMessageRef.current = null;
+          setChatError('Chat connection closed. Tap Reconnect to continue.');
+        }
       };
     } catch (wsErr) {
       setChatError('Could not connect to chat. Please try again.');
@@ -160,21 +217,30 @@ export default function ChatScreen({ onClose }) {
 
     return () => {
       if (wsRef.current) {
-        wsRef.current.close();
+        const current = wsRef.current;
         wsRef.current = null;
+        current.close();
       }
     };
-  }, [token, activeRoom]);
+  }, [token, activeRoom?.id, reconnectKey, myUserId, markRoomRead]);
 
   useEffect(() => {
-    if (!activeRoom || !token) return;
-    fetch(`${API_URL}/chat/read/${activeRoom.id}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
-    fetchUnreadCounts(token);
-  }, [activeRoom, token]);
+    historyRequestIdRef.current += 1;
+    setMessages([]);
+    setNewMsg('');
+    setIsSending(false);
+    pendingMessageRef.current = null;
+  }, [activeRoom?.id]);
 
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    const interval = setInterval(() => fetchUnreadCounts(token), 10000);
+    return () => clearInterval(interval);
+  }, [token]);
 
   const handleSend = () => {
     const content = newMsg.trim();
@@ -190,15 +256,19 @@ export default function ChatScreen({ onClose }) {
       setChatError('Choose a conversation before sending a message.');
       return;
     }
+    if (isSending) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       setChatError('Chat is reconnecting. Please wait a moment and try again.');
       return;
     }
     try {
+      pendingMessageRef.current = { roomId: activeRoom.id, content };
+      setIsSending(true);
       wsRef.current.send(JSON.stringify({ type: 'message', roomId: activeRoom.id, content }));
-      setNewMsg('');
       setChatError('');
     } catch (err) {
+      pendingMessageRef.current = null;
+      setIsSending(false);
       console.error('Chat send failed:', err);
       setChatError('Your message could not be sent. Please try again.');
     }
@@ -260,17 +330,19 @@ export default function ChatScreen({ onClose }) {
 
   const leaveRoom = async (roomId) => {
     try {
-      await fetch(`${API_URL}/chat/rooms/${roomId}/leave`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      setRooms(prev => prev.filter(r => r.id !== roomId));
-      if (activeRoom?.id === roomId) setActiveRoom(null);
+      const response = await fetch(`${API_URL}/chat/rooms/${roomId}/leave`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) throw new Error('Server did not confirm leaving the group');
+      setRooms(prev => prev.filter(r => Number(r.id) !== Number(roomId)));
+      if (Number(activeRoom?.id) === Number(roomId)) setActiveRoom(null);
     } catch (err) { Alert.alert('Could not leave group', err.message || 'Check your connection and try again.'); }
   };
 
   const deleteRoom = async (roomId) => {
     try {
-      await fetch(`${API_URL}/chat/rooms/${roomId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      setRooms(prev => prev.filter(r => r.id !== roomId));
-      if (activeRoom?.id === roomId) setActiveRoom(null);
+      const response = await fetch(`${API_URL}/chat/rooms/${roomId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) throw new Error('Server did not confirm deletion');
+      setRooms(prev => prev.filter(r => Number(r.id) !== Number(roomId)));
+      if (Number(activeRoom?.id) === Number(roomId)) setActiveRoom(null);
     } catch (err) { Alert.alert('Could not delete conversation', err.message || 'Check your connection and try again.'); }
   };
 
@@ -281,7 +353,8 @@ export default function ChatScreen({ onClose }) {
     const filtered = safeUsers.filter(u => {
       if (!u || typeof u !== 'object') return false;
       const name = String(u.full_name || u.name || '').toLowerCase();
-      return name.includes(lower) && Number(u.id) !== Number(myUserId);
+        return name.includes(lower) && Number(u.id) !== Number(myUserId) &&
+          String(u.status || 'active').toLowerCase() === 'active';
     });
     setFilteredUsers(filtered); setShowUserList(true);
   }, [searchTerm, allUsers, myUserId]);
@@ -296,7 +369,7 @@ export default function ChatScreen({ onClose }) {
         style={styles.roomItem} activeOpacity={0.7} onPress={() => setActiveRoom(item)}
         onLongPress={() => {
           if (isGroup) Alert.alert(displayName, 'Choose an action', [{ text: 'Cancel', style: 'cancel' }, { text: 'Leave Group', style: 'destructive', onPress: () => leaveRoom(item.id) }]);
-          else Alert.alert('Delete Conversation', `Delete your conversation with ${displayName}?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteRoom(item.id) }]);
+          else Alert.alert('Delete Conversation', `Permanently delete the messages with ${displayName} for both participants? This cannot be undone.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => deleteRoom(item.id) }]);
         }}
       >
         <View style={styles.avatarCircle}>{isGroup ? <Users size={20} color={colors.primary} /> : <Text style={styles.avatarText}>{getInitials(displayName)}</Text>}</View>
@@ -310,7 +383,7 @@ export default function ChatScreen({ onClose }) {
   };
 
   const renderMessage = ({ item }) => {
-    const isSent = item.user_id === myUserId;
+    const isSent = Number(item.user_id) === Number(myUserId);
     return (
       <View style={[styles.messageWrapper, isSent ? styles.messageWrapperSent : styles.messageWrapperReceived]}>
         {!isSent && <View style={styles.messageAvatar}><Text style={styles.messageAvatarText}>{getInitials(item.full_name || 'U')}</Text></View>}
@@ -353,8 +426,7 @@ export default function ChatScreen({ onClose }) {
                   placeholder="Search colleagues..."
                   placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
                   value={searchTerm} onChangeText={setSearchTerm}
-                  onFocus={() => searchTerm.length > 0 && setShowUserList(true)}
-                  onBlur={() => setTimeout(() => setShowUserList(false), 200)}
+                   onFocus={() => searchTerm.length > 0 && setShowUserList(true)}
                 />
               </View>
               <TouchableOpacity style={styles.newGroupBtn} onPress={() => { setGroupError(''); setShowGroupModal(true); }} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Create group chat">
@@ -381,7 +453,7 @@ export default function ChatScreen({ onClose }) {
 
             <FlatList
               data={rooms}
-              keyExtractor={item => item.id ? String(item.id) : Math.random().toString()}
+              keyExtractor={item => String(item.id)}
               renderItem={renderRoom}
               contentContainerStyle={{ paddingBottom: 20 }}
               ListEmptyComponent={
@@ -402,18 +474,24 @@ export default function ChatScreen({ onClose }) {
               </TouchableOpacity>
               <View style={styles.activeRoomHeaderInfo}>
                 <Text style={styles.activeRoomTitle}>{activeRoom.type === 'group' ? activeRoom.name : (activeRoom.display_name || activeRoom.name)}</Text>
-                <Text style={styles.activeRoomSubtitle}>{activeRoom.type === 'group' ? 'Group Chat' : 'Direct Message'}</Text>
+                <Text style={styles.activeRoomSubtitle}>{connectionState === 'online' ? 'Connected' : connectionState === 'connecting' ? 'Connecting…' : 'Disconnected'}</Text>
               </View>
+              {connectionState === 'offline' && (
+                <TouchableOpacity onPress={() => { setChatError(''); setReconnectKey(value => value + 1); }} style={styles.retryButton}>
+                  <Text style={styles.retryButtonText}>Reconnect</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <FlatList
               ref={flatListRef}
               data={messages}
-              keyExtractor={item => item.id ? String(item.id) : Math.random().toString()}
+              keyExtractor={item => String(item.id)}
               renderItem={renderMessage}
               style={styles.messageList}
               contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
               onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              ListEmptyComponent={historyLoading ? <Text style={styles.helperText}>Loading messages…</Text> : <Text style={styles.helperText}>No messages yet. Start the conversation.</Text>}
             />
 
             <View style={styles.inputArea}>
@@ -424,10 +502,10 @@ export default function ChatScreen({ onClose }) {
                 onChangeText={(value) => { setNewMsg(value); setChatError(''); }}
                 placeholder="Type a message..."
                 placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary}
-                onSubmitEditing={handleSend} returnKeyType="send"
+                onSubmitEditing={handleSend} returnKeyType="send" editable={!isSending}
                 accessibilityLabel="Chat message"
               />
-              <TouchableOpacity onPress={handleSend} style={[styles.sendBtn, !newMsg.trim() && styles.sendBtnDisabled]} activeOpacity={0.8} disabled={!newMsg.trim()} accessibilityRole="button" accessibilityLabel="Send message">
+              <TouchableOpacity onPress={handleSend} style={[styles.sendBtn, (!newMsg.trim() || isSending || connectionState !== 'online') && styles.sendBtnDisabled]} activeOpacity={0.8} disabled={!newMsg.trim() || isSending || connectionState !== 'online'} accessibilityRole="button" accessibilityLabel="Send message">
                 <Send size={18} color={newMsg.trim() ? "#FFFFFF" : "rgba(255,255,255,0.5)"} />
               </TouchableOpacity>
             </View>
@@ -444,7 +522,7 @@ export default function ChatScreen({ onClose }) {
               </View>
             )}
             
-            <Text style={styles.messageCounter}>{newMsg.length}/2000 characters</Text>
+            <Text style={styles.messageCounter}>{isSending ? 'Sending… · ' : ''}{newMsg.length}/2000 characters</Text>
           </View>
         )}
 
@@ -470,7 +548,8 @@ export default function ChatScreen({ onClose }) {
                     if (!u || typeof u !== 'object') return false;
                     const name = String(u.full_name || u.name || '').toLowerCase();
                     const q = String(groupSearch || '').trim().toLowerCase();
-                    return name.includes(q) && u.id !== myUserId;
+                    return name.includes(q) && Number(u.id) !== Number(myUserId) &&
+                      String(u.status || 'active').toLowerCase() === 'active';
                   })
                   .map(u => {
                     const isSelected = selectedUsers.some(s => s.id === u.id);
@@ -511,7 +590,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
     borderBottomColor: colors.border, 
     backgroundColor: colors.surface 
   },
-  chatHeaderTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 20, color: colors.textPrimary, letterSpacing: -0.5 },
+  chatHeaderTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: colors.textPrimary, letterSpacing: -0.5 },
   closeBtn: { padding: 4 },
 
   listHeaderRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 10 },
@@ -522,7 +601,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   userItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 10 },
   userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 13.5, color: colors.textPrimary },
   userRole: { fontFamily: 'Inter_18pt-Medium', fontSize: 11.5, color: colors.textSecondary },
-  roomItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  roomItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   avatarCircle: { width: 46, height: 46, borderRadius: 23, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   avatarText: { fontFamily: 'Inter_18pt-Bold', fontSize: 16, color: colors.primary },
   roomName: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: colors.textPrimary, marginBottom: 2 },
@@ -550,13 +629,15 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   messageText: { fontFamily: 'Inter_18pt-Regular', fontSize: 14, color: colors.textPrimary, lineHeight: 20 },
   sentMessageText: { color: '#FFFFFF' },
   inputArea: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
-  chatInput: { flex: 1, minHeight: 40, maxHeight: 90, backgroundColor: colors.background, borderRadius: 20, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, fontSize: 14, fontFamily: 'Inter_18pt-Medium', color: colors.textPrimary, borderWidth: 1, borderColor: colors.border },
+  chatInput: { flex: 1, minHeight: 40, maxHeight: 90, backgroundColor: colors.background, borderRadius: 8, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, fontSize: 14, fontFamily: 'Inter_18pt-Medium', color: colors.textPrimary, borderWidth: 1, borderColor: colors.border },
   sendBtnDisabled: { backgroundColor: colors.border },
   chatError: { color: colors.danger || '#DC2626', fontFamily: 'Inter_18pt-Medium', fontSize: 12 },
   messageCounter: { color: colors.textSecondary, fontFamily: 'Inter_18pt-Regular', fontSize: 10, textAlign: 'right', paddingHorizontal: 18, paddingBottom: 4 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#0D9488', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
+  retryButton: { paddingVertical: 7, paddingHorizontal: 10, borderRadius: 5, borderWidth: 1, borderColor: colors.border },
+  retryButtonText: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: colors.primary },
+  sendBtn: { width: 40, height: 40, borderRadius: 7, backgroundColor: '#0D9488', justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: colors.surface, borderRadius: 20, padding: 20, width: '100%', maxWidth: 380, maxHeight: '85%', borderWidth: 1, borderColor: colors.border },
+  modalContent: { backgroundColor: colors.surface, borderRadius: 10, padding: 20, width: '100%', maxWidth: 380, maxHeight: '85%', borderWidth: 1, borderColor: colors.border },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 17, color: colors.textPrimary },
   label: { fontFamily: 'Inter_18pt-Bold', fontSize: 11, color: colors.textSecondary, marginBottom: 6, marginTop: 10, textTransform: 'uppercase' },

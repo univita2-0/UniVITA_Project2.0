@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Plus, Trash2, Edit3, X, AlertCircle, Search, ChevronLeft, ChevronRight, ShieldAlert, Tag } from 'lucide-react';
+import { X, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { API_BASE } from '../api';
 import { getUserRole } from '../permissions';
 import FormalModal from '../components/FormalModal';
@@ -138,10 +138,7 @@ const ManageReasons = () => {
       </div>
 
       {!canWrite && (
-        <div className="mr-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Visit reasons are managed by System Administrators.</span>
-        </div>
+        <p className="mr-readonly-banner" role="note">View-only access</p>
       )}
 
       <div className="mr-overview" aria-label="Visit reason summary">
@@ -166,11 +163,11 @@ const ManageReasons = () => {
           
           <div className="mr-toolbar-actions">
             <div className="mr-stats-badge">
-              Total: <strong>{reasons.length}</strong>
+              Showing <strong>{filteredReasons.length}</strong> of {reasons.length}
             </div>
             {canWrite && (
               <button className="mr-btn-primary" onClick={() => setShowAddModal(true)}>
-                <Plus size={16} /> Add Reason
+                Add Reason
               </button>
             )}
           </div>
@@ -182,7 +179,6 @@ const ManageReasons = () => {
             <div className="mr-loading">Loading visit reasons...</div>
           ) : filteredReasons.length === 0 ? (
             <div className="mr-empty">
-              <AlertCircle size={32} className="text-muted" />
               <h4>No visit reasons found</h4>
               <p>
                 {searchQuery
@@ -210,12 +206,8 @@ const ManageReasons = () => {
                     {canWrite && (
                       <td className="text-right">
                         <div className="mr-action-group">
-                          <button className="mr-btn-icon" onClick={() => openEditModal(reason.id, reason.reason_text)} title="Edit">
-                            <Edit3 size={16} />
-                          </button>
-                          <button className="mr-btn-icon danger" onClick={() => openDeleteModal(reason.id)} title="Delete">
-                            <Trash2 size={16} />
-                          </button>
+                          <button type="button" className="mr-btn-icon" onClick={() => openEditModal(reason.id, reason.reason_text)} title="Edit">Edit</button>
+                          <button type="button" className="mr-btn-icon danger" onClick={() => openDeleteModal(reason.id)} title="Delete">Delete</button>
                         </div>
                       </td>
                     )}
@@ -321,7 +313,6 @@ const ManageReasons = () => {
                 Are you sure you want to permanently delete <strong>{reasons.find(r => r.id === deleteTargetId)?.reason_text}</strong>?
               </p>
               <div className="mr-confirm-note">
-                <AlertCircle size={20} color="#DC2626" />
                 <p>
                   Warning: This action cannot be undone. Visitors will no longer see this reason when booking appointments.
                 </p>

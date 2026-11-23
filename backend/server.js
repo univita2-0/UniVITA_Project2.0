@@ -183,14 +183,14 @@ const visitorDestinations = {};
 const recentAlertsCache = new Set();
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// --------------------------------------------------
+
 // CONFIGURATION (from .env)
-// --------------------------------------------------
+
 const JWT_SECRET = process.env.JWT_SECRET;
 const PAYROLL_JWT_SECRET = process.env.PAYROLL_JWT_SECRET;
 const OTP_STORE = {};          // email -> { otp, expiresAt }
 const PIN_ATTEMPTS = new Map(); // email -> { count, lastAttempt }
-const wsClients = new Map();    // userId -> WebSocket
+const wsClients = new Map();     // userId -> Set<WebSocket>
 
 
 const OTP_MAX_ATTEMPTS = 5;
@@ -626,10 +626,10 @@ function authenticateToken(req, res, next) {
 
     try {
       const [rows] = await db.promise().query(
-        'SELECT id, role, status FROM users WHERE id = ? LIMIT 1', [session.id]
+        'SELECT id, role, status, employment_status FROM users WHERE id = ? LIMIT 1', [session.id]
       );
       const account = rows[0];
-      if (!account || account.status !== 'active') {
+      if (!account || account.status !== 'active' || account.employment_status !== 'active') {
         return res.status(401).json({ success: false, message: 'Account is inactive or no longer available. Please sign in again.' });
       }
       if (account.role !== session.role) {
@@ -1552,7 +1552,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
     }
   }
 
-  db.query("SELECT * FROM users WHERE email = ? AND status = 'active'", [cleanEmail], async (err, results) => {
+  db.query("SELECT * FROM users WHERE email = ? AND status = 'active' AND employment_status = 'active'", [cleanEmail], async (err, results) => {
     if (err) return res.status(500).json({ success: false, message: 'Database connection error.' });
     
     // 1. Email is incorrect or inactive:
@@ -1747,10 +1747,13 @@ app.put('/api/users/:id/reset-password', authenticateToken, async (req, res) => 
   }
   
   try {
-    const [targetRows] = await db.promise().query('SELECT role FROM users WHERE id = ? LIMIT 1', [userId]);
-    if (!targetRows.length) return res.status(404).json({ success: false, message: 'User not found.' });
-    if (targetRows[0].role === 'instructor') {
-      return res.status(403).json({ success: false, message: 'Instructor passwords cannot be reset from administrative staff management.' });
+        const [targetRows] = await db.promise().query('SELECT role,status,employment_status FROM users WHERE id=? LIMIT 1',[userId]);
+    if (!targetRows.length) return res.status(404).json({success:false,message:'User not found.'});
+    if (!['active','deactivated'].includes(targetRows[0].status) || !targetRows[0].role) {
+      return res.status(409).json({success:false,message:'Provision account and assign a role before resetting its password.'});
+    }
+    if (String(req.user.id)===String(userId)) {
+      return res.status(403).json({success:false,message:'Use your personal password-change flow for your own account.'});
     }
     const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
     db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [hashedPassword, userId], (err, result) => {
@@ -4532,35 +4535,47 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       candidateNames.push('Compensatory Paid Off', 'Compensatory Time Off', 'Compensatory Leave', 'CTO', 'CPO');
     }
 
-    let [typeRows] = await connection.query(
-      `SELECT id, name, annual_quota FROM leave_types
-        WHERE LOWER(name) IN (${candidateNames.map(() => '?').join(',')})
-           OR LOWER(name) LIKE ?
-        ORDER BY id ASC LIMIT 1`,
-      [...candidateNames.map(n => n.toLowerCase()), `%${lowerType}%`]
+     const normalizedCandidates = [
+      ...new Set(
+        candidateNames.map(name => String(name).trim().toLowerCase())
+      )
+    ];
+
+    const [typeRows] = await connection.query(
+      `SELECT id, name, annual_quota
+       FROM leave_types
+       WHERE is_active = 1
+         AND LOWER(TRIM(name)) IN (
+           ${normalizedCandidates.map(() => '?').join(',')}
+         )
+       ORDER BY (LOWER(TRIM(name)) = ?) DESC, id ASC
+       LIMIT 1`,
+      [...normalizedCandidates, lowerType]
     );
 
-    let leaveTypeId = null;
-    let annualQuota = 15;
+    if (typeRows.length === 0) {
+      await connection.rollback();
 
-    if (typeRows.length > 0) {
-      leaveTypeId = typeRows[0].id;
-      annualQuota = typeRows[0].annual_quota !== undefined && typeRows[0].annual_quota !== null
-        ? parseFloat(typeRows[0].annual_quota) : 15;
-    } else {
-      try {
-        const [insertResult] = await connection.query(
-          "INSERT INTO leave_types (name, annual_quota, is_active) VALUES (?, 15, 1)",
-          [cleanType]
-        );
-        leaveTypeId = insertResult.insertId;
-      } catch (insertErr) {
-        const [fallbackRows] = await connection.query("SELECT id, annual_quota FROM leave_types LIMIT 1");
-        if (fallbackRows.length > 0) {
-          leaveTypeId = fallbackRows[0].id;
-          annualQuota = parseFloat(fallbackRows[0].annual_quota) || 15;
-        }
-      }
+      return res.status(400).json({
+        success: false,
+        message: 'This leave type is unavailable. Please select an active leave type configured by HR.'
+      });
+    }
+
+    const leaveTypeId = typeRows[0].id;
+    const annualQuota = Number(typeRows[0].annual_quota);
+
+    if (
+      typeRows[0].annual_quota == null ||
+      !Number.isFinite(annualQuota) ||
+      annualQuota < 0
+    ) {
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: 'The selected leave type has no valid annual quota. Please contact HR.'
+      });
     }
 
     // 🚨 NEW FIX: Pre-calculate total cost per year and check balance ONCE per year
@@ -5577,6 +5592,100 @@ app.get('/api/payroll/employee-history/:employeeId', authenticateToken, verifyOw
   });
 });
 
+// PHASE 3 HRIS PERSONNEL / ACCOUNT LIFECYCLE API
+// Requires the accompanying Phase 3 schema migration before deployment.
+app.put('/api/employees/:id/employment-status', authenticateToken,
+  requireAction('employees:change-status'), async (req,res) => {
+  const { employment_status } = req.body || {};
+  if (!['active','separated'].includes(employment_status)) {
+    return res.status(400).json({success:false,message:'Employment status must be active or separated.'});
+  }
+  try {
+    const [rows] = await db.promise().query('SELECT id,role,employment_status FROM users WHERE id = ? LIMIT 1',[req.params.id]);
+    if (!rows.length) return res.status(404).json({success:false,message:'Employee not found.'});
+    const current = rows[0];
+    if (current.employment_status === null) return res.status(409).json({success:false,message:'Legacy employment status requires manual classification before a transition.'});
+    if (current.employment_status === employment_status) return res.json({success:true,message:'Employment status unchanged.'});
+    if (current.role === 'admin' && employment_status === 'separated') {
+      const [[count]] = await db.promise().query(
+        "SELECT COUNT(*) AS total FROM users WHERE role='admin' AND status='active' AND employment_status='active' AND id <> ?",[current.id]);
+      if (count.total === 0) return res.status(403).json({success:false,message:'Cannot separate the last active System Administrator.'});
+    }
+    await db.promise().query('UPDATE users SET employment_status=? WHERE id=?',[employment_status,current.id]);
+    logAction(req.user.id,'CHANGE_EMPLOYMENT_STATUS','user',current.id,req,
+      {employment_status:current.employment_status},{employment_status});
+    return res.json({success:true,employment_status,message:'Employment status updated; access remains managed by Admin.'});
+  } catch (err) {
+    console.error('Employment status change:',err);
+    return res.status(500).json({success:false,message:'Failed to update employment status.'});
+  }
+});
+
+app.get('/api/accounts', authenticateToken, requireAction('accounts:view'), async(req,res) => {
+  try {
+    const [rows] = await db.promise().query(
+      `SELECT id,employee_id,full_name,email,role,status AS account_status,employment_status,
+              account_expiration_date, password_last_changed
+       FROM users ORDER BY full_name ASC`);
+    res.json(rows);
+  } catch(err) {
+    console.error('Account directory:',err);
+    res.status(500).json({success:false,message:'Unable to load accounts.'});
+  }
+});
+
+app.post('/api/accounts/:id/provision', authenticateToken,
+  requireAction('accounts:provision'), async(req,res) => {
+  const password = req.body?.password;
+  if (typeof password !== 'string' || password.length < 8 ||
+      !/[A-Z]/.test(password) || !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+    return res.status(400).json({success:false,message:'Password must be at least 8 characters, with an uppercase letter and special character.'});
+  }
+  try {
+    const [rows] = await db.promise().query(
+      'SELECT id,email,password,role,status,employment_status FROM users WHERE id=? LIMIT 1',[req.params.id]);
+    if (!rows.length) return res.status(404).json({success:false,message:'Employee not found.'});
+    const target=rows[0];
+    if (target.employment_status !== 'active' || target.status !== 'not_provisioned' || target.password !== null || target.role !== null) {
+      return res.status(409).json({success:false,message:'Employee is not eligible for new account provisioning.'});
+    }
+    const emailCheck = await validateEmailForAccount(target.email,{checkDns:true});
+    if (!emailCheck.valid) return res.status(400).json({success:false,message:emailCheck.reason});
+    const hash=await bcrypt.hash(password,12);
+    const [result]=await db.promise().query(
+      "UPDATE users SET password=?,password_last_changed=CURRENT_DATE,status='pending_role' WHERE id=? AND status='not_provisioned' AND password IS NULL AND role IS NULL AND employment_status='active'",
+      [hash,target.id]);
+    if (result.affectedRows!==1) return res.status(409).json({success:false,message:'Account provisioning state changed. Reload and retry.'});
+    logAction(req.user.id,'PROVISION_ACCOUNT','user',target.id,req);
+    return res.json({success:true,account_status:'pending_role',message:'Credentials provisioned. Assign a role to enable login.'});
+  }catch(err){console.error('Provision account:',err);return res.status(500).json({success:false,message:'Account provisioning failed.'});}
+});
+
+app.put('/api/accounts/:id/status', authenticateToken, async(req,res) => {
+  const {status}=req.body||{};
+  if (!['active','deactivated'].includes(status)) return res.status(400).json({success:false,message:'Invalid account status.'});
+  if (req.user?.role!=='admin') return res.status(403).json({success:false,message:'System Admin permission required.'});
+  if (String(req.params.id)===String(req.user.id)) return res.status(403).json({success:false,message:'Cannot change your own account status.'});
+  try {
+    const [rows]=await db.promise().query('SELECT id,role,password,status,employment_status FROM users WHERE id=? LIMIT 1',[req.params.id]);
+    if(!rows.length)return res.status(404).json({success:false,message:'Account not found.'});
+    const target=rows[0];
+    if (target.status===status) return res.json({success:true,message:'Account status unchanged.'});
+    if (!['active','deactivated'].includes(target.status)) return res.status(409).json({success:false,message:'Account must first be provisioned and assigned a role.'});
+    if (status==='active' && (target.employment_status!=='active'|| !['admin','hr_admin','security','instructor'].includes(target.role)|| !target.password)) {
+      return res.status(409).json({success:false,message:'Employee must be actively employed with valid credentials and role.'});
+    }
+    if (target.role==='admin' && status==='deactivated') {
+      const [[count]]=await db.promise().query("SELECT COUNT(*) AS total FROM users WHERE role='admin' AND status='active' AND employment_status='active' AND id<>?",[target.id]);
+      if (!count.total) return res.status(403).json({success:false,message:'Cannot deactivate last active System Administrator.'});
+    }
+    const [result]=await db.promise().query('UPDATE users SET status=? WHERE id=? AND status=?',[status,target.id,target.status]);
+    if (result.affectedRows!==1) return res.status(409).json({success:false,message:'Account status changed. Reload and retry.'});
+    logAction(req.user.id,status==='active'?'ACTIVATE_ACCOUNT':'DEACTIVATE_ACCOUNT','user',target.id,req,{status:target.status},{status});
+    return res.json({success:true,status,message:'Account status updated.'});
+  }catch(err){console.error('Account status:',err);return res.status(500).json({success:false,message:'Account status update failed.'});}
+});
+
 app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','security','instructor'), async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -5586,12 +5695,12 @@ app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','secu
       return res.json(results || []);
     }
 
-    let sql = `SELECT id, employee_id, full_name, first_name, last_name, email, role, status, 
+        let sql = `SELECT id, employee_id, full_name, first_name, last_name, email, role, status, employment_status,
               employment_type, position_level, contract_type, monthly_salary, 
               work_days_per_month, payroll_access, middle_initial, date_of_joining, 
               account_expiration_date, date_of_birth, phone_number, gender, 
               emergency_contact_name, emergency_contact_phone, street_address, 
-              city, state_province, postal_code, country, position, profile_picture 
+              city, state_province, postal_code, country, position, profile_picture, additional_info
        FROM users`;
        
     const params = [];
@@ -5608,8 +5717,7 @@ app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','secu
     const directoryFields = ['id','employee_id','full_name','email','role','status',
       'position_level','position','contract_type','employment_type','phone_number','date_of_joining'];
     const safeResults = (results || []).map(person => {
-      const ownsRecord = req.user.role === 'admin'
-        ? person.role !== 'instructor' : person.role === 'instructor';
+      const ownsRecord = req.user.role === 'hr_admin' || req.user.role === 'admin';
       if (ownsRecord) return person;
       return Object.fromEntries(directoryFields.map(key => [key, person[key]]));
     });
@@ -5620,150 +5728,79 @@ app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','secu
   }
 });
 
-app.post('/api/employees', authenticateToken, uploadResume.single('resume_file'), async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to add employees.' });
-  }
-
-  // CRITICAL FIX: Guarantee body is an object to prevent undefined crashes
+app.post('/api/employees', authenticateToken, requireAction('employees:create'), uploadResume.single('resume_file'), async (req, res) => {
+  // HR creates personnel records only; an Admin provisions login separately.
   const data = req.body || {};
-
-  const {
-    employee_id, full_name, first_name, last_name, email, password, role,
-    employment_type, position_level, contract_type,
-    monthly_salary, work_days_per_month,
-    payroll_access, payroll_pin,
-    middle_initial, date_of_joining, account_expiration_date,
-    date_of_birth, phone_number, gender,
-    emergency_contact_name, emergency_contact_phone,
-    street_address, city, state_province, postal_code, country, additional_info, position
-  } = data;
-
-  
-  if (!employee_id || !full_name || !email || !password || !role) {
-    return res.status(400).json({ success: false, message: 'Employee ID, Name, Email, Password, and Role are mandatory fields.' });
+  const { employee_id, full_name, first_name, last_name, email,
+    employment_type, position_level, contract_type, monthly_salary, work_days_per_month,
+    payroll_access, payroll_pin, middle_initial, date_of_joining, date_of_birth,
+    phone_number, gender, emergency_contact_name, emergency_contact_phone,
+    street_address, city, state_province, postal_code, country, additional_info, position } = data;
+  if (![employee_id, full_name, email].every(v => typeof v === 'string' && v.trim())) {
+    return res.status(400).json({ success:false, message:'Employee ID, name and email are required.' });
   }
-
-  
-  const emailCheck = await validateEmailForAccount(email, { checkDns: true });
-  if (!emailCheck.valid) {
-    return res.status(400).json({ success: false, message: emailCheck.reason });
+  const emailCheck = await validateEmailForAccount(email, { checkDns:true });
+  if (!emailCheck.valid) return res.status(400).json({success:false,message:emailCheck.reason});
+  const salary = monthly_salary === undefined || monthly_salary === '' ? 0 : Number(monthly_salary);
+  const workdays = work_days_per_month === undefined || work_days_per_month === '' ? 22 : Number(work_days_per_month);
+  if (!Number.isFinite(salary) || salary < 0 || salary > 99999999.99 ||
+      !Number.isInteger(workdays) || workdays < 1 || workdays > 31) {
+    return res.status(400).json({success:false,message:'Invalid salary or workdays per month.'});
   }
-
-  
-  if (password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-    return res.status(400).json({ success: false, message: 'For security, the password must be at least 8 characters, contain 1 uppercase letter, and 1 special character.' });
-  }
-
-  
-  const STAFF_ROLES = ['admin', 'hr_admin', 'security'];
-  const INSTRUCTOR_ROLE = 'instructor';
-
-  if (req.user.role === 'hr_admin') {
-    if (role !== INSTRUCTOR_ROLE) {
-      return res.status(403).json({
-        success: false,
-        message: 'HR can only create Instructor accounts. Staff accounts must be created by a System Administrator.'
-      });
+  let finalPin = null;
+  if (payroll_pin !== undefined && payroll_pin !== null && String(payroll_pin).trim()) {
+    const pin = String(payroll_pin).trim();
+    if (!PAYROLL_PIN_PATTERN.test(pin) || pin === '1234') {
+      return res.status(400).json({success:false,message:'Payroll PIN must be 4–6 digits and cannot be 1234.'});
     }
-  } else if (req.user.role === 'admin') {
-    if (!STAFF_ROLES.includes(role)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Admins can only create Staff accounts. Instructor accounts must be created by HR.'
-      });
-    }
-  } else {
-    return res.status(403).json({
-      success: false,
-      message: 'Forbidden. Only HR and Admin can create employee accounts.'
-    });
+    finalPin = await bcrypt.hash(pin, 12);
   }
-
+  let infoObj = {};
+  if (additional_info) {
+    try { infoObj = typeof additional_info === 'string' ? JSON.parse(additional_info) : additional_info; }
+    catch { return res.status(400).json({success:false,message:'Invalid onboarding data.'}); }
+    if (!infoObj || typeof infoObj !== 'object' || Array.isArray(infoObj)) {
+      return res.status(400).json({success:false,message:'Invalid onboarding data.'});
+    }
+  }
+  if (req.file) infoObj.resume_file = `/uploads/resumes/${req.file.filename}`;
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    
-const finalAccess = payroll_access || 0;
-
-let finalPin = null;
-
-if (payroll_pin !== undefined &&
-    payroll_pin !== null &&
-    String(payroll_pin).trim() !== '') {
-
-  const requestedPin = String(payroll_pin).trim();
-
-  if (!PAYROLL_PIN_PATTERN.test(requestedPin)) {
-    return res.status(400).json({
-      success: false,
-      message: 'Payroll PIN must contain 4 to 6 numeric digits.'
-    });
-  }
-
-  if (requestedPin === '1234') {
-    return res.status(400).json({
-      success: false,
-      message: 'The default PIN 1234 is not allowed.'
-    });
-  }
-
-  finalPin = await bcrypt.hash(requestedPin, 12);
-}
-
-
-    let infoObj = {};
-    if (additional_info) {
-      try { infoObj = JSON.parse(additional_info); } catch (e) {}
-    }
-    if (req.file) {
-      infoObj.resume_file = `/uploads/resumes/${req.file.filename}`;
-    }
-    const finalAdditionalInfo = Object.keys(infoObj).length > 0 ? JSON.stringify(infoObj) : null;
-
-    const sql = `INSERT INTO users 
-      (employee_id, full_name, first_name, last_name, email, password, role, status,
-       employment_type, position_level, contract_type,
-       monthly_salary, work_days_per_month,
-       payroll_access, payroll_pin,
-       middle_initial, date_of_joining, account_expiration_date,
-       date_of_birth, phone_number, gender,
-       emergency_contact_name, emergency_contact_phone,
-       street_address, city, state_province, postal_code, country, additional_info, position, password_last_changed)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE)`;
-
-    db.query(sql, [
-      employee_id.trim(), full_name.trim(), first_name || null, last_name || null, email.trim().toLowerCase(), hashedPassword, role,
-      employment_type || 'Full-time', position_level || 'Entry Level Simulationist', contract_type || employment_type || 'Full-time',
-      monthly_salary || 0, work_days_per_month || 22,
-      finalAccess, finalPin,
-      middle_initial || null, date_of_joining || null, account_expiration_date || null,
-      date_of_birth || null, phone_number || null, gender || 'prefer_not_to_say',
-      emergency_contact_name || null, emergency_contact_phone || null,
-      street_address || null, city || null, state_province || null,
-      postal_code || null, country || 'Philippines', finalAdditionalInfo, position || null
-    ], (err, result) => {
-      if (err) {
-        if (err.code === 'ER_DUP_ENTRY') {
-          return res.status(409).json({ success: false, message: 'An employee with this ID or Email already exists.' });
-        }
-        return res.status(500).json({ success: false, message: 'Database error while creating employee.' });
-      }
-      logAction(req.user.id, 'CREATE_EMPLOYEE', 'user', result.insertId, req);
-      res.json({ success: true, message: 'Employee successfully created!', employeeId: employee_id });
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error processing password encryption.' });
+    const sql = `INSERT INTO users
+      (employee_id,full_name,first_name,last_name,email,password,role,status,employment_status,
+       employment_type,position_level,contract_type,monthly_salary,work_days_per_month,
+       payroll_access,payroll_pin,middle_initial,date_of_joining,account_expiration_date,
+       date_of_birth,phone_number,gender,emergency_contact_name,emergency_contact_phone,
+       street_address,city,state_province,postal_code,country,additional_info,position,password_last_changed)
+      VALUES (?,?,?,?,?,NULL,NULL,'not_provisioned','active',?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`;
+    const params = [employee_id.trim(),full_name.trim(),first_name || null,last_name || null,email.trim().toLowerCase(),
+      employment_type || 'Full-time',position_level || 'Entry Level Simulationist',contract_type || employment_type || 'Full-time',
+      salary,workdays,payroll_access || 0,finalPin,middle_initial || null,date_of_joining || null,
+      date_of_birth || null,phone_number || null,gender || 'prefer_not_to_say',
+      emergency_contact_name || null,emergency_contact_phone || null,
+      street_address || null,city || null,state_province || null,postal_code || null,
+      country || 'Philippines',Object.keys(infoObj).length ? JSON.stringify(infoObj) : null,position || null];
+    const [result] = await db.promise().query(sql, params);
+    logAction(req.user.id,'CREATE_EMPLOYEE','user',result.insertId,req);
+    return res.status(201).json({success:true,message:'Employee record created. Account not provisioned.',employeeId:employee_id, id:result.insertId});
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({success:false,message:'Employee ID or email already exists.'});
+    console.error('Employee creation error:',err);
+    return res.status(500).json({success:false,message:'Failed to create employee record.'});
   }
 });
 
 app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_file'), async(req, res) => {
   const employeeId = req.params.id;
 
-  const isPrivileged = req.user.role === 'admin' || req.user.role === 'hr_admin';
+    const isHR = req.user.role === 'hr_admin';
   const isSelf = req.user.id.toString() === employeeId.toString();
-
-  if (!isPrivileged && !isSelf) {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission to edit this profile.' });
+  const isPrivileged = isHR;
+  if (!isHR && !isSelf) {
+    return res.status(403).json({success:false,message:'Only HR may edit employee information.'});
+  }
+  
+  if (req.user.role === 'admin') {
+    return res.status(403).json({success:false,message:'Employee Information is read-only for System Admins.'});
   }
 
   
@@ -5834,51 +5871,40 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       return res.status(403).json({ success: false, message: 'Cannot change your own account status.' });
     }
 
-    // ==========================================
+    
     // ROLE-BASED ACCESS CONTROL (RBAC) VALIDATION
-    // ==========================================
+    
     
     if (!isPrivileged) {
-      // 1. Normal users editing their own profile
-      // Strip out any sensitive fields they try to sneak in
+      
       delete updates.role;
       delete updates.system_role;
       delete updates.status;
       delete updates.monthly_salary;
       delete updates.work_days_per_month;
       delete updates.payroll_access;
+      
       delete updates.payroll_pin;
+      
+      const selfFields = new Set(['first_name','last_name','middle_initial','full_name',
+        'phone','phone_number','street','street_address','city','state','state_province',
+        'postal_code','country']);
+      for (const key of Object.keys(updates)) if (!selfFields.has(key)) delete updates[key];
 
     } else if (req.user.role === 'hr_admin') {
-      // 2. HR Editing a user
       
-      // HR can ONLY edit Instructors
-      if (oldData.role !== 'instructor') {
-        return res.status(403).json({
-          success: false,
-          message: 'HR can only manage Instructor accounts. Staff accounts must be managed by a System Administrator.'
-        });
+      if (updates.status !== undefined && updates.status !== oldData.status) {
+        return res.status(403).json({success:false,message:'Use Account Access to change login status.'});
       }
-
-      // HR cannot change roles
+      delete updates.status;
       delete updates.role;
       delete updates.system_role;
-
-      // HR cannot move to Trash or restore from Trash (Admin only)
-      if (updates.status !== undefined && updates.status !== oldData.status) {
-        const allowedHRStatuses = ['active', 'deactivated', 'archived'];
-        if (!allowedHRStatuses.includes(updates.status)) {
-          return res.status(403).json({
-            success: false,
-            message: 'HR cannot change account status to "' + updates.status + '". Delete and restore are Admin-only.'
-          });
-        }
-      }
+      delete updates.account_expiry;
+      delete updates.account_expiration_date;
+      delete updates.employment_status; 
 
     } else if (req.user.role === 'admin') {
-      // 3. Admin Editing a user
       
-      // Admin CANNOT edit Instructors (Instructors belong to HR)
       if (oldData.role === 'instructor') {
         return res.status(403).json({
           success: false,
@@ -5912,13 +5938,8 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
 
       if (incoming !== existing) {
         
-        if (req.user.role === 'hr_admin' && oldData.role !== 'instructor') {
-          return res.status(403).json({
-            success: false,
-            message: 'HR cannot change the email of staff accounts. Contact a System Administrator.'
-          });
-        }
-
+        // HR manages personnel information for both Staff and Instructors.
+        // Existing email validation below remains enforced.
         const emailCheck = await validateEmailForAccount(incoming, { checkDns: true });
         if (!emailCheck.valid) {
           return res.status(400).json({ success: false, message: emailCheck.reason });
@@ -6054,45 +6075,11 @@ app.get('/api/employees/:id', authenticateToken, verifyOwnership, (req, res) => 
 
 
 
-app.put('/api/employees/:employeeId/toggle-status', authenticateToken,
-  allowRoles('admin', 'hr_admin'), async (req, res) => {
-  try {
-    const { employeeId } = req.params;
-    const [rows] = await db.promise().query(
-      'SELECT id, role, status FROM users WHERE employee_id = ? LIMIT 1', [employeeId]);
-    if (!rows.length) return res.status(404).json({ success: false, message: 'Employee not found.' });
-    const target = rows[0];
-    const owns = req.user.role === 'admin' ? target.role !== 'instructor' : target.role === 'instructor';
-    if (!owns) return res.status(403).json({ success: false, message: 'This account is view-only for your role.' });
-    if (String(target.id) === String(req.user.id)) {
-      return res.status(403).json({success:false,message:'Cannot change your own account status.'});
-    }
-    if (!['active','deactivated'].includes(target.status)) {
-      return res.status(409).json({success:false,message:'Only active or deactivated accounts may be toggled.'});
-    }
-    if (target.role === 'admin' && target.status === 'active') {
-      const [[row]] = await db.promise().query(
-        "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND status = 'active' AND id <> ?", [target.id]);
-      if (!row.total) return res.status(403).json({success:false,message:'Cannot deactivate the last active System Administrator.'});
-    }
-    const newStatus = target.status === 'active' ? 'deactivated' : 'active';
-    await db.promise().query('UPDATE users SET status = ? WHERE id = ?', [newStatus, target.id]);
-    logAction(req.user.id, 'TOGGLE_EMPLOYEE_STATUS', 'user', target.id, req);
-    return res.json({success:true,newStatus,message:`Employee successfully ${newStatus}.`});
-  } catch (err) {
-    console.error('Toggle status error:', err);
-    return res.status(500).json({success:false,message:'Failed to toggle status.'});
-  }
+app.put('/api/employees/:employeeId/toggle-status', authenticateToken, (req, res) => {
+  return res.status(410).json({success:false,message:'Legacy account-status toggle retired. Use Account Access.'});
 });
 
 
-// ================================================================
-// C14: Persistent, per-user attendance notification inbox.
-// Unique recipient+event keys make repeated polling idempotent.
-// The authoritative source remains the existing correction/appeal
-// and attendance tables; this is an auxiliary notification ledger.
-// Requires C14_NOTIFICATION_MIGRATION.sql before enabling clients.
-// ================================================================
 const c14Types = new Set(['CORRECTION_PENDING','APPEAL_PENDING','CORRECTION_DECISION','APPEAL_DECISION','MISSING_CLOCK_OUT']);
 async function c14Insert(userId, eventKey, type, title, message, targetType = null, targetId = null, pushNow = false) {
   if (!c14Types.has(type)) return;
@@ -6517,9 +6504,9 @@ app.get('/api/attendance-report', authenticateToken, (req, res) => {
 
 
 app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Only System Admins can permanently delete records.' });
-  }
+  
+  return res.status(410).json({success:false,message:'Employee deletion disabled. Use employment separation.'});
+  
 
   const employeeId = req.params.id;
 
@@ -7050,7 +7037,18 @@ app.get('/api/appointments/booked-slots', async (req, res) => {
 });
 
 app.post('/api/appointments/book', async (req, res) => {
-  const { firstName, lastName, email, phone, date, time, reason, additionalVisitors } = req.body || {};
+const {
+  firstName,
+  lastName,
+  email,
+  phone,
+  date,
+  time,
+  reason,
+  reason_type,
+  custom_reason,
+  additionalVisitors
+} = req.body || {};
   const fields = [firstName, lastName, email, date, time, reason];
   if (fields.some(value => typeof value !== 'string' || !value.trim())) {
     return res.status(400).json({ success: false, message: 'Complete all required appointment fields, including first and last name.' });
@@ -7060,6 +7058,58 @@ app.post('/api/appointments/book', async (req, res) => {
     phone: typeof phone === 'string' ? phone.trim() : '', reason: reason.trim(),
     date, time: time.slice(0, 5)
   };
+
+
+  // Validate the selected or custom purpose of visit.
+  // Legacy callers without reason_type retain existing behavior.
+  if (
+    reason_type != null &&
+    !['predefined', 'other'].includes(reason_type)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid visit reason type.'
+    });
+  }
+
+  if (reason_type === 'other') {
+    if (typeof custom_reason !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Please specify your reason for visiting.'
+      });
+    }
+
+    const customReason = custom_reason.trim().replace(/\s+/g, ' ');
+
+    if (customReason.length < 5 || customReason.length > 200) {
+      return res.status(400).json({
+        success: false,
+        message: 'Custom visit reason must contain 5–200 characters.'
+      });
+    }
+
+    const expectedReason = `Other: ${customReason}`;
+
+    if (clean.reason !== expectedReason) {
+      return res.status(400).json({
+        success: false,
+        message: 'The submitted custom visit reason is inconsistent.'
+      });
+    }
+  }
+
+  if (
+    reason_type === 'predefined' &&
+    custom_reason != null &&
+    custom_reason !== ''
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Custom reason is only allowed when Other is selected.'
+    });
+  }
+
   if (clean.firstName.length > 100 || clean.lastName.length > 100 || clean.reason.length > 500 || clean.email.length > 255) {
     return res.status(400).json({ success: false, message: 'Appointment details exceed the allowed length.' });
   }
@@ -7090,6 +7140,23 @@ app.post('/api/appointments/book', async (req, res) => {
   try {
     const emailCheck = await validateEmailForAccount(clean.email, { checkDns: true });
     if (!emailCheck.valid) return res.status(400).json({ success: false, message: emailCheck.reason });
+
+    if (reason_type === 'predefined') {
+      const [validReasons] = await db.promise().query(
+        `SELECT id
+         FROM visit_reasons
+         WHERE TRIM(reason_text) = ?
+         LIMIT 1`,
+        [clean.reason]
+      );
+
+      if (validReasons.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please select a valid visit reason.'
+        });
+      }
+    }
     connection = await db.promise().getConnection();
     lockKey = await lockAppointmentSlot(connection, clean.date, clean.time);
     await connection.beginTransaction();
@@ -8229,32 +8296,86 @@ app.get('/api/emergency-alerts/active', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/emergency-alerts/:id/read', authenticateToken, (req, res) =>  {
-  const alertId = req.params.id;
-   const userId = req.user.id;
-  
-  if (!userId) return res.status(400).json({ error: 'userId required' });
-  
-  db.query(
-    "UPDATE alert_receipts SET read_at = NOW() WHERE alert_id = ? AND user_id = ?", 
-    [alertId, userId], 
-    (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      
-      // If no receipt row existed for this user/alert yet, insert one marked as read
-      if (result.affectedRows === 0) {
-        db.query(
-          "INSERT INTO alert_receipts (alert_id, user_id, read_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE read_at = NOW()",
-          [alertId, userId],
-          (insertErr) => {
-            if (insertErr) console.error("Failed to insert alert receipt:", insertErr);
-          }
-        );
-      }
-      res.json({ success: true });
-    }
-  );
+
+app.get('/api/emergency-alerts/history', authenticateToken, async (req, res) => {
+  const userId = Number(req.user.id);
+
+  try {
+    // Retrieve only alerts delivered to this authenticated user.
+    // Include expired, inactive, read, and unread alerts.
+    const [history] = await db.promise().query(
+      `SELECT
+         ea.id,
+         ea.title,
+         ea.message,
+         ea.severity,
+         ea.sent_at,
+         ea.is_active,
+         ea.expires_at,
+         ar.read_at
+       FROM alert_receipts ar
+       INNER JOIN emergency_alerts ea
+         ON ea.id = ar.alert_id
+       WHERE ar.user_id = ?
+       ORDER BY ea.sent_at DESC, ea.id DESC`,
+      [userId]
+    );
+
+    return res.json(history);
+  } catch (error) {
+    console.error('Emergency alert history error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to retrieve emergency alert history.'
+    });
+  }
 });
+
+
+app.post('/api/emergency-alerts/:id/read', authenticateToken, async (req, res) => {
+  const alertId = Number(req.params.id);
+  const userId = Number(req.user.id);
+
+  if (!Number.isSafeInteger(alertId) || alertId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid alert ID.'
+    });
+  }
+
+  try {
+    const [result] = await db.promise().query(
+      `UPDATE alert_receipts
+       SET read_at = COALESCE(read_at, NOW())
+       WHERE alert_id = ?
+         AND user_id = ?`,
+      [alertId, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Alert not found for this account.'
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Alert acknowledged successfully.'
+    });
+  } catch (error) {
+    console.error('Alert acknowledgment error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to acknowledge alert.'
+    });
+  }
+});
+
+
+
 app.get('/api/emergency-alerts', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
   db.query("SELECT * FROM emergency_alerts ORDER BY sent_at DESC", (err, results) => {
@@ -8313,6 +8434,56 @@ app.post('/api/jobs/apply', uploadApplication, async (req, res) => {
     return res.status(400).json({ success: false, message: emailCheck.reason });
   }
 
+
+  const jobId = Number(job_id);
+
+  if (!Number.isSafeInteger(jobId) || jobId <= 0) {
+    cleanup();
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid job posting.'
+    });
+  }
+
+  try {
+    const [jobs] = await db.promise().query(
+      `SELECT id, status, requires_prc
+       FROM job_postings
+       WHERE id = ?
+       LIMIT 1`,
+      [jobId]
+    );
+
+    if (!jobs.length || jobs[0].status !== 'open') {
+      cleanup();
+      return res.status(409).json({
+        success: false,
+        message: 'This job posting is no longer accepting applications.'
+      });
+    }
+
+    if (
+      Number(jobs[0].requires_prc) === 1 &&
+      !String(prc_license_no || '').trim()
+    ) {
+      cleanup();
+      return res.status(400).json({
+        success: false,
+        message: 'PRC license number is required for this position.'
+      });
+    }
+
+  } catch (err) {
+    cleanup();
+    console.error('Job eligibility check error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to verify the job posting.'
+    });
+  }
+
+
   const resumePath = `/uploads/resumes/${resumeFile.filename}`;
   const torPath    = torFile ? `/uploads/resumes/${torFile.filename}` : null;
 
@@ -8349,7 +8520,9 @@ app.get('/api/jobs', authenticateToken, allowRoles('admin','hr_admin'), (req, re
     `SELECT jp.id, jp.title, jp.department, jp.description, jp.requirements, jp.employment_type,
        jp.location_type, jp.location, jp.salary_min, jp.salary_max, jp.status,
        jp.requires_prc, jp.posted_by, jp.created_at,
-       (SELECT COUNT(*) FROM job_applicants ja WHERE ja.job_id = jp.id AND ja.status = 'new') AS applicant_count
+       (SELECT COUNT(*)
+ FROM job_applicants ja
+ WHERE ja.job_id = jp.id) AS applicant_count
   FROM job_postings jp
  ORDER BY jp.created_at DESC`,
     (err, results) => {
@@ -8362,107 +8535,343 @@ app.get('/api/jobs', authenticateToken, allowRoles('admin','hr_admin'), (req, re
   );
 });
 
-app.post('/api/jobs', authenticateToken, requireAction('jobs:create'), (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
-  }
+
+const validateJobPosting = (body = {}) => {
   const {
-    title, department, description, requirements, employment_type,
-    location_type, location, salary_min, salary_max, status, requires_prc
-  } = req.body;
+    title,
+    department,
+    description,
+    requirements,
+    employment_type,
+    location_type,
+    location,
+    salary_min,
+    salary_max,
+    status,
+    requires_prc
+  } = body;
 
-  if (!title || !title.trim() || !description || !description.trim()) {
-    return res.status(400).json({ success: false, message: 'Job title and description are required.' });
-  }
-  if (!salary_min || isNaN(salary_min) || Number(salary_min) < 0) {
-    return res.status(400).json({ success: false, message: 'Minimum salary is required and must be a valid non-negative number.' });
-  }
-  if (!salary_max || isNaN(salary_max) || Number(salary_max) < 0) {
-    return res.status(400).json({ success: false, message: 'Maximum salary is required and must be a valid non-negative number.' });
-  }
-  if (Number(salary_max) < Number(salary_min)) {
-    return res.status(400).json({ success: false, message: 'Maximum salary must be greater than or equal to minimum salary.' });
+  const cleanTitle = typeof title === 'string' ? title.trim() : '';
+  const cleanDescription =
+    typeof description === 'string' ? description.trim() : '';
+
+  if (!cleanTitle || !cleanDescription) {
+    return {
+      error: 'Job title and description are required.'
+    };
   }
 
-  db.query(
-    `INSERT INTO job_postings
-       (title, department, description, requirements, employment_type,
-        location_type, location, salary_min, salary_max, status, requires_prc, posted_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      title.trim(), department || null, description.trim(), requirements || null,
-      employment_type || 'Full-time', location_type || 'On-site', location || null,
-      Number(salary_min), Number(salary_max),
-      status || 'open', requires_prc ? 1 : 0, req.user.id
-    ],
-    (err, result) => {
-      if (err) {
-        console.error("Create job error:", err);
-        return res.status(500).json({ success: false, message: 'Failed to create job posting.' });
-      }
-      logAction(req.user.id, 'CREATE_JOB', 'job_posting', result.insertId, req);
-      res.status(201).json({ success: true, message: 'Job posted successfully.', id: result.insertId });
+  // DECIMAL(10,2): nonnegative, up to 8 digits before
+  // the decimal point, and up to 2 decimal places.
+  const validSalary = (value) => {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return false;
     }
-  );
-});
 
-app.put('/api/jobs/:id', authenticateToken, requireAction('jobs:edit'), async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
-  }
-  const {
-    title, department, description, requirements, employment_type,
-    location_type, location, salary_min, salary_max, status, requires_prc
-  } = req.body;
-  const jobId = req.params.id;
+    const text = String(value).trim();
 
-  if (!title || !title.trim() || !description || !description.trim()) {
-    return res.status(400).json({ success: false, message: 'Job title and description are required.' });
-  }
-  if (!salary_min || isNaN(salary_min) || Number(salary_min) < 0) {
-    return res.status(400).json({ success: false, message: 'Minimum salary is required and must be a valid non-negative number.' });
-  }
-  if (!salary_max || isNaN(salary_max) || Number(salary_max) < 0) {
-    return res.status(400).json({ success: false, message: 'Maximum salary is required and must be a valid non-negative number.' });
-  }
-  if (Number(salary_max) < Number(salary_min)) {
-    return res.status(400).json({ success: false, message: 'Maximum salary must be greater than or equal to minimum salary.' });
-  }
-
-  try {
-    const [oldRecord] = await db.promise().query("SELECT * FROM job_postings WHERE id = ?", [jobId]);
-    if (oldRecord.length === 0) {
-      return res.status(404).json({ success: false, message: 'Job posting not found.' });
-    }
-    const oldData = oldRecord[0];
-    const newData = req.body;
-
-    db.query(
-      `UPDATE job_postings SET
-         title = ?, department = ?, description = ?, requirements = ?,
-         employment_type = ?, location_type = ?, location = ?,
-         salary_min = ?, salary_max = ?, status = ?, requires_prc = ?
-       WHERE id = ?`,
-      [
-        title.trim(), department || null, description.trim(), requirements || null,
-        employment_type || 'Full-time', location_type || 'On-site', location || null,
-        Number(salary_min), Number(salary_max),
-        status || 'open', requires_prc ? 1 : 0, jobId
-      ],
-      (err, result) => {
-        if (err) {
-          console.error("Update job error:", err);
-          return res.status(500).json({ success: false, message: 'Failed to update job posting.' });
-        }
-        logAction(req.user.id, 'UPDATE_JOB', 'job_posting', jobId, req, oldData, newData);
-        res.json({ success: true, message: 'Job posting updated successfully.' });
-      }
+    return (
+      /^\d{1,8}(?:\.\d{1,2})?$/.test(text) &&
+      Number.isFinite(Number(text))
     );
-  } catch (err) {
-    console.error("Update job server error:", err);
-    res.status(500).json({ success: false, message: 'Server error while updating job.' });
+  };
+
+  if (!validSalary(salary_min)) {
+    return {
+      error:
+        'Minimum salary must be a valid non-negative amount with up to two decimal places.'
+    };
   }
-});
+
+  if (!validSalary(salary_max)) {
+    return {
+      error:
+        'Maximum salary must be a valid non-negative amount with up to two decimal places.'
+    };
+  }
+
+  const minSalary = Number(salary_min);
+  const maxSalary = Number(salary_max);
+
+  if (maxSalary < minSalary) {
+    return {
+      error:
+        'Maximum salary must be greater than or equal to minimum salary.'
+    };
+  }
+
+  const allowedEmploymentTypes = [
+    'Full-time',
+    'Part-time',
+    'Contract',
+    'Internship'
+  ];
+
+  const allowedLocationTypes = [
+    'On-site',
+    'Remote',
+    'Hybrid'
+  ];
+
+  const cleanEmploymentType = employment_type || 'Full-time';
+  const cleanLocationType = location_type || 'On-site';
+  const cleanStatus = status || 'open';
+
+  if (!allowedEmploymentTypes.includes(cleanEmploymentType)) {
+    return {
+      error: 'Invalid employment type.'
+    };
+  }
+
+  if (!allowedLocationTypes.includes(cleanLocationType)) {
+    return {
+      error: 'Invalid location type.'
+    };
+  }
+
+  if (!['open', 'closed'].includes(cleanStatus)) {
+    return {
+      error: 'Invalid job posting status.'
+    };
+  }
+
+  if (
+    ![true, false, 0, 1, '0', '1', null, undefined]
+      .includes(requires_prc)
+  ) {
+    return {
+      error: 'Invalid PRC license requirement.'
+    };
+  }
+
+  const optionalText = (value) => {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    return typeof value === 'string'
+      ? value.trim() || null
+      : null;
+  };
+
+  return {
+    data: {
+      title: cleanTitle,
+      department: optionalText(department),
+      description: cleanDescription,
+      requirements: optionalText(requirements),
+      employment_type: cleanEmploymentType,
+      location_type: cleanLocationType,
+      location: optionalText(location),
+      salary_min: minSalary,
+      salary_max: maxSalary,
+      status: cleanStatus,
+      requires_prc:
+        requires_prc === true ||
+        requires_prc === 1 ||
+        requires_prc === '1'
+          ? 1
+          : 0
+    }
+  };
+};
+
+app.post(
+  '/api/jobs',
+  authenticateToken,
+  requireAction('jobs:create'),
+  async (req, res) => {
+    if (!['admin', 'hr_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to create job postings.'
+      });
+    }
+
+    const validation = validateJobPosting(req.body);
+
+    if (validation.error) {
+      return res.status(400).json({
+        success: false,
+        message: validation.error
+      });
+    }
+
+    const job = validation.data;
+
+    try {
+      const [result] = await db.promise().query(
+        `INSERT INTO job_postings (
+          title,
+          department,
+          description,
+          requirements,
+          employment_type,
+          location_type,
+          location,
+          salary_min,
+          salary_max,
+          status,
+          requires_prc,
+          posted_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          job.title,
+          job.department,
+          job.description,
+          job.requirements,
+          job.employment_type,
+          job.location_type,
+          job.location,
+          job.salary_min,
+          job.salary_max,
+          job.status,
+          job.requires_prc,
+          req.user.id
+        ]
+      );
+
+      logAction(
+        req.user.id,
+        'CREATE_JOB',
+        'job_posting',
+        result.insertId,
+        req
+      );
+
+      return res.status(201).json({
+        success: true,
+        message:
+          job.status === 'open'
+            ? 'Job posting published successfully.'
+            : 'Job posting created with Closed status.',
+        id: result.insertId
+      });
+
+    } catch (err) {
+      console.error('Create job error:', err);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create job posting.'
+      });
+    }
+  }
+);
+
+
+app.put(
+  '/api/jobs/:id',
+  authenticateToken,
+  requireAction('jobs:edit'),
+  async (req, res) => {
+    if (!['admin', 'hr_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to modify job postings.'
+      });
+    }
+
+    const jobId = Number(req.params.id);
+
+    if (!Number.isSafeInteger(jobId) || jobId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid job posting ID.'
+      });
+    }
+
+    const validation = validateJobPosting(req.body);
+
+    if (validation.error) {
+      return res.status(400).json({
+        success: false,
+        message: validation.error
+      });
+    }
+
+    const job = validation.data;
+
+    try {
+      const [oldRecords] = await db.promise().query(
+        'SELECT * FROM job_postings WHERE id = ? LIMIT 1',
+        [jobId]
+      );
+
+      if (oldRecords.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Job posting not found.'
+        });
+      }
+
+      const oldData = oldRecords[0];
+
+      const [result] = await db.promise().query(
+        `UPDATE job_postings
+         SET
+           title = ?,
+           department = ?,
+           description = ?,
+           requirements = ?,
+           employment_type = ?,
+           location_type = ?,
+           location = ?,
+           salary_min = ?,
+           salary_max = ?,
+           status = ?,
+           requires_prc = ?
+         WHERE id = ?`,
+        [
+          job.title,
+          job.department,
+          job.description,
+          job.requirements,
+          job.employment_type,
+          job.location_type,
+          job.location,
+          job.salary_min,
+          job.salary_max,
+          job.status,
+          job.requires_prc,
+          jobId
+        ]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Job posting no longer exists.'
+        });
+      }
+
+      logAction(
+        req.user.id,
+        'UPDATE_JOB',
+        'job_posting',
+        jobId,
+        req,
+        oldData,
+        job
+      );
+
+      return res.json({
+        success: true,
+        message: 'Job posting updated successfully.'
+      });
+
+    } catch (err) {
+      console.error('Update job error:', err);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while updating job posting.'
+      });
+    }
+  }
+);
+
 
 app.put('/api/applicants/:id/onboarding', authenticateToken, requireAction('applicants:update'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -8515,29 +8924,19 @@ app.put('/api/applicants/:id/onboarding', authenticateToken, requireAction('appl
   }
 });
 
-app.delete('/api/jobs/:id', authenticateToken, requireAction('jobs:delete'), (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
-  }
-  const jobId = req.params.id;
-  db.query("DELETE FROM job_applicants WHERE job_id = ?", [jobId], (err) => {
-    if (err) {
-      console.error("Delete job applicants error:", err);
-      return res.status(500).json({ success: false, message: 'Failed to delete job applicants.' });
-    }
-    db.query("DELETE FROM job_postings WHERE id = ?", [jobId], (err, result) => {
-      if (err) {
-        console.error("Delete job error:", err);
-        return res.status(500).json({ success: false, message: 'Failed to delete job posting.' });
-      }
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ success: false, message: 'Job posting not found.' });
-      }
-      logAction(req.user.id, 'DELETE_JOB', 'job_posting', jobId, req);
-      res.json({ success: true, message: 'Job posting deleted successfully.' });
+
+app.delete(
+  '/api/jobs/:id',
+  authenticateToken,
+  requireAction('jobs:delete'),
+  (req, res) => {
+    return res.status(409).json({
+      success: false,
+      message: 'Permanent deletion is disabled to preserve recruitment history. Close the job posting instead.'
     });
-  });
-});
+  }
+);
+
 
 app.get('/api/jobs/:id', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -8562,6 +8961,232 @@ app.get('/api/jobs/:id', authenticateToken, allowRoles('admin','hr_admin'), (req
   );
 });
 
+
+app.get(
+  '/api/recruitment/interviews/applicant/:id',
+  authenticateToken,
+  allowRoles('admin', 'hr_admin'),
+  async (req, res) => {
+    const applicantId = Number(req.params.id);
+
+    if (!Number.isSafeInteger(applicantId) || applicantId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid applicant ID.'
+      });
+    }
+
+    try {
+      const [rows] = await db.promise().query(
+        `SELECT id, applicant_id,
+                DATE_FORMAT(interview_date, '%Y-%m-%d')
+                  AS interview_date,
+                TIME_FORMAT(interview_time, '%H:%i:%s')
+                  AS interview_time,
+                notes, status, outcome,
+                assessment_notes, created_at
+         FROM recruitment_interviews
+         WHERE applicant_id = ?
+         LIMIT 1`,
+        [applicantId]
+      );
+
+      return res.json({
+        success: true,
+        interview: rows[0] || null
+      });
+    } catch (err) {
+      console.error('Retrieve interview error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to retrieve interview.'
+      });
+    }
+  }
+);
+
+app.post(
+  '/api/recruitment/interviews',
+  authenticateToken,
+  requireAction('applicants:update'),
+  async (req, res) => {
+    const applicantId = Number(req.body.applicant_id);
+    const { date, time } = req.body;
+    const notes = String(req.body.notes || '').trim();
+
+    if (
+      !Number.isSafeInteger(applicantId) ||
+      applicantId <= 0 ||
+      typeof date !== 'string' ||
+      typeof time !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !/^\d{2}:\d{2}$/.test(time)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid applicant, date, and time are required.'
+      });
+    }
+
+    const scheduledAt = new Date(`${date}T${time}:00+08:00`);
+
+    if (
+      !Number.isFinite(scheduledAt.getTime()) ||
+      scheduledAt.getTime() <= Date.now()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Choose a valid future interview schedule.'
+      });
+    }
+
+    if (notes.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'Interview notes must not exceed 500 characters.'
+      });
+    }
+
+    try {
+      const [applicants] = await db.promise().query(
+        `SELECT id, status
+         FROM job_applicants
+         WHERE id = ?`,
+        [applicantId]
+      );
+
+      if (!applicants.length) {
+        return res.status(404).json({
+          success: false,
+          message: 'Applicant not found.'
+        });
+      }
+
+      if (applicants[0].status !== 'shortlisted') {
+        return res.status(409).json({
+          success: false,
+          message: 'Only shortlisted applicants may be scheduled.'
+        });
+      }
+
+      const [result] = await db.promise().query(
+        `INSERT INTO recruitment_interviews
+           (applicant_id, interview_date,
+            interview_time, notes, created_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [applicantId, date, time, notes || null, req.user.id]
+      );
+
+      logAction(
+        req.user.id,
+        'SCHEDULE_RECRUITMENT_INTERVIEW',
+        'recruitment_interview',
+        result.insertId,
+        req
+      );
+
+      return res.status(201).json({
+        success: true,
+        id: result.insertId,
+        message: 'Interview scheduled successfully.'
+      });
+    } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({
+          success: false,
+          message: 'An interview already exists for this applicant.'
+        });
+      }
+
+      console.error('Schedule interview error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to schedule interview.'
+      });
+    }
+  }
+);
+
+app.put(
+  '/api/recruitment/interviews/:id/outcome',
+  authenticateToken,
+  requireAction('applicants:update'),
+  async (req, res) => {
+    const interviewId = Number(req.params.id);
+    const { outcome } = req.body;
+    const notes = String(req.body.notes || '').trim();
+
+    if (!Number.isSafeInteger(interviewId) || interviewId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid interview ID.'
+      });
+    }
+
+    if (!['passed', 'failed'].includes(outcome)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Select a valid interview outcome.'
+      });
+    }
+
+    if (notes.length < 5 || notes.length > 2000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Assessment must contain 5–2,000 characters.'
+      });
+    }
+
+    try {
+      const [result] = await db.promise().query(
+        `UPDATE recruitment_interviews
+         SET status = 'completed',
+             outcome = ?,
+             assessment_notes = ?,
+             assessed_by = ?
+         WHERE id = ?
+           AND status = 'scheduled'
+           AND TIMESTAMP(interview_date, interview_time)
+               <= CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', '+08:00')
+           AND EXISTS (
+             SELECT 1
+             FROM job_applicants
+             WHERE id = recruitment_interviews.applicant_id
+               AND status = 'shortlisted'
+           )`,
+        [outcome, notes, req.user.id, interviewId]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'Interview cannot be assessed. Check its schedule and status.'
+        });
+      }
+
+      logAction(
+        req.user.id,
+        'RECORD_INTERVIEW_OUTCOME',
+        'recruitment_interview',
+        interviewId,
+        req
+      );
+
+      return res.json({
+        success: true,
+        message: 'Interview assessment recorded.'
+      });
+    } catch (err) {
+      console.error('Interview assessment error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to record interview assessment.'
+      });
+    }
+  }
+);
+
+
 app.get('/api/jobs/:id/applicants', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
     return res.status(403).json({ success: false, message: 'Forbidden' });
@@ -8585,30 +9210,146 @@ app.get('/api/jobs/:id/applicants', authenticateToken, allowRoles('admin','hr_ad
   );
 });
 
-app.put('/api/applicants/:id', authenticateToken, requireAction('applicants:update'), (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
-  }
-  const { status } = req.body;
-  if (!['new', 'reviewed', 'shortlisted', 'rejected', 'hired'].includes(status)) {
-    return res.status(400).json({ success: false, message: 'Invalid applicant status provided.' });
-  }
-  db.query(
-    "UPDATE job_applicants SET status = ? WHERE id = ?",
-    [status, req.params.id],
-    (err, result) => {
-      if (err) {
-        console.error("Update applicant status error:", err);
-        return res.status(500).json({ success: false, message: 'Failed to update applicant status.' });
-      }
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ success: false, message: 'Job applicant not found.' });
-      }
-      logAction(req.user.id, 'UPDATE_APPLICANT_STATUS', 'job_applicant', req.params.id, req);
-      res.json({ success: true, message: 'Applicant status successfully updated.' });
+
+app.put(
+  '/api/applicants/:id',
+  authenticateToken,
+  requireAction('applicants:update'),
+  async (req, res) => {
+    const applicantId = Number(req.params.id);
+    const { status } = req.body;
+    const reason = String(req.body.decision_reason || '').trim();
+
+    const transitions = {
+      new: ['reviewed', 'rejected'],
+      reviewed: ['shortlisted', 'rejected'],
+      shortlisted: ['hired', 'rejected'],
+      rejected: [],
+      hired: []
+    };
+
+    if (!Number.isSafeInteger(applicantId) || applicantId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid applicant ID.'
+      });
     }
-  );
-});
+
+    if (!['reviewed', 'shortlisted', 'rejected', 'hired'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid candidate status.'
+      });
+    }
+
+    if (
+      reason.length > 500 ||
+      (status === 'rejected' && reason.length < 5)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rejection requires a reason of 5–500 characters.'
+      });
+    }
+
+    let connection;
+
+    try {
+      connection = await db.promise().getConnection();
+      await connection.beginTransaction();
+
+      const [rows] = await connection.query(
+        `SELECT id, status
+         FROM job_applicants
+         WHERE id = ?
+         FOR UPDATE`,
+        [applicantId]
+      );
+
+      if (!rows.length) {
+        await connection.rollback();
+        return res.status(404).json({
+          success: false,
+          message: 'Applicant not found.'
+        });
+      }
+
+      const currentStatus = rows[0].status;
+
+      if (!transitions[currentStatus]?.includes(status)) {
+        await connection.rollback();
+
+        return res.status(409).json({
+          success: false,
+          message: `Cannot change applicant from ${currentStatus} to ${status}.`
+        });
+      }
+
+      if (status === 'hired') {
+        const [interviews] = await connection.query(
+          `SELECT id
+           FROM recruitment_interviews
+           WHERE applicant_id = ?
+             AND status = 'completed'
+             AND outcome = 'passed'
+           LIMIT 1`,
+          [applicantId]
+        );
+
+        if (!interviews.length) {
+          await connection.rollback();
+
+          return res.status(409).json({
+            success: false,
+            message: 'A passed interview is required before hiring.'
+          });
+        }
+      }
+
+      await connection.query(
+        `UPDATE job_applicants
+         SET status = ?,
+             decision_reason = ?,
+             decision_by = ?,
+             decision_at = NOW()
+         WHERE id = ?`,
+        [status, reason || null, req.user.id, applicantId]
+      );
+
+      await connection.commit();
+
+      logAction(
+        req.user.id,
+        'UPDATE_APPLICANT_STATUS',
+        'job_applicant',
+        applicantId,
+        req,
+        { status: currentStatus },
+        { status, decision_reason: reason || null }
+      );
+
+      return res.json({
+        success: true,
+        message: 'Applicant status updated successfully.'
+      });
+    } catch (err) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+
+      console.error('Applicant status update error:', err);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to update applicant status.'
+      });
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+);
 
 
 
@@ -8628,10 +9369,7 @@ const authorizeChatRoom = (roomId, user, callback) => {
       return callback(null, participants.includes(Number(user.id)), 403, room);
     }
 
-    const isPrivileged = ['admin', 'security', 'hr_admin'].includes(user.role);
-    if (Number(room.id) === 1 || (Number(room.id) <= 4 && isPrivileged)) {
-      return callback(null, true, 403, room);
-    }
+    
 
     db.query(
       "SELECT 1 FROM chat_room_members WHERE room_id = ? AND user_id = ? LIMIT 1",
@@ -8659,9 +9397,23 @@ app.get('/api/chat/rooms', authenticateToken, (req, res) => {
         )
       END as display_name 
     FROM chat_rooms r 
-    WHERE (r.type = 'direct' AND (r.name LIKE CONCAT('dm_%\_', ?) OR r.name LIKE CONCAT('dm\_', ?, '\_%'))) 
-       OR (r.type = 'group' AND EXISTS (SELECT 1 FROM chat_room_members rm WHERE rm.room_id = r.id AND rm.user_id = ?)) 
-    ORDER BY r.created_at DESC
+    WHERE (
+  r.type = 'direct'
+  AND (
+    r.name REGEXP CONCAT('^dm_', ?, '_[0-9]+$')
+    OR r.name REGEXP CONCAT('^dm_[0-9]+_', ?, '$')
+  )
+)
+OR (
+  r.type = 'group'
+  AND EXISTS (
+    SELECT 1
+    FROM chat_room_members rm
+    WHERE rm.room_id = r.id
+      AND rm.user_id = ?
+  )
+)
+ORDER BY r.created_at DESC
   `;
 
   db.query(sql, [userId, userId, userId, userId], (err, rooms) => {
@@ -8722,21 +9474,51 @@ app.delete('/api/chat/rooms/:roomId', authenticateToken, (req, res) => {
       if (parts.length !== 3) return res.status(400).json({ error: 'Invalid DM room name' });
       const participantIds = [parseInt(parts[1]), parseInt(parts[2])];
       if (!participantIds.includes(userId)) return res.status(403).json({ error: 'You are not a participant' });
-      db.query("DELETE FROM chat_messages WHERE room_id = ?", [roomId], () => {
-        db.query("DELETE FROM chat_rooms WHERE id = ?", [roomId], () => res.json({ success: true }));
+      db.query(
+  "DELETE FROM user_chat_read WHERE room_id = ?",
+  [roomId],
+  (readErr) => {
+    if (readErr) {
+      return res.status(500).json({
+        success: false,
+        error: 'Could not remove read markers.'
       });
-    } else if (room.type === 'group') {
-      db.query("SELECT * FROM chat_room_members WHERE room_id = ? AND user_id = ?", [roomId, userId], (err, memb) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (memb.length === 0) return res.status(403).json({ error: 'You are not a member' });
-        db.query("DELETE FROM chat_messages WHERE room_id = ?", [roomId], () => {
-          db.query("DELETE FROM user_chat_read WHERE room_id = ?", [roomId], () => {
-            db.query("DELETE FROM chat_room_members WHERE room_id = ?", [roomId], () => {
-              db.query("DELETE FROM chat_rooms WHERE id = ?", [roomId], () => res.json({ success: true }));
-            });
+    }
+
+    db.query(
+      "DELETE FROM chat_messages WHERE room_id = ?",
+      [roomId],
+      (deleteErr) => {
+        if (deleteErr) {
+          return res.status(500).json({
+            success: false,
+            error: 'Could not delete message history.'
           });
-        });
-      });
+        }
+
+        db.query(
+          "DELETE FROM chat_rooms WHERE id = ?",
+          [roomId],
+          (roomErr) => {
+            if (roomErr) {
+              return res.status(500).json({
+                success: false,
+                error: 'Could not delete conversation.'
+              });
+            }
+
+            return res.json({ success: true });
+          }
+        );
+      }
+    );
+  }
+);
+    } else if (room.type === 'group') {
+  return res.status(403).json({
+    success: false,
+    error: 'Use Leave group to exit. Group history cannot be deleted by members.'
+  });
     } else return res.status(400).json({ error: 'Unknown room type' });
   });
 });
@@ -8774,11 +9556,77 @@ app.post('/api/chat/read/:roomId', authenticateToken, (req, res) => {
 });
 
 app.get('/api/chat/unread-counts', authenticateToken, (req, res) => {
-  const userId = req.user.id;
-  db.query(`SELECT r.id AS room_id, (SELECT COUNT(*) FROM chat_messages cm WHERE cm.room_id = r.id AND cm.sent_at > COALESCE((SELECT last_read_at FROM user_chat_read WHERE user_id = ? AND room_id = r.id), '1970-01-01')) AS unread FROM chat_rooms r JOIN chat_room_members rm ON r.id = rm.room_id AND rm.user_id = ? WHERE r.type = 'group' UNION ALL SELECT r.id AS room_id, (SELECT COUNT(*) FROM chat_messages cm WHERE cm.room_id = r.id AND cm.sent_at > COALESCE((SELECT last_read_at FROM user_chat_read WHERE user_id = ? AND room_id = r.id), '1970-01-01')) AS unread FROM chat_rooms r WHERE r.type = 'direct' AND (r.name LIKE CONCAT('dm_%', ?, '\_%') OR r.name LIKE CONCAT('dm\_%\_', ?))`, [userId, userId, userId, userId, userId], (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+  const userId = Number(req.user.id);
+
+  const query = `
+    SELECT
+      r.id AS room_id,
+      COUNT(cm.id) AS unread
+    FROM chat_rooms r
+    JOIN chat_room_members rm
+      ON rm.room_id = r.id
+      AND rm.user_id = ?
+    LEFT JOIN user_chat_read rd
+      ON rd.room_id = r.id
+      AND rd.user_id = ?
+    LEFT JOIN chat_messages cm
+      ON cm.room_id = r.id
+      AND cm.user_id <> ?
+      AND cm.sent_at > COALESCE(
+        rd.last_read_at,
+        '1970-01-01'
+      )
+    WHERE r.type = 'group'
+    GROUP BY r.id
+
+    UNION ALL
+
+    SELECT
+      r.id AS room_id,
+      COUNT(cm.id) AS unread
+    FROM chat_rooms r
+    LEFT JOIN user_chat_read rd
+      ON rd.room_id = r.id
+      AND rd.user_id = ?
+    LEFT JOIN chat_messages cm
+      ON cm.room_id = r.id
+      AND cm.user_id <> ?
+      AND cm.sent_at > COALESCE(
+        rd.last_read_at,
+        '1970-01-01'
+      )
+    WHERE r.type = 'direct'
+      AND (
+        r.name REGEXP CONCAT('^dm_', ?, '_[0-9]+$')
+        OR r.name REGEXP CONCAT('^dm_[0-9]+_', ?, '$')
+      )
+    GROUP BY r.id
+  `;
+
+  db.query(
+    query,
+    [
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId,
+      userId
+    ],
+    (err, results) => {
+      if (err) {
+        console.error('Unread count failed:', err);
+
+        return res.status(500).json({
+          success: false,
+          message: 'Unable to load unread counts.'
+        });
+      }
+
+      return res.json(results);
+    }
+  );
 });
 
 app.post('/api/chat/group-room', authenticateToken, async (req, res) => {
@@ -8922,9 +9770,12 @@ app.get('/api/attendance-monthly', authenticateToken, allowRoles('admin','hr_adm
   });
 });
 
-app.get('/api/payroll/history', authenticateToken, allowRoles('admin','hr_admin'), (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin or HR access required.' });
+app.get('/api/payroll/history', authenticateToken, allowRoles('hr_admin'), (req, res) => {
+  if (req.user.role !== 'hr_admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'HR access required for payroll history.'
+    });
   }
 
   const sql = `
@@ -10121,54 +10972,31 @@ app.get('/api/audit-logs', authenticateToken, allowRoles('admin'), (req, res) =>
   });
 });
 
-app.put('/api/users/:id/role', authenticateToken, requireAction('roles:assign'), async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Only System Admins can change user roles.' });
-  }
-  
-  const { role } = req.body;
-  const userId = req.params.id;
-  
-  // 1. Strict Self-Edit Validation (Prevent admin lockout)
-  if (req.user.id.toString() === userId.toString()) {
-    return res.status(400).json({ success: false, message: 'You cannot change your own role.' });
-  }
-
-  // 2. Strict Role Set Validation
-  if (!['admin', 'hr_admin', 'security', 'instructor'].includes(role)) {
-    return res.status(400).json({ success: false, message: 'Invalid role assignment.' });
-  }
-
+app.put('/api/users/:id/role', authenticateToken, requireAction('roles:assign'), async (req,res) => {
+  const {role}=req.body||{};
+  const userId=req.params.id;
+  if (String(req.user.id)===String(userId)) return res.status(403).json({success:false,message:'You cannot change your own role.'});
+  if (!['admin','hr_admin','security','instructor'].includes(role)) return res.status(400).json({success:false,message:'Invalid role assignment.'});
   try {
-    const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [userId]);
-    if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'User not found.' });
-    const oldData = oldRecord[0];
-    if (oldData.status !== 'active') {
-      return res.status(409).json({success:false,message:'Only active accounts can be reassigned. Activate the account through its owning department first.'});
+    const [rows]=await db.promise().query('SELECT id,role,status,password,employment_status FROM users WHERE id=? LIMIT 1',[userId]);
+    if(!rows.length) return res.status(404).json({success:false,message:'Account not found.'});
+    const target=rows[0];
+    if (target.employment_status!=='active'||!target.password||!['active','pending_role'].includes(target.status)) {
+      return res.status(409).json({success:false,message:'Role assignment requires active employment and provisioned credentials.'});
     }
-    if (oldData.role === role) return res.json({success:true,message:'Role is already assigned.'});
-
-    if (oldData.role === 'admin' && role !== 'admin') {
-      const [adminCount] = await db.promise().query(
-        "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active' AND id != ?",
-        [userId]
-      );
-      if (adminCount[0].count === 0) {
-        return res.status(403).json({ 
-          success: false, 
-          message: 'Action denied: You cannot demote the last active System Administrator.' 
-        });
-      }
+    if (target.status==='pending_role'&&target.role!==null) return res.status(409).json({success:false,message:'Invalid pending role state.'});
+    if (target.role===role&&target.status==='active') return res.json({success:true,message:'Role already assigned.'});
+    if (target.role==='admin'&&role!=='admin') {
+      const [[count]]=await db.promise().query("SELECT COUNT(*) AS total FROM users WHERE role='admin' AND status='active' AND employment_status='active' AND id<>?",[target.id]);
+      if (!count.total) return res.status(403).json({success:false,message:'Cannot demote the last active System Administrator.'});
     }
-
-    await db.promise().query("UPDATE users SET role = ? WHERE id = ?", [role, userId]);
-    
-    logAction(req.user.id, 'UPDATE_USER_ROLE', 'user', userId, req, { role: oldData.role }, { role });
-    res.json({ success: true, message: 'User role successfully updated.' });
-  } catch (err) {
-    console.error("Role update error:", err);
-    res.status(500).json({ success: false, message: 'Server error while updating role.' });
-  }
+    const [result]=await db.promise().query(
+      "UPDATE users SET role=?,status=CASE WHEN status='pending_role' THEN 'active' ELSE status END WHERE id=? AND status=? AND (role <=> ?)",
+      [role,target.id,target.status,target.role]);
+    if(result.affectedRows!==1) return res.status(409).json({success:false,message:'Role changed concurrently. Reload and retry.'});
+    logAction(req.user.id,'UPDATE_USER_ROLE','user',target.id,req,{role:target.role},{role});
+    return res.json({success:true,message:'Role assigned successfully.',role});
+  }catch(err){console.error('Role update:',err);return res.status(500).json({success:false,message:'Role update failed.'});}
 });
 
 const createConfigTable = `
@@ -12939,14 +13767,37 @@ if (
 const userId = decoded.id;
 
     
-    db.query("SELECT id, email, role FROM users WHERE id = ? AND status = 'active'", [userId], (err, rows) => {
-      if (err || rows.length === 0) {
-        return ws.close(4001, 'User not found or inactive');
-      }
-      
-      const user = rows[0];
-      ws.user = user;
-      wsClients.set(user.id, ws);
+    db.query(
+  `SELECT
+    id,
+    email,
+    role,
+    full_name,
+    employee_id
+   FROM users
+   WHERE id = ?
+     AND status = 'active'
+     AND employment_status = 'active'`,
+  [userId],
+  (err, rows) => {
+    if (
+      err ||
+      rows.length === 0 ||
+      rows[0].role !== decoded.role
+    ) {
+      return ws.close(4001, 'User not found or inactive');
+    }
+
+    const user = rows[0];
+
+    ws.user = user;
+
+   
+    if (!wsClients.has(user.id)) {
+      wsClients.set(user.id, new Set());
+    }
+
+    wsClients.get(user.id).add(ws);
       ws.on('error', socketErr => console.error('Chat websocket error:', socketErr.message));
       
       ws.on('message', (data) => {
@@ -12995,53 +13846,87 @@ const userId = decoded.id;
               }
 
               const messageObj = {
-                id: result.insertId,
-                room_id: roomId,
-                user_id: user.id,
-                full_name: user.email,
-                message: content,
-                sent_at: new Date().toISOString()
-              };
+  id: result.insertId,
+  room_id: roomId,
+  user_id: user.id,
+  full_name: user.full_name,
+  employee_id: user.employee_id,
+  message: content,
+  sent_at: new Date().toISOString()
+};
               const broadcast = (recipientIds) => {
-                recipientIds.forEach(recipientId => {
-                  const client = wsClients.get(Number(recipientId));
-                  if (client && client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_message', message: messageObj }));
-                  }
-                });
-              };
+  recipientIds.forEach(recipientId => {
+    const sockets = wsClients.get(Number(recipientId));
 
-              if (room.type === 'direct') {
-                broadcast(room.name.split('_').slice(1).map(Number));
-              } else if (Number(room.id) === 1) {
-                wss.clients.forEach(client => {
-                  if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'new_message', message: messageObj }));
-                  }
-                });
-              } else {
-                db.query("SELECT user_id FROM chat_room_members WHERE room_id = ?", [roomId], (memberErr, members) => {
-                  if (memberErr) {
-                    console.error('Could not find chat group recipients:', memberErr.message);
-                    return;
-                  }
-                  const recipientIds = members.map(member => member.user_id);
-                  if (Number(room.id) <= 4) {
-                    wss.clients.forEach(client => {
-                      if (client.user && ['admin', 'security', 'hr_admin'].includes(client.user.role)) {
-                        recipientIds.push(client.user.id);
-                      }
-                    });
-                  }
-                  broadcast([...new Set(recipientIds.map(Number))]);
-                });
-              }
+    sockets?.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: 'new_message',
+          message: messageObj
+        }));
+      }
+    });
+  });
+};
+
+              
+if (room.type === 'direct') {
+  // Send only to the two direct-message participants.
+  const match = /^dm_(\d+)_(\d+)$/.exec(room.name);
+
+  if (!match) {
+    console.error('Invalid direct-message room name:', room.name);
+    return;
+  }
+
+  const recipientIds = [
+    Number(match[1]),
+    Number(match[2])
+  ];
+
+  broadcast(recipientIds);
+
+} else if (room.type === 'group') {
+  
+  db.query(
+    "SELECT user_id FROM chat_room_members WHERE room_id = ?",
+    [roomId],
+    (memberErr, members) => {
+      if (memberErr) {
+        console.error(
+          'Could not retrieve group recipients:',
+          memberErr.message
+        );
+        return;
+      }
+
+      const recipientIds = [
+        ...new Set(members.map(member => Number(member.user_id)))
+      ];
+
+      broadcast(recipientIds);
+    }
+  );
+}
+
             });
           });
         }
       });
       
-      ws.on('close', () => wsClients.delete(user.id));
+      ws.on('close', () => {
+  const sockets = wsClients.get(user.id);
+
+  if (!sockets) return;
+
+ 
+  sockets.delete(ws);
+
+  
+  if (sockets.size === 0) {
+    wsClients.delete(user.id);
+  }
+});
     });
   } catch (err) {
     ws.close(4001, 'Invalid token');

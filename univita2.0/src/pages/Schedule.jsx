@@ -455,13 +455,7 @@ const Schedule = () => {
         </div>
       </div>
 
-      {/* ---- Read-only banner for Admin ---- */}
-      {isAdmin && (
-        <div className="sch-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Schedule management is handled by HR.</span>
-        </div>
-      )}
+      
 
       <div className="sch-overview" aria-label="Schedule summary">
         <div className="sch-overview-item"><span>Active instructors</span><strong>{instructors.length}</strong></div>

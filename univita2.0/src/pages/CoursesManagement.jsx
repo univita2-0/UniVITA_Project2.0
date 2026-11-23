@@ -177,39 +177,33 @@ const CoursesManagement = () => {
 
   return (
     <div className="cm-container facility-courses">
-      {/* FIX 10.8 — read-only banner for Admin */}
       {isAdmin && (
-        <div style={{
-          padding: '12px 16px',
-          marginBottom: '20px',
-          background: '#F0FDFA',
-          border: '1px solid #99F6E4',
-          borderRadius: '5px',
-          color: '#0F766E',
-          fontSize: '12px',
-          fontWeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
-          <span><strong>Read-only view.</strong> Course management is handled by HR.</span>
-        </div>
+        <p className="facility-view-only" role="note">View-only access</p>
       )}
 
-      <div className="facility-page-intro"><p>Manage the courses used for program organization and instructor scheduling.</p></div>
-      <div className="facility-stat-strip" aria-label="Course inventory summary"><div><span>Total courses</span><strong>{courses.length}</strong></div><div><span>Matching courses</span><strong>{filteredCourses.length}</strong></div><div><span>Available programs</span><strong>{programs.length}</strong></div></div>
-      {/* Header Area */}
-      <div className="cm-header">
-        <div className="cm-header-left">
-          <p className="cm-subtitle">Manage academic courses and subjects for instructor assignment.</p>
+     
+      <section className="facility-stat-strip" aria-label="Course inventory summary">
+        <div className="facility-stat-card">
+          <span>Total courses</span>
+          <strong>{courses.length}</strong>
         </div>
-        {canWrite && (
+        <div className="facility-stat-card">
+          <span>Matching courses</span>
+          <strong>{filteredCourses.length}</strong>
+        </div>
+        <div className="facility-stat-card">
+          <span>Available programs</span>
+          <strong>{programs.length}</strong>
+        </div>
+      </section>
+      {/* Header Area */}
+      {canWrite && (
+        <div className="cm-header facility-header-actions">
           <button className="cm-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-            <Plus size={18} /> Add New Course
+            Add New Course
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Main Content Card */}
       <div className="cm-content-card">
@@ -241,9 +235,6 @@ const CoursesManagement = () => {
           <div className="cm-loading">Loading courses...</div>
         ) : filteredCourses.length === 0 ? (
           <div className="cm-empty">
-            <div className="cm-empty-icon-wrap">
-              <BookOpen size={32} />
-            </div>
             <h3>No courses found</h3>
             <p>
               {searchQuery 
@@ -252,7 +243,7 @@ const CoursesManagement = () => {
             </p>
             {!searchQuery && canWrite && (
               <button className="cm-btn-outline mt-4" onClick={() => { resetForm(); setShowModal(true); }}>
-                <Plus size={16} /> Add First Course
+                Add First Course
               </button>
             )}
           </div>
@@ -282,10 +273,10 @@ const CoursesManagement = () => {
                         <td>
                           <div className="cm-action-group">
                             <button className="cm-action-btn edit" onClick={() => handleEdit(course)} title="Edit Course">
-                              <Edit3 size={14} /> Edit
+                              Edit
                             </button>
                             <button className="cm-action-btn delete" onClick={() => handleDeleteClick(course.id, course.name)} title="Delete Course">
-                              <Trash2 size={14} /> Delete
+                              Delete
                             </button>
                           </div>
                         </td>
@@ -394,7 +385,6 @@ const CoursesManagement = () => {
                 Are you sure you want to permanently delete <strong>"{deleteTargetName}"</strong>?
               </p>
               <div className="cm-alert-box danger">
-                <AlertCircle size={18} />
                 <span>Warning: This action cannot be undone and may affect instructors currently assigned to this course.</span>
               </div>
             </div>

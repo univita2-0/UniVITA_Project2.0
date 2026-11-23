@@ -183,19 +183,19 @@ export default function LeaveBalancesScreen({ navigation }) {
             balances.map((item, idx) => {
               const isCto = isCtoType(item.leave_type);
               const remainingNum = safeNumber(item.remaining_days);
-              const quotaNum = isCto ? null : (safeNumber(item.annual_quota) ?? 15);
+              const quotaNum = isCto ? null : safeNumber(item.annual_quota);
 
               const remainingText = remainingNum != null
                 ? isCto
                   ? `${remainingNum} days earned`
-                  : `${remainingNum}/${quotaNum} days remaining`
+                  : quotaNum == null ? `${remainingNum} days remaining (quota not configured)` : `${remainingNum}/${quotaNum} days remaining`
                 : isCto
                   ? '— days earned'
-                  : `—/${quotaNum} days remaining`;
+                  : quotaNum == null ? 'Balance not configured' : `—/${quotaNum} days remaining`;
 
               const quotaText = isCto
                 ? 'Converted from approved overtime hours (8 hrs = 1 day)'
-                : `Annual quota: ${quotaNum} days`;
+                : quotaNum == null ? 'Annual quota not configured' : `Annual quota: ${quotaNum} days`;
 
               const displayType = item.leave_type || 'Leave';
 

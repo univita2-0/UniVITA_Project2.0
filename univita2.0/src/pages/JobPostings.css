@@ -292,91 +292,107 @@
   .cf-label { width: 100%; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
 }
 
-/* UniVITA enterprise recruitment design — scoped to the Job Postings page */
-.jp-wrapper {
-  --jp-navy:#0c2031; --jp-ink:#142435; --jp-teal:#0d9488;
-  --jp-muted:#64748b; --jp-border:#e1e8ef; --jp-canvas:#f5f7fa;
-  font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:transparent; min-height:0; padding:5px 10px 10px;
-  color:var(--jp-ink); width:100%; box-sizing:border-box;
-}
+
+
+/* ================================================================
+   UniVITA Enterprise — Consistent Administrative UI
+   01. Page and typography
+   02. Buttons, tabs and filters
+   03. Summary cards and tables
+   04. Dialogs, status and responsive adjustments
+   Print templates and the existing functional CSS remain preserved.
+   ================================================================ */
+
+/* 01. Page */
+.jp-wrapper { --jp-teal:#0D9488; background:transparent; min-height:0; padding:5px 10px 10px; color:#0F172A; font-size:13px; }
 .jp-wrapper * { box-sizing:border-box; }
-.jp-header { margin:0 0 13px; gap:14px; align-items:flex-end; }
-.jp-section-label { display:flex; align-items:center; gap:6px; font-size:10px; font-weight:700; letter-spacing:.09em; color:#0d9488; margin-bottom:6px; }
-.jp-title { font-family:Inter,system-ui,sans-serif; font-size:23px; font-weight:700; line-height:1.2; margin:0 0 5px; letter-spacing:-.04em; color:var(--jp-navy); }
-.jp-subtitle { color:#66778a; font-size:12px; line-height:1.5; }
-.jp-header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.jp-refresh { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
-.jp-btn-primary,.jp-btn-cancel { height:34px; padding:0 13px; border-radius:5px; font-size:12px; font-weight:600; }
-.jp-btn-primary { background:#0d766f; }
-.jp-btn-primary:hover { background:#095c58; }
-.jp-btn-primary:focus-visible,.jp-btn-cancel:focus-visible,.jp-tab:focus-visible,.jp-ats-tab:focus-visible,.jp-actions button:focus-visible,.jp-page-controls button:focus-visible { outline:2px solid #0d9488; outline-offset:2px; }
-.jp-readonly-banner { padding:9px 12px; margin:0 0 12px; font-size:12px; border-radius:5px; }
-.jp-metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:13px; }
-.jp-metric-card { background:#fff; border:1px solid var(--jp-border); border-radius:6px; min-width:0; padding:13px 15px; box-shadow:0 1px 2px rgba(12,32,49,.025); }
-.jp-metric-heading { display:flex; justify-content:space-between; gap:7px; color:#64748b; font-size:11px; font-weight:600; margin-bottom:10px; }
-.jp-metric-heading svg { color:#0d9488; flex-shrink:0; }
-.jp-metric-card strong { display:block; color:var(--jp-navy); font-size:25px; line-height:1.1; letter-spacing:-.045em; font-weight:700; font-variant-numeric:tabular-nums; }
-.jp-metric-card small { display:block; margin-top:6px; color:#8290a0; font-size:10px; }
-.jp-main-card { border-color:var(--jp-border); border-radius:6px; box-shadow:0 1px 3px rgba(12,32,49,.035); }
-.jp-workspace-header { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:15px 17px 12px; border-bottom:1px solid #e8edf2; }
-.jp-workspace-header h2 { margin:0 0 4px; color:#142435; font-size:14px; font-weight:700; letter-spacing:-.02em; }
-.jp-workspace-header p { margin:0; font-size:11px; color:#7b899b; }
-.jp-record-label { color:#66778a; white-space:nowrap; font-size:11px; font-weight:500; }
-.jp-toolbar { padding:10px 16px; gap:10px; background:#fff; }
-.jp-tabs { background:#f0f3f7; border:1px solid #e8edf2; padding:2px; gap:2px; border-radius:5px; }
-.jp-tab { border-radius:4px; min-height:30px; padding:5px 12px; font-size:11px; font-weight:600; }
-.jp-tab.active { color:#0d766f; background:#fff; }
-.jp-tab .tab-count { font-size:10px; font-variant-numeric:tabular-nums; }
-.jp-search { width:min(100%,280px); height:33px; border-color:#dce4eb; background:#fff; border-radius:5px; padding:0 9px; }
-.jp-search input { font-family:inherit; font-size:11px; }
-.jp-table th { padding:10px 16px; background:#f8fafc; color:#66778a; font-size:10px; letter-spacing:.055em; font-weight:700; }
-.jp-table td { padding:11px 16px; border-color:#eef1f5; font-size:12px; }
-.jp-cell-title { font-size:12px; color:#172b3d; font-weight:650; }
-.jp-cell-sub { font-size:10px; color:#77879a; }
-.jp-tag { font-size:10px; border-color:#e5ebf0; color:#576a7e; background:#f7f9fb; padding:3px 7px; }
-.jp-status { font-size:10px; font-weight:650; letter-spacing:.02em; padding:4px 8px; text-transform:capitalize; }
+.jp-header { gap:12px; margin:7px 0 13px; align-items:center; }
+.jp-title { font:700 21px/1.3 Inter, sans-serif; letter-spacing:-.025em; margin:0 0 3px; }
+.jp-subtitle { font-size:12px; line-height:1.5; }
+.jp-header-actions { display:flex; align-items:center; gap:8px; }
+.jp-section-label { font-size:10px; letter-spacing:.08em; font-weight:700; color:#0F766E; }
+.jp-readonly-banner { background:none; border:0; color:#64748B; padding:0; margin:0 0 12px; font-size:12px; font-weight:500; }
+/* 02. Controls */
+.jp-btn-primary,.jp-btn-cancel { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:34px; padding:0 12px; font:600 12px Inter,sans-serif; border-radius:5px; box-shadow:none; }
+.jp-btn-primary { background:#0D9488; }
+.jp-btn-primary:hover:not(:disabled) { background:#0F766E; }
+.jp-toolbar { padding:11px 13px; gap:10px; }
+.jp-tabs { background:transparent; padding:0; gap:4px; }
+.jp-tab { border-radius:4px; font:600 12px Inter,sans-serif; padding:7px 11px; }
+.jp-tab.active { background:#EAF7F4; color:#0F766E; box-shadow:none; }
+.jp-tab .tab-count { font-size:11px; }
+.jp-search { height:35px; background:white; border-radius:5px; }
+.jp-search input { font:400 12px Inter,sans-serif; }
+.jp-search.small { height:34px; }
+/* 03. Summary and table */
+.jp-metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:0 0 12px; }
+.jp-metric-card { background:#fff; border:1px solid #E2E8F0; border-radius:6px; padding:13px 15px; min-width:0; box-shadow:none; }
+.jp-metric-heading { color:#64748B; font:600 11px Inter,sans-serif; margin:0 0 5px; }
+.jp-metric-card strong { font:700 23px Inter,sans-serif; color:#0F172A; }
+.jp-metric-card small { display:block; color:#94A3B8; font-size:11px; margin-top:3px; }
+.jp-main-card { border-radius:7px; box-shadow:none; }
+.jp-workspace-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid #E2E8F0; }
+.jp-workspace-header p { margin:0; font-size:12px; color:#64748B; }
+.jp-record-label { font-size:11px; color:#64748B; white-space:nowrap; }
+.jp-table th { background:#F6F8FA; padding:10px 13px; font-size:11px; letter-spacing:.035em; white-space:nowrap; }
+.jp-table td { padding:11px 13px; font-size:12px; }
+.jp-cell-title { font-size:13px; }
+.jp-cell-sub { font-size:11px; }
+.jp-tag { font-size:11px; padding:3px 7px; }
+.jp-status,.jp-app-badge,.jp-badge-status { font:600 11px Inter,sans-serif; letter-spacing:0; text-transform:capitalize; padding:4px 8px; border-radius:4px; }
 .jp-applicant-count { font-size:12px; }
-.jp-btn-view { height:30px; background:#f0fdfa; border-color:#c8ebe5; color:#0c716b; font-size:11px; padding:0 10px; }
-.jp-btn-icon { width:30px; height:30px; }
-.jp-actions { gap:5px; }
-.jp-loading,.jp-empty { padding:45px 18px; }
-.jp-empty p { font-size:12px; }
-.jp-pagination { padding:11px 16px; background:#fff; }
-.jp-page-text,.jp-page-num { font-size:11px; }
-.jp-page-controls button { font-size:11px; padding:6px 9px; }
+.jp-actions { justify-content:flex-end; gap:5px; flex-wrap:wrap; }
+.jp-btn-view,.jp-btn-icon,.jp-ats-action { display:inline-flex; width:auto; min-width:0; height:32px; align-items:center; justify-content:center; background:white; color:#334155; border:1px solid #D5DFE9; border-radius:5px; padding:0 10px; font:600 12px Inter,sans-serif; white-space:nowrap; }
+.jp-btn-view:hover,.jp-btn-icon:hover,.jp-ats-action:hover { background:#F8FAFC; border-color:#94A3B8; }
+.jp-btn-icon.danger { color:#B42318; }
+.jp-pagination { padding:10px 13px; background:#fff; }
+/* 04. Forms and dialogs */
 .jp-form { gap:13px; }
-.jp-form-row { gap:11px; }
-.jp-form-group label { font-size:11px; color:#405366; }
-.jp-input { border-radius:5px; font-family:inherit; font-size:12px; padding:9px 10px; }
-.jp-input:focus { border-color:#0d9488; box-shadow:0 0 0 2px rgba(13,148,136,.10); }
-.jp-ats-wrapper,.candidate-formal-layout { border-radius:5px; }
-.jp-ats-toolbar { padding:12px; gap:10px; }
-.jp-ats-tab { font-size:11px; padding:6px 9px; }
-.jp-ats-tab.active { background:#0c766e; }
-.jp-ats-row { padding:10px 12px; }
-.jp-ats-avatar { border-radius:6px; background:#e5f5f2; color:#0a766e; }
-.jp-ats-name { font-size:12px; }
+.jp-form-group label { font-size:11px; }
+.jp-input { font:400 12px Inter,sans-serif; border-radius:5px; min-height:36px; }
+.jp-textarea { line-height:1.5; }
+.jp-ats-toolbar { gap:10px; padding:12px; }
+.jp-ats-row { padding:11px 12px; gap:10px; }
+.jp-ats-avatar { display:none; }
+.jp-ats-name,.jp-ats-action { font-size:12px; }
 .jp-ats-email { font-size:11px; }
-.jp-ats-action { font-size:11px; }
-.jp-app-badge { font-size:10px; letter-spacing:.015em; }
-.cf-row { padding:11px 13px; }
-.cf-label { font-size:11px; }
-.cf-value { font-size:12px; }
-.cf-section-label { padding:9px 13px; font-size:10px; }
-@media(max-width:1000px) { .jp-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media(max-width:650px) {
-  .jp-header { align-items:stretch; }
-  .jp-header-actions { width:100%; }
-  .jp-metric-grid { gap:8px; }
-  .jp-metric-card { padding:11px; }
-  .jp-metric-card strong { font-size:21px; }
-  .jp-workspace-header { align-items:flex-start; flex-wrap:wrap; }
-  .jp-toolbar { flex-direction:column; align-items:stretch; }
-  .jp-search { width:100%; }
-  .jp-table { min-width:700px; }
-  .jp-page-controls { gap:5px; }
-  .jp-pagination { gap:8px; }
-  .jp-ats-row { grid-template-columns:minmax(0,1fr) auto; }
-  .jp-ats-action { grid-column:1/-1; justify-content:center; }
+.jp-ats-tab.active { background:#EAF7F4; color:#0F766E; }
+.candidate-formal-layout .cf-row { padding:10px 13px; background:white; }
+.candidate-formal-layout .cf-label { font-size:11px; color:#64748B; }
+.candidate-formal-layout .cf-value { font-size:12px; }
+.candidate-formal-layout .cf-letter-text { font-size:12px; padding:10px; }
+.jp-wrapper :is(button,input,select,textarea):focus-visible { outline:2px solid #0D9488; outline-offset:2px; }
+@media(max-width:1100px) { .jp-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:650px) { .jp-wrapper{padding:5px 10px 10px;} .jp-metric-grid{grid-template-columns:1fr 1fr;} .jp-header{align-items:stretch;} .jp-toolbar{flex-direction:column;align-items:stretch;} .jp-search{width:100%;} .jp-workspace-header{flex-wrap:wrap;} }
+
+/* UniVITA Recruitment — compact, two-line statistics cards */
+.jp-wrapper .jp-metric-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-height: 104px;
+  padding: 16px 18px;
 }
+.jp-wrapper .jp-metric-heading {
+  margin: 0;
+  color: #526579;
+  font: 500 13px/1.35 'Inter', system-ui, sans-serif;
+}
+.jp-wrapper .jp-metric-card strong {
+  display: block;
+  color: #0F172A;
+  font: 700 30px/1.1 'Inter', system-ui, sans-serif;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 650px) {
+  .jp-wrapper .jp-metric-card { padding: 13px 14px; min-height: 92px; }
+  .jp-wrapper .jp-metric-card strong { font-size: 27px; }
+}
+
+/* Recruitment workflow adjustments — Scoped to this page. */
+.jp-wrapper .jp-decision-intro { margin:0; color:#475569; font:400 13px/1.55 Inter,sans-serif; }
+.jp-wrapper .cf-value button { max-width:100%; white-space:normal; }
+.jp-wrapper .jp-metric-card { min-height:91px; }
+.jp-wrapper .jp-metric-card strong { font-variant-numeric:tabular-nums; }

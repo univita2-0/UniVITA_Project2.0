@@ -203,7 +203,7 @@ export default function ScheduleScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <CalIcon size={26} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={2} />
+            
             <Text style={styles.title}>My Schedule</Text>
           </View>
 

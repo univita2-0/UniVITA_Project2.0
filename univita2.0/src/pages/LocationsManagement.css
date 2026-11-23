@@ -429,28 +429,263 @@
   .expert-pagination { justify-content: center; }
 }
 
-/* UniVITA Facilities — enterprise workspace additions */
-.facility-page-intro { padding: 3px 0 12px; }
-.facility-page-intro .facility-kicker { color: #0f766e; font-size: 10px; font-weight: 800; letter-spacing: .11em; margin-bottom: 5px; }
-.facility-page-intro h1 { margin: 0; font-size: clamp(19px, 2vw, 24px); line-height: 1.35; font-weight: 750; letter-spacing: -.035em; color: #102a3a; }
-.facility-page-intro p { margin: 4px 0 0; color: #64748b; font-size: 12.5px; }
-.facility-stat-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin: 0 0 13px; }
-.facility-stat-strip > div { background: white; border: 1px solid #e0e7ee; border-radius: 6px; min-height: 66px; padding: 10px 13px; display: flex; flex-direction: column; gap: 4px; }
-.facility-stat-strip span { font-size: 11px; color: #64748b; font-weight: 550; }
-.facility-stat-strip strong { color: #142f3e; font-size: 23px; font-weight: 750; line-height: 1.1; font-variant-numeric: tabular-nums; }
-@media (max-width: 640px) { .facility-stat-strip { grid-template-columns: 1fr; } .facility-stat-strip > div { min-height: 56px; } }
 
-/* Scoped to Facilities > Locations, leaving other expert-container pages unchanged */
-.expert-container.facility-locations { padding: 5px 10px 10px; min-height: 0; background: #f7f9fb; }
-.facility-locations .expert-header { align-items: center; gap: 10px; margin: 0 0 12px; }
-.facility-locations .expert-subtitle { font-size: 12px; }
-.facility-locations .expert-btn-primary { background: #0d746f; border-color: #0d746f; border-radius: 5px; min-height: 35px; padding: 7px 12px; font-size: 12px; }
-.facility-locations .expert-btn-primary:hover { background: #095e5a; }
-.facility-locations .expert-search-card, .facility-locations .expert-card { border: 1px solid #e0e7ee; border-radius: 6px; box-shadow: 0 1px 2px rgba(15,23,42,.03); }
-.facility-locations .expert-search-card { margin-bottom: 10px; }
-.facility-locations .expert-table th { background: #f5f8fa; color: #526576; text-transform: uppercase; letter-spacing: .035em; font-size: 11px; }
-.facility-locations .expert-table td { font-size: 12px; }
-.facility-locations .expert-table th, .facility-locations .expert-table td { padding-top: 11px; padding-bottom: 11px; }
-.facility-locations .expert-btn-icon, .facility-locations .expert-page-btn { border-radius: 4px; }
-.facility-clear-search { border: 0; background: transparent; color: #64748b; display: inline-flex; align-items: center; cursor: pointer; padding: 4px; }
-.facility-clear-search:focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; }
+/* ============================================================
+   UniVITA Facilities — Locations Enterprise Presentation
+   Scoped to .facility-locations to protect unrelated pages.
+   ============================================================ */
+
+.expert-container.facility-locations {
+  --accent: #0D9488;
+  --accent-hover: #0F766E;
+  --border: #E2E8F0;
+  --border-soft: #EDF2F7;
+  --text: #0F172A;
+  --text-2: #334155;
+  --text-muted: #64748B;
+  min-height: 0;
+  width: 100%;
+  padding: 5px 10px 10px;
+  background: #F8FAFC;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.facility-locations * {
+  box-sizing: border-box;
+}
+
+/* Introduction and access */
+.facility-locations .facility-view-only {
+  margin: 1px 0 10px;
+  color: #64748B;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.facility-locations .facility-page-intro {
+  padding: 4px 0 13px;
+}
+
+.facility-locations .facility-page-intro p {
+  margin: 0;
+  font-size: 13px;
+  color: #64748B;
+  line-height: 1.5;
+}
+
+/* Summary metrics without icons */
+.facility-locations .facility-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.facility-locations .facility-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 78px;
+  padding: 12px 15px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 7px;
+}
+
+.facility-locations .facility-stat-card span {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748B;
+}
+
+.facility-locations .facility-stat-card strong {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: #0F172A;
+}
+
+/* Primary controls, search, and inventory table */
+.facility-locations .expert-header {
+  align-items: center;
+  min-height: 34px;
+  margin-bottom: 12px;
+  gap: 10px;
+}
+
+.facility-locations .expert-btn-primary,
+.facility-locations .expert-btn-secondary {
+  min-height: 36px;
+  height: 36px;
+  padding: 7px 13px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.facility-locations .expert-btn-primary {
+  border-color: #0D9488;
+  background: #0D9488;
+}
+
+.facility-locations .expert-btn-primary:hover:not(:disabled) {
+  background: #0F766E;
+  border-color: #0F766E;
+  box-shadow: none;
+}
+
+.facility-locations .expert-search-card,
+.facility-locations .expert-card {
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.facility-locations .expert-search-card {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+}
+
+.facility-locations .expert-search-input-group {
+  height: 38px;
+  background: #FFFFFF;
+  border-color: #CBD5E1;
+  border-radius: 5px;
+}
+
+.facility-locations .expert-clean-input {
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.facility-locations .expert-stats-badge {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #64748B;
+  font-size: 12px;
+}
+
+.facility-locations .expert-table th {
+  padding: 11px 14px;
+  background: #F5F8FA;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+}
+
+.facility-locations .expert-table td {
+  padding: 12px 14px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.facility-locations .expert-chip.default {
+  background: #F1F5F9;
+  border-color: #E2E8F0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.facility-locations .expert-action-group {
+  gap: 6px;
+}
+
+.facility-locations .expert-btn-icon {
+  min-width: 50px;
+  height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #D9E2EC;
+  border-radius: 5px;
+  color: #334155;
+  background: #FFFFFF;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.facility-locations .expert-btn-icon.danger {
+  color: #B42318;
+}
+
+/* Modal forms and map */
+.facility-locations .loc-modal-split {
+  grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.facility-locations .loc-form-group label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.facility-locations .loc-form-panel,
+.facility-locations .loc-map-panel {
+  gap: 12px;
+}
+
+.facility-locations .loc-info-alert {
+  padding: 10px 12px;
+  border: 1px solid #E2E8F0;
+  border-radius: 5px;
+  background: #F8FAFC;
+  color: #475569;
+  font-size: 12px;
+}
+
+.facility-locations .loc-coordinates-box {
+  gap: 10px;
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.facility-locations .loc-map-container {
+  border-radius: 7px;
+}
+
+.facility-locations .expert-confirm-body,
+.facility-locations .expert-confirm-title,
+.facility-locations .expert-confirm-note p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .facility-locations .loc-modal-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .facility-locations .facility-stat-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .facility-locations .expert-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .facility-locations .expert-search-input-group {
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+
+/* Keep the single management action flush-right without blank headings. */
+.facility-courses .facility-header-actions,
+.facility-programs .facility-header-actions,
+.facility-locations .facility-header-actions {
+  justify-content: flex-end;
+}

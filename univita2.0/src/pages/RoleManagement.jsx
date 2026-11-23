@@ -1,19 +1,44 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
-import { Users, Search, ShieldCheck, UserCheck, ChevronLeft, ChevronRight, ShieldAlert } from 'lucide-react';
-import './RoleManagement.css';
+import {
+  Users,
+  Search,
+  ShieldCheck,
+  UserCheck,
+  ChevronLeft,
+  ChevronRight,
+  ShieldAlert
+} from 'lucide-react';
 import { API_BASE } from '../api';
 import { getUserRole, decodeJwtPayload } from '../permissions';
+import './RoleManagement.css';
+
+// ============================================================
+// API helpers and presentation constants
+// ============================================================
+
+const ROLE_OPTIONS = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'hr_admin', label: 'HR' },
+  { value: 'security', label: 'Security' },
+  { value: 'instructor', label: 'Instructor' }
+];
 
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
 
+// ============================================================
+// Main component
+// ============================================================
+
 const RoleManagement = () => {
+  // Authorization context
   const currentUserRole = getUserRole();
   const isAdmin = currentUserRole === 'admin';
 
+  // Directory, filter, and pagination state
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
@@ -42,15 +67,22 @@ const RoleManagement = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
 
+  // Load role directory on mount
   useEffect(() => {
     fetchUsers();
   }, []);
 
+  // API: retrieve accounts and pending-role personnel
   const fetchUsers = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/employees`, getAuthHeaders());
-      const activeUsers = (Array.isArray(res.data) ? res.data : []).filter(user => user.status === 'active');
-      setUsers(activeUsers);
+      const res = await axios.get(`${API_BASE}/accounts`, getAuthHeaders());
+      const accountRows = Array.isArray(res.data) ? res.data : [];
+      // Keep pending-role accounts visible so an Admin can finish provisioning.
+      // Deactivated accounts remain visible; archived/deleted accounts are hidden.
+      setUsers(accountRows.filter(record => (
+        !['archived', 'deleted'].includes(String(record.status || '').trim().toLowerCase()) &&
+        !['archived', 'deleted'].includes(String(record.account_status || '').trim().toLowerCase())
+      )));
     } catch (err) {
       console.error('Failed to fetch users', err);
       toast.error(err.response?.data?.message || err.response?.data?.error || 'Failed to load users');
@@ -59,6 +91,7 @@ const RoleManagement = () => {
     }
   };
 
+  // API: assign a predefined role (Admin only)
   const handleRoleChange = async (userId, newRole) => {
     if (!isAdmin) {
       toast.error('Only System Administrators can change user roles.');
@@ -71,6 +104,10 @@ const RoleManagement = () => {
 
     const target = users.find(u => String(u.id) === String(userId));
     if (!target || target.role === newRole) return;
+    if (target.employment_status !== 'active' || !['active', 'pending_role'].includes(target.account_status)) {
+      toast.error('Role changes require active employment and an active or pending-role account.');
+      return;
+    }
     if (!window.confirm(`Reassign ${target.full_name} from ${target.role} to ${newRole}? This changes access to the web and mobile applications.`)) return;
     setUpdating(userId);
 
@@ -78,7 +115,8 @@ const RoleManagement = () => {
       const res = await axios.put(`${API_BASE}/users/${userId}/role`, { role: newRole }, getAuthHeaders());
 
       if (res.data.success || res.status === 200) {
-        setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+        // Refresh: first role assignment also activates a pending-role account on the backend.
+        await fetchUsers();
         toast.success(`Role updated for ${users.find(u => u.id === userId)?.full_name}`);
       }
     } catch (err) {
@@ -90,6 +128,7 @@ const RoleManagement = () => {
     }
   };
 
+  // Presentation helpers and derived directory data
   const getRoleBadgeClass = (role) => {
     const classes = {
       admin: 'rm-badge-admin',
@@ -130,7 +169,13 @@ const RoleManagement = () => {
     };
   }, [users]);
 
-  if (loading) return <div className="expert-loading">Loading users and access privileges...</div>;
+  if (loading) {
+    return (
+      <div className="expert-loading">
+        Loading users and access privileges...
+      </div>
+    );
+  }
 
   return (
     <div className="expert-container uv-admin-roles">
@@ -138,7 +183,7 @@ const RoleManagement = () => {
         <div className="expert-title-group">
           <div>
             
-            <p className="expert-subtitle">Assign and manage access control levels across system modules.</p>
+            <p className="expert-subtitle">Review user roles and assign predefined access levels to eligible provisioned accounts.</p>
           </div>
         </div>
       </div>
@@ -146,27 +191,27 @@ const RoleManagement = () => {
       {!isAdmin && (
         <div className="rm-readonly-banner">
           <ShieldAlert size={16} />
-          <span>Read-only view. Role assignments are restricted to System Administrators.</span>
+          <span>View-only access</span>
         </div>
       )}
 
       <div className="rep-stats-row">
         <div className="rep-stat-box">
-          <div className="rep-stat-icon"><Users size={20} /></div>
+          
           <div className="rep-stat-info">
-            <div className="rep-stat-label">Total Accounts</div>
+            <div className="rep-stat-label">Personnel</div>
             <div className="rep-stat-value">{roleCounts.total}</div>
           </div>
         </div>
         <div className="rep-stat-box">
-          <div className="rep-stat-icon"><ShieldCheck size={20} /></div>
+          
           <div className="rep-stat-info">
             <div className="rep-stat-label">Admins & HR</div>
             <div className="rep-stat-value">{roleCounts.admin + roleCounts.hr}</div>
           </div>
         </div>
         <div className="rep-stat-box">
-          <div className="rep-stat-icon"><UserCheck size={20} /></div>
+         
           <div className="rep-stat-info">
             <div className="rep-stat-label">Instructors</div>
             <div className="rep-stat-value">{roleCounts.instructor}</div>
@@ -175,7 +220,10 @@ const RoleManagement = () => {
       </div>
 
       <div className="expert-card">
-        <div className="uv-admin-section-heading"><span>Account directory</span><span>{totalUsers} matching accounts</span></div>
+        <div className="uv-admin-section-heading">
+          <span>Account directory</span>
+          <span>{totalUsers} matching accounts</span>
+        </div>
         <div className="expert-search-card">
           <div className="rm-filters">
             <div className="rm-search-group">
@@ -212,13 +260,14 @@ const RoleManagement = () => {
                 <th>Employee ID</th>
                 <th>User Details</th>
                 <th>Current Role</th>
+                <th>Account Status</th>
                 <th className="text-right">Access Action</th>
               </tr>
             </thead>
             <tbody>
               {paginatedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="expert-empty">
+                  <td colSpan="5" className="expert-empty">
                     <Users size={48} className="text-muted" />
                     <p>No users found matching your criteria.</p>
                     <span>Try broadening your search or filter settings.</span>
@@ -234,22 +283,47 @@ const RoleManagement = () => {
                     </td>
                     <td>
                       <span className={`rm-badge ${getRoleBadgeClass(user.role)}`}>
-                        {user.role === 'hr_admin' ? 'HR' : user.role}
+                        {user.role === 'hr_admin' ? 'HR' : user.role || 'Unassigned'}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={`rm-badge ${
+                          user.account_status === 'active'
+                            ? 'rm-badge-hr'
+                            : user.account_status === 'pending_role'
+                              ? 'rm-badge-security'
+                              : 'rm-badge-default'
+                        }`}
+                      >
+                        {user.account_status === 'pending_role'
+                          ? 'Pending Role'
+                          : user.account_status === 'not_provisioned'
+                            ? 'Not Provisioned'
+                            : user.account_status || 'Review Required'}
                       </span>
                     </td>
                     <td className="text-right">
                       <div className="rm-select-wrapper">
                         <select
-                          value={user.role}
+                          value={user.role || ''}
                           onChange={e => handleRoleChange(user.id, e.target.value)}
-                          disabled={updating === user.id || String(user.id) === String(currentUserId) || !isAdmin}
+                          disabled={
+                            updating === user.id ||
+                            String(user.id) === String(currentUserId) ||
+                            !isAdmin ||
+                            user.employment_status !== 'active' ||
+                            !['active', 'pending_role'].includes(user.account_status)
+                          }
                           className="rm-select"
                           title={String(user.id) === String(currentUserId) ? "You cannot change your own role" : ""}
                         >
-                          <option value="admin">Admin</option>
-                          <option value="hr_admin">HR</option>
-                          <option value="security">Security</option>
-                          <option value="instructor">Instructor</option>
+                          <option value="" disabled>Assign a role</option>
+                          {ROLE_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </td>

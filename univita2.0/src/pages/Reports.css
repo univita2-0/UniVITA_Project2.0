@@ -524,83 +524,229 @@
   .print-privacy-banner strong { color: #334155; font-size: 6.5pt; }
 }
 
-/* ================================================
-   UniVITA Enterprise Reports | Screen redesign
-   Preserves existing @media print document layouts.
-   ================================================ */
+/* ========================================================================
+   Reports workspace — compact enterprise presentation (screen only)
+   Retains all established print document rules above and below this block.
+   ======================================================================== */
 @media screen {
   .formal-rep-container {
-    padding: 5px 10px 10px;
-    min-height: 0;
-    background: transparent;
     --primary: #0B3B40;
-    --primary-hover: #0C5053;
-    --radius-lg: 7px;
-    --radius-md: 5px;
-    --radius-sm: 4px;
+    --primary-hover: #0F5257;
+    --radius-sm: 5px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 5px 10px 10px;
+    background: transparent;
+    box-sizing: border-box;
+    font-family: Inter, system-ui, sans-serif;
   }
-  .formal-rep-header {
+
+  .formal-rep-container *, .formal-rep-container *::before,
+  .formal-rep-container *::after { box-sizing: border-box; }
+
+  .formal-rep-section-heading {
+    display: flex;
     align-items: center;
-    background: #fff;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 1px 10px;
+    margin: 0;
+  }
+  .formal-rep-section-heading h2 {
+    margin: 0 0 3px;
+    font: 650 14px/1.4 Inter, system-ui, sans-serif;
+    color: #102A3A;
+    letter-spacing: -0.015em;
+  }
+  .formal-rep-section-heading p {
+    margin: 0;
+    color: #64748B;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .formal-rep-access-note {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 500;
+    color: #64748B;
+    white-space: nowrap;
+  }
+
+  .formal-rep-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    overflow-x: auto;
+    gap: 6px;
+    margin: 0 0 12px;
+    padding: 4px;
+    background: #FFFFFF;
     border: 1px solid #E2E8F0;
     border-radius: 7px;
-    padding: 17px 18px;
-    margin: 0 0 12px;
-    gap: 16px;
+    scrollbar-width: thin;
   }
-  .formal-rep-title-block { flex: 1 1 300px; }
-  .formal-rep-eyebrow {
-    display: flex; align-items: center; gap: 6px;
-    color: #0D9488; font-size: 10px; font-weight: 800;
-    letter-spacing: .11em; margin-bottom: 5px;
+  .formal-rep-tab-btn {
+    flex: 0 0 auto;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: #5B7084;
+    font: 600 12px/1 Inter, system-ui, sans-serif;
+    white-space: nowrap;
+    cursor: pointer;
   }
-  .formal-rep-title { font: 700 22px/1.2 Inter, sans-serif; letter-spacing: -.035em; margin-bottom: 5px; }
-  .formal-rep-title-block p { font-size: 12px; line-height: 1.5; max-width: 520px; }
-  .formal-rep-controls { justify-content: flex-end; gap: 7px; flex: 2 1 520px; }
-  .formal-rep-select { min-width: 135px; max-width: 220px; height: 36px; font-size: 12px; font-weight: 500; border-radius: 5px; padding-left: 33px; }
-  .formal-rep-controls .formal-rep-select[style] { min-width: 145px !important; }
-  .formal-rep-icon { left: 10px; width: 14px; }
-  .formal-rep-btn-primary, .formal-rep-btn-outline { height: 36px; font-size: 12px; padding: 0 12px; border-radius: 5px; }
+  .formal-rep-tab-btn:hover:not(.active) {
+    background: #F5F8FA;
+    color: #143746;
+    border-color: #E5EBEF;
+  }
+  .formal-rep-tab-btn.active {
+    color: #0D6F68;
+    background: #EAF7F4;
+    border-color: #C4E8E1;
+  }
+
+  .formal-rep-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: end;
+    gap: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 7px;
+  }
+  .formal-rep-filter-group {
+    flex: 1 1 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 10px;
+    min-width: 0;
+  }
+  .formal-rep-filter {
+    flex: 0 1 200px;
+    min-width: 155px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .formal-rep-filter-period { flex-basis: 190px; }
+  .formal-rep-filter > span {
+    color: #607285;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .formal-rep-filter .formal-rep-select {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    height: 35px;
+    padding: 0 32px 0 11px;
+    background: #FFFFFF;
+    border: 1px solid #D7E0E8;
+    border-radius: 5px;
+    color: #183043;
+    font: 500 12px Inter, system-ui, sans-serif;
+    outline: none;
+    cursor: pointer;
+  }
+  .formal-rep-controls {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .formal-rep-btn-primary, .formal-rep-btn-outline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 35px;
+    padding: 0 12px;
+    border-radius: 5px;
+    font: 600 12px/1 Inter, system-ui, sans-serif;
+    box-shadow: none;
+  }
   .formal-rep-btn-primary { background: #0B3B40; border-color: #0B3B40; }
   .formal-rep-btn-primary:hover:not(:disabled) { background: #0D5557; }
-  .formal-rep-readonly-banner { margin-bottom: 12px; font-size: 12px; border-radius: 5px; }
-  .formal-rep-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; padding: 7px 2px 9px; }
-  .formal-rep-section-kicker { font-size: 10px; font-weight: 800; letter-spacing: .1em; color: #0D9488; }
-  .formal-rep-section-heading h2 { margin: 3px 0 0; color: #173042; font-size: 15px; letter-spacing: -.02em; }
-  .formal-rep-period-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #64748B; }
-  .formal-rep-tabs { flex-wrap: nowrap; overflow-x: auto; border: 1px solid #E2E8F0; border-radius: 6px; background: #fff; padding: 5px; gap: 4px; margin-bottom: 12px; }
-  .formal-rep-tab-btn { flex: 0 0 auto; border: 1px solid transparent; height: 34px; border-radius: 4px; font-size: 11.5px; font-weight: 600; padding: 0 12px; }
-  .formal-rep-tab-btn.active { background: #E5F5F2; color: #0F766E; border-color: #BCE9E1; }
-  .formal-rep-tab-btn:hover:not(.active) { border-color: #E2E8F0; }
+  .formal-rep-btn-outline { background: #FFFFFF; border-color: #CBD5E1; }
+  .formal-rep-container :is(button, select):focus-visible {
+    outline: 2px solid #0D9488;
+    outline-offset: 2px;
+  }
+
   .formal-rep-screen { gap: 12px; }
-  .formal-rep-stats-grid { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; }
-  .formal-rep-stat-box { border-radius: 6px; min-width: 0; padding: 14px; gap: 11px; box-shadow: none; }
-  .formal-rep-stat-icon { width: 36px; height: 36px; border-radius: 5px; }
-  .formal-rep-stat-value { font-size: 23px; letter-spacing: -.04em; }
-  .formal-rep-stat-label { font-size: 11px; }
-  .formal-rep-card { border-radius: 6px; box-shadow: none; min-width: 0; }
-  .formal-rep-card-header { padding: 12px 15px; }
-  .formal-rep-card-header h3 { font: 700 12px/1.4 Inter,sans-serif; letter-spacing: 0; text-transform: none; }
-  .formal-rep-card-body { padding: 12px 15px; }
+  .formal-rep-stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .formal-rep-stat-box {
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    padding: 14px 15px;
+    gap: 0;
+    border-radius: 7px;
+    box-shadow: none;
+  }
+  .formal-rep-stat-info { gap: 6px; }
+  .formal-rep-stat-label {
+    color: #64748B;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .formal-rep-stat-value {
+    color: #142E3E;
+    font: 700 22px/1.2 Inter, system-ui, sans-serif;
+    letter-spacing: -0.03em;
+    overflow-wrap: anywhere;
+  }
   .formal-rep-chart-grid { gap: 10px; }
+  .formal-rep-card { border-radius: 7px; box-shadow: none; min-width: 0; }
+  .formal-rep-card-header { padding: 12px 15px; }
+  .formal-rep-card-header h3 {
+    font: 650 13px/1.4 Inter, system-ui, sans-serif;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .formal-rep-card-body { padding: 12px 15px; }
   .formal-rep-table { font-size: 12px; }
-  .formal-rep-table th { font-size: 10px; letter-spacing: .03em; }
-  .formal-rep-container :is(button, select):focus-visible { outline: 2px solid #0D9488; outline-offset: 2px; }
+  .formal-rep-table th { font-size: 11px; letter-spacing: 0.02em; }
+  .formal-rep-table td { font-size: 12px; }
+  .formal-rep-empty { font-size: 12px; }
 }
-@media screen and (max-width: 1200px) {
-  .formal-rep-header { align-items: stretch; }
-  .formal-rep-controls { flex: 1 1 100%; justify-content: flex-start; }
-  .formal-rep-stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+
+@media screen and (max-width: 1024px) {
+  .formal-rep-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .formal-rep-chart-grid { grid-template-columns: 1fr; }
 }
-@media screen and (max-width: 620px) {
-  .formal-rep-header { padding: 13px; }
-  .formal-rep-title { font-size: 19px; }
-  .formal-rep-controls .formal-rep-input-wrapper { flex: 1 1 calc(50% - 8px); }
-  .formal-rep-controls .formal-rep-select { width: 100%; max-width: none; }
-  .formal-rep-stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .formal-rep-stat-box { padding: 10px; }
-  .formal-rep-stat-value { font-size: 18px; }
-  .formal-rep-section-heading { align-items: flex-start; }
+
+@media screen and (max-width: 680px) {
+  .formal-rep-section-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .formal-rep-toolbar { padding: 12px; }
+  .formal-rep-filter-group { width: 100%; }
+  .formal-rep-filter { flex: 1 1 calc(50% - 10px); }
+  .formal-rep-filter-period { flex: 1 1 100%; }
+  .formal-rep-controls { justify-content: flex-start; width: 100%; }
+  .formal-rep-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .formal-rep-stat-box { padding: 11px; }
+  .formal-rep-stat-value { font-size: 19px; }
+}
+
+@media screen and (max-width: 400px) {
+  .formal-rep-filter { flex: 1 1 100%; }
+  .formal-rep-controls > button { flex: 1 1 auto; }
 }
 
 /* Print clarifications: source limitations and authorized signatories. */
@@ -611,3 +757,51 @@
   .print-only { page-break-after: auto; }
   .formal-print-footer { break-inside: avoid; }
 }
+
+
+/* ================================================================
+   UniVITA Enterprise — Consistent Administrative UI
+   01. Page and typography
+   02. Buttons, tabs and filters
+   03. Summary cards and tables
+   04. Dialogs, status and responsive adjustments
+   Print templates and the existing functional CSS remain preserved.
+   ================================================================ */
+
+/* 01. Page */
+@media screen {
+.formal-rep-container { --primary:#0D9488; --primary-hover:#0F766E; padding:5px 10px 10px; min-height:0; background:transparent; font-size:13px; }
+.formal-rep-header { align-items:center; gap:12px; margin:7px 0 12px; padding:0 2px 13px; }
+.formal-rep-title { font:700 21px/1.3 Inter,sans-serif; letter-spacing:-.025em; margin:0 0 3px; }
+.formal-rep-title-block p { font-size:12px; }
+.formal-rep-controls { gap:7px; }
+.formal-rep-select { height:35px; min-width:140px; padding:0 12px; font:500 12px Inter,sans-serif; border-radius:5px; }
+.formal-rep-btn-primary,.formal-rep-btn-outline { height:35px; padding:0 12px; font:600 12px Inter,sans-serif; border-radius:5px; }
+.formal-rep-readonly-banner { background:none; border:0; padding:0; margin:0 0 12px; color:#64748B; font-size:12px; font-weight:500; }
+/* 02. Tabs */
+.formal-rep-section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 2px 10px; }
+.formal-rep-section-heading h2 { font:700 13px Inter,sans-serif; margin:0; }
+.formal-rep-period-tag { color:#64748B; font-size:11px; }
+.formal-rep-tabs { border-bottom:1px solid #E2E8F0; padding:0 2px; gap:6px; margin-bottom:12px; overflow-x:auto; flex-wrap:nowrap; }
+.formal-rep-tab-btn { flex-shrink:0; height:36px; background:transparent; border:0; border-bottom:2px solid transparent; border-radius:0; padding:0 11px; font:600 12px Inter,sans-serif; color:#64748B; }
+.formal-rep-tab-btn.active { background:transparent; color:#0F766E; border:0; border-bottom:2px solid #0D9488; }
+.formal-rep-tab-btn:hover { border-color:#E2E8F0; }
+/* 03. Summary and charts */
+.formal-rep-screen { gap:12px; }
+.formal-rep-stats-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.formal-rep-stat-box { padding:13px 15px; display:block; min-width:0; box-shadow:none; border-radius:6px; }
+.formal-rep-stat-info { gap:5px; }
+.formal-rep-stat-label { font:600 11px Inter,sans-serif; letter-spacing:0; text-transform:none; }
+.formal-rep-stat-value { font:700 22px Inter,sans-serif; letter-spacing:-.025em; overflow-wrap:anywhere; }
+.formal-rep-chart-grid { gap:12px; }
+.formal-rep-card { border-radius:7px; box-shadow:none; }
+.formal-rep-card-header { background:white; padding:12px 15px; }
+.formal-rep-card-header h3 { font:700 13px/1.4 Inter,sans-serif; text-transform:none; letter-spacing:0; }
+.formal-rep-card-body { padding:12px 15px; }
+.formal-rep-table { font-size:12px; }
+.formal-rep-table th { font-size:11px; letter-spacing:.03em; }
+.formal-rep-badge { font-size:11px; border-radius:4px; }
+.formal-rep-container :is(button,select):focus-visible { outline:2px solid #0D9488; outline-offset:2px; }
+}
+@media screen and (max-width:1200px) { .formal-rep-stats-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .formal-rep-controls { justify-content:flex-start; } }
+@media screen and (max-width:650px) { .formal-rep-container{padding:5px 10px 10px;} .formal-rep-header{align-items:stretch;} .formal-rep-stats-grid{grid-template-columns:1fr 1fr;} .formal-rep-chart-grid{grid-template-columns:1fr;} .formal-rep-select{min-width:0;} }

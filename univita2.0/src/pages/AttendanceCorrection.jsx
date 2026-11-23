@@ -8,6 +8,34 @@ import { API_BASE, getWebApiErrorMessage } from '../api';
 import { useRole } from '../permissions';
 import './AttendanceCorrection.css';
 
+
+// Presentation only: use consistent labels and semantic status colors.
+const getDisplayStatus = (status) => {
+  const normalized = String(status || '').trim().toLowerCase();
+
+  const labels = {
+    pending: 'Pending',
+    approved: 'Approved',
+    rejected: 'Rejected',
+    cancelled: 'Cancelled'
+  };
+
+  return labels[normalized] || (status ? String(status) : '—');
+};
+
+const getDisplayStatusTone = (status) => {
+  switch (String(status || '').trim().toLowerCase()) {
+    case 'approved':
+      return 'success';
+    case 'rejected':
+      return 'danger';
+    case 'pending':
+      return 'warning';
+    default:
+      return 'default';
+  }
+};
+
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
@@ -46,7 +74,7 @@ const formatDate = (dateString) => {
 const getAuditStatus = (rec) => {
   if (!rec) return { label: 'Original', cls: 'default' };
   const cs = String(rec.correction_status || '').toLowerCase();
-  if (cs === 'pending')   return { label: 'Pending Review', cls: 'warning' };
+  if (cs === 'pending')   return { label: 'Pending', cls: 'warning' };
   if (cs === 'approved')  return { label: 'Approved',       cls: 'success' };
   if (cs === 'rejected')  return { label: 'Rejected',       cls: 'danger'  };
   if (cs === 'cancelled') return { label: 'Cancelled',      cls: 'default' };
@@ -63,7 +91,7 @@ const STATUS_TABS = [
 const ALLOWED_STATUSES = ['present', 'late', 'absent', 'on leave'];
 
 const AttendanceCorrection = () => {
-  const { can, isAdmin } = useRole();
+  const { can } = useRole();
   const canEditAttendance = can('attendance:update');
   const canReviewCorrections = can('corrections:review');
 
@@ -101,7 +129,7 @@ const AttendanceCorrection = () => {
   useEffect(() => {
     const onFocus = () => {
       if (document.visibilityState !== 'visible') return;
-      fetchPendingCount?.();
+      fetchPendingCount();
     };
     document.addEventListener('visibilitychange', onFocus);
     return () => document.removeEventListener('visibilitychange', onFocus);
@@ -206,7 +234,7 @@ const AttendanceCorrection = () => {
       const normalized = form.status.toLowerCase().replace(/\s+/g, ' ').trim();
       if (!ALLOWED_STATUSES.includes(normalized)) {
         const msg = 'Invalid status. Allowed: Present, Late, Absent, On Leave.';
-        setSaveError(msg); toast.error(msg); return;
+        setSaveError(msg); return;
       }
     }
 
@@ -217,11 +245,11 @@ const AttendanceCorrection = () => {
 
       if (diff === 0) {
         const msg = 'Time Out cannot be the same as Time In.';
-        setSaveError(msg); toast.error(msg); return;
+        setSaveError(msg); return;
       }
       if (diff < 0 && Math.abs(diff) < 12 * 60) {
         const msg = 'Time Out must be later than Time In for same-day shifts.';
-        setSaveError(msg); toast.error(msg); return;
+        setSaveError(msg); return;
       }
     }
 
@@ -289,12 +317,12 @@ const AttendanceCorrection = () => {
     try {
       await axios.put(`${API_BASE}/attendance/corrections/${id}/review`, { status }, getAuthHeaders());
       toast.success(`Correction request ${status}`);
-      await Promise.all([fetchPendingCorrections(), fetchDefaultRecords(), fetchPendingCount(), ...(searchDone ? [fetchRecords()] : [])]);
+      await Promise.all([fetchPendingCorrections(), fetchDefaultRecords(), ...(searchDone ? [fetchRecords()] : [])]);
     } catch (err) {
       toast.error(getWebApiErrorMessage(err, `Failed to ${verb} correction.`));
       // A conflict may mean another HR reviewer has already processed the request.
       if (err?.response?.status === 409) {
-        await Promise.all([fetchPendingCorrections(), fetchPendingCount()]);
+        await Promise.all([fetchPendingCorrections()]);
       }
     } finally {
       reviewingCorrectionRef.current = null;
@@ -364,25 +392,7 @@ const AttendanceCorrection = () => {
 
   return (
     <div className="ac-container">
-      {/* FIX 10.3 — read-only banner for Admin */}
-      {isAdmin && (
-        <div style={{
-          padding: '12px 16px',
-          marginBottom: '20px',
-          background: '#F0FDFA',
-          border: '1px solid #99F6E4',
-          borderRadius: '5px',
-          color: '#0F766E',
-          fontSize: '12px',
-          fontWeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
-          <span><strong>Read-only view.</strong> Attendance edits and correction reviews are handled by HR.</span>
-        </div>
-      )}
+      
 
       <header className="ac-header">
         <div className="ac-title-group">
@@ -397,10 +407,10 @@ const AttendanceCorrection = () => {
       </header>
 
       <section className="ac-summary" aria-label="Attendance correction overview">
-        <div className="ac-summary-item"><span>Records available</span><strong>{baseRecords.length}</strong><small>{searchDone ? 'Employee search' : 'Recent attendance'}</small></div>
-        <div className="ac-summary-item"><span>Pending review</span><strong>{pendingCount}</strong><small>Awaiting HR decision</small></div>
-        <div className="ac-summary-item"><span>Approved</span><strong>{baseRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'approved').length}</strong><small>Visible records</small></div>
-        <div className="ac-summary-item"><span>Rejected</span><strong>{baseRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'rejected').length}</strong><small>Visible records</small></div>
+        <div className="ac-summary-item"><span>Records available</span><strong>{baseRecords.length}</strong></div>
+        <div className="ac-summary-item"><span>Pending review</span><strong>{pendingCount}</strong></div>
+        <div className="ac-summary-item"><span>Approved</span><strong>{baseRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'approved').length}</strong></div>
+        <div className="ac-summary-item"><span>Rejected</span><strong>{baseRecords.filter(r => String(r.correction_status || '').toLowerCase() === 'rejected').length}</strong></div>
       </section>
       <div className="ac-section-intro"><div><p>Search records and inspect adjustments made to time entries.</p></div><span>{filteredRecords.length} records</span></div>
 
@@ -498,7 +508,7 @@ const AttendanceCorrection = () => {
                             <div className="ac-action-group" style={{ justifyContent: 'center' }}>
                               {/* View Details — read-only, always visible */}
                               <button onClick={() => setViewingRecord(rec)} className="ac-edit-btn" title="View Full Details">
-                                <Eye size={16} color="#475569" />
+                                View
                               </button>
                               {/* FIX 10.3 — Edit button hidden for non-HR */}
                               {canEditAttendance && (
@@ -577,7 +587,7 @@ const AttendanceCorrection = () => {
                     <label>Proof Verification</label>
                     <div>
                       <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${viewingRecord.clock_in_selfie || viewingRecord.clock_out_selfie}`)} className="ac-proof-action-btn">
-                        <Eye size={14} /> View Selfie Verification Proof
+                        View Selfie Verification Proof
                       </button>
                     </div>
                   </div>
@@ -707,7 +717,7 @@ const AttendanceCorrection = () => {
                         {c.selfie_url && (
                           <div className="ac-minimal-field full-width">
                             <button onClick={() => setPreviewImage(`${API_BASE.replace(/\/api$/, '')}${c.selfie_url}`)} className="ac-minimal-link" style={{ border: 'none', cursor: 'pointer', background: 'transparent', padding: 0 }}>
-                              <Eye size={14} /> View Proof
+                              View Proof
                             </button>
                           </div>
                         )}

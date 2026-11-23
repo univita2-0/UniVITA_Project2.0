@@ -107,6 +107,25 @@ const formatPHTDateTime = (dateInput) => {
 
 // C15.5: Keep notification labels short, consistent, and action-specific.
 // The backend's event type determines the status; a message's wording does not.
+// Emergency alerts share the existing backend alert_receipts read state.
+// History is loaded from authenticated, server-filtered recipient records.
+const fetchEmergencyAlertHistory = async token => {
+  const response = await axios.get(`${API_URL}/emergency-alerts/history`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!Array.isArray(response.data)) throw new Error('Invalid emergency alert history response.');
+  return response.data;
+};
+
+const acknowledgeEmergencyAlert = async (id, token) => {
+  const response = await axios.post(
+    `${API_URL}/emergency-alerts/${id}/read`,
+    {},
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.data?.success) throw new Error('Emergency alert acknowledgment was not saved.');
+};
+
 const c155DescribeAttendanceEvent = notification => {
   const event = String(notification?.event_type || '').toUpperCase();
   const target = String(notification?.target_type || '').toLowerCase();
@@ -137,6 +156,7 @@ export default function NotificationsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [c14Error, setC14Error] = useState('');
   const [c15ReadError, setC15ReadError] = useState('');
+  const [emergencyError, setEmergencyError] = useState('');
 
   useFocusEffect(
     useCallback(() => {
@@ -221,6 +241,26 @@ export default function NotificationsScreen({ navigation }) {
           } catch (err) {
             if (active) setC14Error('Attendance alerts are temporarily unavailable. Other request updates remain visible.');
           }
+          // Emergency alert history remains visible after acknowledgment or expiry.
+          // Unlike the active-only endpoint, the history endpoint reads durable receipts.
+          try {
+            const emergency = await fetchEmergencyAlertHistory(token);
+            if (active) setEmergencyError('');
+            aggregated.push(...emergency.map(alert => ({
+              id: `emergency_${alert.id}`,
+              notificationId: alert.id,
+              type: 'Emergency',
+              title: alert.title || 'Emergency alert',
+              remarks: alert.message || '',
+              date: alert.sent_at,
+              status: 'emergency',
+              severity: String(alert.severity || 'info').toLowerCase(),
+              unread: !alert.read_at,
+              emergency: true
+            })));
+          } catch (err) {
+            if (active) setEmergencyError('Emergency alert history is temporarily unavailable.');
+          }
           // Sort descending by action date
           aggregated.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
           if (active) setNotifications(aggregated);
@@ -245,6 +285,19 @@ export default function NotificationsScreen({ navigation }) {
   // C15: Open the existing authoritative history screen, not a new review flow.
   // Navigation works for both read and unread notifications.
   const openNotification = async (item) => {
+    if (item.emergency) {
+      if (!item.unread) return;
+      try {
+        const token = await AsyncStorage.getItem('auth_token');
+        if (!token) throw new Error('Please sign in again.');
+        await acknowledgeEmergencyAlert(item.notificationId, token);
+        setNotifications(old => old.map(n => n.id === item.id ? { ...n, unread: false } : n));
+        setEmergencyError('');
+      } catch (error) {
+        setEmergencyError('Unable to acknowledge the alert. Check your connection and retry.');
+      }
+      return;
+    }
     if (item.notificationId && item.unread) {
       const employeeId = await c15ResolveEmployeeId();
       try {
@@ -304,7 +357,7 @@ export default function NotificationsScreen({ navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
           <ArrowLeft size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Request Notifications</Text>
+        <Text style={styles.headerTitle}>Notifications</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -315,6 +368,7 @@ export default function NotificationsScreen({ navigation }) {
         nestedScrollEnabled={true}
         alwaysBounceVertical={true}
       >
+        {!!emergencyError && <Text style={{color:'#B45309',padding:12}}>{emergencyError}</Text>}
         {!!c14Error && <Text style={{color:'#B45309',padding:12}}>{c14Error}</Text>}
         {!!c15ReadError && <Text style={{color:'#B45309',paddingHorizontal:12,paddingBottom:8}}>{c15ReadError}</Text>}
         {loading ? (
@@ -323,7 +377,7 @@ export default function NotificationsScreen({ navigation }) {
           <View style={styles.emptyState}>
             <Inbox size={48} color={colors.textSecondary} opacity={0.5} />
             <Text style={styles.emptyTitle}>All Caught Up!</Text>
-            <Text style={styles.emptySub}>No request or attendance updates are available.</Text>
+            <Text style={styles.emptySub}>No notifications are available.</Text>
           </View>
         ) : (
           notifications.map(item => (
@@ -338,7 +392,14 @@ export default function NotificationsScreen({ navigation }) {
                 </View>
                 <Text style={styles.remarksText}>{item.remarks}</Text>
                 <View style={styles.statusWrap}>
-                  {item.status === 'approved' ? (
+                  {item.emergency ? (
+                     <View style={styles.badgeNeutral}>
+                       <AlertTriangle size={12} color={item.severity === 'critical' ? '#DC2626' : item.severity === 'warning' ? '#D97706' : colors.textSecondary} />
+                       <Text style={styles.badgeTextNeutral}>
+                         {`${item.severity === 'critical' ? 'Critical' : item.severity === 'warning' ? 'Warning' : 'Information'} · ${item.unread ? 'Acknowledge' : 'Acknowledged'}`}
+                       </Text>
+                     </View>
+                   ) : item.status === 'approved' ? (
                     <View style={styles.badgeSuccess}>
                       <CheckCircle size={12} color="#059669" />
                       <Text style={styles.badgeTextSuccess}>Approved</Text>

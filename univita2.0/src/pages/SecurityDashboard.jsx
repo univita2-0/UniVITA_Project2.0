@@ -28,7 +28,7 @@ const timeLabel = value => {
   return Number.isNaN(d.getTime()) ? 'Recently' : d.toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour:'2-digit',minute:'2-digit'});
 };
 
-const Metric = ({icon:Icon,label,value,hint,onClick}) => <button type="button" className="uv-role-metric" onClick={onClick}><span className="uv-role-metric-head"><span>{label}</span><Icon size={18}/></span><strong>{value}</strong><span className="uv-role-metric-bottom">{hint}<ArrowUpRight size={15}/></span></button>;
+const Metric = ({label,value,hint,onClick}) => <button type="button" className="uv-role-metric" onClick={onClick}><span className="uv-role-metric-head">{label}</span><strong>{value}</strong><span className="uv-role-metric-bottom">{hint}</span></button>;
 
 const SecurityDashboard = ({ setView }) => {
   const [data,setData] = useState({all:[], active:[], approved:0, tags:0, scanners:0, distribution:[]});
@@ -70,7 +70,7 @@ const SecurityDashboard = ({ setView }) => {
       ['On campus',groups.active,'#0D9488'],['Pending approval',groups.pending,'#E8A23A'],['Completed',groups.completed,'#4777C7'],['No show / rejected',groups.noShow,'#D45A60'],['Expected / upcoming',groups.upcoming,'#94A3B8']
     ]});
     const incidents = [];
-    tags.forEach(t=>{const battery=Number(t.battery_level);if(Number.isFinite(battery) && battery>0 && battery<2600) incidents.push({id:`battery-${t.ble_id}`,title:`Low battery · ${t.label||t.ble_id}`,detail:`Battery reading ${battery} mV. Check and recharge or replace the tag battery as appropriate.`,icon:BatteryWarning});});
+    tags.forEach(t=>{const battery=Number(t.battery_level);if(Number.isFinite(battery) && battery>0 && battery<2600) incidents.push({id:`battery-${t.ble_id}`,title:`Low battery · ${t.label||t.ble_id}`,detail:`Battery reading ${battery} mV. Check the tag and replace its coin-cell battery if needed.`,icon:BatteryWarning});});
     scanners.forEach(s=>{
       const last = s.last_ping ? new Date(s.last_ping) : null;
       const minutes = last && !Number.isNaN(last.getTime()) ? (Date.now()-last.getTime())/60000 : null;
@@ -92,26 +92,62 @@ const SecurityDashboard = ({ setView }) => {
   const totalPages=Math.max(1,Math.ceil(todayActivities.length/5));
   const display=todayActivities.slice((page-1)*5,page*5);
   const dismissAlert=id=>setDismissed(prev=>new Set([...prev,id]));
-  if(loading) return <div className="uv-role-state" role="status"><RefreshCw size={23} className="uv-role-spin"/> Loading security overview…</div>;
+  if(loading) return <div className="uv-role-state" role="status"><RefreshCw size={18} className="uv-role-spin"/> Loading security overview…</div>;
 
-  return <main className="uv-role-dashboard" aria-label="Security overview">
-    <header className="uv-role-intro"><div><p>Today's visitors, access activity, and BLE monitoring in one workspace.</p></div><button className="uv-role-button" type="button" disabled={refreshing} onClick={()=>load(false)}><RefreshCw size={15} className={refreshing?'uv-role-spin':''}/> Refresh data</button></header>
-    <div className="uv-role-status"><span><CalendarDays size={15}/>{new Date(`${today}T12:00:00`).toLocaleDateString('en-PH',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</span><span><ShieldCheck size={15}/> Visitor operations monitoring</span><span>Updated {updated?timeLabel(updated.toISOString()):'—'}</span></div>
-    {warning&&<div className="uv-role-warning" role="alert"><AlertCircle size={16}/>{warning}</div>}
-    <section className="uv-role-metrics uv-role-metrics-3" aria-label="Security key metrics">
-      <Metric icon={UserCheck} label="Approved visits today" value={data.approved} hint="Visit schedules" onClick={()=>navigate('today-visitors')}/>
-      <Metric icon={Users} label="Today's visitor requests" value={data.all.length} hint="Daily visitor list" onClick={()=>navigate('today-visitors')}/>
-      <Metric icon={Radio} label="BLE tags in use" value={data.tags} hint="Tag inventory" onClick={()=>navigate('manage-ble')}/>
-    </section>
-    <section className="uv-role-columns">
-      <article className="uv-role-card"><header className="uv-role-card-header"><div><p>Checked-in visitors and hardware alerts.</p></div><span className="uv-role-count">{data.active.length} on campus</span></header>
-        <div className="uv-role-tabs" role="tablist" aria-label="Security desk views"><button type="button" role="tab" aria-selected={tab==='visitors'} className={tab==='visitors'?'active':''} onClick={()=>setTab('visitors')}><UserCheck size={15}/> Current visitors</button><button type="button" role="tab" aria-selected={tab==='alerts'} className={tab==='alerts'?'active':''} onClick={()=>setTab('alerts')}><Bell size={15}/> Hardware alerts {visibleAlerts.length>0&&<span className="uv-role-tab-badge">{visibleAlerts.length}</span>}</button></div>
-        <div className="uv-role-queue uv-role-security-queue" role="tabpanel">{tab==='visitors'?(data.active.length?data.active.map(v=><div className="uv-role-queue-row" key={v.id}><span className="uv-role-queue-icon"><MapPin size={16}/></span><div><strong>{`${v.first_name||''} ${v.last_name||''}`.trim()||'Visitor'}</strong><small>{v.destination||v.reason||'Destination not assigned'} · {v.visit_time?String(v.visit_time).slice(0,5):'Time unavailable'}</small></div><button className="uv-role-mini-button" type="button" onClick={()=>navigate('track-visitor')}>Track <ChevronRight size={14}/></button></div>):<div className="uv-role-empty"><CheckCircle2 size={24}/><span>No visitors currently checked in.</span></div>):(visibleAlerts.length?visibleAlerts.map(a=><div className="uv-role-queue-row uv-role-incident" key={a.id}><span className="uv-role-queue-icon"><a.icon size={16}/></span><div><strong>{a.title}</strong><small>{a.detail}</small></div><button type="button" className="uv-role-mini-button" onClick={()=>dismissAlert(a.id)} aria-label={`Dismiss ${a.title}`}><X size={14}/> Dismiss</button></div>):<div className="uv-role-empty"><CheckCircle2 size={24}/><span>No hardware alerts detected in the loaded records.</span></div>)}</div>
-      </article>
-      <article className="uv-role-card"><header className="uv-role-card-header"><div><h2>Today's visit breakdown</h2></div><ClipboardList size={18} className="uv-role-accent"/></header><div className="uv-role-chart"><div className="uv-role-chart-summary"><div><strong>{data.active.length}</strong><small>Visitors on campus now</small></div><div className="uv-role-chart-total"><strong>{data.all.length}</strong><small>Total requests</small></div></div><div className="uv-role-stacked" role="img" aria-label="Distribution of today's visitor requests">{data.all.length?data.distribution.map(([name,count,color])=><span key={name} style={{width:`${count/data.all.length*100}%`,background:color}}/>):<span style={{width:'100%',background:'#E2E8F0'}}/>}</div>{data.distribution.map(([name,count,color])=><div className="uv-role-legend" key={name}><span className="uv-role-legend-dot" style={{background:color}}/>{name}<strong>{count}</strong><small>{data.all.length?`${Math.round(count/data.all.length*100)}%`:'—'}</small></div>)}<button type="button" className="uv-role-link" onClick={()=>navigate('today-visitors')}>View today's visitors <ArrowUpRight size={15}/></button></div></article>
-    </section>
-    <section className="uv-role-card uv-role-activities"><header className="uv-role-card-header"><div><h2>Recent visitor activity</h2><p>Latest relevant visitor and appointment events.</p></div><Activity size={18} className="uv-role-accent"/></header>{display.length?display.map((a,i)=><div className="uv-role-activity" key={`${a.id||i}-${i}`}><span className="uv-role-avatar">{String(a.actor||'V').charAt(0).toUpperCase()}</span><div><strong>{a.actor||'Visitor'}</strong><small>{a.reference||'Visitor operation'}</small></div><span className="uv-role-activity-label">{String(a.title||a.type||'Visitor event').replace(/_/g,' ')}</span><time>{timeLabel(a.occurred_at||a.created_at||a.timestamp)}</time></div>):<div className="uv-role-empty"><Activity size={24}/><span>No visitor activity recorded today.</span></div>}{todayActivities.length>5&&<footer className="uv-role-pagination"><button type="button" disabled={page===1} onClick={()=>setPage(p=>Math.max(1,p-1))}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {totalPages}</span><button type="button" disabled={page===totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next <ChevronRight size={15}/></button></footer>}</section>
-  </main>;
+  return (
+    <main className="uv-role-dashboard" aria-label="Security overview">
+      <header className="uv-role-intro">
+        <div><p>Visitor activity, on-site monitoring, and BLE hardware status.</p></div>
+        <div className="uv-role-meta"><small>Updated {updated ? timeLabel(updated.toISOString()) : '—'} · Auto refresh every 30 seconds</small></div>
+      </header>
+      {warning && <div className="uv-role-warning" role="alert"><AlertCircle size={16}/><span>{warning}</span></div>}
+      <section className="uv-role-metrics uv-role-metrics-3" aria-label="Security key metrics">
+        <Metric label="Approved visits today" value={data.approved} hint="Today's visitor list" onClick={()=>navigate('today-visitors')}/>
+        <Metric label="Visitor requests today" value={data.all.length} hint="View all visitor requests" onClick={()=>navigate('today-visitors')}/>
+        <Metric label="BLE tags in use" value={data.tags} hint="View BLE tag inventory" onClick={()=>navigate('manage-ble')}/>
+      </section>
+      <div className="uv-role-columns">
+        <section className="uv-role-card uv-role-primary" aria-labelledby="security-desk-title">
+          <header className="uv-role-card-header"><div><h2 id="security-desk-title">Visitor & Hardware Monitoring</h2><p>Currently checked-in visitors and device alerts</p></div><span className="uv-role-count">{data.active.length} on campus</span></header>
+          <div className="uv-role-tabs" role="tablist" aria-label="Security desk views">
+            <button role="tab" type="button" aria-selected={tab==='visitors'} className={tab==='visitors'?'active':''} onClick={()=>setTab('visitors')}>Current Visitors</button>
+            <button role="tab" type="button" aria-selected={tab==='alerts'} className={tab==='alerts'?'active':''} onClick={()=>setTab('alerts')}>Hardware Alerts {visibleAlerts.length>0 && <span className="uv-role-tab-badge">{visibleAlerts.length}</span>}</button>
+          </div>
+          <div className="uv-role-queue uv-role-security-queue" role="tabpanel">
+            {tab==='visitors' ? (data.active.length ? data.active.map(v => (
+              <div className="uv-role-queue-row" key={v.id}>
+                <span className="uv-role-avatar">{String(v.first_name || 'V').charAt(0).toUpperCase()}</span>
+                <div className="uv-role-queue-main"><strong>{`${v.first_name||''} ${v.last_name||''}`.trim() || 'Visitor'}</strong><small>{v.destination || v.reason || 'Destination not assigned'} · {v.visit_time ? String(v.visit_time).slice(0,5) : 'Time unavailable'}</small></div>
+                <button type="button" className="uv-role-mini-button" onClick={()=>navigate('track-visitor')}>Track <ChevronRight size={14}/></button>
+              </div>
+            )) : <div className="uv-role-empty">No visitors currently checked in.</div>) : (visibleAlerts.length ? visibleAlerts.map(a => (
+              <div className="uv-role-queue-row uv-role-incident" key={a.id}>
+                <span className="uv-role-warning-mark"><AlertCircle size={16}/></span>
+                <div className="uv-role-queue-main"><strong>{a.title}</strong><small>{a.detail}</small></div>
+                <button type="button" className="uv-role-mini-button" aria-label={`Dismiss ${a.title}`} onClick={()=>dismissAlert(a.id)}>Dismiss</button>
+              </div>
+            )) : <div className="uv-role-empty">No hardware alerts detected in the loaded records.</div>)}
+          </div>
+        </section>
+        <section className="uv-role-card" aria-labelledby="security-breakdown-title">
+          <header className="uv-role-card-header"><div><h2 id="security-breakdown-title">Today's Visit Breakdown</h2><p>Status of visitor requests</p></div></header>
+          <div className="uv-role-chart">
+            <div className="uv-role-chart-summary"><div><strong>{data.active.length}</strong><small>Visitors on campus</small></div><div className="uv-role-chart-total"><strong>{data.all.length}</strong><small>Total requests</small></div></div>
+            <div className="uv-role-stacked" role="img" aria-label="Distribution of today's visitor requests">
+              {data.all.length ? data.distribution.map(([name,count,color])=><span key={name} style={{width:`${count/data.all.length*100}%`,background:color}} />) : <span style={{width:'100%',background:'#E2E8F0'}} />}
+            </div>
+            {data.distribution.map(([name,count,color]) => <div className="uv-role-legend" key={name}><span className="uv-role-legend-dot" style={{background:color}}/><span>{name}</span><strong>{count}</strong><small>{data.all.length ? `${Math.round(count/data.all.length*100)}%` : '—'}</small></div>)}
+            <button type="button" className="uv-role-link" onClick={()=>navigate('today-visitors')}>View today's visitors <ChevronRight size={15}/></button>
+          </div>
+        </section>
+      </div>
+      <section className="uv-role-card uv-role-activities" aria-labelledby="security-activity-title">
+        <header className="uv-role-card-header"><div><h2 id="security-activity-title">Recent Visitor Activity</h2><p>Visitor and appointment events recorded today</p></div><span className="uv-role-subtle-count">{todayActivities.length} records</span></header>
+        {display.length ? display.map((a,i)=><div className="uv-role-activity" key={`${a.id||i}-${i}`}><span className="uv-role-avatar">{String(a.actor||'V').charAt(0).toUpperCase()}</span><div className="uv-role-activity-person"><strong>{a.actor||'Visitor'}</strong><small>{a.reference||'Visitor operation'}</small></div><span className="uv-role-activity-label">{String(a.title||a.type||'Visitor event').replace(/_/g,' ')}</span><time>{timeLabel(a.occurred_at||a.created_at||a.timestamp)}</time></div>) : <div className="uv-role-empty">No visitor activity recorded today.</div>}
+        {todayActivities.length>5 && <footer className="uv-role-pagination"><button type="button" disabled={page===1} onClick={()=>setPage(p=>Math.max(1,p-1))}><ChevronLeft size={14}/> Previous</button><span>Page {page} of {totalPages}</span><button type="button" disabled={page===totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next <ChevronRight size={14}/></button></footer>}
+      </section>
+    </main>
+  );
 };
 
 export default SecurityDashboard;

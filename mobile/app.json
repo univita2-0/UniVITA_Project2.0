@@ -4,32 +4,32 @@
     "slug": "mobile",
     "version": "1.2.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/univita-ios.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
-    "ios": {
-      "supportsTablet": true,
-      "infoPlist": {
-        "UIBackgroundModes": [
-          "location",
-          "fetch"
-        ],
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "UniVITA requires location access to verify attendance during your scheduled shifts.",
-        "NSLocationAlwaysUsageDescription": "Allow UniVITA to track your location in the background to ensure shift compliance.",
-        "NSLocationWhenInUseUsageDescription": "Allow UniVITA to use your location when the app is in use."
-      }
-    },
+    
+"ios": {
+  "supportsTablet": true,
+  "icon": "./assets/images/univita-ios.png",
+  "infoPlist": {
+    "UIBackgroundModes": [
+      "location",
+      "fetch"
+    ],
+    "NSLocationAlwaysAndWhenInUseUsageDescription": "UniVITA requires location access to verify attendance during your scheduled shifts.",
+    "NSLocationAlwaysUsageDescription": "Allow UniVITA to track your location in the background to ensure shift compliance.",
+    "NSLocationWhenInUseUsageDescription": "Allow UniVITA to use your location when the app is in use."
+  }
+},
     "android": {
-      "package": "com.anonymous.mobile",
+      "package": "com.univita.hct",
       "versionCode": 2,
       "ndkVersion": "27.1.12297006",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
+  "foregroundImage": "./assets/images/univita-android.png",
+  "backgroundColor": "#FFFFFF"
+},
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "ACCESS_FINE_LOCATION",

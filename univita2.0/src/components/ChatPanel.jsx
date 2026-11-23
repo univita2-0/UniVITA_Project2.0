@@ -18,11 +18,27 @@ const ChatPanel = ({ token }) => {
   const [newMsg, setNewMsg] = useState('');
   const [chatError, setChatError] = useState('');
   const [connectionState, setConnectionState] = useState('offline');
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const [isSending, setIsSending] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const pendingMessageRef = useRef(null);
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
   const [myUserId, setMyUserId] = useState(null);
-  const [unreadTotal, setUnreadTotal] = useState(0);
   const [unreadMap, setUnreadMap] = useState({});
+  const unreadTotal = Object.values(unreadMap).reduce((total, value) => total + (Number(value) || 0), 0);
+  const readRoom = useCallback(async (roomId) => {
+    if (!token || !roomId) return;
+    try {
+      const response = await fetch(`${API_BASE}/chat/read/${roomId}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Read confirmation failed');
+      setUnreadMap(previous => ({ ...previous, [roomId]: 0 }));
+    } catch (error) {
+      console.error('Unable to update conversation read status', error);
+    }
+  }, [token]);
 
   const activeRoomRef = useRef(activeRoom);
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
@@ -55,14 +71,11 @@ const ChatPanel = ({ token }) => {
       if (!res.ok) throw new Error(`Unread counts request failed (${res.status})`);
       const data = await res.json();
       const map = {};
-      let total = 0;
       (Array.isArray(data) ? data : []).forEach(r => {
         const count = Number(r.unread) || 0;
         map[r.room_id] = count;
-        total += count;
       });
       setUnreadMap(map);
-      setUnreadTotal(total);
     } catch (err) {
       console.error('Failed to fetch unread counts', err);
     }
@@ -87,7 +100,14 @@ const ChatPanel = ({ token }) => {
     setChatError('');
     setConnectionState('connecting');
     fetchUnreadCounts();
-    const ws = new WebSocket(`${WS_URL}?token=${token}`);
+    let ws;
+    try {
+      ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
+    } catch (error) {
+      setConnectionState('offline');
+      setChatError('Unable to connect to messaging. Check your network and try again.');
+      return undefined;
+    }
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -96,19 +116,36 @@ const ChatPanel = ({ token }) => {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'new_message') {
-          const msgRoomId = data.message.room_id;
-          if (activeRoomRef.current && Number(activeRoomRef.current.id) === Number(msgRoomId)) {
-            setMessages(prev => [...prev, data.message]);
-          }
-          if (!openRef.current || !activeRoomRef.current || Number(activeRoomRef.current.id) !== Number(msgRoomId)) {
-            setUnreadMap(prev => ({
-              ...prev,
-              [msgRoomId]: (prev[msgRoomId] || 0) + 1
+        if (data.type === 'new_message' && data.message) {
+          const incoming = data.message;
+          const roomId = Number(incoming.room_id);
+          const isMine = Number(incoming.user_id) === Number(myUserId);
+          const isCurrentRoom = openRef.current &&
+            Number(activeRoomRef.current?.id) === roomId;
+
+          if (isCurrentRoom) {
+            setMessages(previous => previous.some(message => Number(message.id) === Number(incoming.id))
+              ? previous : [...previous, incoming]);
+            if (!isMine) readRoom(roomId);
+          } else if (!isMine) {
+            setUnreadMap(previous => ({
+              ...previous,
+              [roomId]: Number(previous[roomId] || 0) + 1
             }));
-            setUnreadTotal(prev => prev + 1);
           }
+
+          if (isMine && pendingMessageRef.current &&
+            Number(pendingMessageRef.current.roomId) === roomId &&
+            pendingMessageRef.current.content === incoming.message) {
+            pendingMessageRef.current = null;
+            setNewMsg('');
+            setIsSending(false);
+          }
+          fetchRooms();
+          fetchUnreadCounts();
         } else if (data.type === 'error') {
+          pendingMessageRef.current = null;
+          setIsSending(false);
           setChatError(data.message || 'Your message could not be sent. Please try again.');
         }
       } catch (err) {
@@ -123,14 +160,16 @@ const ChatPanel = ({ token }) => {
     ws.onclose = () => {
       if (wsRef.current === ws) {
         setConnectionState('offline');
-        setChatError('Chat connection closed. Reopen the panel to reconnect.');
+        setIsSending(false);
+        pendingMessageRef.current = null;
+        setChatError('Messages are disconnected. Select Reconnect to continue.');
       }
     };
     return () => {
       if (wsRef.current === ws) wsRef.current = null;
       ws.close();
     };
-  }, [token, open, fetchUnreadCounts]);
+  }, [token, open, reconnectKey, myUserId, readRoom, fetchUnreadCounts]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -138,19 +177,7 @@ const ChatPanel = ({ token }) => {
     return () => clearInterval(interval);
   }, [token, fetchUnreadCounts]);
 
-  // Keep the existing read-on-open behavior for backwards compatibility.
-  useEffect(() => {
-    if (open) {
-      rooms.forEach(room => {
-        fetch(`${API_BASE}/chat/read/${room.id}`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => {});
-      });
-      setUnreadMap({});
-      setUnreadTotal(0);
-    }
-  }, [open, rooms, token]);
+  // Read acknowledgements are sent only when the user opens that specific room.
 
   const fetchRooms = useCallback(async () => {
     if (!token) return;
@@ -170,7 +197,7 @@ const ChatPanel = ({ token }) => {
   useEffect(() => {
     if (!token) return;
     fetch(`${API_BASE}/employees`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error('Colleague directory unavailable'); return res.json(); })
       .then(data => setAllUsers(Array.isArray(data) ? data : []))
       .catch(console.error);
   }, [token]);
@@ -184,39 +211,48 @@ const ChatPanel = ({ token }) => {
     }
     setFilteredUsers(allUsers.filter(u =>
       String(u?.full_name || u?.name || '').toLowerCase().includes(cleanSearch) &&
-      Number(u?.id) !== Number(myUserId)
+      Number(u?.id) !== Number(myUserId) &&
+      String(u?.status || 'active').toLowerCase() === 'active'
     ));
     setShowSearchResults(true);
   }, [searchTerm, allUsers, myUserId]);
 
   useEffect(() => {
-    if (!activeRoom) return;
-    fetch(`${API_BASE}/chat/read/${activeRoom.id}`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` }
-    }).catch(console.error);
-    fetchUnreadCounts();
-  }, [activeRoom, token, fetchUnreadCounts]);
-
-  useEffect(() => {
-    if (!activeRoom) return;
+    if (!activeRoom?.id || !token || !open) return undefined;
+    let cancelled = false;
+    const controller = new AbortController();
+    setHistoryLoading(true);
     setMessages([]);
+    setChatError('');
     fetch(`${API_BASE}/chat/history/${activeRoom.id}`, {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal
     })
-      .then(res => res.json())
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data)) {
+          throw new Error(data?.message || 'Could not load this conversation.');
+        }
+        return data;
+      })
       .then(data => {
-        if (Array.isArray(data)) setMessages(data);
-        else {
-          setMessages([]);
-          setChatError(data?.message || 'Could not load this conversation. Please try again.');
+        if (!cancelled) {
+          setMessages(previous => {
+            const all = new Map([...data, ...previous].map(item => [Number(item.id), item]));
+            return [...all.values()].sort((a, b) => Number(a.id) - Number(b.id));
+          });
+          readRoom(activeRoom.id);
+          fetchUnreadCounts();
         }
       })
-      .catch(err => {
-        console.error('Chat history error:', err);
-        setMessages([]);
-        setChatError('Could not load this conversation. Check your connection and try again.');
-      });
-  }, [activeRoom, token]);
+      .catch(error => {
+        if (!cancelled && error.name !== 'AbortError') {
+          setChatError(error.message || 'Unable to load messages.');
+        }
+      })
+      .finally(() => { if (!cancelled) setHistoryLoading(false); });
+    return () => { cancelled = true; controller.abort(); };
+  }, [activeRoom?.id, token, open, readRoom, fetchUnreadCounts]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages]);
 
@@ -225,14 +261,18 @@ const ChatPanel = ({ token }) => {
     if (!content) return setChatError('Enter a message before sending.');
     if (content.length > 2000) return setChatError('Messages can be up to 2,000 characters.');
     if (!activeRoom?.id) return setChatError('Choose a conversation before sending a message.');
+    if (isSending) return;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       return setChatError('Chat is reconnecting. Please wait a moment and try again.');
     }
     try {
+      pendingMessageRef.current = { roomId: activeRoom.id, content };
+      setIsSending(true);
       wsRef.current.send(JSON.stringify({ type: 'message', roomId: activeRoom.id, content }));
-      setNewMsg('');
       setChatError('');
     } catch (err) {
+      pendingMessageRef.current = null;
+      setIsSending(false);
       console.error('Web chat send failed:', err);
       setChatError('Your message could not be sent. Please try again.');
     }
@@ -345,9 +385,10 @@ const ChatPanel = ({ token }) => {
 
   const availableGroupUsers = allUsers.filter(u =>
     u && String(u.full_name || u.name || '').toLowerCase().includes(groupSearch.trim().toLowerCase()) &&
-    Number(u.id) !== Number(myUserId)
+      Number(u.id) !== Number(myUserId) &&
+      String(u.status || 'active').toLowerCase() === 'active'
   );
-  const isSendDisabled = !newMsg.trim() || newMsg.length > 2000;
+  const isSendDisabled = !newMsg.trim() || newMsg.length > 2000 || isSending || connectionState !== 'online';
   const isGroupCreateDisabled = isCreatingGroup || groupName.trim().length < 2 || groupName.trim().length > 50 || selectedUsers.length < 1;
   const roomTitle = activeRoom?.type === 'group'
     ? activeRoom.name : (activeRoom?.display_name || activeRoom?.name || 'Conversation');
@@ -376,10 +417,10 @@ const ChatPanel = ({ token }) => {
             <div className="cp-view">
               <header className="cp-header">
                 <div className="cp-header-heading">
-                  <div className="cp-header-symbol"><MessageSquare size={19} /></div>
+                  
                   <div>
                     <h3>Messages</h3>
-                    <span className="cp-header-caption">Team communication</span>
+                   
                   </div>
                 </div>
                 <button type="button" className="cp-icon-btn cp-close-btn" aria-label="Close messages" onClick={togglePanel}><X size={19} /></button>
@@ -440,8 +481,10 @@ const ChatPanel = ({ token }) => {
                           <button type="button" aria-label={`Leave ${displayName}`} title="Leave group"
                             onClick={() => { setRoomToLeave(room); setShowLeaveRoomModal(true); }}><LogOut size={15} /></button>
                         )}
-                        <button type="button" aria-label={`Delete ${displayName}`} title="Delete conversation"
-                          onClick={() => { setRoomToDelete(room); setShowDeleteRoomModal(true); }}><Trash2 size={15} /></button>
+                        {!isGroup && (
+                          <button type="button" aria-label={`Delete ${displayName}`} title="Delete conversation for both participants"
+                            onClick={() => { setRoomToDelete(room); setShowDeleteRoomModal(true); }}><Trash2 size={15} /></button>
+                        )}
                       </div>
                     </div>
                   );
@@ -465,11 +508,14 @@ const ChatPanel = ({ token }) => {
                     {connectionState === 'online' ? 'Connected' : connectionState === 'connecting' ? 'Connecting' : 'Disconnected'}
                   </span>
                 </div>
+                {connectionState === 'offline' && (
+                  <button type="button" className="cp-reconnect" onClick={() => { setChatError(''); setReconnectKey(value => value + 1); }}>Reconnect</button>
+                )}
                 <button type="button" className="cp-icon-btn cp-close-btn" aria-label="Close messages" onClick={togglePanel}><X size={19} /></button>
               </header>
 
               <div className="cp-messages" role="log" aria-label="Conversation messages" aria-live="polite">
-                {!messages.length && (
+                {historyLoading ? <div className="cp-empty-state cp-empty-messages">Loading messages…</div> : !messages.length && (
                   <div className="cp-empty-state cp-empty-messages">
                     <MessageSquare size={25} strokeWidth={1.5} aria-hidden="true" />
                     <strong>No messages yet</strong>
@@ -489,14 +535,14 @@ const ChatPanel = ({ token }) => {
               </div>
               <div className="cp-composer">
                 <div className="cp-input-area">
-                  <input type="text" placeholder="Write a message..." value={newMsg} maxLength={2000}
+                  <input type="text" placeholder={isSending ? 'Sending message…' : 'Write a message…'} value={newMsg} maxLength={2000} disabled={isSending}
                     aria-label="Chat message"
                     onChange={e => { setNewMsg(e.target.value); setChatError(''); }}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleSend(); }} />
                   <button type="button" onClick={handleSend} className="cp-btn-send" disabled={isSendDisabled}
                     aria-label="Send message"><Send size={17} /></button>
                 </div>
-                <div className="cp-input-hint">{newMsg.length} / 2,000</div>
+                <div className="cp-input-hint">{isSending ? 'Sending… · ' : ''}{newMsg.length} / 2,000</div>
               </div>
             </div>
           )}
@@ -558,7 +604,7 @@ const ChatPanel = ({ token }) => {
         <div className="cp-modal-overlay" role="presentation">
           <div className="cp-modal cp-confirmation-modal" role="alertdialog" aria-modal="true" aria-labelledby="cp-delete-title" aria-describedby="cp-delete-description">
             <div className="cp-modal-header"><h4 id="cp-delete-title">Delete conversation</h4></div>
-            <div className="cp-modal-body"><p id="cp-delete-description">Delete “{roomToDelete?.display_name || roomToDelete?.name}” entirely? This cannot be undone.</p></div>
+            <div className="cp-modal-body"><p id="cp-delete-description">Permanently delete this conversation and its message history for both participants? This cannot be undone.</p></div>
             <div className="cp-modal-actions">
               <button type="button" className="cp-btn-cancel" onClick={() => setShowDeleteRoomModal(false)}>Cancel</button>
               <button type="button" className="cp-btn-danger" onClick={() => { if (roomToDelete?.id) deleteRoom(roomToDelete.id); setShowDeleteRoomModal(false); }}>Delete</button>

@@ -204,40 +204,32 @@ const LocationsManagement = () => {
 
   return (
     <div className="expert-container facility-locations">
-      {/* FIX 10.9 — read-only banner for Admin */}
       {isAdmin && (
-        <div style={{
-          padding: '12px 16px',
-          marginBottom: '20px',
-          background: '#F0FDFA',
-          border: '1px solid #99F6E4',
-          borderRadius: '5px',
-          color: '#0F766E',
-          fontSize: '12px',
-          fontWeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }} aria-hidden="true">ⓘ</span>
-          <span><strong>Read-only view.</strong> School location management is handled by HR.</span>
-        </div>
+        <p className="facility-view-only" role="note">View-only access</p>
       )}
 
-      <div className="facility-page-intro"><p>Maintain approved campus coordinates and attendance geofences.</p></div>
-      <div className="facility-stat-strip" aria-label="Location inventory summary"><div><span>Registered locations</span><strong>{locations.length}</strong></div><div><span>Matching records</span><strong>{filteredLocations.length}</strong></div><div><span>Geofence coverage</span><strong>{locations.filter(loc => Number(loc.radius) > 0).length}</strong></div></div>
-      <div className="expert-header">
-        <div className="expert-title-group">
-          <div>
-            <p className="expert-subtitle">Manage approved campus boundaries for location tracking and attendance.</p>
-          </div>
+      
+      <section className="facility-stat-strip" aria-label="Location inventory summary">
+        <div className="facility-stat-card">
+          <span>Registered locations</span>
+          <strong>{locations.length}</strong>
         </div>
-        {canWrite && (
+        <div className="facility-stat-card">
+          <span>Matching records</span>
+          <strong>{filteredLocations.length}</strong>
+        </div>
+        <div className="facility-stat-card">
+          <span>Geofence coverage</span>
+          <strong>{locations.filter(loc => Number(loc.radius) > 0).length}</strong>
+        </div>
+      </section>
+      {canWrite && (
+        <div className="expert-header facility-header-actions">
           <button className="expert-btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-            <Plus size={16} /> Register New Location
+            Register New Location
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="expert-search-card">
         <div className="expert-search-row">
@@ -263,7 +255,6 @@ const LocationsManagement = () => {
           <div className="expert-loading">Loading locations...</div>
         ) : filteredLocations.length === 0 ? (
           <div className="expert-empty">
-            <AlertCircle size={48} className="text-muted" />
             <p>No locations found.</p>
             {searchQuery
               ? <span>Try adjusting your search criteria.</span>
@@ -298,12 +289,8 @@ const LocationsManagement = () => {
                       {canWrite && (
                         <td>
                           <div className="expert-action-group right">
-                            <button className="expert-btn-icon" onClick={() => handleEdit(loc)} title="Edit Location">
-                              <Edit3 size={18} color="#475569" />
-                            </button>
-                            <button className="expert-btn-icon danger" onClick={() => handleDeleteClick(loc.id, loc.name)} title="Delete Location">
-                              <Trash2 size={18} color="#EF4444" />
-                            </button>
+                            <button className="expert-btn-icon" onClick={() => handleEdit(loc)} title="Edit Location">Edit</button>
+                            <button className="expert-btn-icon danger" onClick={() => handleDeleteClick(loc.id, loc.name)} title="Delete Location">Delete</button>
                           </div>
                         </td>
                       )}
@@ -397,7 +384,6 @@ const LocationsManagement = () => {
             </div>
 
             <div className="loc-info-alert">
-              <Crosshair size={18} />
               <span>You can manually edit the coordinates above or simply <strong>click anywhere on the map</strong> to drop a pin.</span>
             </div>
           </div>

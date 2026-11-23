@@ -316,104 +316,212 @@ const SharedCalendar = () => {
 
   return (
     <div className="calendar-layout">
+      {/* Page heading */}
       <div className="cal-page-heading">
         <div>
-          
-          <p>Coordinate events, meetings, holidays, and leave requests from a single calendar.</p>
+          <p>
+            Coordinate events, meetings, holidays, and leave requests from a single calendar.
+          </p>
         </div>
-        <button type="button" className="cal-today-btn" onClick={() => { setCurrentDate(new Date()); setActiveDate(new Date().getDate()); }}>Today</button>
+        <button
+          type="button"
+          className="cal-today-btn"
+          onClick={() => {
+            setCurrentDate(new Date());
+            setActiveDate(new Date().getDate());
+          }}
+        >
+          Today
+        </button>
       </div>
+
+      {/* Calendar overview */}
       <div className="cal-overview" aria-label="Calendar overview">
-        <div><span>Upcoming events</span><strong>{schoolEvents.length}</strong></div>
-        <div><span>Pending leaves</span><strong>{leaveRequests.length}</strong></div>
-        <div><span>Holidays ahead</span><strong>{phHolidaysList.length}</strong></div>
+        <div>
+          <span>Upcoming events</span>
+          <strong>{schoolEvents.length}</strong>
+        </div>
+        <div>
+          <span>Pending leaves</span>
+          <strong>{leaveRequests.length}</strong>
+        </div>
+        <div>
+          <span>Holidays ahead</span>
+          <strong>{phHolidaysList.length}</strong>
+        </div>
       </div>
+
+      {/* Calendar workspace */}
       <div className="cal-workspace">
-      <div className="calendar-main">
-        <div className="cal-header">
-          <button className="cal-nav-btn" onClick={() => {
-            const prev = new Date(currentDate);
-            prev.setMonth(prev.getMonth() - 1);
-            setCurrentDate(prev);
-          }}><ChevronLeft size={20} /></button>
-          <span className="cal-title">{monthName} {year}</span>
-          <button className="cal-nav-btn" onClick={() => {
-            const next = new Date(currentDate);
-            next.setMonth(next.getMonth() + 1);
-            setCurrentDate(next);
-          }}><ChevronRight size={20} /></button>
-        </div>
+        <div className="calendar-main">
+          <div className="cal-header">
+            <button
+              type="button"
+              className="cal-nav-btn"
+              aria-label="Previous month"
+              onClick={() => {
+                const prev = new Date(currentDate);
+                prev.setMonth(prev.getMonth() - 1);
+                setCurrentDate(prev);
+              }}
+            >
+              <ChevronLeft size={20} />
+            </button>
 
-        <div className="cal-grid-wrapper">
-          <div className="cal-grid-header">
-            {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map(d => <div key={d} className="cal-day-name">{d}</div>)}
-          </div>
-          <div className="cal-grid-body">
-            {emptySlots.map((_, i) => <div key={`e-${i}`} className="cal-date empty"></div>)}
-            {days.map((day) => {
-              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const isToday = dateStr === currentTodayStr;
-              const dayEvents = events.filter(e => e.date === dateStr);
-              return (
-                <div
-                  key={day}
-                  className={`cal-date ${day === activeDate ? 'active' : ''} ${isToday ? 'current-today' : ''}`}
-                  onClick={() => handleDayClick(day, dateStr, dayEvents)}
-                  onMouseEnter={(e) => handleMouseEnter(dateStr, e)}
-                  onMouseMove={handleMouseMove}
-                  onMouseLeave={handleMouseLeave}
-                >
-                  <span className="date-number">{day}</span>
-                  <div className="dot-container">
-                    {dayEvents.map((e, i) => {
-                      const legend = legendItems.find(l => l.label === e.type || (leaveCategories.includes(e.type) && l.label === 'Leave'));
-                      return <div key={i} className={`dot ${legend?.className || 'event'}`} title={e.title}></div>;
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+            <span className="cal-title">{monthName} {year}</span>
 
-        <div className="cal-legend">
-          {legendItems.map(item => (
-            <div key={item.label} className="legend-item">
-              <span className={`dot ${item.className}`}></span>
-              <span className="legend-text">{item.label}</span>
+            <button
+              type="button"
+              className="cal-nav-btn"
+              aria-label="Next month"
+              onClick={() => {
+                const next = new Date(currentDate);
+                next.setMonth(next.getMonth() + 1);
+                setCurrentDate(next);
+              }}
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
+
+          <div className="cal-grid-wrapper">
+            <div className="cal-grid-header">
+              {['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].map(dayName => (
+                <div key={dayName} className="cal-day-name">{dayName}</div>
+              ))}
             </div>
-          ))}
+
+            <div className="cal-grid-body">
+              {emptySlots.map((_, index) => (
+                <div key={`e-${index}`} className="cal-date empty" />
+              ))}
+
+              {days.map(day => {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const isToday = dateStr === currentTodayStr;
+                const dayEvents = events.filter(event => event.date === dateStr);
+
+                return (
+                  <div
+                    key={day}
+                    className={`cal-date ${day === activeDate ? 'active' : ''} ${isToday ? 'current-today' : ''}`}
+                    onClick={() => handleDayClick(day, dateStr, dayEvents)}
+                    onMouseEnter={event => handleMouseEnter(dateStr, event)}
+                    onMouseMove={handleMouseMove}
+                    onMouseLeave={handleMouseLeave}
+                  >
+                    <span className="date-number">{day}</span>
+                    <div className="dot-container">
+                      {dayEvents.map((event, index) => {
+                        const legend = legendItems.find(item =>
+                          item.label === event.type ||
+                          (leaveCategories.includes(event.type) && item.label === 'Leave')
+                        );
+
+                        return (
+                          <div
+                            key={index}
+                            className={`dot ${legend?.className || 'event'}`}
+                            title={event.title}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="cal-legend">
+            {legendItems.map(item => (
+              <div key={item.label} className="legend-item">
+                <span className={`dot ${item.className}`} />
+                <span className="legend-text">{item.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
 
-      <div className="calendar-sidebar">
-        {!isReadOnly && (
-          <button className="sidebar-btn btn-add" onClick={() => { resetForm(); setShowModal(true); }}>
-            <div className="sidebar-btn-content"><Plus size={16} /> Add New Event</div>
-          </button>
-        )}
+        {/* Calendar actions and quick links */}
+        <aside className="calendar-sidebar" aria-label="Calendar actions and quick links">
+          <div className="cal-sidebar-section">
+            <h2 className="cal-sidebar-heading">Actions</h2>
 
-        <button className="sidebar-btn btn-history" onClick={() => setShowHistoryModal(true)}>
-          <div className="sidebar-btn-content"><History size={16} /> View History Log</div>
-        </button>
+            {!isReadOnly && (
+              <button
+                type="button"
+                className="sidebar-btn btn-add"
+                onClick={() => {
+                  resetForm();
+                  setShowModal(true);
+                }}
+              >
+                <span className="sidebar-btn-content">
+                  <Plus size={16} aria-hidden="true" />
+                  <span>Add New Event</span>
+                </span>
+              </button>
+            )}
 
-        <div className="sidebar-divider"></div>
+            <button
+              type="button"
+              className="sidebar-btn btn-history"
+              onClick={() => setShowHistoryModal(true)}
+            >
+              <span className="sidebar-btn-content">
+                
+                <span>View History Log</span>
+              </span>
+            </button>
+          </div>
 
-        <button className="sidebar-btn btn-upcoming" onClick={() => setShowUpcomingModal(true)}>
-          <div className="sidebar-btn-content"><CalIcon size={16} /> Upcoming Events</div>
-          <span className="badge">{schoolEvents.length}</span>
-        </button>
+          <div className="cal-sidebar-section cal-sidebar-summary">
+            
 
-        <button className="sidebar-btn btn-leave" onClick={() => setShowLeaveModal(true)}>
-          <div className="sidebar-btn-content"><Bell size={16} /> Leave Requests</div>
-          <span className="badge">{leaveRequests.length}</span>
-        </button>
+            <button
+              type="button"
+              className="sidebar-btn btn-upcoming"
+              onClick={() => setShowUpcomingModal(true)}
+            >
+              <span className="sidebar-btn-content">
+               
+                <span>Upcoming Events</span>
+              </span>
+              <span className="badge" aria-label={`${schoolEvents.length} upcoming events`}>
+                {schoolEvents.length}
+              </span>
+            </button>
 
-        <button className="sidebar-btn btn-holiday" onClick={() => setShowHolidaysModal(true)}>
-          <div className="sidebar-btn-content"><CalendarDays size={16} /> PH Holidays</div>
-          <span className="badge">{phHolidaysList.length}</span>
-        </button>
-      </div>
+            <button
+              type="button"
+              className="sidebar-btn btn-leave"
+              onClick={() => setShowLeaveModal(true)}
+            >
+              <span className="sidebar-btn-content">
+                
+                <span>Leave Requests</span>
+              </span>
+              <span className="badge" aria-label={`${leaveRequests.length} pending leave requests`}>
+                {leaveRequests.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className="sidebar-btn btn-holiday"
+              onClick={() => setShowHolidaysModal(true)}
+            >
+              <span className="sidebar-btn-content">
+               
+                <span>PH Holidays</span>
+              </span>
+              <span className="badge" aria-label={`${phHolidaysList.length} upcoming holidays`}>
+                {phHolidaysList.length}
+              </span>
+            </button>
+          </div>
+        </aside>
 
       </div>
 

@@ -153,7 +153,7 @@ const todayStr = getPHDateString();
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <CalendarIcon size={26} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={2} />
+            
             <Text style={styles.title}>Shared Calendar</Text>
           </View>
 

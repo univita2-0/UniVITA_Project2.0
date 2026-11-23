@@ -31,10 +31,11 @@ const timeLabel = (value) => {
 };
 const excluded = ['LOGIN', 'VISITOR', 'APPOINTMENT', 'VISIT_REASON', 'BLE', 'SCANNER'];
 
-const Metric = ({ icon: Icon, label, value, hint, onClick }) => (
+const Metric = ({ label, value, hint, onClick }) => (
   <button type="button" className="uv-role-metric" onClick={onClick}>
-    <span className="uv-role-metric-head"><span>{label}</span><Icon size={18} aria-hidden="true" /></span>
-    <strong>{value}</strong><span className="uv-role-metric-bottom">{hint}<ArrowUpRight size={15} aria-hidden="true" /></span>
+    <span className="uv-role-metric-head">{label}</span>
+    <strong>{value}</strong>
+    <span className="uv-role-metric-bottom">{hint}</span>
   </button>
 );
 
@@ -109,46 +110,67 @@ const HRDashboard = ({ setView }) => {
   const pageCount = Math.max(1, Math.ceil(todayActivities.length / 5));
   const display = todayActivities.slice((page - 1) * 5, page * 5);
 
-  if (loading) return <div className="uv-role-state" role="status"><RefreshCw size={23} className="uv-role-spin" /> Loading HR overview…</div>;
+  if (loading) return <div className="uv-role-state" role="status"><RefreshCw className="uv-role-spin" size={18} /> Loading HR overview…</div>;
 
   return (
     <main className="uv-role-dashboard" aria-label="HR overview">
       <header className="uv-role-intro">
-        <div><p>Instructor workforce, attendance, and outstanding approvals in one workspace.</p></div>
-        <button className="uv-role-button" type="button" disabled={refreshing} onClick={() => load()}><RefreshCw size={15} className={refreshing ? 'uv-role-spin' : ''} /> Refresh data</button>
+        <div>
+         
+          <p>Workforce attendance, personnel requests, and recent HR operations.</p>
+        </div>
+        <div className="uv-role-meta"><small>Updated {updated ? timeLabel(updated.toISOString()) : '—'}</small></div>
       </header>
-      <div className="uv-role-status"><span><CalendarDays size={15} /> {new Date(`${today}T12:00:00`).toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span><span><CheckCircle2 size={15} /> HR operations overview</span><span>Updated {updated ? timeLabel(updated.toISOString()) : '—'}</span></div>
-      {warning && <div className="uv-role-warning" role="alert"><AlertCircle size={16} /> {warning}</div>}
+      {warning && <div className="uv-role-warning" role="alert"><AlertCircle size={16} /> <span>{warning}</span></div>}
+
       <section className="uv-role-metrics" aria-label="HR key metrics">
-        <Metric icon={Users} label="Active instructors" value={data.instructors} hint="Employee directory" onClick={() => navigate('employee-management')} />
-        <Metric icon={CalendarOff} label="On leave today" value={data.leaveToday} hint="Approved leave" onClick={() => navigate('leave-management')} />
-        <Metric icon={UserX} label="Absent / missed" value={data.absent} hint="Attendance records" onClick={() => navigate('attendance')} />
-        <Metric icon={Clock3} label="Late attendance" value={data.late} hint="Attendance records" onClick={() => navigate('attendance')} />
+        <Metric label="Active instructors" value={data.instructors} hint="View employee directory" onClick={() => navigate('employee-management')} />
+        <Metric label="On leave today" value={data.leaveToday} hint="View leave requests" onClick={() => navigate('leave-management')} />
+        <Metric label="Absent or missed" value={data.absent} hint="View attendance" onClick={() => navigate('attendance')} />
+        <Metric label="Late attendance" value={data.late} hint="View attendance" onClick={() => navigate('attendance')} />
       </section>
-      <section className="uv-role-columns">
-        <article className="uv-role-card">
-          <header className="uv-role-card-header"><div><h2>Pending HR reviews</h2></div><span className="uv-role-count">{pendingTotal} pending</span></header>
-          <div className="uv-role-queue">{data.pending.map(item => <div className="uv-role-queue-row" key={item.id}><span className="uv-role-queue-icon"><item.icon size={16} /></span><div><strong>{item.name}</strong><small>{item.count ? `${item.count} request${item.count === 1 ? '' : 's'} awaiting review` : 'No requests awaiting review'}</small></div><b>{item.count}</b><button type="button" className="uv-role-mini-button" onClick={() => navigate(item.route)}>Review <ChevronRight size={14}/></button></div>)}</div>
-        </article>
-        <article className="uv-role-card"><header className="uv-role-card-header"><div><h2>Attendance overview</h2></div><TrendingUp size={18} className="uv-role-accent" /></header>
-          <div className="uv-role-chart"><div className="uv-role-chart-summary"><div><strong>{attendanceRate === null ? '—' : `${attendanceRate}%`}</strong><small>Present or late, among classified records</small></div><div className="uv-role-chart-total"><strong>{data.scheduled}</strong><small>Shift records</small></div></div>
-            <div className="uv-role-stacked" role="img" aria-label={`${data.present} present, ${data.late} late, ${data.absent} absent or missed`}>
-              {recorded ? <><span style={{width:`${data.present / recorded * 100}%`,background:'#0D9488'}}/><span style={{width:`${data.late / recorded * 100}%`,background:'#E8A23A'}}/><span style={{width:`${data.absent / recorded * 100}%`,background:'#D45A60'}}/></> : <span style={{width:'100%',background:'#E2E8F0'}}/>}
-            </div>
-            {[['Present',data.present,'#0D9488'],['Late',data.late,'#E8A23A'],['Absent / missed',data.absent,'#D45A60']].map(([name,value,color]) => <div className="uv-role-legend" key={name}><span className="uv-role-legend-dot" style={{background:color}}/>{name}<strong>{value}</strong><small>{recorded ? `${Math.round(value / recorded * 100)}%` : '—'}</small></div>)}
-            <div className="uv-role-legend" aria-label="Missing Clock-Out cases in the last 7 days">
-              <span className="uv-role-legend-dot" style={{background:'#D97706'}}/>
-              <span className="uv-role-legend-name">Missing Clock-Out <small>(last 7 days)</small></span>
-              <strong>{c12Monitor === null ? '—' : c12Monitor.filter(r => r.status === 'MISSING_CLOCK_OUT').length}</strong>
-              <small className="uv-role-legend-placeholder" aria-hidden="true">—</small>
-            </div>
-            <button type="button" className="uv-role-link" onClick={() => navigate('attendance')}>Open attendance records <ArrowUpRight size={15}/></button>
+
+      <div className="uv-role-columns">
+        <section className="uv-role-card uv-role-primary" aria-labelledby="hr-pending-title">
+          <header className="uv-role-card-header"><div><h2 id="hr-pending-title">Pending HR Reviews</h2><p>Requests awaiting processing</p></div><span className="uv-role-count">{pendingTotal} pending</span></header>
+          <div className="uv-role-queue">
+            {data.pending.map(item => (
+              <div className="uv-role-queue-row" key={item.id}>
+                <div className="uv-role-queue-main"><strong>{item.name}</strong><small>{item.count ? `${item.count} request${item.count === 1 ? '' : 's'} awaiting review` : 'No pending requests'}</small></div>
+                <span className={`uv-role-queue-number ${item.count ? 'has-items' : ''}`}>{item.count}</span>
+                <button type="button" className="uv-role-mini-button" onClick={() => navigate(item.route)}>Review <ChevronRight size={14} /></button>
+              </div>
+            ))}
           </div>
-        </article>
-      </section>
-      <section className="uv-role-card uv-role-activities"><header className="uv-role-card-header"><div><h2>TODAY'S EVENTS</h2><p>Latest relevant actions recorded today.</p></div><Activity size={18} className="uv-role-accent"/></header>
-        {display.length ? display.map((item,i) => <div className="uv-role-activity" key={`${item.id || i}-${i}`}><span className="uv-role-avatar">{String(item.actor || 'S').charAt(0).toUpperCase()}</span><div><strong>{item.actor || 'System user'}</strong></div><span className="uv-role-activity-label">{String(item.title || item.type || 'Action recorded').replace(/_/g,' ')}</span><time>{timeLabel(item.occurred_at || item.created_at || item.timestamp)}</time></div>) : <div className="uv-role-empty"><Activity size={24}/><span>No HR activity recorded today.</span></div>}
-        {todayActivities.length > 5 && <footer className="uv-role-pagination"><button type="button" disabled={page===1} onClick={()=>setPage(p=>Math.max(1,p-1))}><ChevronLeft size={15}/> Previous</button><span>Page {page} of {pageCount}</span><button type="button" disabled={page===pageCount} onClick={()=>setPage(p=>Math.min(pageCount,p+1))}>Next <ChevronRight size={15}/></button></footer>}
+        </section>
+
+        <section className="uv-role-card" aria-labelledby="hr-attendance-title">
+          <header className="uv-role-card-header"><div><h2 id="hr-attendance-title">Attendance Overview</h2><p>Today's classified attendance records</p></div></header>
+          <div className="uv-role-chart">
+            <div className="uv-role-chart-summary"><div><strong>{attendanceRate === null ? '—' : `${attendanceRate}%`}</strong><small>Present or late rate</small></div><div className="uv-role-chart-total"><strong>{data.scheduled}</strong><small>Shift records</small></div></div>
+            <div className="uv-role-stacked" role="img" aria-label={`${data.present} present, ${data.late} late, ${data.absent} absent or missed`}>
+              {recorded ? <><span style={{width:`${data.present/recorded*100}%`,background:'#0D9488'}} /><span style={{width:`${data.late/recorded*100}%`,background:'#E8A23A'}} /><span style={{width:`${data.absent/recorded*100}%`,background:'#D45A60'}} /></> : <span style={{width:'100%',background:'#E2E8F0'}} />}
+            </div>
+            {[['Present',data.present,'#0D9488'],['Late',data.late,'#E8A23A'],['Absent / missed',data.absent,'#D45A60']].map(([label,value,color]) => (
+              <div className="uv-role-legend" key={label}><span className="uv-role-legend-dot" style={{background:color}} /><span>{label}</span><strong>{value}</strong><small>{recorded ? `${Math.round(value/recorded*100)}%` : '—'}</small></div>
+            ))}
+            <div className="uv-role-legend"><span className="uv-role-legend-dot" style={{background:'#D97706'}} /><span>Missing clock-out <small className="uv-role-inline-note">(last 7 days)</small></span><strong>{c12Monitor === null ? '—' : c12Monitor.filter(r => r.status === 'MISSING_CLOCK_OUT').length}</strong><small>—</small></div>
+            <button className="uv-role-link" type="button" onClick={() => navigate('attendance')}>View attendance records <ChevronRight size={15}/></button>
+          </div>
+        </section>
+      </div>
+
+      <section className="uv-role-card uv-role-activities" aria-labelledby="hr-activity-title">
+        <header className="uv-role-card-header"><div><h2 id="hr-activity-title">Today's HR Activity</h2><p>Latest relevant actions recorded today</p></div><span className="uv-role-subtle-count">{todayActivities.length} records</span></header>
+        {display.length ? display.map((item,i) => (
+          <div className="uv-role-activity" key={`${item.id || i}-${i}`}>
+            <span className="uv-role-avatar">{String(item.actor || 'S').charAt(0).toUpperCase()}</span>
+            <div className="uv-role-activity-person"><strong>{item.actor || 'System user'}</strong></div>
+            <span className="uv-role-activity-label">{String(item.title || item.type || 'Action recorded').replace(/_/g,' ')}</span>
+            <time>{timeLabel(item.occurred_at || item.created_at || item.timestamp)}</time>
+          </div>
+        )) : <div className="uv-role-empty">No HR activity recorded today.</div>}
+        {todayActivities.length > 5 && <footer className="uv-role-pagination"><button type="button" disabled={page === 1} onClick={() => setPage(p=>Math.max(1,p-1))}><ChevronLeft size={14}/> Previous</button><span>Page {page} of {pageCount}</span><button type="button" disabled={page === pageCount} onClick={() => setPage(p=>Math.min(pageCount,p+1))}>Next <ChevronRight size={14}/></button></footer>}
       </section>
     </main>
   );

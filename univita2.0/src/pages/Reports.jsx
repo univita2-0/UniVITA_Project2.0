@@ -37,9 +37,10 @@ const Reports = () => {
   const currentUserRole = getUserRole();
   const isAdmin = currentUserRole === 'admin';
   const isHR = currentUserRole === 'hr_admin';
-  const canWrite = isHR; // governs Export CSV + Print
+  const isSecurity = currentUserRole === 'security';
 
-  const [selectedReport, setSelectedReport] = useState('attendance');
+  const [selectedReport, setSelectedReport] = useState(isSecurity ? 'visitor' : 'attendance');
+  const canWrite = isHR || (isSecurity && selectedReport === 'visitor');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -78,21 +79,31 @@ const Reports = () => {
 
   // ---- Tabs: payroll hidden for Admin ----
   const allTabs = [
-    { id: 'attendance', label: 'Attendance & Timekeeping', icon: <Clock size={16} /> },
-    { id: 'payroll', label: 'Payroll Status & Earnings', icon: <DollarSign size={16} /> },
-    { id: 'visitor', label: 'Campus Visitor Tracking', icon: <Users size={16} /> },
-    { id: 'scheduling', label: 'Instruction Logistics', icon: <Calendar size={16} /> },
-    { id: 'requests', label: 'Workflow & HR Requests', icon: <ClipboardList size={16} /> }
+    { id: 'attendance', label: 'Attendance & Timekeeping' },
+    { id: 'payroll', label: 'Payroll Status & Earnings' },
+    { id: 'visitor', label: 'Campus Visitor Tracking' },
+    { id: 'scheduling', label: 'Instruction Logistics' },
+    { id: 'requests', label: 'Workflow & HR Requests' }
   ];
-  const visibleTabs = allTabs.filter(t => (t.id !== 'payroll' || isHR) && (t.id !== 'visitor' || isAdmin)); // HR cannot call the existing visitor-detail API.
+  // Security gets visitor reporting only. HR handles workforce reports and payroll;
+  // Admin can view operational categories, but never payroll or report exports.
+  const visibleTabs = allTabs.filter(tab => {
+    if (isSecurity) return tab.id === 'visitor';
+    if (tab.id === 'payroll') return isHR;
+    if (tab.id === 'visitor') return isAdmin;
+    return isAdmin || isHR;
+  });
 
   // Guard: if Admin somehow lands on payroll, force back to attendance
   useEffect(() => {
-    if (!visibleTabs.some(tab => tab.id === selectedReport)) setSelectedReport('attendance');
+    if (!visibleTabs.some(tab => tab.id === selectedReport)) {
+      setSelectedReport(isSecurity ? 'visitor' : 'attendance');
+    }
   }, [currentUserRole, selectedReport]);
 
   useEffect(() => {
     const fetchFilterData = async () => {
+      if (isSecurity) return;
       try {
         const [progRes, courseRes] = await Promise.all([
           axios.get(`${API_BASE}/programs`, getAuthHeaders()),
@@ -105,7 +116,7 @@ const Reports = () => {
       }
     };
     fetchFilterData();
-  }, []);
+  }, [isSecurity]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -115,7 +126,7 @@ const Reports = () => {
         switch (selectedReport) {
           case 'attendance': await fetchAttendanceData(); break;
           case 'payroll': if (!isHR) throw new Error('Payroll report is available to HR only.'); await fetchPayrollData(); break;
-          case 'visitor': if (!isAdmin) throw new Error('Detailed visitor report requires Administrator access.'); await fetchVisitorData(); break;
+          case 'visitor': if (!isAdmin && !isSecurity) throw new Error('Visitor reporting requires Admin or Security access.'); await fetchVisitorData(); break;
           case 'scheduling': await fetchSchedulingData(); break;
           case 'requests': await fetchRequestsData(); break;
           default: break;
@@ -220,7 +231,7 @@ const Reports = () => {
   };
 
   const handleExportCSV = () => {
-    if (!canWrite || loading || error) {
+    if (!canWrite || (isSecurity && selectedReport !== 'visitor') || loading || error) {
       alert('Report export is unavailable: check access rights and report load status.');
       return;
     }
@@ -234,6 +245,15 @@ const Reports = () => {
     } else if (selectedReport === 'payroll') {
       headers = ['Employee ID', 'Name', 'Gross Pay', 'SSS', 'PhilHealth', 'Pag-IBIG', 'Tax', 'Net Pay'];
       rows = payrollData.map(p => [p.employee_id, p.full_name, p.gross_pay, p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.tax_deduction, p.net_pay]);
+    } else if (selectedReport === 'visitor' && isSecurity) {
+      headers = ['Visitor', 'Visit Date', 'Visit Time', 'Purpose', 'Status'];
+      rows = visitorList.map(v => [
+        `${v.first_name || ''} ${v.last_name || ''}`.trim(),
+        calendarDay(v.visit_date),
+        String(v.visit_time || '').slice(0, 5),
+        v.reason || '',
+        v.status || 'PENDING'
+      ]);
     } else if (selectedReport === 'requests') {
       headers = ['Category', 'Name', 'Date', 'Reason', 'Status'];
       rows = [
@@ -255,7 +275,7 @@ const Reports = () => {
   };
 
   const handleExport = () => {
-    if (!canWrite || loading || error) {
+    if (!canWrite || (isSecurity && selectedReport !== 'visitor') || loading || error) {
       alert('Report printing is unavailable: check access rights and report load status.');
       return;
     }
@@ -282,10 +302,10 @@ const Reports = () => {
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
-          <StatBox label="Total Regular Hours" value={`${totalReg.toFixed(1)} hrs`} icon={<Clock size={18} />} />
-          <StatBox label="Overtime Hours" value="Not verified" icon={<TrendingUp size={18} />} />
-          <StatBox label="Approved Leave Days" value="Not verified" icon={<FileText size={18} />} />
-          <StatBox label="Faculty Tracked" value={attendanceData.length} icon={<Users size={18} />} />
+          <StatBox label="Total Regular Hours" value={`${totalReg.toFixed(1)} hrs`} />
+          <StatBox label="Overtime Hours" value="Not verified" />
+          <StatBox label="Approved Leave Days" value="Not verified" />
+          <StatBox label="Faculty Tracked" value={attendanceData.length} />
         </div>
         <div className="formal-rep-chart-grid">
           <div className="formal-rep-card">
@@ -338,10 +358,10 @@ const Reports = () => {
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
-          <StatBox label="Payroll Records" value={payrollData.length} icon={<Users size={18} />} />
-          <StatBox label="Total Gross Earnings" value={`₱${grossSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={<DollarSign size={18} />} />
-          <StatBox label="Total Net Pay" value={`₱${netSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} icon={<DollarSign size={18} />} />
-          <StatBox label="Average Net Salary" value={`₱${(payrollData.length ? netSum / payrollData.length : 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`} icon={<TrendingUp size={18} />} />
+          <StatBox label="Payroll Records" value={payrollData.length} />
+          <StatBox label="Total Gross Earnings" value={`₱${grossSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} />
+          <StatBox label="Total Net Pay" value={`₱${netSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} />
+          <StatBox label="Average Net Salary" value={`₱${(payrollData.length ? netSum / payrollData.length : 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`} />
         </div>
         <div className="formal-rep-card">
           <div className="formal-rep-card-header"><h3>Recorded Gross and Net Payroll (Top 10)</h3></div>
@@ -376,10 +396,10 @@ const Reports = () => {
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
-          <StatBox label="Approved Appointments" value={visitorStats.approved} icon={<CheckCircle size={18} />} />
-          <StatBox label="Rejected Requests" value={visitorStats.rejected} icon={<XCircle size={18} />} />
-          <StatBox label="Awaiting Approval" value={visitorStats.pending} icon={<AlertCircle size={18} />} />
-          <StatBox label="Total Appointments" value={total} icon={<PieChart size={18} />} />
+          <StatBox label="Approved Appointments" value={visitorStats.approved} />
+          <StatBox label="Rejected Requests" value={visitorStats.rejected} />
+          <StatBox label="Awaiting Approval" value={visitorStats.pending} />
+          <StatBox label="Total Appointments" value={total} />
         </div>
         <div className="formal-rep-card">
           <div className="formal-rep-card-header"><h3>Appointment Decision Breakdown</h3></div>
@@ -411,9 +431,9 @@ const Reports = () => {
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
-          <StatBox label="Total Assigned Shifts" value={total} icon={<Calendar size={18} />} />
-          <StatBox label="Active Instructors Assigned" value={uniq} icon={<Users size={18} />} />
-          <StatBox label="Remaining Shifts in Period" value={upcoming} icon={<Clock size={18} />} />
+          <StatBox label="Total Assigned Shifts" value={total} />
+          <StatBox label="Active Instructors Assigned" value={uniq} />
+          <StatBox label="Remaining Shifts in Period" value={upcoming} />
         </div>
         <div className="formal-rep-card">
           <div className="formal-rep-card-header"><h3>Instruction Deployment Log (Recent 10)</h3></div>
@@ -469,10 +489,10 @@ const Reports = () => {
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
-          <StatBox label="Leave Applications" value={requestsData.leaves.length} icon={<Calendar size={18} />} />
-          <StatBox label="Overtime Claims" value={requestsData.overtime.length} icon={<Clock size={18} />} />
-          <StatBox label="Attendance Appeals" value={requestsData.appeals.length} icon={<AlertCircle size={18} />} />
-          <StatBox label="Pending Review" value={totalPending} icon={<FileText size={18} />} />
+          <StatBox label="Leave Applications" value={requestsData.leaves.length} />
+          <StatBox label="Overtime Claims" value={requestsData.overtime.length} />
+          <StatBox label="Attendance Appeals" value={requestsData.appeals.length} />
+          <StatBox label="Pending Review" value={totalPending} />
         </div>
         <div className="formal-rep-chart-grid">
           <div className="formal-rep-card">
@@ -579,86 +599,95 @@ const Reports = () => {
 
   return (
     <div className="formal-rep-container">
-      <div className="formal-rep-header">
-        <div className="formal-rep-title-block">
-          
-          <p>
-            {isAdmin
-              ? 'Read-only view of operational reports. Payroll reports and internal report exports are managed by HR.'
-              : 'Generate, review, and export institutional reports across timekeeping, payroll, security, and HR workflows.'}
-          </p>
-        </div>
-
-        <div className="formal-rep-controls">
-          <div className="formal-rep-input-wrapper">
-            <Layers size={16} className="formal-rep-icon" />
-            <select
-              className="formal-rep-select"
-              style={{ minWidth: '160px' }}
-              value={programId}
-              onChange={e => { setProgramId(e.target.value); setCourseName(''); }}
-              disabled={loading || !['attendance', 'scheduling'].includes(selectedReport)}
-            >
-              <option value="">All Programs</option>
-              {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
-            </select>
-          </div>
-
-          <div className="formal-rep-input-wrapper">
-            <BookOpen size={16} className="formal-rep-icon" />
-            <select
-              className="formal-rep-select"
-              style={{ minWidth: '160px' }}
-              value={courseName}
-              onChange={e => setCourseName(e.target.value)}
-              disabled={loading || !['attendance', 'scheduling'].includes(selectedReport)}
-            >
-              <option value="">All Courses</option>
-              {courses.filter(c => !programId || String(c.program_id) === String(programId)).map(c => (
-                <option key={c.id} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="formal-rep-input-wrapper">
-            <Calendar size={16} className="formal-rep-icon" />
-            <select className="formal-rep-select" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} disabled={loading}>
-              {availableMonths.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-          </div>
-
-          {/* ---- Export CSV & Print — HR only ---- */}
-          {canWrite && (
-            <>
-              <button className="formal-rep-btn-outline" onClick={handleExportCSV} disabled={loading || Boolean(error) || !['attendance', 'payroll', 'requests'].includes(selectedReport)}>
-                <Download size={16} /> Export CSV
-              </button>
-              <button className="formal-rep-btn-primary" onClick={handleExport} disabled={loading || Boolean(error)}>
-                <Printer size={16} /> Print Internal Report
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ---- Read-only banner ---- */}
-      {isAdmin && (
-        <div className="formal-rep-readonly-banner">
-          <ShieldAlert size={16} />
-          <span>Read-only view. Payroll reports are restricted to HR. Internal report exports are disabled.</span>
-        </div>
-      )}
-
+      {/* Report category selector and contextual actions */}
       <div className="formal-rep-section-heading">
-        <div><h2>Report categories</h2></div>
-        <span className="formal-rep-period-tag"><Calendar size={14} /> {monthLabel}</span>
+        <div>
+          
+          <p>Select a category to review the corresponding records.</p>
+        </div>
+        {isAdmin && <span className="formal-rep-access-note">View-only access</span>}
       </div>
+
       <div className="formal-rep-tabs" role="tablist" aria-label="Report category">
         {visibleTabs.map(tab => (
-          <button key={tab.id} type="button" role="tab" aria-selected={selectedReport === tab.id} className={`formal-rep-tab-btn ${selectedReport === tab.id ? 'active' : ''}`} onClick={() => setSelectedReport(tab.id)}>
-            {tab.icon} {tab.label}
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={selectedReport === tab.id}
+            className={`formal-rep-tab-btn ${selectedReport === tab.id ? 'active' : ''}`}
+            onClick={() => setSelectedReport(tab.id)}
+          >
+            {tab.label}
           </button>
         ))}
+      </div>
+
+      <div className="formal-rep-toolbar" aria-label="Report filters and actions">
+        <div className="formal-rep-filter-group">
+          {['attendance', 'scheduling'].includes(selectedReport) && !isSecurity && (
+            <>
+              <label className="formal-rep-filter">
+                <span>Program</span>
+                <select
+                  className="formal-rep-select"
+                  value={programId}
+                  onChange={e => { setProgramId(e.target.value); setCourseName(''); }}
+                  disabled={loading}
+                >
+                  <option value="">All Programs</option>
+                  {programs.map(p => <option key={p.id} value={p.id}>{p.program_name}</option>)}
+                </select>
+              </label>
+              <label className="formal-rep-filter">
+                <span>Course</span>
+                <select
+                  className="formal-rep-select"
+                  value={courseName}
+                  onChange={e => setCourseName(e.target.value)}
+                  disabled={loading}
+                >
+                  <option value="">All Courses</option>
+                  {courses.filter(c => !programId || String(c.program_id) === String(programId)).map(c => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          <label className="formal-rep-filter formal-rep-filter-period">
+            <span>Reporting Period</span>
+            <select
+              className="formal-rep-select"
+              value={selectedMonth}
+              onChange={e => setSelectedMonth(e.target.value)}
+              disabled={loading}
+            >
+              {availableMonths.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </label>
+        </div>
+
+        {canWrite && (
+          <div className="formal-rep-controls">
+            <button
+              type="button"
+              className="formal-rep-btn-outline"
+              onClick={handleExportCSV}
+              disabled={loading || Boolean(error) || !(isSecurity ? selectedReport === 'visitor' : ['attendance', 'payroll', 'requests'].includes(selectedReport))}
+            >
+              Export CSV
+            </button>
+            <button
+              type="button"
+              className="formal-rep-btn-primary"
+              onClick={handleExport}
+              disabled={loading || Boolean(error)}
+            >
+              Print Report
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="formal-rep-content screen-only">
@@ -766,7 +795,7 @@ const Reports = () => {
         </div>
       )}
 
-      {canWrite && selectedReport === 'visitor' && (
+      {isSecurity && selectedReport === 'visitor' && (
         <div className="print-only">
           <PrintableHeader
             title="CAMPUS VISITOR & GUEST CLEARANCE LOG"
@@ -895,9 +924,8 @@ const Reports = () => {
   );
 };
 
-const StatBox = ({ label, value, icon }) => (
+const StatBox = ({ label, value }) => (
   <div className="formal-rep-stat-box">
-    <div className="formal-rep-stat-icon">{icon}</div>
     <div className="formal-rep-stat-info">
       <span className="formal-rep-stat-label">{label}</span>
       <span className="formal-rep-stat-value">{value}</span>

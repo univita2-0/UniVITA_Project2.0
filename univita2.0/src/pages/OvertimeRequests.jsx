@@ -32,16 +32,20 @@ const formatTo12Hour = (timeStr) => {
 const normalizeStatus = (status) => {
   const s = String(status || '').toLowerCase().trim();
   if (['pending', 'approved', 'rejected', 'cancelled'].includes(s)) return s;
-  return 'pending';
+  return 'unknown';
 };
 
-const formatStatusLabel = (status) => normalizeStatus(status).toUpperCase();
+const formatStatusLabel = (status) => {
+  const value = normalizeStatus(status);
+  return value.charAt(0).toUpperCase() + value.slice(1);
+};
 
 const getChipClass = (status) => {
   const s = normalizeStatus(status);
   if (s === 'approved') return 'success';
   if (s === 'rejected') return 'danger';
   if (s === 'cancelled') return 'default';
+  if (s === 'unknown') return 'default';
   return 'warning';
 };
 
@@ -54,8 +58,9 @@ const TABS = [
 
 const OvertimeRequests = () => {
   const { can, isAdmin } = useRole();
-  // Both permissions travel together on this page (a single batch action confirms one or the other)
-  const canDecide = can('overtime:approve') && can('overtime:reject');
+  const canApprove = can('overtime:approve');
+  const canReject = can('overtime:reject');
+  const canDecide = canApprove || canReject;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [historyRequests, setHistoryRequests] = useState([]);
@@ -115,8 +120,8 @@ const OvertimeRequests = () => {
 
   const openReview = (req, action) => {
     // FIX 10.5 — defense-in-depth: only HR can open the review modal
-    if (!canDecide) {
-      toast.error('You do not have permission to review overtime requests.');
+    if (!can(action === 'approved' ? 'overtime:approve' : 'overtime:reject')) {
+      toast.error('You do not have permission to perform this action.');
       return;
     }
     setReviewingRequest(req);
@@ -126,8 +131,13 @@ const OvertimeRequests = () => {
 
   const handleAction = async (id, status, remarks) => {
     // FIX 10.5 — defense-in-depth: reject API call if role lacks permission
-    if (!canDecide) {
-      toast.error('You do not have permission to review overtime requests.');
+    if (!can(status === 'approved' ? 'overtime:approve' : 'overtime:reject')) {
+      toast.error('You do not have permission to perform this action.');
+      return;
+    }
+    if (processing) return;
+    if (String(remarks || '').trim().length > 500) {
+      toast.error('Review remarks must not exceed 500 characters.');
       return;
     }
     setProcessing(true);
@@ -192,11 +202,6 @@ const OvertimeRequests = () => {
     rejected: historyRequests.filter(r => normalizeStatus(r.status) === 'rejected').length,
   };
 
-  const refreshAll = () => {
-    fetchAllHistory();
-    fetchPending();
-  };
-
   const emptyMessage = (() => {
     const tabLabel = activeTab === 'all' ? '' : `${activeTab} `;
     if (searchQuery) return `No ${tabLabel}overtime records match your search.`;
@@ -210,9 +215,6 @@ const OvertimeRequests = () => {
          
         </div>
         <div className="ot-heading-actions">
-          <button className="ot-btn-secondary" onClick={refreshAll} disabled={loadingHistory || loadingPending}>
-            <RefreshCw size={15} className={loadingHistory || loadingPending ? 'ot-spin' : ''} /> Refresh
-          </button>
           <button className="ot-btn-primary" onClick={() => setShowPendingModal(true)}>
             Pending Requests
             {pendingCount > 0 && <span className="ot-badge-count">{pendingCount}</span>}
@@ -220,18 +222,12 @@ const OvertimeRequests = () => {
         </div>
       </div>
 
-      {isAdmin && (
-        <div className="ot-readonly-notice" role="note">
-          <span className="ot-readonly-icon">i</span>
-          <span><strong>Read-only access.</strong> HR personnel are responsible for approving or rejecting overtime requests.</span>
-        </div>
-      )}
-
+     
       <div className="ot-summary-grid" aria-label="Overtime request summary">
-        <div className="ot-summary-card"><div className="ot-summary-top"><span>Total Requests</span><ClipboardList size={17} /></div><strong>{recordSummary.total}</strong><small>Recorded overtime submissions</small></div>
-        <div className="ot-summary-card"><div className="ot-summary-top"><span>Pending Review</span><Clock3 size={17} /></div><strong>{pendingCount}</strong><small>Awaiting HR decision</small></div>
-        <div className="ot-summary-card"><div className="ot-summary-top"><span>Approved</span><CheckCircle2 size={17} /></div><strong>{recordSummary.approved}</strong><small>Successfully approved</small></div>
-        <div className="ot-summary-card"><div className="ot-summary-top"><span>Rejected</span><XCircle size={17} /></div><strong>{recordSummary.rejected}</strong><small>Declined submissions</small></div>
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Total Requests</span></div><strong>{recordSummary.total}</strong></div>
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Pending Review</span></div><strong>{pendingCount}</strong></div>
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Approved</span></div><strong>{recordSummary.approved}</strong></div>
+        <div className="ot-summary-card"><div className="ot-summary-top"><span>Rejected</span></div><strong>{recordSummary.rejected}</strong></div>
       </div>
 
       <section className="ot-records-section" aria-label="Overtime request records">
@@ -307,7 +303,7 @@ const OvertimeRequests = () => {
                           onClick={() => { setReviewRemarks(''); setViewingRequest(req); }}
                           title="View Details"
                         >
-                          <Eye size={16} color="#475569" />
+                          View
                         </button>
                       </td>
                     </tr>
@@ -409,7 +405,7 @@ const OvertimeRequests = () => {
                           rel="noopener noreferrer"
                           className="ot-proof-action-btn"
                         >
-                          <Paperclip size={14} /> View Attached Document
+                          View Attached Document
                         </a>
                       </div>
                     </div>
@@ -440,7 +436,7 @@ const OvertimeRequests = () => {
                       <button
                         className="ot-btn-min-reject"
                         onClick={() => handleAction(viewingRequest.id, 'rejected', reviewRemarks)}
-                        disabled={processing}
+                        disabled={processing || !canReject}
                         style={{ opacity: processing ? 0.6 : 1, cursor: processing ? 'not-allowed' : 'pointer' }}
                       >
                         {processing ? 'Processing...' : 'Reject'}
@@ -448,7 +444,7 @@ const OvertimeRequests = () => {
                       <button
                         className="ot-btn-min-approve"
                         onClick={() => handleAction(viewingRequest.id, 'approved', reviewRemarks)}
-                        disabled={processing}
+                        disabled={processing || !canApprove}
                         style={{ opacity: processing ? 0.6 : 1, cursor: processing ? 'not-allowed' : 'pointer' }}
                       >
                         {processing ? 'Processing...' : 'Approve'}
@@ -551,7 +547,7 @@ const OvertimeRequests = () => {
                               rel="noopener noreferrer"
                               className="ot-minimal-link"
                             >
-                              <Paperclip size={14} /> View Attached Document
+                              View Attached Document
                             </a>
                           </div>
                         )}
@@ -560,8 +556,8 @@ const OvertimeRequests = () => {
                       {/* FIX 10.5 — Approve/Reject only for HR */}
                       {canDecide ? (
                         <div className="ot-minimal-footer">
-                          <button className="ot-btn-min-reject" onClick={() => openReview(req, 'rejected')}>Reject</button>
-                          <button className="ot-btn-min-approve" onClick={() => openReview(req, 'approved')}>Approve</button>
+                          {canReject && <button className="ot-btn-min-reject" onClick={() => openReview(req, 'rejected')}>Reject</button>}
+                          {canApprove && <button className="ot-btn-min-approve" onClick={() => openReview(req, 'approved')}>Approve</button>}
                         </div>
                       ) : (
                         <div className="ot-minimal-footer" style={{ justifyContent: 'center' }}>
@@ -629,7 +625,7 @@ const OvertimeRequests = () => {
                           rel="noopener noreferrer"
                           className="ot-proof-action-btn"
                         >
-                          <Paperclip size={14} /> View Attached Document
+                          View Attached Document
                         </a>
                       </div>
                     </div>
@@ -646,6 +642,7 @@ const OvertimeRequests = () => {
                       ? 'Explain why this request is being rejected...'
                       : 'Optional approval notes...'}
                     value={reviewRemarks}
+                    maxLength={500}
                     onChange={e => setReviewRemarks(e.target.value)}
                     style={{
                       width: '100%', padding: '0.6rem', border: '1px solid #CBD5E1',

@@ -8,7 +8,7 @@ import { Image } from 'expo-image'; // 👈 Using expo-image for better renderin
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { 
-  User, Shield, ChevronRight, LogOut, ArrowLeft, Bell, Sun, Moon, Lock, Check, X, 
+  User, Shield, ChevronRight, LogOut, ArrowLeft, Sun, Moon, Lock, Check, X, 
   Eye, EyeOff, Camera, FileText, CreditCard, Briefcase, MapPin, ShieldCheck, HelpCircle
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -363,8 +363,6 @@ export default function ProfileScreen({ navigation }) {
               <MenuItem icon={User} title="Edit Profile" subtitle="Update your name and email" onPress={() => { setEditName(userData.name); setEditEmail(userData.email); setShowEditModal(true); }} />
               <View style={styles.divider} />
               <MenuItem icon={Shield} title="Change Password" subtitle="Update your login credentials" onPress={() => { setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setShowPasswordModal(true); }} />
-              <View style={styles.divider} />
-              <MenuItem icon={Bell} title="Emergency Alerts" subtitle="View active broadcasts" onPress={() => navigation.navigate('Alerts')} />
               <View style={styles.divider} />
               <MenuItem icon={HelpCircle} title="Help Center & Terms" subtitle="Read app instructions and privacy policy" onPress={() => navigation.navigate('HelpAndTerms')} />
             </View>
