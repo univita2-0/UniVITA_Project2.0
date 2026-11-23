@@ -55,6 +55,10 @@ const ACTION_ROLES = Object.freeze({
   'system:audit-log':         ['admin'],
   'system:visit-reasons':     ['admin'],
 
+  'reports:instructor:view':   ['admin', 'hr_admin'],
+  'reports:visitor:view':      ['admin', 'security'],
+  'reports:tracking:print':    ['admin', 'hr_admin', 'security'],
+
   'alerts:broadcast':         ['admin', 'hr_admin'],
 
   'visitors:approve':         ['admin'],

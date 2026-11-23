@@ -21,7 +21,7 @@ const WebSocket = require('ws');
 const url = require('url');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const { allowRoles, requireAction } = require('./rbacPolicy');
+const { allowRoles, requireAction, ACTION_ROLES } = require('./rbacPolicy');
 
 const app = express();
 const GPS_GRACE_MS = 120000; 
@@ -402,25 +402,35 @@ const broadcastInstructorStatus = async (employeeId) => {
         WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN NULL -- ✅ [5, 6] Replaced NOW()
         ELSE (SELECT is_inside_campus FROM instructor_location_tracking WHERE employee_id = u.employee_id ORDER BY id DESC LIMIT 1)
       END) AS last_is_inside,
-      (CASE 
-        WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF' -- ✅ [7] Replaced NOW()
-        WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
-        WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-        WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'GPS OFF' -- ✅ [8, 9] Replaced NOW()
-        ELSE 'GPS ON'
-      END) AS gps_status
+      (
+CASE
+  WHEN CONCAT(s.date, ' ', s.end_time) < ?
+    THEN 'GPS OFF'
+  WHEN u.last_location_ping IS NULL
+    THEN 'Unavailable'
+  WHEN u.location_tracking_enabled = 0
+    THEN 'GPS Disabled'
+  WHEN TIMESTAMPDIFF(
+    SECOND,
+    u.last_location_ping,
+    ?
+  ) > ?
+    THEN 'Signal Lost'
+  ELSE 'GPS ON'
+END AS gps_status
+
     FROM users u
     LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND DATE(s.date) = ?
     WHERE u.employee_id = ?
   `, [
-    phNow,                        // [1]
-    phNow, GPS_STALE_SECONDS,     // [2, 3]
-    phNow,                        // [4]
-    phNow, GPS_STALE_SECONDS,     // [5, 6]
-    phNow,                        // [7]
-    phNow, GPS_STALE_SECONDS,     // [8, 9]
-    today,                        // [10] for DATE(s.date) = ?
-    employeeId                    // [11] for u.employee_id = ?
+    phNow,                       
+    phNow, GPS_STALE_SECONDS,     
+    phNow,                       
+    phNow, GPS_STALE_SECONDS,     
+    phNow,                        
+    phNow, GPS_STALE_SECONDS,     
+    today,                        
+    employeeId                    
   ]);
 
   if (rows.length === 0) return;
@@ -497,8 +507,7 @@ const getRoomCoords = (floor, room) => {
   if (ROOM_COORDINATES[f] && ROOM_COORDINATES[f][r]) {
     return ROOM_COORDINATES[f][r];
   }
-  // Default to entrance coordinates if room name not matched
-  return f === '5' ? { x: 52.75, y: 132.15 } : { x: 360.45, y: 50.75 };
+ return null;
 };
 
 
@@ -6859,8 +6868,24 @@ app.put('/api/visitor-requests/:id/return', authenticateToken, requireAction('vi
       delete visitorDestinations[bleId];
       delete liveVisitors[bleId];
       delete lastKnownVisitorsData[bleId];
+      bleRoomCandidates.delete(bleId);
     }
-    logVisitorHistory(bleId, visitorName, bleId, null, 'Exit / Returned', 'disconnect', null, null);
+    logVisitorHistory(
+  bleId,
+  visitorName,
+  bleId,
+  null,
+  'Exit / Returned',
+  'checkout',
+  null,
+  null
+);
+
+broadcastToTrackingClients({
+  type: 'visitor_checkout',
+  bleId,
+  visitorRequestId: requestId
+});
   }
   logAction(req.user.id, 'VISITOR_RETURN', 'visitor_request', requestId, req);
   return res.json({ success: true, message: 'BLE tag successfully returned.' });
@@ -6876,51 +6901,82 @@ app.get('/api/scanners', authenticateToken, allowRoles('admin','security'), (req
   });
 });
 
+
 app.post('/api/scanners', authenticateToken, async (req, res) => {
+  // 1. Verify role permissions
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
-    return res.status(403).json({ success: false, message: 'Forbidden.' });
+    return res.status(403).json({
+      success: false,
+      message: 'Forbidden.'
+    });
   }
+
   const { scanner_id, assigned_room, assigned_floor } = req.body;
-  if (!scanner_id || !assigned_room || !assigned_floor) {
-    return res.status(400).json({ success: false, message: "Scanner ID, assigned room, and floor are required." });
-  }
-  
-  
-  const validFloors = ['3', '5'];
-  if (!validFloors.includes(String(assigned_floor).trim())) {
-    return res.status(400).json({ success: false, message: "Invalid floor. Must be '3' or '5'." });
-  }
-  
-  if (scanner_id.trim().length > 50 || assigned_room.trim().length > 100) {
-    return res.status(400).json({ success: false, message: "Scanner ID or Room name exceeds maximum length." });
+  if (
+    typeof scanner_id !== 'string' ||
+    typeof assigned_room !== 'string' ||
+    typeof assigned_floor !== 'string' ||
+    scanner_id.trim().length === 0 ||
+    scanner_id.trim().length > 50 ||
+    assigned_room.trim().length === 0 ||
+    assigned_room.trim().length > 100 ||
+    !['3', '5'].includes(assigned_floor.trim()) ||
+    !(ALLOWED_ROOMS[assigned_floor.trim()] || [])
+      .includes(assigned_room.trim()) ||
+    !getRoomCoords(assigned_floor, assigned_room)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid scanner ID, floor, or mapped room.'
+    });
   }
 
   try {
+    // 3. Check whether scanner is already registered
     const [existing] = await db.promise().query(
       "SELECT id FROM scanners WHERE scanner_id = ?",
       [scanner_id.trim()]
     );
 
-    // Upsert support
+    // 4. Update scanner mapping if already registered
     if (existing.length > 0) {
       await db.promise().query(
         "UPDATE scanners SET assigned_room = ?, assigned_floor = ? WHERE scanner_id = ?",
         [assigned_room.trim(), assigned_floor.trim(), scanner_id.trim()]
       );
+
       logAction(req.user.id, 'UPDATE_SCANNER', 'scanner', existing[0].id, req);
-      return res.json({ success: true, message: "Scanner room mapping updated successfully." });
+
+      return res.json({
+        success: true,
+        message: "Scanner room mapping updated successfully."
+      });
     }
 
+    // 5. Register a new scanner
     const [result] = await db.promise().query(
       "INSERT INTO scanners (scanner_id, assigned_room, assigned_floor) VALUES (?, ?, ?)",
       [scanner_id.trim(), assigned_room.trim(), assigned_floor.trim()]
     );
+
     logAction(req.user.id, 'CREATE_SCANNER', 'scanner', result.insertId, req);
-    res.status(201).json({ success: true, message: "Scanner registered successfully.", id: result.insertId });
+
+    return res.status(201).json({
+      success: true,
+      message: "Scanner registered successfully.",
+      id: result.insertId
+    });
+
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error('Scanner registration error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to register or update scanner.'
+    });
   }
 });
+
 
 app.put('/api/scanners/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security') {
@@ -6932,6 +6988,28 @@ app.put('/api/scanners/:id', authenticateToken, async (req, res) => {
   if (!scanner_id || !assigned_room || !assigned_floor) {
     return res.status(400).json({ success: false, message: "Scanner ID, assigned room, and floor are required." });
   }
+
+
+  // V01: Validate scanner mapping before updating it.
+  if (
+    typeof scanner_id !== 'string' ||
+    typeof assigned_room !== 'string' ||
+    typeof assigned_floor !== 'string' ||
+    !['3', '5'].includes(assigned_floor.trim()) ||
+    scanner_id.trim().length === 0 ||
+    scanner_id.trim().length > 50 ||
+    assigned_room.trim().length === 0 ||
+    assigned_room.trim().length > 100 ||
+    !(ALLOWED_ROOMS[assigned_floor.trim()] || [])
+      .includes(assigned_room.trim()) ||
+    !getRoomCoords(assigned_floor, assigned_room)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid scanner ID, floor, or mapped room.'
+    });
+  }
+
 
   try {
     // Check if the new scanner_id is already taken by a DIFFERENT scanner
@@ -7395,46 +7473,80 @@ app.get('/api/dashboard/summary', authenticateToken, allowRoles('admin','hr_admi
 });
 
 
+
 setInterval(async () => {
   try {
-    
     const [rows] = await db.promise().query(
       "SELECT config_value FROM system_settings WHERE config_key = 'loiter_threshold_minutes'"
     );
-    
-    
-    const thresholdMinutes = rows.length > 0 ? parseInt(rows[0].config_value, 10) : 2;
-    const LOITER_THRESHOLD_MS = thresholdMinutes * 60 * 1000;
 
+    const configuredMinutes = rows.length > 0
+      ? Number(rows[0].config_value)
+      : 2;
+
+    const thresholdMinutes =
+      Number.isFinite(configuredMinutes) &&
+      configuredMinutes >= 1 &&
+      configuredMinutes <= 60
+        ? configuredMinutes
+        : 2;
+
+    const LOITER_THRESHOLD_MS = thresholdMinutes * 60 * 1000;
+    const SIGNAL_FRESHNESS_MS = 45000;
     const now = Date.now();
 
-    for (const bleId in liveVisitors) {
+    for (const bleId of Object.keys(liveVisitors)) {
       const visitor = liveVisitors[bleId];
-      if (visitor && !visitor.isDisconnected && visitor.roomEnteredAt) {
-        const stayDurationMs = now - visitor.roomEnteredAt;
-        
-       
-        const inWrongRoom = visitor.destination && visitor.destination !== 'Unknown' && 
-                            visitor.currentRoom !== 'Unknown' && visitor.currentRoom !== visitor.destination;
 
-        if (inWrongRoom && stayDurationMs >= LOITER_THRESHOLD_MS && !visitor.loiterAlertSent) {
-          visitor.loiterAlertSent = true; 
+      if (
+        !visitor ||
+        !visitor.isDetected ||
+        visitor.isDisconnected ||
+        visitor.trackingStatus !== 'active' ||
+        !Number.isFinite(visitor.lastSeen) ||
+        now - visitor.lastSeen > SIGNAL_FRESHNESS_MS ||
+        !Number.isFinite(visitor.roomEnteredAt)
+      ) {
+        continue;
+      }
 
-          
-          logVisitorHistory(
-            visitor.id, visitor.name, visitor.bleId, 
-            visitor.floor, visitor.currentRoom, 'loitering', visitor.x, visitor.y
-          );
+      const inWrongRoom =
+        Boolean(visitor.destination) &&
+        visitor.destination !== 'Unknown' &&
+        visitor.destination !== 'Not Assigned' &&
+        visitor.currentRoom !== 'Unknown' &&
+        visitor.currentRoom !== 'Waiting for Scanner...' &&
+        visitor.currentRoom !== visitor.destination;
 
-          console.log(`[SYSTEM ALERT] Loitering logged for ${visitor.name} (${thresholdMinutes} mins)`);
-        }
+      const stayDurationMs = now - visitor.roomEnteredAt;
+
+      if (
+        inWrongRoom &&
+        stayDurationMs >= LOITER_THRESHOLD_MS &&
+        !visitor.loiterAlertSent
+      ) {
+        visitor.loiterAlertSent = true;
+
+        logVisitorHistory(
+          visitor.id,
+          visitor.name,
+          visitor.bleId,
+          visitor.floor,
+          visitor.currentRoom,
+          'loitering',
+          visitor.x,
+          visitor.y
+        );
+
+        console.log(
+          `[VISITOR TRACKING] Unexpected room stay flagged for review: ${visitor.name}`
+        );
       }
     }
   } catch (err) {
-    console.error("Loitering Watchdog Error:", err);
+    console.error('Loitering Watchdog Error:', err);
   }
 }, 10000);
-
 
 setInterval(async () => {
   try {
@@ -7455,68 +7567,87 @@ setInterval(async () => {
   }
 }, 60000);
 
-// ============================================
+
 // UNIFIED VISITOR TRACKING WATCHDOG (Single Timer)
-// ============================================
-let liveVisitors = {}; 
+
+
+let liveVisitors = {};
 let lastKnownVisitorsData = {};
 
+// V02: Signal loss applies only after a real BLE detection.
 setInterval(async () => {
   const now = Date.now();
-  const INACTIVITY_THRESHOLD_MS = 45000; // 45 seconds before flagging signal loss
+  const INACTIVITY_THRESHOLD_MS = 45000;
 
-  // 1. Fetch only actively checked-in BLE IDs currently holding a badge in the facility
-  let validBleIds = new Set();
+  let validBleIds = null;
+
   try {
     const [activeRows] = await db.promise().query(`
-      SELECT ble_id FROM visitor_requests 
-      WHERE arrived = 1 AND returned = 0 AND no_show = 0 AND ble_id IS NOT NULL
+      SELECT ble_id
+      FROM visitor_requests
+      WHERE arrived = 1
+        AND returned = 0
+        AND no_show = 0
+        AND ble_id IS NOT NULL
     `);
-    validBleIds = new Set(activeRows.map(row => String(row.ble_id).trim()));
+
+    validBleIds = new Set(
+      activeRows.map(row => String(row.ble_id).trim())
+    );
+
   } catch (err) {
-    if (
-      err.code !== 'ECONNRESET' && 
-      err.code !== 'ETIMEDOUT' && 
-      err.code !== 'ENOTFOUND' && 
-      err.code !== 'PROTOCOL_CONNECTION_LOST'
-    ) {
-      console.error("Failed to fetch valid BLE IDs:", err.message);
-    }
+    console.error(
+      'Active-tag lookup failed:',
+      err.message
+    );
+
+    // Preserve existing live tracking state.
+    return;
   }
 
-  // 2. Evaluate all live visitors currently tracked in memory
-  for (const bleId in liveVisitors) {
-    if (!validBleIds.has(String(bleId).trim())) {
+  for (const bleId of Object.keys(liveVisitors)) {
+    if (!validBleIds.has(bleId)) {
       delete liveVisitors[bleId];
       delete lastKnownVisitorsData[bleId];
+      bleRoomCandidates.delete(bleId);
       continue;
     }
 
     const visitor = liveVisitors[bleId];
-    const timeSinceLastPing = now - visitor.lastSeen;
 
-    // CHECK 1: Has the signal been lost for more than 45 seconds?
-    if (timeSinceLastPing > INACTIVITY_THRESHOLD_MS) {
-      if (!visitor.isDisconnected) {
-        console.log(`⚠️ Visitor ${bleId} signal lost in ${visitor.currentRoom}.`);
-        visitor.isDisconnected = true;
-        visitor.disconnectedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'disconnect', null, null);
-      }
-    } 
-    // CHECK 2: Signal is ACTIVE. Is this a brand-new connection or a recovery from a signal drop?
-    else {
-      if (!lastKnownVisitorsData[bleId] || lastKnownVisitorsData[bleId].isDisconnected) {
-        console.log(`✅ Visitor ${bleId} connected/reconnected.`);
-        logVisitorHistory(bleId, visitor.name, bleId, visitor.floor, visitor.currentRoom, 'connect', visitor.x, visitor.y);
-      }
-      visitor.isDisconnected = false;
+    // Waiting for the first scan is not signal loss.
+    if (!visitor?.isDetected) continue;
+
+    if (
+      !visitor.isDisconnected &&
+      now - Number(visitor.lastSeen || 0) >
+        INACTIVITY_THRESHOLD_MS
+    ) {
+      visitor.isDisconnected = true;
+      visitor.trackingStatus = 'signal_lost';
+      visitor.disconnectedAt = now;
+
+      logVisitorHistory(
+        bleId,
+        visitor.name,
+        bleId,
+        visitor.floor,
+        visitor.currentRoom,
+        'signal_lost',
+        visitor.x,
+        visitor.y
+      );
+
+      broadcastToTrackingClients({
+        type: 'location_update',
+        visitor: { ...visitor }
+      });
     }
 
-    // Update state tracking snapshot
     lastKnownVisitorsData[bleId] = { ...visitor };
   }
 }, 10000);
+
 
 app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
   if (req.user.role !== 'instructor') {
@@ -7531,287 +7662,729 @@ app.put('/api/user/tracking-enabled', authenticateToken, async (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/ble-data', async (req, res) => {
-  const hardwareApiKey = req.headers['x-api-key'];
-  if (!process.env.HARDWARE_API_KEY || hardwareApiKey !== process.env.HARDWARE_API_KEY) {
-    console.warn("Unauthorized hardware access attempt blocked.");
-    return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
+
+/* ============================================================
+   V01 — UNIFIED BLE SCANNER INGESTION
+
+   Both /api/ble-data and /api/scan use the same validation.
+   A room change requires two consistent detections within
+   a 12-second confirmation window.
+   ============================================================ */
+
+const BLE_ROOM_CONFIRMATIONS = 2;
+const BLE_ROOM_CONFIRM_WINDOW_MS = 12000;
+
+const bleRoomCandidates = new Map();
+const bleTagScanQueues = new Map();
+
+
+// 1. VALIDATE INCOMING SCANNER PAYLOAD
+const normalizeBleScanInput = (body, legacy = false) => {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return null;
   }
 
-  const { scannerId, beaconId } = req.body;
-  if (!scannerId || !beaconId) {
-    return res.status(400).json({ success: false, message: "Missing scannerId or beaconId." });
+  const scannerId = body.scannerId;
+  const tagMac = legacy ? body.beaconId : body.tagMac;
+
+  if (
+    typeof scannerId !== 'string' ||
+    typeof tagMac !== 'string'
+  ) {
+    return null;
   }
 
-  try {
-    const [scannerRows] = await db.promise().query(
-      "SELECT assigned_room, assigned_floor FROM scanners WHERE scanner_id = ?",
-      [scannerId.trim()]
-    );
+  const scanner = scannerId.trim();
+  const mac = tagMac.trim();
 
-    if (scannerRows.length === 0) {
-      return res.status(404).json({ success: false, message: `Scanner ID '${scannerId}' is not registered.` });
+  if (
+    !scanner ||
+    scanner.length > 50 ||
+    !mac ||
+    mac.length > 50 ||
+    !/^[a-zA-Z0-9:\-]+$/.test(mac)
+  ) {
+    return null;
+  }
+
+  const optionalNumber = (value, minimum, maximum) => {
+    if (
+      value === undefined ||
+      value === null ||
+      value === ''
+    ) {
+      return null;
     }
 
-    const room = scannerRows[0].assigned_room;
-    const floor = String(scannerRows[0].assigned_floor);
+    const number = Number(value);
 
-    const sql = `
-      SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
-      FROM visitor_requests vr
-      JOIN ble_tags bt ON vr.ble_id = bt.ble_id
-      WHERE UPPER(bt.mac_address) = UPPER(?) 
-        AND vr.arrived = 1 
-        AND vr.no_show = 0 
-        AND vr.returned = 0
-      LIMIT 1
-    `;
+    if (
+      !Number.isFinite(number) ||
+      number < minimum ||
+      number > maximum
+    ) {
+      throw new Error('INVALID_TELEMETRY');
+    }
 
-    const [results] = await db.promise().query(sql, [beaconId.trim()]);
+    return number;
+  };
 
-    if (results.length === 0) {
-      try {
-        const [tagRes] = await db.promise().query("SELECT ble_id FROM ble_tags WHERE UPPER(mac_address) = UPPER(?)", [beaconId.trim()]);
-        if (tagRes && tagRes.length > 0) {
-          const ghostId = tagRes[0].ble_id;
-          if (liveVisitors[ghostId]) {
-            delete liveVisitors[ghostId];
-          }
+  try {
+    return {
+      scannerId: scanner,
+      tagMac: mac,
+      rssi: optionalNumber(body.rssi, -127, 0),
+      vbatt: optionalNumber(body.vbatt, 1800, 3600)
+    };
+  } catch (_) {
+    return null;
+  }
+};
+
+// 2. PROCESS VALIDATED BLE DETECTION
+async function processValidatedBleScan(scan) {
+
+  // 1. VERIFY REGISTERED SCANNER
+  const [scanners] = await db.promise().query(
+    `SELECT scanner_id, assigned_floor, assigned_room
+     FROM scanners
+     WHERE scanner_id = ?
+     LIMIT 1`,
+    [scan.scannerId]
+  );
+
+  if (!scanners.length) {
+    return {
+      status: 404,
+      body: {
+        success: false,
+        message: 'Scanner is not registered.'
+      }
+    };
+  }
+
+  const floor = String(scanners[0].assigned_floor).trim();
+  const room = String(scanners[0].assigned_room).trim();
+
+  const coords = (ALLOWED_ROOMS[floor] || []).includes(room)
+    ? getRoomCoords(floor, room)
+    : null;
+
+  if (
+    !coords ||
+    !Number.isFinite(coords.x) ||
+    !Number.isFinite(coords.y)
+  ) {
+    console.warn(
+      'Scanner has invalid floor or room mapping:',
+      scan.scannerId
+    );
+
+    return {
+      status: 422,
+      body: {
+        success: false,
+        message:
+          'Scanner room is not mapped. Contact administrator.'
+      }
+    };
+  }
+
+  // 2. UPDATE SCANNER HEARTBEAT
+
+  await db.promise().query(
+    `UPDATE scanners
+     SET last_ping = ?, status = 'ONLINE'
+     WHERE scanner_id = ?`,
+    [getPHDateTime(), scan.scannerId]
+  );
+
+  if (scan.vbatt !== null) {
+    await db.promise().query(
+      `UPDATE ble_tags
+       SET battery_level = ?
+       WHERE UPPER(mac_address) = UPPER(?)`,
+      [scan.vbatt, scan.tagMac]
+    );
+  }
+
+  // 3. VERIFY ACTIVE CHECKED-IN VISITOR
+
+  const [visits] = await db.promise().query(
+    `SELECT
+       vr.id,
+       vr.first_name,
+       vr.last_name,
+       bt.ble_id,
+       vr.destination
+     FROM visitor_requests vr
+     INNER JOIN ble_tags bt ON (
+       UPPER(vr.ble_id) = UPPER(bt.ble_id)
+       OR UPPER(vr.used_ble_id) = UPPER(bt.ble_id)
+       OR UPPER(vr.ble_id) = UPPER(bt.mac_address)
+     )
+     WHERE UPPER(bt.mac_address) = UPPER(?)
+       AND vr.arrived = 1
+       AND vr.returned = 0
+       AND vr.no_show = 0
+     ORDER BY vr.id DESC
+     LIMIT 1`,
+    [scan.tagMac]
+  );
+
+  if (!visits.length) {
+    return {
+      status: 200,
+      body: {
+        success: false,
+        message: 'Tag not checked in or inactive.'
+      }
+    };
+  }
+
+  const visit = visits[0];
+
+  const bleId = String(visit.ble_id).trim();
+
+  const name =
+    `${visit.first_name} ${visit.last_name || ''}`.trim();
+
+  const destination = visit.destination || 'Not Assigned';
+
+  const previous = liveVisitors[bleId];
+
+  const sameVisit =
+    previous &&
+    Number(previous.visitorRequestId) === Number(visit.id);
+
+  const old = sameVisit ? previous : null;
+
+  const now = Date.now();
+
+  const wasDisconnected = Boolean(
+    old?.isDetected &&
+    (
+      old.isDisconnected ||
+      old.trackingStatus === 'signal_lost'
+    )
+  );
+
+  const isFirstDetection = !old || !old.isDetected;
+
+  const locationChanged = Boolean(
+    old &&
+    old.isDetected &&
+    (
+      old.floor !== floor ||
+      old.currentRoom !== room
+    )
+  );
+
+
+  // 4. V01: CONFIRM ROOM CHANGES
+
+  const candidateKey = bleId;
+
+  if (locationChanged) {
+    const candidate = bleRoomCandidates.get(candidateKey);
+
+    const matches = Boolean(
+      candidate &&
+      Number(candidate.visitId) === Number(visit.id) &&
+      candidate.floor === floor &&
+      candidate.room === room &&
+      now - candidate.firstAt <=
+        BLE_ROOM_CONFIRM_WINDOW_MS
+    );
+
+    const next = matches
+      ? {
+          ...candidate,
+          count: candidate.count + 1
         }
-      } catch (dbErr) {
-        console.error("Ghost cleanup DB error:", dbErr);
+      : {
+          visitId: visit.id,
+          floor,
+          room,
+          count: 1,
+          firstAt: now
+        };
+
+    if (next.count < BLE_ROOM_CONFIRMATIONS) {
+
+      await db.promise().query(
+        `UPDATE visitor_live_positions
+         SET last_seen = NOW()
+         WHERE ble_id = ?`,
+        [bleId]
+      );
+
+      bleRoomCandidates.set(candidateKey, next);
+
+      const updatedVisitor = {
+        ...old,
+
+        // Keep last confirmed room and coordinates.
+        floor: old.floor,
+        currentRoom: old.currentRoom,
+        x: old.x,
+        y: old.y,
+
+        destination,
+        lastSeen: now,
+        rssi: scan.rssi,
+
+        isDetected: true,
+        isDisconnected: false,
+        isPendingDetection: false,
+
+        disconnectedAt: null,
+        trackingStatus: 'active',
+
+        // Reset loitering timing after a signal recovery.
+        roomEnteredAt: wasDisconnected
+          ? now
+          : (old.roomEnteredAt || now),
+
+        loiterAlertSent: wasDisconnected
+          ? false
+          : (old.loiterAlertSent || false)
+      };
+
+      liveVisitors[bleId] = updatedVisitor;
+      visitorDestinations[bleId] = destination;
+
+   
+      if (wasDisconnected) {
+        logVisitorHistory(
+          bleId,
+          name,
+          bleId,
+          old.floor,
+          old.currentRoom,
+          'signal_restored',
+          old.x,
+          old.y
+        );
       }
-      return res.json({ success: false, message: "Visitor not found or already returned" });
+
+      broadcastToTrackingClients({
+        type: 'location_update',
+        visitor: updatedVisitor
+      });
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          pendingLocationConfirmation: true,
+          currentRoom: old.currentRoom,
+          destination,
+          trackingStatus: 'active',
+          signalRestored: wasDisconnected,
+          message:
+            'Detection accepted; waiting for room confirmation.'
+        }
+      };
     }
+  }
 
-    const row = results[0];
-    const bleId = row.ble_id;
-    const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-    const destination = row.destination || 'Not Assigned';
-    
-    // Calculate blueprint map coordinates (x, y)
-    const coords = getRoomCoords(floor, room);
+  bleRoomCandidates.delete(candidateKey);
 
-    // Track movement event if visitor shifted rooms
-    if (liveVisitors[bleId] && liveVisitors[bleId].currentRoom !== room) {
-      logVisitorHistory(bleId, visitorName, bleId, floor, room, 'move', coords.x, coords.y);
-    }
+  const changed = locationChanged;
 
-    liveVisitors[bleId] = {
-      id: bleId,
-      name: visitorName,
-      bleId: bleId,
-      floor: floor,
+  // 5. PREPARE CONFIRMED POSITION
+  
+  const roomEnteredAt =
+    changed || isFirstDetection || wasDisconnected
+      ? now
+      : (old.roomEnteredAt || now);
+
+  const data = {
+    id: bleId,
+    visitorRequestId: visit.id,
+    name,
+    bleId,
+
+    floor,
+    currentRoom: room,
+    destination,
+
+    x: coords.x,
+    y: coords.y,
+
+    lastSeen: now,
+    roomEnteredAt,
+
+    loiterAlertSent:
+      changed || isFirstDetection || wasDisconnected
+        ? false
+        : (old.loiterAlertSent || false),
+
+    isDetected: true,
+    isDisconnected: false,
+    isPendingDetection: false,
+
+    disconnectedAt: null,
+    trackingStatus: 'active',
+
+    rssi: scan.rssi
+  };
+
+  // 6. SAVE CONFIRMED POSITION
+
+  await db.promise().query(
+    `INSERT INTO visitor_live_positions
+       (
+         ble_id,
+         x,
+         y,
+         floor,
+         current_room,
+         destination,
+         last_seen
+       )
+     VALUES (?, ?, ?, ?, ?, ?, NOW())
+     ON DUPLICATE KEY UPDATE
+       x = VALUES(x),
+       y = VALUES(y),
+       floor = VALUES(floor),
+       current_room = VALUES(current_room),
+       destination = VALUES(destination),
+       last_seen = NOW()`,
+    [
+      bleId,
+      data.x,
+      data.y,
+      floor,
+      room,
+      destination
+    ]
+  );
+
+
+  // 7. UPDATE LIVE TRACKING MEMORY
+ 
+  liveVisitors[bleId] = data;
+  visitorDestinations[bleId] = destination;
+
+  // 8. RECORD CONNECTION AND RESTORATION EVENTS
+ 
+  if (isFirstDetection) {
+
+    // First actual BLE observation for the active visit.
+    logVisitorHistory(
+      bleId,
+      name,
+      bleId,
+      floor,
+      room,
+      'connect',
+      coords.x,
+      coords.y
+    );
+
+  } else if (wasDisconnected) {
+
+    // The tag has been detected after a recorded loss.
+    logVisitorHistory(
+      bleId,
+      name,
+      bleId,
+      floor,
+      room,
+      'signal_restored',
+      coords.x,
+      coords.y
+    );
+  }
+
+  // 9. RECORD CONFIRMED MOVEMENT
+ 
+  if (changed) {
+    logVisitorHistory(
+      bleId,
+      name,
+      bleId,
+      floor,
+      room,
+      'move',
+      coords.x,
+      coords.y
+    );
+  }
+
+
+  // 10. BROADCAST ACTIVE TRACKING STATE
+
+  broadcastToTrackingClients({
+    type: 'location_update',
+    visitor: data
+  });
+
+  return {
+    status: 200,
+    body: {
+      success: true,
       currentRoom: room,
-      destination: destination,
-      x: coords.x,
-      y: coords.y,
-      lastSeen: Date.now()
-    };
+      destination,
+      trackingStatus: 'active',
+      signalRestored: wasDisconnected,
+      pendingLocationConfirmation: false
+    }
+  };
+}
 
-    visitorDestinations[bleId] = destination;
-    res.json({ success: true, message: "Visitor location updated successfully." });
 
-  } catch (dbErr) {
-    console.error("Dynamic Scanner Lookup Error:", dbErr);
-    return res.status(500).json({ success: false, message: "Server error during scanner lookup" });
+// SHARED ROUTE HANDLER
+
+async function unifiedBleScanHandler(req, res, legacy = false) {
+
+  const key = req.headers['x-api-key'];
+
+  // 1. Verify hardware API key.
+  if (
+    !process.env.HARDWARE_API_KEY ||
+    key !== process.env.HARDWARE_API_KEY
+  ) {
+    return res.status(401).json({
+      success: false,
+      message: 'Unauthorized hardware access.'
+    });
   }
-});
 
-app.post('/api/scan', async (req, res) => {
-  const hardwareApiKey = req.headers['x-api-key'];
-  const phNow = getPHDateTime();
-  if (!process.env.HARDWARE_API_KEY || hardwareApiKey !== process.env.HARDWARE_API_KEY) {
-    return res.status(401).json({ success: false, message: "Unauthorized hardware access." });
+  // 2. Normalize legacy and current ESP32 payloads.
+  const scan = normalizeBleScanInput(req.body, legacy);
+
+  if (!scan) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid scanner ID, tag MAC, or telemetry.'
+    });
   }
 
-  const { scannerId, tagMac, rssi, vbatt } = req.body;
-  if (!scannerId || !tagMac) {
-    return res.status(400).json({ success: false, message: "Missing scannerId or tagMac." });
-  }
+  // 3. Process observations sequentially per BLE tag.
+  const queueKey = scan.tagMac.toUpperCase();
+
+  const prior =
+    bleTagScanQueues.get(queueKey) || Promise.resolve();
+
+  const running = prior
+    .catch(() => {})
+    .then(() => processValidatedBleScan(scan));
+
+  bleTagScanQueues.set(queueKey, running);
 
   try {
-    const [scannerRows] = await db.promise().query(
-      "SELECT assigned_floor, assigned_room FROM scanners WHERE scanner_id = ?",
-      [scannerId.trim()]
+    const result = await running;
+
+    return res.status(result.status).json(result.body);
+
+  } catch (error) {
+    console.error(
+      'Scanner ingestion error:',
+      error
     );
 
-    if (scannerRows.length === 0) {
-      console.warn(`[SCAN] Unregistered scanner ID: ${scannerId}`);
-      return res.status(404).json({ success: false, message: `Scanner '${scannerId}' is not registered.` });
-    }
-
-    await db.promise().query(
-      "UPDATE scanners SET last_ping = ?, status = 'ONLINE' WHERE scanner_id = ?", 
-      [phNow, scannerId.trim()]
-    );
-
-    if (vbatt && vbatt > 0) {
-      await db.promise().query(
-        "UPDATE ble_tags SET battery_level = ? WHERE UPPER(mac_address) = UPPER(?)",
-        [vbatt, tagMac.trim()]
-      );
-    }
-
-    const detectedFloor = String(scannerRows[0].assigned_floor);
-    const detectedCurrentRoom = scannerRows[0].assigned_room;
-
-    const sql = `
-      SELECT vr.id, vr.first_name, vr.last_name, bt.ble_id, vr.destination
-      FROM visitor_requests vr
-      JOIN ble_tags bt ON (
-        UPPER(vr.ble_id) = UPPER(bt.ble_id) 
-        OR UPPER(vr.used_ble_id) = UPPER(bt.ble_id)
-        OR UPPER(vr.ble_id) = UPPER(bt.mac_address)
-      )
-      WHERE UPPER(bt.mac_address) = UPPER(?) 
-        AND vr.arrived = 1 
-        AND vr.returned = 0 
-        AND vr.no_show = 0
-      ORDER BY vr.id DESC
-      LIMIT 1
-    `;
-
-    const [visitorRows] = await db.promise().query(sql, [tagMac.trim()]);
-    
-    if (visitorRows.length === 0) {
-      
-      const [tagCheck] = await db.promise().query("SELECT * FROM ble_tags WHERE UPPER(mac_address) = UPPER(?)", [tagMac.trim()]);
-      if (tagCheck.length === 0) {
-        console.warn(`[SCAN REJECTED] MAC ${tagMac} is NOT registered in ble_tags table!`);
-      } else {
-        console.warn(`[SCAN REJECTED] Tag found for MAC ${tagMac}, but visitor is not checked-in (arrived=1, returned=0).`);
-      }
-      return res.json({ success: false, message: "Tag not checked-in or inactive." });
-    }
-
-    const row = visitorRows[0];
-    const bleId = row.ble_id;
-    const visitorName = `${row.first_name} ${row.last_name || ''}`.trim();
-    const plannedDestination = row.destination || 'Classroom 2';
-    const coords = getRoomCoords(detectedFloor, detectedCurrentRoom);
-
-    let roomEnteredAt = Date.now();
-    let loiterAlertSent = false;
-
-    if (liveVisitors[bleId]) {
-      if (liveVisitors[bleId].currentRoom !== detectedCurrentRoom) {
-        logVisitorHistory(bleId, visitorName, bleId, detectedFloor, detectedCurrentRoom, 'move', coords.x, coords.y);
-      } else {
-        roomEnteredAt = liveVisitors[bleId].roomEnteredAt || Date.now();
-        loiterAlertSent = liveVisitors[bleId].loiterAlertSent || false;
-      }
-    }
-
-    const liveData = {
-      id: bleId,
-      name: visitorName,
-      bleId: bleId,
-      floor: detectedFloor,
-      currentRoom: detectedCurrentRoom, 
-      destination: plannedDestination,   
-      x: coords.x,
-      y: coords.y,
-      lastSeen: Date.now(),
-      roomEnteredAt: roomEnteredAt,       
-      loiterAlertSent: loiterAlertSent,   
-      isDetected: true,
-      isDisconnected: false,
-      rssi: rssi || -50
-    };
-
-    liveVisitors[bleId] = liveData;
-
-    
-    await db.promise().query(
-      `INSERT INTO visitor_live_positions (ble_id, x, y, floor, current_room, destination, last_seen)
-       VALUES (?, ?, ?, ?, ?, ?, NOW())
-       ON DUPLICATE KEY UPDATE x = ?, y = ?, floor = ?, current_room = ?, destination = ?, last_seen = NOW()`,
-      [bleId, coords.x, coords.y, detectedFloor, detectedCurrentRoom, plannedDestination,
-       coords.x, coords.y, detectedFloor, detectedCurrentRoom, plannedDestination]
-    );
-
-    
-    broadcastToTrackingClients({
-      type: 'location_update',
-      visitor: liveData
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to process BLE detection.'
     });
 
-    res.status(200).json({ success: true, currentRoom: detectedCurrentRoom, destination: plannedDestination });
-  } catch (err) {
-    console.error("Scan processing error:", err);
-    res.status(500).json({ success: false, message: err.message });
+  } finally {
+    if (bleTagScanQueues.get(queueKey) === running) {
+      bleTagScanQueues.delete(queueKey);
+    }
   }
-});
+}
 
-// ============================================
+
+app.post('/api/ble-data', (req, res) =>
+  unifiedBleScanHandler(req, res, true)
+);
+
+app.post('/api/scan', (req, res) =>
+  unifiedBleScanHandler(req, res, false)
+);
+
+
 // LIVE POSITIONS & VISIT REASONS (Secured & Validated)
-// ============================================
+
 
 app.get('/api/positions', authenticateToken, allowRoles('security'), async (req, res) => {
   try {
     const [activeVisitors] = await db.promise().query(`
-      SELECT vr.id, vr.first_name, vr.last_name, vr.ble_id, vr.destination
+      SELECT
+        vr.id,
+        vr.first_name,
+        vr.last_name,
+        vr.ble_id,
+        vr.destination,
+        vr.arrived_at
       FROM visitor_requests vr
-      WHERE vr.arrived = 1 AND vr.returned = 0 AND vr.no_show = 0 AND vr.ble_id IS NOT NULL
+      WHERE vr.arrived = 1
+        AND vr.returned = 0
+        AND vr.no_show = 0
+        AND vr.ble_id IS NOT NULL
     `);
 
+    const [dbPositions] = await db.promise().query(
+      'SELECT * FROM visitor_live_positions'
+    );
+
+    const dbPosMap = new Map(
+      dbPositions.map(position => [
+        String(position.ble_id).trim(),
+        position
+      ])
+    );
+
     const now = Date.now();
+    const SIGNAL_FRESHNESS_MS = 45000;
     const result = [];
 
-    // Fallback query for persisted positions if memory is empty
-    const [dbPositions] = await db.promise().query('SELECT * FROM visitor_live_positions');
-    const dbPosMap = {};
-    dbPositions.forEach(p => dbPosMap[p.ble_id] = p);
-
-    for (const v of activeVisitors) {
-      const bleId = v.ble_id;
+    for (const visitor of activeVisitors) {
+      const bleId = String(visitor.ble_id).trim();
       const live = liveVisitors[bleId];
-      const dbPos = dbPosMap[bleId];
-      const fullName = `${v.first_name} ${v.last_name || ''}`.trim();
+      const dbPos = dbPosMap.get(bleId);
 
-      if (live && live.isDetected && !live.isDisconnected && (now - live.lastSeen <= 45000)) {
+      const fullName =
+        `${visitor.first_name} ${visitor.last_name || ''}`.trim();
+
+      const sameVisit = Boolean(
+        live &&
+        Number(live.visitorRequestId) === Number(visitor.id)
+      );
+
+      const currentLive = sameVisit ? live : null;
+
+      const hasLiveDetection = Boolean(
+        currentLive?.isDetected &&
+        Number.isFinite(currentLive.lastSeen)
+      );
+
+      if (hasLiveDetection) {
+        const stale =
+          now - currentLive.lastSeen > SIGNAL_FRESHNESS_MS;
+
+        const signalLost =
+          currentLive.isDisconnected ||
+          currentLive.trackingStatus === 'signal_lost' ||
+          stale;
+
         result.push({
-          ...live,
-          destination: v.destination
+          ...currentLive,
+          visitorRequestId: visitor.id,
+          name: fullName,
+          destination: visitor.destination,
+          isDetected: true,
+          isDisconnected: Boolean(signalLost),
+          isPendingDetection: false,
+          trackingStatus: signalLost ? 'signal_lost' : 'active',
+          disconnectedAt: signalLost
+            ? (currentLive.disconnectedAt || null)
+            : null
         });
-      } else if (dbPos) {
-        // Fallback to DB (disconnected but has a last known position)
+
+        continue;
+      }
+
+      if (currentLive && !currentLive.isDetected) {
+        result.push({
+          ...currentLive,
+          visitorRequestId: visitor.id,
+          name: fullName,
+          destination: visitor.destination,
+          floor: currentLive.floor || null,
+          x: null,
+          y: null,
+          lastSeen: null,
+          isDetected: false,
+          isDisconnected: false,
+          isPendingDetection: true,
+          trackingStatus: 'awaiting_detection'
+        });
+
+        continue;
+      }
+
+      const checkInTime = visitor.arrived_at
+        ? new Date(visitor.arrived_at).getTime()
+        : NaN;
+
+      const positionTime = dbPos?.last_seen
+        ? new Date(dbPos.last_seen).getTime()
+        : NaN;
+
+      const coords = dbPos
+        ? getRoomCoords(dbPos.floor, dbPos.current_room)
+        : null;
+
+      const validCachedPosition = Boolean(
+        dbPos &&
+        Number.isFinite(checkInTime) &&
+        Number.isFinite(positionTime) &&
+        positionTime >= checkInTime &&
+        coords &&
+        Number.isFinite(Number(dbPos.x)) &&
+        Number.isFinite(Number(dbPos.y))
+      );
+
+      if (validCachedPosition) {
         result.push({
           id: bleId,
+          visitorRequestId: visitor.id,
           name: fullName,
-          bleId: bleId,
+          bleId,
           floor: dbPos.floor,
           currentRoom: dbPos.current_room,
-          destination: v.destination,
-          x: dbPos.x,
-          y: dbPos.y,
-          lastSeen: new Date(dbPos.last_seen).getTime(),
+          destination: visitor.destination,
+          x: Number(dbPos.x),
+          y: Number(dbPos.y),
+          lastSeen: positionTime,
+          isDetected: true,
           isDisconnected: true,
-          disconnectedAt: 'From Cache'
+          isPendingDetection: false,
+          disconnectedAt: null,
+          trackingStatus: 'last_known'
         });
-      } else {
-        result.push({
-          id: bleId,
-          name: fullName,
-          bleId: bleId,
-          floor: "5",
-          currentRoom: "Waiting for Scanner...", 
-          destination: v.destination,
-          x: null,                               
-          y: null,
-          lastSeen: now,
-          isDisconnected: false,
-          isPendingDetection: true
-        });
+
+        continue;
       }
+
+      result.push({
+        id: bleId,
+        visitorRequestId: visitor.id,
+        name: fullName,
+        bleId,
+        floor: null,
+        currentRoom: 'Waiting for Scanner...',
+        destination: visitor.destination,
+        x: null,
+        y: null,
+        lastSeen: null,
+        roomEnteredAt: null,
+        isDetected: false,
+        isDisconnected: false,
+        isPendingDetection: true,
+        disconnectedAt: null,
+        trackingStatus: 'awaiting_detection'
+      });
     }
-    res.json(result);
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(result);
+
   } catch (err) {
-    console.error("Fetch positions error:", err);
-    res.json([]);
+    console.error('Fetch positions error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to retrieve current visitor positions.'
+    });
   }
 });
+
 
 app.get('/api/visit-reasons', (req, res) => {
   db.query("SELECT * FROM visit_reasons ORDER BY reason_text", (err, results) => {
@@ -11081,95 +11654,214 @@ app.get('/api/visitor-requests', authenticateToken, allowRoles('admin','security
   });
 });
 
+
 app.put('/api/visitor-requests/:id/arrive', authenticateToken, requireAction('visitors:checkin'), async (req, res) => {
   const requestId = Number(req.params.id);
   const { floor, destination, ble_id } = req.body || {};
+
   if (!Number.isSafeInteger(requestId) || requestId <= 0) {
     return res.status(400).json({ success: false, message: 'Invalid visitor request ID.' });
   }
-  if (typeof destination !== 'string' || !destination.trim() || typeof ble_id !== 'string' || !ble_id.trim() || floor == null) {
-    return res.status(400).json({ success: false, message: 'Floor, destination room, and BLE tag are required.' });
+
+  if (
+    typeof destination !== 'string' ||
+    !destination.trim() ||
+    typeof ble_id !== 'string' ||
+    !ble_id.trim() ||
+    floor == null
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Floor, destination room, and BLE tag are required.'
+    });
   }
+
   const cleanFloor = String(floor).trim();
   const cleanRoom = destination.trim();
   const cleanBleId = ble_id.trim();
+
   if (!(ALLOWED_ROOMS[cleanFloor] || []).includes(cleanRoom)) {
-    return res.status(400).json({ success: false, message: 'Invalid destination room for the selected floor.' });
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid destination room for the selected floor.'
+    });
   }
 
   let connection;
   let visitorName;
+
   try {
     connection = await db.promise().getConnection();
     await connection.beginTransaction();
-    // All concurrent check-ins for this tag must first acquire the same inventory row lock.
-    const [tagRows] = await connection.query('SELECT id FROM ble_tags WHERE ble_id = ? FOR UPDATE', [cleanBleId]);
-    if (!tagRows.length) {
-      await connection.rollback();
-      return res.status(404).json({ success: false, message: `BLE Tag '${cleanBleId}' is not registered in the inventory.` });
-    }
-    const [reqRows] = await connection.query(
-      'SELECT id, first_name, last_name, status, arrived, returned, no_show FROM visitor_requests WHERE id = ? FOR UPDATE',
-      [requestId]
-    );
-    if (!reqRows.length) {
-      await connection.rollback();
-      return res.status(404).json({ success: false, message: 'Visitor request not found.' });
-    }
-    const visitor = reqRows[0];
-    if (visitor.status !== 'APPROVED') {
-      await connection.rollback();
-      return res.status(409).json({ success: false, message: `Cannot check in. Appointment status is '${visitor.status}'.` });
-    }
-    if (Number(visitor.no_show) === 1) {
-      await connection.rollback();
-      return res.status(409).json({ success: false, message: 'This appointment was marked No Show and cannot be checked in.' });
-    }
-    if (Number(visitor.returned) === 1) {
-      await connection.rollback();
-      return res.status(409).json({ success: false, message: 'This visit was already completed. A new appointment is required.' });
-    }
-    if (Number(visitor.arrived) === 1) {
-      await connection.rollback();
-      return res.status(409).json({ success: false, message: 'Visitor is already checked in.' });
-    }
-    const [activeWithTag] = await connection.query(
-      `SELECT id, first_name, last_name FROM visitor_requests
-       WHERE ble_id = ? AND arrived = 1 AND returned = 0 AND no_show = 0 LIMIT 1`,
+
+    const [tagRows] = await connection.query(
+      'SELECT id FROM ble_tags WHERE ble_id = ? FOR UPDATE',
       [cleanBleId]
     );
+
+    if (!tagRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: `BLE Tag '${cleanBleId}' is not registered in the inventory.`
+      });
+    }
+
+    const [reqRows] = await connection.query(
+      `SELECT id, first_name, last_name, status, arrived, returned, no_show
+       FROM visitor_requests
+       WHERE id = ?
+       FOR UPDATE`,
+      [requestId]
+    );
+
+    if (!reqRows.length) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Visitor request not found.'
+      });
+    }
+
+    const visitor = reqRows[0];
+
+    if (visitor.status !== 'APPROVED') {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: `Cannot check in. Appointment status is '${visitor.status}'.`
+      });
+    }
+
+    if (Number(visitor.no_show) === 1) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: 'This appointment was marked No Show and cannot be checked in.'
+      });
+    }
+
+    if (Number(visitor.returned) === 1) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: 'This visit was already completed. A new appointment is required.'
+      });
+    }
+
+    if (Number(visitor.arrived) === 1) {
+      await connection.rollback();
+      return res.status(409).json({
+        success: false,
+        message: 'Visitor is already checked in.'
+      });
+    }
+
+    const [activeWithTag] = await connection.query(
+      `SELECT id, first_name, last_name
+       FROM visitor_requests
+       WHERE ble_id = ?
+         AND arrived = 1
+         AND returned = 0
+         AND no_show = 0
+       LIMIT 1`,
+      [cleanBleId]
+    );
+
     if (activeWithTag.length) {
       await connection.rollback();
-      return res.status(409).json({ success: false, message: `Tag '${cleanBleId}' is currently in use by ${activeWithTag[0].first_name} ${activeWithTag[0].last_name}.` });
+      return res.status(409).json({
+        success: false,
+        message: `Tag '${cleanBleId}' is currently in use by ${activeWithTag[0].first_name} ${activeWithTag[0].last_name}.`
+      });
     }
+
     const [updated] = await connection.query(
-      `UPDATE visitor_requests SET arrived = 1, arrived_at = NOW(), destination = ?,
-       ble_id = ?, returned = 0, no_show = 0 WHERE id = ? AND status = 'APPROVED'
-       AND arrived = 0 AND returned = 0 AND no_show = 0`,
+      `UPDATE visitor_requests
+       SET arrived = 1,
+           arrived_at = NOW(),
+           destination = ?,
+           ble_id = ?,
+           returned = 0,
+           no_show = 0
+       WHERE id = ?
+         AND status = 'APPROVED'
+         AND arrived = 0
+         AND returned = 0
+         AND no_show = 0`,
       [cleanRoom, cleanBleId, requestId]
     );
+
     if (updated.affectedRows !== 1) {
       await connection.rollback();
-      return res.status(409).json({ success: false, message: 'Visitor check-in state changed. Refresh and try again.' });
+      return res.status(409).json({
+        success: false,
+        message: 'Visitor check-in state changed. Refresh and try again.'
+      });
     }
+
     visitorName = `${visitor.first_name} ${visitor.last_name || ''}`.trim();
+
     await connection.commit();
+
   } catch (err) {
-    if (connection) { try { await connection.rollback(); } catch (_) {} }
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
+
     console.error('Check-in error:', err);
-    return res.status(500).json({ success: false, message: 'Unable to complete visitor check-in.' });
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to complete visitor check-in.'
+    });
+
   } finally {
     if (connection) connection.release();
   }
 
   logAction(req.user.id, 'VISITOR_ARRIVE', 'visitor_request', requestId, req);
+
+  bleRoomCandidates.delete(cleanBleId);
+  delete lastKnownVisitorsData[cleanBleId];
+  delete visitorDestinations[cleanBleId];
+
   liveVisitors[cleanBleId] = {
-    id: cleanBleId, visitorRequestId: requestId, name: visitorName, bleId: cleanBleId, floor: cleanFloor,
-    currentRoom: 'Waiting for Scanner...', destination: cleanRoom,
-    x: null, y: null, lastSeen: Date.now(), isDetected: false, isDisconnected: false
+    id: cleanBleId,
+    visitorRequestId: requestId,
+    name: visitorName,
+    bleId: cleanBleId,
+    floor: cleanFloor,
+    currentRoom: 'Waiting for Scanner...',
+    destination: cleanRoom,
+    x: null,
+    y: null,
+    lastSeen: null,
+    roomEnteredAt: null,
+    loiterAlertSent: false,
+    isDetected: false,
+    isDisconnected: false,
+    isPendingDetection: true,
+    disconnectedAt: null,
+    trackingStatus: 'awaiting_detection'
   };
-  return res.json({ success: true, message: 'Visitor checked in successfully. BLE tag activated.' });
+
+  visitorDestinations[cleanBleId] = cleanRoom;
+
+  broadcastToTrackingClients({
+    type: 'location_update',
+    visitor: liveVisitors[cleanBleId]
+  });
+
+  return res.json({
+    success: true,
+    message: 'Visitor checked in successfully. Awaiting first BLE scanner detection.',
+    trackingStatus: 'awaiting_detection'
+  });
 });
+
 
 app.put('/api/visitor-requests/:id/no-show', authenticateToken, allowRoles('security'), async (req, res) => {
   const requestId = Number(req.params.id);
@@ -11255,238 +11947,560 @@ app.put('/api/visitor-requests/:id/destination', authenticateToken, async (req, 
   }
 });
 
-const GPS_STALE_SECONDS = 900;           
+const GPS_STALE_SECONDS = 180;  
 const GPS_ALERT_COOLDOWN_SECONDS = 300; 
 
-app.post('/api/instructor/location', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'instructor') return res.status(403).json({ error: 'Forbidden' });
 
-  let { latitude, longitude, location_enabled, location_name } = req.body;
+app.post('/api/instructor/location', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'instructor') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const {
+    latitude,
+    longitude,
+    location_enabled,
+    gps_accuracy,
+    gps_timestamp
+  } = req.body || {};
+
   const userId = req.user.id;
-  const isLocEnabled = (location_enabled === true || location_enabled === 'true' || location_enabled === 1 || location_enabled === '1');
+
+  const isLocEnabled = (
+    location_enabled === true ||
+    location_enabled === 'true' ||
+    location_enabled === 1 ||
+    location_enabled === '1'
+  );
+
   const phNow = getPHDateTime();
   const { date: today, time: currentTime } = getPHTime();
 
+  // Validate GPS values without accepting partially numeric strings.
+  const parsedLat = Number(latitude);
+  const parsedLon = Number(longitude);
+
+  const hasCoordinates =
+    latitude !== undefined &&
+    latitude !== null &&
+    longitude !== undefined &&
+    longitude !== null &&
+    String(latitude).trim() !== '' &&
+    String(longitude).trim() !== '';
+
+  const coordinatesValid =
+    hasCoordinates &&
+    Number.isFinite(parsedLat) &&
+    Number.isFinite(parsedLon) &&
+    parsedLat >= -90 &&
+    parsedLat <= 90 &&
+    parsedLon >= -180 &&
+    parsedLon <= 180 &&
+    !(parsedLat === 0 && parsedLon === 0);
+
   try {
+    // =====================================================
+    // 1. VALIDATE AUTHENTICATED INSTRUCTOR
+    // =====================================================
     const [userRows] = await db.promise().query(
-      "SELECT id, employee_id, full_name, location_tracking_enabled FROM users WHERE id = ?",
+      `SELECT id, employee_id, full_name,
+              location_tracking_enabled
+       FROM users
+       WHERE id = ?`,
       [userId]
     );
-    if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    if (userRows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
 
     const employeeId = userRows[0].employee_id;
     const fullName = userRows[0].full_name;
 
+    // =====================================================
+    // 2. FIND THE CURRENT SCHEDULE
+    // =====================================================
     const [scheduleRows] = await db.promise().query(
-      `SELECT s.id, s.place, s.start_time, s.end_time, a.time_in, a.time_out
+      `SELECT
+         s.id,
+         s.place,
+         s.start_time,
+         s.end_time,
+         a.time_in,
+         a.time_out
        FROM schedules s
-       LEFT JOIN attendance a ON s.id = a.schedule_id AND a.date = s.date
+       LEFT JOIN attendance a
+         ON s.id = a.schedule_id
+         AND a.date = s.date
        WHERE (s.user_id = ? OR s.user_id = ?)
          AND s.date = ?
          AND (
-           (? BETWEEN SUBTIME(s.start_time, '00:30:00') AND s.end_time)
-           OR (a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--'))
+           (? BETWEEN SUBTIME(s.start_time, '00:30:00')
+                         AND s.end_time)
+           OR (
+             a.time_in IS NOT NULL
+             AND a.time_out IS NULL
+           )
          )
-       ORDER BY s.start_time ASC LIMIT 1`,
+       ORDER BY
+         CASE
+           WHEN a.time_in IS NOT NULL
+            AND a.time_out IS NULL
+           THEN 0
+           ELSE 1
+         END,
+         s.start_time ASC
+       LIMIT 1`,
       [employeeId, userId, today, currentTime]
     );
 
-    // ✅ FIXED: Removed the "closest schedule" fallback logic.
-    // If there is no active shift today, we reject the ping instead of attaching it to a random shift.
-    let currentSchedule = scheduleRows[0];
+    const currentSchedule = scheduleRows[0];
 
     if (!currentSchedule) {
-      return res.json({ success: false, message: "No active shift today" });
+      return res.json({
+        success: false,
+        message: 'No active shift today'
+      });
     }
 
+    // =====================================================
+    // 3. CHECK SHIFT END
+    // =====================================================
     if (currentTime > currentSchedule.end_time) {
       await db.promise().query(
-        "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ? OR id = ?",
+        `UPDATE users
+         SET location_tracking_enabled = 0
+         WHERE employee_id = ? OR id = ?`,
         [employeeId, userId]
       );
-      return res.json({ success: false, message: "Shift has ended. Location tracking closed." });
+
+      gpsStates.delete(employeeId);
+      campusStates.delete(employeeId);
+
+      await broadcastInstructorStatus(employeeId);
+
+      return res.json({
+        success: false,
+        message: 'Shift has ended. Location tracking closed.'
+      });
     }
 
-    const isOnDuty = !!(currentSchedule && currentSchedule.time_in);
+    const isOnDuty =
+      currentSchedule.time_in != null &&
+      currentSchedule.time_out == null;
 
-    const [lastRec] = await db.promise().query(
-      `SELECT location_enabled, is_inside_campus, location_name
-       FROM instructor_location_tracking 
-       WHERE employee_id = ? 
-       ORDER BY id DESC LIMIT 1`,
-      [employeeId]
-    );
+    // =====================================================
+    // 4. VALIDATE GPS COORDINATES AND MEASUREMENT QUALITY
+    // =====================================================
+    if (isLocEnabled) {
+      if (!coordinatesValid) {
+        return res.status(422).json({
+          success: false,
+          code: 'INVALID_COORDINATES',
+          message: 'Valid GPS coordinates are required.'
+        });
+      }
 
-    const lastGpsState = lastRec.length ? (lastRec[0].location_enabled === 1 ? 1 : 0) : null;
-    const lastInsideState = lastRec.length ? (lastRec[0].is_inside_campus === 1 ? 1 : 0) : null;
+      const hasAccuracy =
+        gps_accuracy !== undefined &&
+        gps_accuracy !== null;
 
+      const hasTimestamp =
+        gps_timestamp !== undefined &&
+        gps_timestamp !== null;
+
+      // Preserve compatibility with older mobile APKs
+      // that do not send either GPS quality field.
+      if (hasAccuracy !== hasTimestamp) {
+        return res.status(422).json({
+          success: false,
+          code: 'INCOMPLETE_GPS_QUALITY',
+          message:
+            'GPS accuracy and measurement timestamp must be provided together.'
+        });
+      }
+
+      if (hasAccuracy && hasTimestamp) {
+        const accuracy = Number(gps_accuracy);
+        const measuredAt = Date.parse(gps_timestamp);
+        const ageMs = Date.now() - measuredAt;
+
+        const accuracyValid =
+          String(gps_accuracy).trim() !== '' &&
+          Number.isFinite(accuracy) &&
+          accuracy >= 0 &&
+          accuracy <= 100;
+
+        const timestampValid =
+          typeof gps_timestamp === 'string' &&
+          gps_timestamp.trim() !== '' &&
+          Number.isFinite(measuredAt) &&
+          ageMs >= -10000 &&
+          ageMs <= 60000;
+
+        if (!accuracyValid || !timestampValid) {
+          return res.status(422).json({
+            success: false,
+            code: 'LOW_QUALITY_GPS',
+            message:
+              'GPS location is inaccurate or outdated. Please retry.'
+          });
+        }
+      }
+    }
+
+    // =====================================================
+    // 5. VALIDATE ASSIGNED CAMPUS GEOFENCE
+    // =====================================================
     let isInside = false;
     let resolvedLocationName = 'GPS Disabled';
-    const parsedLat = parseFloat(latitude);
-    const parsedLon = parseFloat(longitude);
 
-    if (isLocEnabled && !isNaN(parsedLat) && !isNaN(parsedLon) && parsedLat !== 0 && parsedLon !== 0) {
+    if (isLocEnabled) {
       const [locRows] = await db.promise().query(
-        "SELECT latitude, longitude, radius FROM school_locations WHERE name = ?",
+        `SELECT latitude, longitude, radius
+         FROM school_locations
+         WHERE name = ?
+         LIMIT 1`,
         [currentSchedule.place]
       );
-      if (locRows.length > 0) {
-        const dist = getDistanceFromLatLonInMeters(parsedLat, parsedLon, locRows[0].latitude, locRows[0].longitude);
-        isInside = dist <= locRows[0].radius;
-        resolvedLocationName = isInside ? currentSchedule.place : 'Outside Campus Perimeter';
-      } else {
-        resolvedLocationName = location_name || 'Outside Campus Perimeter';
+
+      if (locRows.length === 0) {
+        return res.status(409).json({
+          success: false,
+          code: 'GEOFENCE_NOT_CONFIGURED',
+          message:
+            'The assigned campus geofence is not configured. Contact HR.'
+        });
       }
+
+      const campus = locRows[0];
+
+      const campusLat = Number(campus.latitude);
+      const campusLon = Number(campus.longitude);
+      const campusRadius = Number(campus.radius);
+
+      const campusValid =
+        Number.isFinite(campusLat) &&
+        Number.isFinite(campusLon) &&
+        campusLat >= -90 &&
+        campusLat <= 90 &&
+        campusLon >= -180 &&
+        campusLon <= 180 &&
+        Number.isFinite(campusRadius) &&
+        campusRadius > 0;
+
+      if (!campusValid) {
+        return res.status(409).json({
+          success: false,
+          code: 'INVALID_GEOFENCE',
+          message:
+            'The assigned campus has invalid geofence settings. Contact HR.'
+        });
+      }
+
+      const distance = getDistanceFromLatLonInMeters(
+        parsedLat,
+        parsedLon,
+        campusLat,
+        campusLon
+      );
+
+      if (!Number.isFinite(distance)) {
+        return res.status(422).json({
+          success: false,
+          code: 'INVALID_DISTANCE',
+          message: 'Unable to validate the GPS position.'
+        });
+      }
+
+      isInside = distance <= campusRadius;
+
+      resolvedLocationName = isInside
+        ? currentSchedule.place
+        : 'Outside Campus Perimeter';
+
     } else {
       isInside = false;
-      resolvedLocationName = isLocEnabled ? 'Outside Campus Perimeter' : 'GPS Disabled';
+      resolvedLocationName = 'GPS Disabled';
     }
 
-    await db.promise().query(
-      `INSERT INTO instructor_location_tracking 
-       (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [employeeId, currentSchedule.id, parsedLat || 0, parsedLon || 0, resolvedLocationName, isInside ? 1 : 0, isLocEnabled ? 1 : 0, phNow]
+    const [lastRec] = await db.promise().query(
+  `SELECT
+     schedule_id,
+     location_enabled,
+     is_inside_campus,
+     location_name,
+     ping_time
+   FROM instructor_location_tracking
+   WHERE employee_id = ?
+     AND schedule_id = ?
+   ORDER BY id DESC
+   LIMIT 1`,
+  [employeeId, currentSchedule.id]
+);
+
+    const previous = lastRec[0] || null;
+
+    const lastGpsState = previous
+      ? Number(previous.location_enabled) === 1 ? 1 : 0
+      : null;
+
+    const [lastCampusRec] = await db.promise().query(
+      `SELECT is_inside_campus
+       FROM instructor_location_tracking
+       WHERE employee_id = ?
+         AND schedule_id = ?
+         AND location_enabled = 1
+       ORDER BY id DESC
+       LIMIT 1`,
+      [employeeId, currentSchedule.id]
     );
 
-    await db.promise().query(
-      "UPDATE users SET last_location_ping = ?, location_tracking_enabled = ? WHERE employee_id = ? OR id = ?",
-      [phNow, isLocEnabled ? 1 : 0, employeeId, userId]
-    );
+    const lastInsideState = lastCampusRec.length
+      ? Number(lastCampusRec[0].is_inside_campus) === 1 ? 1 : 0
+      : null;
+
+    let signalWasLost = false;
 
     
+    const previousPingAt = previous?.ping_time;
+
+    const previousPingMs =
+      previousPingAt instanceof Date
+        ? previousPingAt.getTime()
+        : previousPingAt
+          ? parsePHTMillis(previousPingAt)
+          : NaN;
+
+
+    if (
+      isOnDuty &&
+      isLocEnabled &&
+      Number.isFinite(previousPingMs) &&
+      Date.now() - previousPingMs > GPS_STALE_SECONDS * 1000
+    ) {
+      const [lossAlerts] = await db.promise().query(
+        `SELECT id
+         FROM location_alerts
+         WHERE employee_id = ?
+           AND schedule_id = ?
+           AND alert_message = 'Location signal lost'
+           AND created_at >= ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [
+          employeeId,
+          currentSchedule.id,
+          previousPingAt
+        ]
+      );
+
+      signalWasLost = lossAlerts.length > 0;
+    }
+
+    const storedLat = isLocEnabled ? parsedLat : 0;
+    const storedLon = isLocEnabled ? parsedLon : 0;
+
+    await db.promise().query(
+      `INSERT INTO instructor_location_tracking
+       (
+         employee_id,
+         schedule_id,
+         latitude,
+         longitude,
+         location_name,
+         is_inside_campus,
+         location_enabled,
+         ping_time
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        employeeId,
+        currentSchedule.id,
+        storedLat,
+        storedLon,
+        resolvedLocationName,
+        isInside ? 1 : 0,
+        isLocEnabled ? 1 : 0,
+        phNow
+      ]
+    );
+
+    // =====================================================
+    // 8. UPDATE INSTRUCTOR TRACKING STATE
+    // =====================================================
+    await db.promise().query(
+      `UPDATE users
+       SET last_location_ping = ?,
+           location_tracking_enabled = ?
+       WHERE employee_id = ? OR id = ?`,
+      [
+        phNow,
+        isLocEnabled ? 1 : 0,
+        employeeId,
+        userId
+      ]
+    );
+
+    // =====================================================
+    // 9. DETECT GPS AND CAMPUS TRANSITIONS
+    // =====================================================
     if (isOnDuty) {
       const nowMs = Date.now();
       const currentGps = isLocEnabled ? 1 : 0;
       const currentInside = isInside ? 1 : 0;
 
-   
-      let gpsObj = gpsStates.get(employeeId);
-      if (!gpsObj) {
-         gpsObj = { stable: lastGpsState !== null ? lastGpsState : currentGps, pending: null, pendingSince: 0 };
-      }
-      
-      if (lastGpsState !== null && lastGpsState !== currentGps) {
-         
-         if (gpsObj.stable === currentGps) {
-             gpsObj.pending = null;
-             gpsObj.pendingSince = 0;
-         } else {
-             if (gpsObj.pending !== currentGps) {
-                 gpsObj.pending = currentGps;
-                 gpsObj.pendingSince = nowMs;
-             } else if (nowMs - gpsObj.pendingSince > GPS_GRACE_MS) {
-                 
-                 const transitionAt = new Date(gpsObj.pendingSince);
-                 gpsObj.stable = currentGps;
-                 gpsObj.pending = null;
-                 gpsObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(
-                   currentGps === 1 ? 'GPS turned ON' : 'GPS turned OFF',
-                   {
-                     employeeId, fullName,
-                     scheduleId: currentSchedule.id,
-                     locationName: resolvedLocationName,
-                     latitude: parsedLat, longitude: parsedLon
-                   },
-                   transitionAt
-                 );
-             }
-         }
-      } else {
-         
-         if (gpsObj.pending !== null) {
-             if (nowMs - gpsObj.pendingSince > GPS_GRACE_MS) {
-                 
-                 const transitionAt = new Date(gpsObj.pendingSince);
-                 gpsObj.stable = gpsObj.pending;
-                 gpsObj.pending = null;
-                 gpsObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(
-                   gpsObj.stable === 1 ? 'GPS turned ON' : 'GPS turned OFF',
-                   {
-                     employeeId, fullName,
-                     scheduleId: currentSchedule.id,
-                     locationName: resolvedLocationName,
-                     latitude: parsedLat, longitude: parsedLon
-                   },
-                   transitionAt
-                 );
-             }
-         }
-      }
-      gpsStates.set(employeeId, gpsObj);
+      const alertContext = {
+        employeeId,
+        fullName,
+        scheduleId: currentSchedule.id,
+        locationName: resolvedLocationName,
+        latitude: isLocEnabled ? parsedLat : null,
+        longitude: isLocEnabled ? parsedLon : null
+      };
 
-      
-      let campusObj = campusStates.get(employeeId);
-      if (!campusObj) {
-         campusObj = { stable: lastInsideState !== null ? lastInsideState : currentInside, pending: null, pendingSince: 0 };
+      // Shared transition confirmation:
+      // a new state must remain observed for GPS_GRACE_MS
+      // before a transition alert is generated.
+      const advanceTransition = async (
+        stateMap,
+        currentValue,
+        previousValue,
+        messageForState,
+        enabledForDetection = true
+      ) => {
+        const existing = stateMap.get(employeeId);
+
+        let state;
+
+        if (
+          !existing ||
+          existing.scheduleId !== currentSchedule.id
+        ) {
+          state = {
+            scheduleId: currentSchedule.id,
+            stable: previousValue !== null
+              ? previousValue
+              : currentValue,
+            pending: null,
+            pendingSince: 0
+          };
+        } else {
+          state = existing;
+        }
+
+        if (!enabledForDetection) {
+          state.pending = null;
+          state.pendingSince = 0;
+          stateMap.set(employeeId, state);
+          return;
+        }
+
+        if (state.stable === currentValue) {
+          state.pending = null;
+          state.pendingSince = 0;
+
+        } else if (state.pending !== currentValue) {
+          state.pending = currentValue;
+          state.pendingSince = nowMs;
+
+        } else if (
+          nowMs - state.pendingSince >= GPS_GRACE_MS
+        ) {
+          const transitionAt = new Date(state.pendingSince);
+
+          state.stable = currentValue;
+          state.pending = null;
+          state.pendingSince = 0;
+
+          await insertAndBroadcastAlert(
+            messageForState(currentValue),
+            alertContext,
+            transitionAt
+          );
+        }
+
+        stateMap.set(employeeId, state);
+      };
+
+      // -----------------------------------------
+      // 9A. GPS ON / OFF transitions
+      // -----------------------------------------
+      await advanceTransition(
+        gpsStates,
+        currentGps,
+        lastGpsState,
+        value => value === 1
+          ? 'GPS turned ON'
+          : 'GPS turned OFF'
+      );
+
+      // -----------------------------------------
+      // 9B. Campus entry / exit transitions
+      // -----------------------------------------
+      if (isLocEnabled) {
+        await advanceTransition(
+          campusStates,
+          currentInside,
+          lastInsideState,
+          value => value === 1
+            ? 'Entered campus perimeter'
+            : 'Went outside campus perimeter'
+        );
+      } else {
+        // Do not generate a campus-exit event just
+        // because GPS has been disabled.
+        const campusState = campusStates.get(employeeId);
+
+        if (campusState) {
+          campusState.pending = null;
+          campusState.pendingSince = 0;
+          campusStates.set(employeeId, campusState);
+        }
       }
-      
-      if (isLocEnabled && lastInsideState !== null && lastInsideState !== currentInside) {
-         if (campusObj.stable === currentInside) {
-             campusObj.pending = null;
-             campusObj.pendingSince = 0;
-         } else {
-             if (campusObj.pending !== currentInside) {
-                 campusObj.pending = currentInside;
-                 campusObj.pendingSince = nowMs;
-             } else if (nowMs - campusObj.pendingSince > GPS_GRACE_MS) {
-                 
-                 const transitionAt = new Date(campusObj.pendingSince);
-                 campusObj.stable = currentInside;
-                 campusObj.pending = null;
-                 campusObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(
-                   currentInside === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter',
-                   {
-                     employeeId, fullName,
-                     scheduleId: currentSchedule.id,
-                     locationName: resolvedLocationName,
-                     latitude: parsedLat, longitude: parsedLon
-                   },
-                   transitionAt
-                 );
-             }
-         }
-      } else if (isLocEnabled) {
-         if (campusObj.pending !== null) {
-             if (nowMs - campusObj.pendingSince > GPS_GRACE_MS) {
-                 
-                 const transitionAt = new Date(campusObj.pendingSince);
-                 campusObj.stable = campusObj.pending;
-                 campusObj.pending = null;
-                 campusObj.pendingSince = 0;
-                 await insertAndBroadcastAlert(
-                   campusObj.stable === 1 ? 'Entered campus perimeter' : 'Went outside campus perimeter',
-                   {
-                     employeeId, fullName,
-                     scheduleId: currentSchedule.id,
-                     locationName: resolvedLocationName,
-                     latitude: parsedLat, longitude: parsedLon
-                   },
-                   transitionAt
-                 );
-             }
-         }
-      }
-      campusStates.set(employeeId, campusObj);
+
+    } else {
+      gpsStates.delete(employeeId);
+      campusStates.delete(employeeId);
+    }
+
+
+    if (signalWasLost && isLocEnabled) {
+      await insertAndBroadcastAlert(
+        'Location signal restored',
+        {
+          employeeId,
+          fullName,
+          scheduleId: currentSchedule.id,
+          locationName: resolvedLocationName,
+          latitude: parsedLat,
+          longitude: parsedLon
+        }
+      );
     }
 
     await broadcastInstructorStatus(employeeId);
-    res.json({ 
-      success: true, 
-      isInside, 
-      inShift: true, 
-      location_name: resolvedLocationName, 
-      gps_status: isLocEnabled ? 'GPS ON' : 'GPS OFF' 
+
+    return res.json({
+      success: true,
+      isInside,
+      inShift: true,
+      location_name: resolvedLocationName,
+      gps_status: isLocEnabled ? 'GPS ON' : 'GPS OFF'
     });
+
+    
   } catch (err) {
-    console.error("Location update error:", err);
-    res.status(500).json({ error: err.message });
+    console.error('Location update error:', err);
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to process instructor location update.'
+    });
   }
 });
-
 
 
 app.get('/api/location-tracking/suspicious', authenticateToken, async (req, res) => {
@@ -11543,145 +12557,210 @@ app.get('/api/location-tracking/suspicious', authenticateToken, async (req, res)
   }
 });
 
+
 app.get('/api/location-tracking/status', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') return res.status(403).json({ error: 'Forbidden' });
+  if (!['admin', 'hr_admin'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   const selectedDate = req.query.date || getPHTime().date;
+  if (!isValidISOCalendarDate(selectedDate)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid tracking date.'
+    });
+  }
+
   const phNow = getPHDateTime();
 
   try {
     const [rows] = await db.promise().query(`
-      SELECT 
+      SELECT
         u.employee_id, u.full_name, u.location_tracking_enabled,
-        s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course,
-        s.start_time, s.end_time,
+        s.id AS schedule_id, s.place AS schedule_place,
+        s.course AS schedule_course, s.start_time, s.end_time,
         a.time_in, a.time_out,
-        
-        COALESCE(a.status, 
-          CASE 
-            WHEN CONCAT(s.date, ' ', s.end_time) < ? AND a.time_in IS NULL THEN 'Missed Schedule' -- ✅ [1]
-            WHEN CONCAT(s.date, ' ', s.start_time) <= ? AND CONCAT(s.date, ' ', s.end_time) >= ? AND a.time_in IS NULL THEN 'Not Clocked In' -- ✅ [2, 3]
+
+        COALESCE(a.status,
+          CASE
+            WHEN CONCAT(s.date, ' ', s.end_time) < ?
+              AND a.time_in IS NULL THEN 'Missed Schedule'
+            WHEN CONCAT(s.date, ' ', s.start_time) <= ?
+              AND CONCAT(s.date, ' ', s.end_time) >= ?
+              AND a.time_in IS NULL THEN 'Not Clocked In'
             ELSE 'Scheduled'
           END
         ) AS attendance_status,
-        
-        CASE 
-          WHEN a.time_in IS NULL THEN 'Unavailable'
-          WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Unavailable'
-          WHEN u.last_location_ping IS NULL THEN 'Unavailable'
-          WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'Signal Lost' -- ✅ [4, 5]
-          ELSE COALESCE(ilt.location_name, 'Unavailable') 
-        END AS last_position_name, 
-        
-        CASE 
-          WHEN a.time_in IS NULL THEN NULL
-          WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN NULL
-          WHEN u.last_location_ping IS NULL THEN NULL
+
+        CASE
+          WHEN a.time_in IS NULL OR a.time_out IS NOT NULL
+            THEN 'Unavailable'
+          WHEN ilt.ping_time IS NULL THEN 'Unavailable'
+          WHEN ilt.location_enabled = 0 THEN 'GPS Disabled'
+          WHEN u.location_tracking_enabled = 0 THEN 'Unavailable'
+          WHEN TIMESTAMPDIFF(SECOND, ilt.ping_time, ?) > ?
+            THEN 'Signal Lost'
+          ELSE COALESCE(ilt.location_name, 'Unavailable')
+        END AS last_position_name,
+
+        CASE
+          WHEN a.time_in IS NULL OR a.time_out IS NOT NULL THEN NULL
+          WHEN ilt.ping_time IS NULL OR ilt.location_enabled = 0 THEN NULL
           WHEN u.location_tracking_enabled = 0 THEN NULL
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN NULL -- ✅ [6, 7]
-          ELSE ilt.is_inside_campus 
+          WHEN TIMESTAMPDIFF(SECOND, ilt.ping_time, ?) > ? THEN NULL
+          ELSE ilt.is_inside_campus
         END AS last_is_inside,
-        
-        u.last_location_ping AS last_ping_time,
-        
-        CASE 
-          WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF' -- ✅ [8]
-          WHEN a.time_in IS NULL THEN 'GPS OFF'
-          WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'GPS OFF'
-          WHEN u.last_location_ping IS NULL THEN 'GPS OFF'
-          WHEN u.location_tracking_enabled = 0 THEN 'GPS OFF'
-          WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'GPS OFF' -- ✅ [9, 10]
+
+        ilt.ping_time AS last_ping_time,
+
+        CASE
+          WHEN a.time_in IS NULL OR a.time_out IS NOT NULL
+            OR CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF'
+          WHEN ilt.ping_time IS NULL THEN 'Unavailable'
+          WHEN ilt.location_enabled = 0 THEN 'GPS Disabled'
+          WHEN u.location_tracking_enabled = 0 THEN 'Unavailable'
+          WHEN TIMESTAMPDIFF(SECOND, ilt.ping_time, ?) > ?
+            THEN 'Signal Lost'
           ELSE 'GPS ON'
         END AS gps_status,
-        
+
         COALESCE(
-          a.time_in, 
-          (SELECT DATE_FORMAT(MIN(ping_time), '%H:%i:%s') FROM instructor_location_tracking 
-           WHERE employee_id = u.employee_id AND schedule_id = s.id AND is_inside_campus = 1 
-           AND ping_time >= CONCAT(s.date, ' ', s.start_time) - INTERVAL 1 HOUR)
+          a.time_in,
+          (SELECT DATE_FORMAT(MIN(ping_time), '%H:%i:%s')
+           FROM instructor_location_tracking
+           WHERE employee_id = u.employee_id
+             AND schedule_id = s.id
+             AND is_inside_campus = 1
+             AND ping_time >= CONCAT(s.date, ' ', s.start_time) - INTERVAL 1 HOUR)
         ) AS campus_entry_time,
-        
-        COALESCE(
-          a.time_out, 
-          ${GEO_EXIT_SUBQUERY} 
-        ) AS campus_exit_time
+
+        COALESCE(a.time_out, ${GEO_EXIT_SUBQUERY}) AS campus_exit_time
 
       FROM users u
-      INNER JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id)
-      LEFT JOIN attendance a ON s.id = a.schedule_id AND a.date = s.date
-      LEFT JOIN (
-          SELECT t1.* FROM instructor_location_tracking t1
-          INNER JOIN (SELECT MAX(id) as max_id FROM instructor_location_tracking GROUP BY employee_id) t2 ON t1.id = t2.max_id
-      ) ilt ON u.employee_id = ilt.employee_id
-      WHERE u.role = 'instructor' AND u.status = 'active' AND s.date = ?
+      INNER JOIN schedules s
+        ON (u.employee_id = s.user_id OR u.id = s.user_id)
+      LEFT JOIN attendance a
+        ON s.id = a.schedule_id AND a.date = s.date
+      LEFT JOIN instructor_location_tracking ilt
+        ON ilt.id = (
+          SELECT MAX(t.id)
+          FROM instructor_location_tracking t
+          WHERE t.employee_id = u.employee_id
+            AND t.schedule_id = s.id
+        )
+      WHERE u.role = 'instructor'
+        AND u.status = 'active'
+        AND s.date = ?
       ORDER BY s.start_time ASC
     `, [
-      phNow,                                  // [1]
-      phNow, phNow,                           // [2, 3]
-      phNow, GPS_STALE_SECONDS,               // [4, 5]
-      phNow, GPS_STALE_SECONDS,               // [6, 7]
-      phNow,                                  // [8]
-      phNow, GPS_STALE_SECONDS,               // [9, 10]
-      selectedDate                            // [11] for s.date = ?
+      phNow, phNow, phNow,               
+      phNow, GPS_STALE_SECONDS,          
+      phNow, GPS_STALE_SECONDS,          
+      phNow, phNow, GPS_STALE_SECONDS,   
+      selectedDate                      
     ]);
 
-    res.json(rows);
+    return res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Location tracking status error:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to load location tracking status.'
+    });
   }
 });
+
+
 
 app.get('/api/location-tracking/instructor-timeline/:employeeId', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+  if (!['admin', 'hr_admin'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  
+
   const { employeeId } = req.params;
   const targetDate = req.query.date || getPHTime().date;
-  
+  const rawScheduleId = req.query.schedule_id;
+  const scheduleId = rawScheduleId == null || rawScheduleId === ''
+    ? null
+    : Number(rawScheduleId);
+
+  if (!isValidISOCalendarDate(targetDate)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid timeline date.'
+    });
+  }
+
+  if (
+    scheduleId !== null &&
+    (!Number.isSafeInteger(scheduleId) || scheduleId < 1)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid schedule ID.'
+    });
+  }
+
   try {
-    
+    // Associate telemetry with the assigned schedule date,
+    // not simply the calendar date when a ping arrived.
     const [rows] = await db.promise().query(`
-  SELECT t.id, t.ping_time, t.location_enabled, t.is_inside_campus, t.location_name, t.latitude, t.longitude
-  FROM instructor_location_tracking t
-  INNER JOIN schedules s ON t.schedule_id = s.id
-  WHERE (t.employee_id = ? OR t.employee_id = (SELECT id FROM users WHERE employee_id = ?))
-    AND (DATE(t.ping_time) = ? OR DATE(CONVERT_TZ(t.ping_time, '+00:00', '+08:00')) = ?)
-    AND (
-      -- 🚨 ROBUST FIX: Use DATE_SUB / DATE_ADD to handle midnight rollovers safely
-      t.ping_time BETWEEN DATE_SUB(CONCAT(s.date, ' ', s.start_time), INTERVAL 30 MINUTE)
-                      AND DATE_ADD(CONCAT(s.date, ' ', s.end_time), INTERVAL 30 MINUTE)
-    )
-  ORDER BY t.id ASC
-`, [employeeId, employeeId, targetDate, targetDate]);
+      SELECT
+        t.id, t.schedule_id, t.ping_time,
+        t.location_enabled, t.is_inside_campus,
+        t.location_name, t.latitude, t.longitude
+      FROM instructor_location_tracking t
+      INNER JOIN schedules s ON s.id = t.schedule_id
+      WHERE t.employee_id = ?
+        AND s.date = ?
+        AND (? IS NULL OR s.id = ?)
+      ORDER BY t.id ASC
+      LIMIT 5000
+    `, [employeeId, targetDate, scheduleId, scheduleId]);
 
     const [alerts] = await db.promise().query(`
-      SELECT id, alert_message, created_at
-      FROM location_alerts
-      WHERE (employee_id = ? OR employee_id = (SELECT id FROM users WHERE employee_id = ?))
-        AND (DATE(created_at) = ? OR DATE(CONVERT_TZ(created_at, '+00:00', '+08:00')) = ?)
-      ORDER BY id ASC
-    `, [employeeId, employeeId, targetDate, targetDate]);
+      SELECT
+        la.id, la.schedule_id, la.alert_message,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+      FROM location_alerts la
+      INNER JOIN schedules s ON s.id = la.schedule_id
+      WHERE la.employee_id = ?
+        AND s.date = ?
+        AND (? IS NULL OR la.schedule_id = ?)
+      ORDER BY la.id ASC
+      LIMIT 5000
+    `, [employeeId, targetDate, scheduleId, scheduleId]);
 
-    const [schedule] = await db.promise().query(`
-      SELECT start_time, end_time FROM schedules 
-      WHERE (user_id = ? OR user_id = (SELECT id FROM users WHERE employee_id = ?)) AND date = ? 
-      ORDER BY start_time ASC LIMIT 1
-    `, [employeeId, employeeId, targetDate]);
+    const [schedules] = await db.promise().query(`
+      SELECT s.id, s.start_time, s.end_time
+      FROM schedules s
+      INNER JOIN users u
+        ON (s.user_id = u.employee_id OR s.user_id = u.id)
+      WHERE u.employee_id = ?
+        AND s.date = ?
+        AND (? IS NULL OR s.id = ?)
+      ORDER BY s.start_time ASC
+      LIMIT 1
+    `, [employeeId, targetDate, scheduleId, scheduleId]);
 
-    res.json({ 
-      timeline: rows, 
-      alerts, 
-      start_time: schedule.length > 0 ? schedule[0].start_time : null,
-      end_time: schedule.length > 0 ? schedule[0].end_time : null
+    return res.json({
+      timeline: rows,
+      alerts: alerts.map(alert => ({
+        ...alert,
+        ...classifyLocationAlert(alert.alert_message)
+      })),
+      start_time: schedules[0]?.start_time ?? null,
+      end_time: schedules[0]?.end_time ?? null
     });
-    
   } catch (err) {
-    console.error("Timeline fetch error:", err);
-    res.status(500).json({ error: err.message });
+    console.error('Location timeline error:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to load location timeline.'
+    });
   }
 });
+
 
 app.get('/api/location-tracking/alerts', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -11699,13 +12778,27 @@ app.get('/api/location-tracking/alerts', authenticateToken, async (req, res) => 
         DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
       FROM location_alerts la
       JOIN users u ON (la.employee_id = u.employee_id OR la.employee_id = u.id)
-      LEFT JOIN schedules s ON (la.employee_id = s.user_id OR u.employee_id = s.user_id) AND DATE(la.created_at) = s.date
+      LEFT JOIN schedules s ON s.id = la.schedule_id
       WHERE DATE(la.created_at) = ? OR DATE(CONVERT_TZ(la.created_at, '+00:00', '+08:00')) = ?
       ORDER BY la.id DESC
     `;
 
     const [rows] = await db.promise().query(sql, [targetDate, targetDate]);
-    res.json(rows);
+    
+const classifiedAlerts = rows.map((alert) => {
+  const classification = classifyLocationAlert(
+    alert.alert_message
+  );
+
+  return {
+    ...alert,
+    category: classification.category,
+    severity: classification.severity
+  };
+});
+
+res.json(classifiedAlerts);
+
   } catch (err) {
     console.error("Alert fetch error:", err);
     res.status(500).json({ error: err.message });
@@ -11721,93 +12814,1180 @@ const broadcastToTrackingClients = (data) => {
   });
 };
 
-async function insertAndBroadcastAlert(alertMsg, context, eventDate = null) {
+
+const classifyLocationAlert = (message) => {
+  const value = String(message || '').trim().toLowerCase();
+
+  switch (value) {
+    case 'gps turned on':
+    case 'location signal restored':
+  return {
+    category: 'GPS Status',
+    severity: 'information'
+  };
+
+    case 'gps turned off':
+    case 'location signal lost':
+      return { category: 'GPS Status', severity: 'warning' };
+
+    case 'entered campus perimeter':
+    case 'entered campus':
+      return { category: 'Geofence', severity: 'information' };
+
+    case 'went outside campus perimeter':
+      return { category: 'Geofence', severity: 'warning' };
+
+    default:
+      if (
+        value.includes('suspicious') ||
+        value.includes('impossible travel') ||
+        value.includes('mock location')
+      ) {
+        return {
+          category: 'Suspicious Activity',
+          severity: 'requires_review'
+        };
+      }
+
+      return { category: 'Other', severity: 'information' };
+  }
+};
+
+
+async function insertAndBroadcastAlert(
+  alertMsg,
+  context,
+  eventDate = null
+) {
   try {
-  
-    const alertTime = eventDate ? getPHTimeFromDate(eventDate) : getPHDateTime();
+    const alertTime = eventDate
+      ? getPHTimeFromDate(eventDate)
+      : getPHDateTime();
+
+    const classification = classifyLocationAlert(alertMsg);
+
+    const lat =
+      context.latitude !== undefined &&
+      context.latitude !== null &&
+      Number.isFinite(Number(context.latitude)) &&
+      Number(context.latitude) >= -90 &&
+      Number(context.latitude) <= 90
+        ? Number(context.latitude)
+        : null;
+
+    const lon =
+      context.longitude !== undefined &&
+      context.longitude !== null &&
+      Number.isFinite(Number(context.longitude)) &&
+      Number(context.longitude) >= -180 &&
+      Number(context.longitude) <= 180
+        ? Number(context.longitude)
+        : null;
 
     const [result] = await db.promise().query(
-      `INSERT INTO location_alerts (employee_id, alert_message, latitude, longitude, created_at)
-       SELECT ?, ?, ?, ?, ?
+      `INSERT INTO location_alerts
+       (
+         employee_id,
+         schedule_id,
+         alert_message,
+         latitude,
+         longitude,
+         created_at
+       )
+       SELECT ?, ?, ?, ?, ?, ?
        FROM DUAL
        WHERE NOT EXISTS (
-         SELECT 1 FROM location_alerts 
-         WHERE employee_id = ? AND alert_message = ? 
-         AND created_at > DATE_SUB(STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s'), INTERVAL ? SECOND)
+         SELECT 1
+         FROM location_alerts
+         WHERE employee_id = ?
+           AND alert_message = ?
+           AND created_at > DATE_SUB(
+             STR_TO_DATE(?, '%Y-%m-%d %H:%i:%s'),
+             INTERVAL ? SECOND
+           )
        )`,
-      [context.employeeId, alertMsg, context.latitude || 0, context.longitude || 0, alertTime, 
-        context.employeeId, alertMsg, alertTime, GPS_ALERT_COOLDOWN_SECONDS]
+      [
+        context.employeeId,
+        context.scheduleId ?? null,
+        alertMsg,
+        lat,
+        lon,
+        alertTime,
+        context.employeeId,
+        alertMsg,
+        alertTime,
+        GPS_ALERT_COOLDOWN_SECONDS
+      ]
     );
 
-    if (result.affectedRows === 0) return;
+    if (result.affectedRows === 0) {
+      return;
+    }
 
     const alert = {
       id: result.insertId,
+      employee_id: context.employeeId,
       full_name: context.fullName,
       alert_message: alertMsg,
+      category: classification.category,
+      severity: classification.severity,
       location_name: context.locationName || 'Unavailable',
       created_at: alertTime
     };
 
-    broadcastToAdminAndHR({ type: 'new_alert', alert });
+    broadcastToAdminAndHR({
+      type: 'new_alert',
+      alert
+    });
+
   } catch (err) {
-    console.error("Failed to broadcast alert:", err);
+    console.error(
+      'Failed to insert or broadcast location alert:',
+      err
+    );
   }
 }
 
-// Background watchdog: Automatically detects disconnected or permission-revoked instructors
+
+
+
+// LOCATION SIGNAL WATCHDOG
+// Missing telemetry is NOT proof that GPS was disabled.
+
+
 setInterval(async () => {
   try {
     const phNow = getPHDateTime();
-        const [offlineInstructors] = await db.promise().query(`
-      SELECT u.id, u.employee_id, u.full_name, u.last_location_ping, s.id as schedule_id, s.place
-      FROM users u
-      INNER JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND s.date = CURDATE()
-      INNER JOIN attendance a ON s.id = a.schedule_id AND a.date = s.date
-      WHERE u.role = 'instructor'
-        AND u.status = 'active'
-        AND u.location_tracking_enabled = 1
-        AND a.time_in IS NOT NULL
-        AND (a.time_out IS NULL OR a.time_out = '--:--')
-        AND TIMESTAMPDIFF(SECOND, u.last_location_ping, NOW()) > ?
-    `, [GPS_STALE_SECONDS]);
+    const { date: today, time: currentTime } = getPHTime();
 
-        for (const inst of offlineInstructors) {
-      
-      const [lastRow] = await db.promise().query(
-        `SELECT location_enabled FROM instructor_location_tracking
-          WHERE employee_id = ? ORDER BY id DESC LIMIT 1`,
-        [inst.employee_id]
+    const [offlineInstructors] = await db.promise().query(
+      `SELECT
+         u.id,
+         u.employee_id,
+         u.full_name,
+         u.last_location_ping,
+         s.id AS schedule_id,
+         s.place
+       FROM users u
+       INNER JOIN schedules s
+         ON (
+           u.employee_id = s.user_id
+           OR u.id = s.user_id
+         )
+         AND s.date = ?
+       INNER JOIN attendance a
+         ON a.schedule_id = s.id
+         AND a.date = s.date
+       WHERE u.role = 'instructor'
+         AND u.status = 'active'
+         AND u.location_tracking_enabled = 1
+         AND a.time_in IS NOT NULL
+         AND a.time_out IS NULL
+         AND u.last_location_ping IS NOT NULL
+         AND s.end_time >= ?
+         AND TIMESTAMPDIFF(
+           SECOND,
+           u.last_location_ping,
+           ?
+         ) > ?`,
+      [
+        today,
+        currentTime,
+        phNow,
+        GPS_STALE_SECONDS
+      ]
+    );
+
+    for (const instructor of offlineInstructors) {
+      // Create at most one signal-loss event for
+      // the uninterrupted outage after the last ping.
+      const [existing] = await db.promise().query(
+        `SELECT id
+         FROM location_alerts
+         WHERE employee_id = ?
+           AND alert_message = 'Location signal lost'
+           AND created_at >= ?
+         LIMIT 1`,
+        [
+          instructor.employee_id,
+          instructor.last_location_ping
+        ]
       );
-      if (lastRow.length > 0 && lastRow[0].location_enabled === 0) {
+
+      if (existing.length > 0) {
         continue;
       }
 
-      await db.promise().query(
-        "UPDATE users SET location_tracking_enabled = 0 WHERE id = ?",
-        [inst.id]
+      await insertAndBroadcastAlert(
+        'Location signal lost',
+        {
+          employeeId: instructor.employee_id,
+          fullName: instructor.full_name,
+          scheduleId: instructor.schedule_id,
+          locationName: instructor.place || 'Unavailable',
+          latitude: null,
+          longitude: null
+        }
       );
 
-      await db.promise().query(
-        `INSERT INTO instructor_location_tracking 
-         (employee_id, schedule_id, latitude, longitude, location_name, is_inside_campus, location_enabled, ping_time)
-         VALUES (?, ?, 0, 0, 'GPS Turned OFF / Signal Lost', 0, 0, ?)`,
-        [inst.employee_id, inst.schedule_id, phNow]
+      await broadcastInstructorStatus(
+        instructor.employee_id
       );
-
-      await insertAndBroadcastAlert('GPS turned OFF', {
-        employeeId: inst.employee_id,
-        fullName: inst.full_name,
-        scheduleId: inst.schedule_id,
-        locationName: 'Outside / Signal Lost'
-      });
-
-      await broadcastInstructorStatus(inst.employee_id);
     }
-  } catch (watchdogErr) {
-    console.error("Watchdog error:", watchdogErr.message);
+  } catch (error) {
+    console.error(
+      'Location signal watchdog error:',
+      error
+    );
   }
 }, 20000);
+
+
+
+const REPORT_EVIDENCE_TYPES = Object.freeze([
+  'instructor',
+  'visitor',
+  'activity'
+]);
+
+const REPORT_VISITOR_INCIDENT_PATTERN =
+  /incident|emergency|evacuat|missing|lost|distress|sos|alert|panic/i;
+
+// 1. CHECK REPORT ACCESS
+
+
+const canReadTrackingEvidence = (role, type) => {
+  if (type === 'instructor') {
+    return ACTION_ROLES['reports:instructor:view'].includes(role);
+  }
+
+  if (type === 'visitor' || type === 'activity') {
+    return ACTION_ROLES['reports:visitor:view'].includes(role);
+  }
+
+  return false;
+};
+
+const evidenceText = (value, fallback = '—') =>
+  value === null || value === undefined || value === ''
+    ? fallback
+    : String(value);
+
+
+// 2. RETRIEVE REPORT EVIDENCE
+
+const buildTrackingEvidence = async (type, day) => {
+
+  
+  if (type === 'instructor') {
+
+    const [alerts] = await db.promise().query(
+      `SELECT
+         la.id,
+         la.employee_id,
+         u.full_name,
+         s.place AS location_name,
+         la.alert_message,
+         DATE_FORMAT(
+           la.created_at, '%Y-%m-%d %H:%i:%s'
+         ) AS created_at
+       FROM location_alerts la
+       JOIN users u
+         ON u.employee_id = la.employee_id
+       LEFT JOIN schedules s
+         ON s.id = la.schedule_id
+       WHERE DATE(la.created_at) = ?
+       ORDER BY la.id DESC
+       LIMIT 500`,
+      [day]
+    );
+
+    const [flags] = await db.promise().query(
+      `SELECT
+         al.id,
+         u.employee_id,
+         u.full_name,
+         al.new_value,
+         DATE_FORMAT(
+           al.created_at, '%Y-%m-%d %H:%i:%s'
+         ) AS created_at
+       FROM audit_logs al
+       JOIN users u
+         ON u.id = al.user_id
+       WHERE al.action = 'SUSPICIOUS_LOCATION'
+         AND DATE(al.created_at) = ?
+       ORDER BY al.id DESC
+       LIMIT 500`,
+      [day]
+    );
+
+    const ordinary = alerts.map(row => {
+      const classification = classifyLocationAlert(
+        row.alert_message
+      );
+
+      return {
+        key: `gps-${row.id}`,
+        id: row.id,
+        subject: evidenceText(
+          row.full_name || row.employee_id
+        ),
+        reference: evidenceText(row.employee_id),
+        date: row.created_at,
+        category: classification.category,
+        severity: classification.severity,
+        description: evidenceText(row.alert_message),
+        location: evidenceText(row.location_name),
+        origin: 'GPS monitoring alert',
+        verified: false
+      };
+    });
+
+    const suspicious = flags.map(row => {
+      let payload = {};
+
+      try {
+        payload = typeof row.new_value === 'string'
+          ? JSON.parse(row.new_value)
+          : (row.new_value || {});
+      } catch (_) {
+        payload = {};
+      }
+
+      const flagDescriptions = Array.isArray(payload.flags)
+        ? payload.flags.map(flag =>
+            `${evidenceText(flag.reason, 'Flag')}${
+              flag.detail ? ` — ${flag.detail}` : ''
+            }`
+          )
+        : [];
+
+      return {
+        key: `flag-${row.id}`,
+        id: row.id,
+        subject: evidenceText(
+          row.full_name || row.employee_id
+        ),
+        reference: evidenceText(row.employee_id),
+        date: row.created_at,
+        category: 'Suspicious Activity',
+        severity: 'requires_review',
+        description:
+          flagDescriptions.join('; ') ||
+          'Automated location anomaly flagged for review',
+        location:
+          payload.lat != null && payload.lon != null
+            ? `${payload.lat}, ${payload.lon}`
+            : 'Unavailable',
+        origin: 'System audit flag',
+        verified: false
+      };
+    });
+
+    return [...ordinary, ...suspicious];
+  }
+
+  // VISITOR BLE TRACKING REPORTS
+  const [rows] = await db.promise().query(
+    `SELECT
+       id,
+       visitor_name,
+       ble_id,
+       floor,
+       current_room,
+       event_type,
+       DATE_FORMAT(
+         created_at, '%Y-%m-%d %H:%i:%s'
+       ) AS created_at
+     FROM visitor_history
+     WHERE DATE(created_at) = ?
+     ORDER BY id DESC
+     LIMIT 500`,
+    [day]
+  );
+
+  const records = rows.map(row => ({
+    key: `visitor-${row.id}`,
+    id: row.id,
+    subject: evidenceText(row.visitor_name),
+    reference: evidenceText(
+      row.ble_id,
+      'No tag specified'
+    ),
+    date: row.created_at,
+    category: 'Visitor BLE Tracking',
+
+    severity: REPORT_VISITOR_INCIDENT_PATTERN.test(
+      String(row.event_type || '')
+    )
+      ? 'requires_review'
+      : 'information',
+
+    description: evidenceText(
+      row.event_type,
+      'Tracking observation'
+    ),
+
+    location:
+      [
+        row.floor != null && `Floor ${row.floor}`,
+        row.current_room
+      ].filter(Boolean).join(' / ') || 'Unavailable',
+
+    origin: 'Visitor tracking history',
+    verified: false
+  }));
+
+  // Only explicitly incident-related visitor records.
+  if (type === 'visitor') {
+    return records.filter(
+      record => record.severity === 'requires_review'
+    );
+  }
+
+  // Full visitor tracking activity report.
+  return records;
+};
+
+
+// 3. VALIDATE REPORT TYPE, DATE AND USER ROLE
+
+const validateEvidenceQuery = (req, res) => {
+
+  const type = String(
+    req.method === 'POST'
+      ? req.body?.type || ''
+      : req.query.type || ''
+  );
+
+  const day = String(
+    req.method === 'POST'
+      ? req.body?.date || ''
+      : req.query.date || ''
+  );
+
+  if (
+    !REPORT_EVIDENCE_TYPES.includes(type) ||
+    !isValidISOCalendarDate(day) ||
+    day > getPHTime().date
+  ) {
+    res.status(400).json({
+      success: false,
+      message: 'Invalid report type or event date.'
+    });
+    return null;
+  }
+
+  if (!canReadTrackingEvidence(req.user.role, type)) {
+    res.status(403).json({
+      success: false,
+      message:
+        'Forbidden: this report category is outside your role.'
+    });
+    return null;
+  }
+
+  return { type, day };
+};
+
+
+// 4. GET — REPORT EVIDENCE
+
+app.get(
+  '/api/reports/tracking-evidence',
+  authenticateToken,
+  allowRoles('admin', 'hr_admin', 'security'),
+  async (req, res) => {
+
+    const selection = validateEvidenceQuery(req, res);
+    if (!selection) return;
+
+    try {
+      const records = await buildTrackingEvidence(
+        selection.type,
+        selection.day
+      );
+
+      res.setHeader('Cache-Control', 'no-store');
+
+      return res.json({
+        success: true,
+        records
+      });
+
+    } catch (error) {
+      console.error(
+        'Tracking evidence report lookup error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: 'Could not load tracking evidence.'
+      });
+    }
+  }
+);
+
+
+app.post(
+  '/api/reports/tracking-evidence/print-request',
+  authenticateToken,
+  allowRoles('admin', 'hr_admin', 'security'),
+  async (req, res) => {
+
+    const selection = validateEvidenceQuery(req, res);
+    if (!selection) return;
+
+    const recordKey = req.body?.key;
+
+    if (
+      typeof recordKey !== 'string' ||
+      !/^(gps|flag|visitor)-[1-9]\d{0,15}$/.test(recordKey)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid report evidence identifier.'
+      });
+    }
+
+    const allowedPrefix =
+      selection.type === 'instructor'
+        ? /^(gps|flag)-/
+        : /^visitor-/;
+
+    if (!allowedPrefix.test(recordKey)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Record does not belong to report category.'
+      });
+    }
+
+    try {
+      // Verify the evidence still exists.
+      const records = await buildTrackingEvidence(
+        selection.type,
+        selection.day
+      );
+
+      const record = records.find(
+        item => item.key === recordKey
+      );
+
+      if (!record) {
+        return res.status(404).json({
+          success: false,
+          message: 'No matching report evidence record found.'
+        });
+      }
+
+      const ip = String(
+        req.ip || req.socket?.remoteAddress || ''
+      ).slice(0, 45) || null;
+
+      const userAgent = String(
+        req.get('user-agent') || ''
+      ).slice(0, 1000) || null;
+
+      // Log the request BEFORE authorizing printing.
+      const [inserted] = await db.promise().query(
+        `INSERT INTO audit_logs
+          (
+            user_id,
+            action,
+            target_type,
+            target_id,
+            old_value,
+            new_value,
+            ip_address,
+            user_agent,
+            created_at
+          )
+         VALUES (
+           ?,
+           'REPORT_PRINT_REQUESTED',
+           'tracking_evidence',
+           ?,
+           NULL,
+           ?,
+           ?,
+           ?,
+           ?
+         )`,
+        [
+          req.user.id,
+          recordKey,
+          JSON.stringify({
+            type: selection.type,
+            date: selection.day,
+            source: record.origin,
+            subject_reference: record.reference
+          }),
+          ip,
+          userAgent,
+          getPHDateTime()
+        ]
+      );
+
+      res.setHeader('Cache-Control', 'no-store');
+
+      return res.json({
+        success: true,
+        record,
+        audit_id: inserted.insertId
+      });
+
+    } catch (error) {
+      console.error(
+        'Tracking evidence print request error:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          'Report print request could not be authorized or audited.'
+      });
+    }
+  }
+);
+
+
+const VISITOR_REVIEW_EVENTS = ['signal_lost', 'loitering'];
+
+const VISITOR_REVIEW_STATUSES = [
+  'under_review',
+  'dismissed',
+  'confirmed_incident'
+];
+
+app.get(
+  '/api/visitor-event-reviews',
+  authenticateToken,
+  allowRoles('admin', 'security'),
+  async (req, res) => {
+    try {
+      const [events] = await db.promise().query(
+        `SELECT
+           id,
+           visitor_name,
+           ble_id,
+           floor,
+           current_room,
+           event_type,
+           DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS timestamp
+         FROM visitor_history
+         WHERE event_type IN (?, ?)
+         ORDER BY id DESC
+         LIMIT 300`,
+        VISITOR_REVIEW_EVENTS
+      );
+
+      if (!events.length) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json([]);
+      }
+
+      const ids = events.map(event => String(event.id));
+      const placeholders = ids.map(() => '?').join(',');
+
+      const [decisions] = await db.promise().query(
+        `SELECT
+           al.id AS audit_id,
+           al.target_id,
+           al.new_value,
+           DATE_FORMAT(al.created_at, '%Y-%m-%d %H:%i:%s') AS reviewed_at,
+           u.full_name AS reviewed_by_name
+         FROM audit_logs al
+         LEFT JOIN users u ON u.id = al.user_id
+         WHERE al.action = 'REVIEW_VISITOR_EVENT'
+           AND al.target_type = 'visitor_history'
+           AND al.target_id IN (${placeholders})
+         ORDER BY al.id DESC`,
+        ids
+      );
+
+      const latest = new Map();
+
+      for (const row of decisions) {
+        const key = String(row.target_id);
+
+        if (latest.has(key)) continue;
+
+        let review = row.new_value;
+
+        if (typeof review === 'string') {
+          try {
+            review = JSON.parse(review);
+          } catch (_) {
+            review = null;
+          }
+        }
+
+        if (!review || typeof review !== 'object') continue;
+
+        latest.set(key, {
+          status: review.status,
+          notes: review.notes || '',
+          reviewedAt: row.reviewed_at,
+          reviewedBy: row.reviewed_by_name || 'Authorized user',
+          auditId: row.audit_id
+        });
+      }
+
+      res.setHeader('Cache-Control', 'no-store');
+
+      return res.json(
+        events.map(event => ({
+          ...event,
+          review: latest.get(String(event.id)) || {
+            status: 'pending_review',
+            notes: '',
+            reviewedAt: null,
+            reviewedBy: null,
+            auditId: null
+          }
+        }))
+      );
+
+    } catch (error) {
+      console.error('Visitor review queue error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to load visitor reviews.'
+      });
+    }
+  }
+);
+
+
+app.put(
+  '/api/visitor-event-reviews/:id',
+  authenticateToken,
+  allowRoles('admin', 'security'),
+  async (req, res) => {
+    const eventId = Number(req.params.id);
+    const { status, notes } = req.body || {};
+
+    if (
+      !Number.isSafeInteger(eventId) ||
+      eventId <= 0 ||
+      !VISITOR_REVIEW_STATUSES.includes(status) ||
+      typeof notes !== 'string' ||
+      notes.trim().length < 10 ||
+      notes.trim().length > 1000
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Valid event ID, review status, and notes (10–1000 characters) are required.'
+      });
+    }
+
+    let connection;
+    let started = false;
+
+    try {
+      connection = await db.promise().getConnection();
+      await connection.beginTransaction();
+      started = true;
+
+      const [events] = await connection.query(
+        `SELECT
+           id,
+           event_type,
+           visitor_name,
+           ble_id,
+           floor,
+           current_room,
+           created_at
+         FROM visitor_history
+         WHERE id = ?
+         FOR UPDATE`,
+        [eventId]
+      );
+
+      if (
+        !events.length ||
+        !VISITOR_REVIEW_EVENTS.includes(events[0].event_type)
+      ) {
+        await connection.rollback();
+        started = false;
+
+        return res.status(404).json({
+          success: false,
+          message: 'Reviewable event not found.'
+        });
+      }
+
+      const [priorRows] = await connection.query(
+        `SELECT new_value
+         FROM audit_logs
+         WHERE action = 'REVIEW_VISITOR_EVENT'
+           AND target_type = 'visitor_history'
+           AND target_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [String(eventId)]
+      );
+
+      let oldValue = {
+        status: 'pending_review',
+        notes: ''
+      };
+
+      if (priorRows.length) {
+        const value = priorRows[0].new_value;
+
+        try {
+          oldValue = typeof value === 'string'
+            ? JSON.parse(value)
+            : value;
+        } catch (_) {
+          oldValue = {
+            status: 'pending_review',
+            notes: ''
+          };
+        }
+      }
+
+      const newValue = {
+        status,
+        notes: notes.trim(),
+        observation_type: events[0].event_type,
+        visitor_name: events[0].visitor_name,
+        ble_id: events[0].ble_id
+      };
+
+      const rawIp =
+        req.headers['x-forwarded-for'] ||
+        req.socket?.remoteAddress ||
+        null;
+
+      const ip = rawIp
+        ? String(rawIp).split(',')[0].trim()
+        : null;
+
+      const [saved] = await connection.query(
+        `INSERT INTO audit_logs
+          (
+            user_id,
+            action,
+            target_type,
+            target_id,
+            old_value,
+            new_value,
+            ip_address,
+            user_agent,
+            created_at
+          )
+         VALUES (
+           ?,
+           'REVIEW_VISITOR_EVENT',
+           'visitor_history',
+           ?, ?, ?, ?, ?, ?
+         )`,
+        [
+          req.user.id,
+          String(eventId),
+          JSON.stringify(oldValue),
+          JSON.stringify(newValue),
+          ip,
+          req.headers['user-agent'] || null,
+          getPHDateTime()
+        ]
+      );
+
+      await connection.commit();
+      started = false;
+
+      return res.json({
+        success: true,
+        auditId: saved.insertId,
+        status,
+        message: 'Review decision recorded in audit logs.'
+      });
+
+    } catch (error) {
+      if (connection && started) {
+        await connection.rollback().catch(() => {});
+      }
+
+      console.error('Visitor review decision error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to save review decision.'
+      });
+
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+);
+
+
+
+const VISITOR_REPORT_EVENTS = ['signal_lost', 'loitering'];
+
+const VISITOR_REPORT_STATUSES = [
+  'all',
+  'pending_review',
+  'under_review',
+  'dismissed',
+  'confirmed_incident'
+];
+
+const parseVisitorReview = value => {
+  try {
+    const parsed = typeof value === 'string'
+      ? JSON.parse(value)
+      : value;
+
+    return parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed)
+        ? parsed
+        : {};
+  } catch (_) {
+    return {};
+  }
+};
+
+app.get(
+  '/api/visitor-incident-reports',
+  authenticateToken,
+  allowRoles('admin', 'security'),
+  async (req, res) => {
+    const { startDate, endDate, status = 'all' } = req.query;
+
+    if (
+      !VISITOR_REPORT_STATUSES.includes(status) ||
+      (startDate != null && !isValidISOCalendarDate(startDate)) ||
+      (endDate != null && !isValidISOCalendarDate(endDate)) ||
+      (startDate && endDate && startDate > endDate)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date range or review status.'
+      });
+    }
+
+    if (
+      startDate &&
+      endDate &&
+      (
+        Date.parse(`${endDate}T00:00:00Z`) -
+        Date.parse(`${startDate}T00:00:00Z`)
+      ) > 366 * 86400000
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Date range cannot exceed 366 days.'
+      });
+    }
+
+    try {
+      const conditions = ['vh.event_type IN (?, ?)'];
+      const params = [...VISITOR_REPORT_EVENTS];
+
+      if (startDate) {
+        conditions.push('vh.created_at >= ?');
+        params.push(`${startDate} 00:00:00`);
+      }
+
+      if (endDate) {
+        conditions.push(
+          'vh.created_at < DATE_ADD(?, INTERVAL 1 DAY)'
+        );
+        params.push(`${endDate} 00:00:00`);
+      }
+
+      const [rows] = await db.promise().query(
+        `SELECT
+           vh.id,
+           vh.visitor_name,
+           vh.ble_id,
+           vh.floor,
+           vh.current_room,
+           vh.event_type,
+           DATE_FORMAT(
+             vh.created_at,
+             '%Y-%m-%d %H:%i:%s'
+           ) AS observed_at,
+           al.id AS audit_id,
+           al.new_value,
+           DATE_FORMAT(
+             al.created_at,
+             '%Y-%m-%d %H:%i:%s'
+           ) AS reviewed_at,
+           u.full_name AS reviewed_by
+         FROM visitor_history vh
+         LEFT JOIN audit_logs al ON al.id = (
+           SELECT MAX(a.id)
+           FROM audit_logs a
+           WHERE a.action = 'REVIEW_VISITOR_EVENT'
+             AND a.target_type = 'visitor_history'
+             AND a.target_id = CAST(vh.id AS CHAR)
+         )
+         LEFT JOIN users u ON u.id = al.user_id
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY vh.created_at DESC, vh.id DESC
+         LIMIT 1001`,
+        params
+      );
+
+      const capped = rows.length > 1000;
+
+      const records = rows.slice(0, 1000).map(row => {
+        const review = parseVisitorReview(row.new_value);
+
+        const reviewStatus =
+          row.audit_id != null &&
+          VISITOR_REPORT_STATUSES.includes(review.status) &&
+          review.status !== 'all'
+            ? review.status
+            : 'pending_review';
+
+        return {
+          eventId: row.id,
+          visitorName: row.visitor_name,
+          bleId: row.ble_id,
+          floor: row.floor,
+          room: row.current_room,
+          eventType: row.event_type,
+          observedAt: row.observed_at,
+          reviewStatus,
+          reviewNotes:
+            row.audit_id == null
+              ? ''
+              : String(review.notes || ''),
+          reviewedBy: row.reviewed_by || null,
+          reviewedAt: row.reviewed_at || null,
+          auditId: row.audit_id || null
+        };
+      }).filter(row =>
+        status === 'all' || row.reviewStatus === status
+      );
+
+      res.setHeader('Cache-Control', 'no-store');
+
+      return res.json({
+        success: true,
+        records,
+        limit: 1000,
+        capped
+      });
+
+    } catch (error) {
+      console.error('Visitor incident report error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to retrieve visitor incident report.'
+      });
+    }
+  }
+);
+
+app.get(
+  '/api/visitor-incident-reports/:id/evidence',
+  authenticateToken,
+  allowRoles('admin', 'security'),
+  async (req, res) => {
+    const eventId = Number(req.params.id);
+
+    if (
+      !Number.isSafeInteger(eventId) ||
+      eventId <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid event ID.'
+      });
+    }
+
+    try {
+      const [events] = await db.promise().query(
+        `SELECT
+           id,
+           visitor_id,
+           visitor_name,
+           ble_id,
+           floor,
+           current_room,
+           event_type,
+           x,
+           y,
+           DATE_FORMAT(
+             created_at,
+             '%Y-%m-%d %H:%i:%s'
+           ) AS observed_at
+         FROM visitor_history
+         WHERE id = ?
+           AND event_type IN (?, ?)
+         LIMIT 1`,
+        [eventId, ...VISITOR_REPORT_EVENTS]
+      );
+
+      if (!events.length) {
+        return res.status(404).json({
+          success: false,
+          message: 'Reviewable observation not found.'
+        });
+      }
+
+      const [reviews] = await db.promise().query(
+        `SELECT
+           al.id,
+           al.user_id,
+           al.old_value,
+           al.new_value,
+           DATE_FORMAT(
+             al.created_at,
+             '%Y-%m-%d %H:%i:%s'
+           ) AS reviewed_at,
+           u.full_name AS reviewer
+         FROM audit_logs al
+         LEFT JOIN users u ON u.id = al.user_id
+         WHERE al.action = 'REVIEW_VISITOR_EVENT'
+           AND al.target_type = 'visitor_history'
+           AND al.target_id = ?
+         ORDER BY al.id ASC`,
+        [String(eventId)]
+      );
+
+      res.setHeader('Cache-Control', 'no-store');
+
+      return res.json({
+        success: true,
+        observation: events[0],
+        reviewHistory: reviews.map(row => ({
+          auditId: row.id,
+          reviewer: row.reviewer || 'Former user',
+          reviewerId: row.user_id,
+          reviewedAt: row.reviewed_at,
+          previousDecision: parseVisitorReview(
+            row.old_value
+          ),
+          decision: parseVisitorReview(
+            row.new_value
+          )
+        }))
+      });
+
+    } catch (error) {
+      console.error('Visitor event evidence error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to retrieve event evidence.'
+      });
+    }
+  }
+);
+
 
 app.get('/api/visitor-history', authenticateToken, allowRoles('admin','security'), (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'security' && req.user.role !== 'hr_admin') {

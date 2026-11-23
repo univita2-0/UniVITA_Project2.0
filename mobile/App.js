@@ -56,26 +56,49 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error) return;
   if (!data || !data.locations || data.locations.length === 0) return;
 
-  const location = data.locations[0];
+  // Background reports are lower-trust than an authenticated attendance check.
+  // Discard malformed, imprecise, stale, or explicitly mocked readings.
+  const location = data.locations[data.locations.length - 1];
+  const coords = location?.coords || {};
+  const latitude = Number(coords.latitude);
+  const longitude = Number(coords.longitude);
+  const accuracy = coords.accuracy == null ? NaN : Number(coords.accuracy);
+  const measuredAt = Number(location?.timestamp);
+  const ageMs = Date.now() - measuredAt;
+  const validCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude)
+    && latitude >= -90 && latitude <= 90
+    && longitude >= -180 && longitude <= 180
+    && !(latitude === 0 && longitude === 0);
+  const validQuality = Number.isFinite(accuracy) && accuracy >= 0 && accuracy <= 100
+    && Number.isFinite(measuredAt) && ageMs >= -10000 && ageMs <= 60000;
+  if (!validCoordinates || !validQuality || location?.mocked === true) return;
+
   try {
     const netState = await NetInfo.fetch();
-    if (!netState.isConnected) return;
+    if (!netState.isConnected || netState.isInternetReachable === false) return;
     const token = await AsyncStorage.getItem('auth_token');
     if (!token) return;
 
-    await fetch(`${API_URL}/instructor/location`, {
+    const response = await fetch(`${API_URL}/instructor/location`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        location_enabled: true
+        latitude,
+        longitude,
+        location_enabled: true,
+        gps_accuracy: accuracy,
+        gps_timestamp: new Date(measuredAt).toISOString(),
       }),
     });
-  } catch (err) {}
+    if (!response.ok) {
+      console.warn('Background location report rejected:', response.status);
+    }
+  } catch (err) {
+    console.warn('Background location transmission failed:', err?.message || err);
+  }
 });
 
 const Stack = createNativeStackNavigator();

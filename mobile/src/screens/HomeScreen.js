@@ -532,8 +532,11 @@ const greeting = useMemo(() => {
   
   useEffect(() => {
   let isCancelled = false;
+  let checkInProgress = false;
 
   const checkAndManageTracking = async (forceRestart = false) => {
+    if (isCancelled || checkInProgress) return;
+    checkInProgress = true;
     const { allTodaySchedules, todaySchedule, currentMinutes } = trackingRef.current;
     try {
       const hasActiveOrUpcomingShift = allTodaySchedules.some(shift => {
@@ -563,16 +566,25 @@ const greeting = useMemo(() => {
           return;
         }
 
-        await setTrackingEnabled(true);
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const latitude = Number(loc?.coords?.latitude);
+        const longitude = Number(loc?.coords?.longitude);
+        const accuracy = loc?.coords?.accuracy == null ? NaN : Number(loc.coords.accuracy);
+        const measuredAt = Number(loc?.timestamp);
+        const ageMs = Date.now() - measuredAt;
+        const usable = Number.isFinite(latitude) && Number.isFinite(longitude)
+          && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+          && !(latitude === 0 && longitude === 0)
+          && Number.isFinite(accuracy) && accuracy >= 0 && accuracy <= 100
+          && Number.isFinite(measuredAt) && ageMs >= -10000 && ageMs <= 60000
+          && loc?.mocked !== true;
 
-        if (!isCancelled && loc && loc.coords) {
-          await sendLocationPing(
-            loc.coords.latitude,
-            loc.coords.longitude,
-            true,
-            todaySchedule?.place || 'Campus'
+        if (!isCancelled && usable) {
+          const result = await sendLocationPing(
+            latitude, longitude, true, todaySchedule?.place || 'Campus',
+            { accuracy, timestamp: new Date(measuredAt).toISOString() }
           );
+          if (result?.success) await setTrackingEnabled(true);
         }
 
         const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
@@ -603,10 +615,10 @@ const greeting = useMemo(() => {
         await sendLocationPing(0, 0, false, 'Shift Ended');
       }
     } catch (err) {
-      try {
-        await setTrackingEnabled(false);
-        await sendLocationPing(0, 0, false, 'GPS Disabled');
-      } catch (e) {}
+      // A timeout or network error is not evidence that GPS was disabled.
+      console.warn('Location tracking check failed:', err?.message || err);
+    } finally {
+      checkInProgress = false;
     }
   };
 

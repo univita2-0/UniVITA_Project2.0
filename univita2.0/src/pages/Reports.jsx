@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import './Reports.css';
+import VisitorIncidentReports from './VisitorIncidentReports';
 import {
   Download, Users, Calendar, DollarSign, PieChart,
   Clock, FileText, TrendingUp, AlertCircle, CheckCircle, XCircle,
@@ -40,6 +41,7 @@ const Reports = () => {
   const isSecurity = currentUserRole === 'security';
 
   const [selectedReport, setSelectedReport] = useState(isSecurity ? 'visitor' : 'attendance');
+  const [visitorSection, setVisitorSection] = useState('appointments');
   const canWrite = isHR || (isSecurity && selectedReport === 'visitor');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
@@ -395,6 +397,11 @@ const Reports = () => {
 
     return (
       <div className="formal-rep-screen">
+        <nav className="formal-rep-visitor-subtabs" aria-label="Visitor reporting sections">
+          <button type="button" className={visitorSection === 'appointments' ? 'active' : ''} onClick={() => setVisitorSection('appointments')}>Appointments</button>
+          <button type="button" className={visitorSection === 'incidents' ? 'active' : ''} onClick={() => setVisitorSection('incidents')}>Incident Reports</button>
+        </nav>
+        {visitorSection === 'incidents' ? <VisitorIncidentReports month={selectedMonth} canExport={isSecurity} /> : (<>
         <div className="formal-rep-stats-grid">
           <StatBox label="Approved Appointments" value={visitorStats.approved} />
           <StatBox label="Rejected Requests" value={visitorStats.rejected} />
@@ -419,6 +426,7 @@ const Reports = () => {
             )}
           </div>
         </div>
+        </>)}
       </div>
     );
   };
@@ -668,7 +676,7 @@ const Reports = () => {
           </label>
         </div>
 
-        {canWrite && (
+        {canWrite && !(selectedReport === 'visitor' && visitorSection === 'incidents') && (
           <div className="formal-rep-controls">
             <button
               type="button"
@@ -795,7 +803,7 @@ const Reports = () => {
         </div>
       )}
 
-      {isSecurity && selectedReport === 'visitor' && (
+      {isSecurity && selectedReport === 'visitor' && visitorSection === 'appointments' && (
         <div className="print-only">
           <PrintableHeader
             title="CAMPUS VISITOR & GUEST CLEARANCE LOG"

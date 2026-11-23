@@ -11,7 +11,6 @@ import SecurityDashboard from './pages/SecurityDashboard';
 import ManageRequest from './pages/ManageRequest';
 import History from './pages/History';
 import BuildingVisitorTracking from './pages/BuildingVisitorTracking';
-import VisitorHistory from './pages/VisitorHistory';
 import Attendance from './pages/Attendance';
 import Schedule from './pages/Schedule';
 import SharedCalendar from './pages/SharedCalendar';
@@ -21,13 +20,13 @@ import PayrollHistory from './pages/PayrollHistory';
 import PayrollSummary from './pages/PayrollSummary';
 import ReportsWorkspace from './pages/ReportsWorkspace';
 import EmployeeManagement from './pages/EmployeeManagement';
-import AccountManagement from './pages/AccountManagement';
 import LocationsManagement from './pages/LocationsManagement';
 import CoursesManagement from './pages/CoursesManagement';
 import ProgramManagement from './pages/ProgramManagement';
 import LeaveManagement from './pages/LeaveManagement';
 import LeaveBalancesManagement from './pages/LeaveBalancesManagement';
 import EmergencyAlerts from './pages/EmergencyAlerts';
+import ComplianceReports from './pages/ComplianceReports';
 import AttendanceAppeals from './pages/AttendanceAppeals';
 import AttendanceCorrection from './pages/AttendanceCorrection';
 import Documents from './pages/Documents';
@@ -217,10 +216,9 @@ function App() {
       case 'payroll-main': return { title: 'Payroll Main' };
       case 'payroll-history': return { title: 'Payroll History' };
       case 'payroll-summary': return { title: 'Payroll Summary' };
-      case 'reports': return { title: 'Reports' };
-      case 'compliance-reports': return { title: 'Reports' };
-      case 'employee-management': return { title: 'Employee Information' };
-      case 'account-management': return { title: 'Account Access' };
+      case 'reports': return { title: 'Reports Dashboard' };
+      case 'compliance-reports': return { title: 'Compliance Reports' };
+      case 'employee-management': return { title: 'Employee Management' };
       case 'locations': return { title: 'Location Management' };
       case 'courses': return { title: 'Course Management' };
       case 'programs': return { title: 'Program Management' };
@@ -249,7 +247,7 @@ function App() {
   // 🟢 FIX 9 + FIX 10: every route gated by RequireRole + ROUTE_ROLES (single source)
   const renderContent = () => {
     if (showHistoryDetail) {
-      return <RequireRole roles={ROUTE_ROLES.history}><VisitorHistory /></RequireRole>;
+      return <RequireRole roles={ROUTE_ROLES.history}><BuildingVisitorTracking /></RequireRole>;
     }
 
     const roles = ROUTE_ROLES[currentView];
@@ -278,7 +276,7 @@ function App() {
     const renderView = () => {
       switch (currentView) {
         case 'manage-request':        return <ManageRequest />;
-        case 'history':               return <History />;
+        case 'history':               return <BuildingVisitorTracking />;
         case 'track-visitor':         return <BuildingVisitorTracking />;
         case 'attendance':            return <Attendance />;
         case 'schedule':              return <Schedule />;
@@ -312,10 +310,9 @@ function App() {
           );
         case 'payroll-history':       return <PayrollHistory />;
         case 'payroll-summary':       return <PayrollSummary />;
-        case 'reports':               return <ReportsWorkspace />;
-        case 'compliance-reports':    return <ReportsWorkspace initialTab="formal" />;
+        case 'reports':               return <ReportsWorkspace initialTab="analytics" />;
+        case 'compliance-reports':    return <ComplianceReports />;
         case 'employee-management':   return <EmployeeManagement onOpenPinChange={openPinModalForAdmin} />;
-        case 'account-management':    return <AccountManagement />;
         case 'locations':             return <LocationsManagement />;
         case 'courses':               return <CoursesManagement />;
         case 'programs':              return <ProgramManagement />;

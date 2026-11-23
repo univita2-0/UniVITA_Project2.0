@@ -108,7 +108,7 @@ const SecurityDashboard = ({ setView }) => {
       </section>
       <div className="uv-role-columns">
         <section className="uv-role-card uv-role-primary" aria-labelledby="security-desk-title">
-          <header className="uv-role-card-header"><div><h2 id="security-desk-title">Visitor & Hardware Monitoring</h2><p>Currently checked-in visitors and device alerts</p></div><span className="uv-role-count">{data.active.length} on campus</span></header>
+          <header className="uv-role-card-header"><div><h2 id="security-desk-title">Visitor & Hardware Monitoring</h2></div><span className="uv-role-count">{data.active.length} on campus</span></header>
           <div className="uv-role-tabs" role="tablist" aria-label="Security desk views">
             <button role="tab" type="button" aria-selected={tab==='visitors'} className={tab==='visitors'?'active':''} onClick={()=>setTab('visitors')}>Current Visitors</button>
             <button role="tab" type="button" aria-selected={tab==='alerts'} className={tab==='alerts'?'active':''} onClick={()=>setTab('alerts')}>Hardware Alerts {visibleAlerts.length>0 && <span className="uv-role-tab-badge">{visibleAlerts.length}</span>}</button>
@@ -130,7 +130,7 @@ const SecurityDashboard = ({ setView }) => {
           </div>
         </section>
         <section className="uv-role-card" aria-labelledby="security-breakdown-title">
-          <header className="uv-role-card-header"><div><h2 id="security-breakdown-title">Today's Visit Breakdown</h2><p>Status of visitor requests</p></div></header>
+          <header className="uv-role-card-header"><div><h2 id="security-breakdown-title">Today's Visit Breakdown</h2></div></header>
           <div className="uv-role-chart">
             <div className="uv-role-chart-summary"><div><strong>{data.active.length}</strong><small>Visitors on campus</small></div><div className="uv-role-chart-total"><strong>{data.all.length}</strong><small>Total requests</small></div></div>
             <div className="uv-role-stacked" role="img" aria-label="Distribution of today's visitor requests">
@@ -142,8 +142,8 @@ const SecurityDashboard = ({ setView }) => {
         </section>
       </div>
       <section className="uv-role-card uv-role-activities" aria-labelledby="security-activity-title">
-        <header className="uv-role-card-header"><div><h2 id="security-activity-title">Recent Visitor Activity</h2><p>Visitor and appointment events recorded today</p></div><span className="uv-role-subtle-count">{todayActivities.length} records</span></header>
-        {display.length ? display.map((a,i)=><div className="uv-role-activity" key={`${a.id||i}-${i}`}><span className="uv-role-avatar">{String(a.actor||'V').charAt(0).toUpperCase()}</span><div className="uv-role-activity-person"><strong>{a.actor||'Visitor'}</strong><small>{a.reference||'Visitor operation'}</small></div><span className="uv-role-activity-label">{String(a.title||a.type||'Visitor event').replace(/_/g,' ')}</span><time>{timeLabel(a.occurred_at||a.created_at||a.timestamp)}</time></div>) : <div className="uv-role-empty">No visitor activity recorded today.</div>}
+        <header className="uv-role-card-header"><div><h2 id="security-activity-title">Recent Visitor Activity</h2></div><span className="uv-role-subtle-count">{todayActivities.length} records</span></header>
+        {display.length ? display.map((a,i)=><div className="uv-role-activity" key={`${a.id||i}-${i}`}><span className="uv-role-avatar">{String(a.actor||'V').charAt(0).toUpperCase()}</span><div className="uv-role-activity-person"><strong>{a.actor||'Visitor'}</strong></div><span className="uv-role-activity-label">{String(a.title||a.type||'Visitor event').replace(/_/g,' ')}</span><time>{timeLabel(a.occurred_at||a.created_at||a.timestamp)}</time></div>) : <div className="uv-role-empty">No visitor activity recorded today.</div>}
         {todayActivities.length>5 && <footer className="uv-role-pagination"><button type="button" disabled={page===1} onClick={()=>setPage(p=>Math.max(1,p-1))}><ChevronLeft size={14}/> Previous</button><span>Page {page} of {totalPages}</span><button type="button" disabled={page===totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next <ChevronRight size={14}/></button></footer>}
       </section>
     </main>

@@ -1319,7 +1319,7 @@ const AppointmentPage = ({ onAdminLogin }) => {
         <div className="ap-modal-overlay" onClick={() => setShowAppointmentModal(false)}>
           <div className="ap-modal-content ap-booking-modal" role="dialog" aria-modal="true" aria-labelledby="ap-booking-title" onClick={e => e.stopPropagation()}>
             <div className="ap-modal-header ap-booking-modal-header">
-              <div className="ap-booking-heading"><div><h2 id="ap-booking-title">Request a Campus Visit</h2><p>Provide your details and preferred visit schedule.</p></div></div>
+              <div className="ap-booking-heading"><div><p>Provide your details and preferred visit schedule.</p></div></div>
               <button className="ap-btn-close" onClick={() => setShowAppointmentModal(false)} aria-label="Close modal">
                 <X size={20} />
               </button>

@@ -933,17 +933,22 @@ export const requestAttendanceCorrection = async (data) => {
 // ==========================================
 // ATTENDANCE WITH SELFIE + GEOTAG
 // ==========================================
-export const sendLocationPing = async (latitude, longitude, location_enabled, location_name) => {
+export const sendLocationPing = async (latitude, longitude, location_enabled, location_name, quality = null) => {
   try {
     const headers = await getAuthHeaders();
+    const body = { latitude, longitude, location_enabled, location_name };
+    if (quality && typeof quality === 'object' && location_enabled === true) {
+      body.gps_accuracy = quality.accuracy;
+      body.gps_timestamp = quality.timestamp;
+    }
     const response = await apiFetch(`${API_URL}/instructor/location`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ latitude, longitude, location_enabled, location_name })
-    }, 0); // 0 retries for location pings, they happen frequently anyway
+      body: JSON.stringify(body)
+    }, 0); // 0 retries: location pings happen frequently.
     return await handleResponse(response);
   } catch (error) {
-    return { success: false };
+    return { success: false, message: error?.message || 'Location transmission failed.' };
   }
 };
 

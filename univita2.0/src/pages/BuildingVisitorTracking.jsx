@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'react-toastify';
 import './BuildingVisitorTracking.css';
 import useBLEPositions from '../hooks/useBLEPositions';
@@ -13,6 +12,26 @@ import FormalModal from '../components/FormalModal';
 const getAuthHeaders = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
 });
+
+// Construct popup content through text nodes; never interpolate visitor input into HTML.
+const createVisitorPopup = (visitor) => {
+  const element = document.createElement('div');
+  const fields = [
+    ['Visitor', visitor.name],
+    ['BLE', visitor.bleId],
+    ['Confirmed room', visitor.currentRoom],
+    ['Destination', visitor.destination]
+  ];
+  fields.forEach(([label, value]) => {
+    const line = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = `${label}: `;
+    line.appendChild(strong);
+    line.appendChild(document.createTextNode(String(value ?? '—')));
+    element.appendChild(line);
+  });
+  return element;
+};
 
 // 🟢 FIXED: Added the missing room arrays
 const thirdFloorRooms = [
@@ -54,10 +73,16 @@ const IMAGE_HEIGHT = 400;
 
 const BuildingVisitorTracking = () => {
   const [currentFloor, setCurrentFloor] = useState('3');
-  const [isLive, setIsLive] = useState(true);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('live');
+  const [reviewEvents, setReviewEvents] = useState([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewEdits, setReviewEdits] = useState({});
+  const [savingReviewId, setSavingReviewId] = useState(null);
+  const [reviewSearch, setReviewSearch] = useState('');
+  const [reviewStatusFilter, setReviewStatusFilter] = useState('all');
   const [visitorHistory, setVisitorHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyHasLoaded, setHistoryHasLoaded] = useState(false);
   const [showDestinationModal, setShowDestinationModal] = useState(false);
   const [editingVisitor, setEditingVisitor] = useState(null);
   const [newDestination, setNewDestination] = useState('');
@@ -75,7 +100,6 @@ const BuildingVisitorTracking = () => {
   const mapBoundsRef = useRef(null);
   const prevVisitorsRef = useRef([]);
   const [disconnectedVisitors, setDisconnectedVisitors] = useState([]);
-  const visitorRoomStatsRef = useRef({});
 
   const { visitors, setVisitorDestination } = useBLEPositions();
 
@@ -143,22 +167,30 @@ const BuildingVisitorTracking = () => {
     const roomCounts = {};
 
     visitors.forEach((visitor) => {
-      if (visitor.floor !== currentFloor) {
+      if (visitor.floor !== currentFloor || visitor.isDisconnected || visitor.isPendingDetection) {
         if (markersRef.current[visitor.id]) markersRef.current[visitor.id].setOpacity(0);
         return;
       }
-      
+
       const roomKey = `${visitor.floor}-${visitor.currentRoom}`;
       if (!roomCounts[roomKey]) roomCounts[roomKey] = 0;
       
-      const lat = visitor.y;
-      const lng = visitor.x + (roomCounts[roomKey] * 6);
+      // Do not turn missing coordinates into x=0 by adding a numeric offset.
+      const x = visitor.x == null ? NaN : Number(visitor.x);
+      const y = visitor.y == null ? NaN : Number(visitor.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        if (markersRef.current[visitor.id]) markersRef.current[visitor.id].setOpacity(0);
+        return;
+      }
+      const lat = y;
+      const lng = x + (roomCounts[roomKey] * 6);
       roomCounts[roomKey]++;
 
-      if (lat == null || lng == null) return;
-
       if (markersRef.current[visitor.id]) {
-        markersRef.current[visitor.id].setLatLng([lat, lng]).setOpacity(1);
+        markersRef.current[visitor.id]
+          .setLatLng([lat, lng])
+          .setOpacity(1)
+          .setPopupContent(createVisitorPopup(visitor));
       } else {
         const icon = L.divIcon({
           html: `<div style="background-color:#ef4444; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 0 0 0 rgba(239,68,68,0.7); animation:pulse 1.5s infinite;"></div>`,
@@ -167,12 +199,7 @@ const BuildingVisitorTracking = () => {
           popupAnchor: [0, -8],
         });
         const marker = L.marker([lat, lng], { icon }).addTo(mapRef.current);
-        marker.bindPopup(`
-          <b>${visitor.name}</b><br/>
-          BLE: ${visitor.bleId}<br/>
-          Current room: ${visitor.currentRoom}<br/>
-          Destination: ${visitor.destination}
-        `, { autoPan: false });
+        marker.bindPopup(createVisitorPopup(visitor), { autoPan: false });
         markersRef.current[visitor.id] = marker;
       }
     });
@@ -207,24 +234,74 @@ const BuildingVisitorTracking = () => {
       console.error('Failed to fetch history:', err);
     } finally {
       setHistoryLoading(false);
+      setHistoryHasLoaded(true);
     }
   };
 
   useEffect(() => {
-    let interval;
-    if (showHistoryModal) {
-      fetchVisitorHistory(); 
-      interval = setInterval(fetchVisitorHistory, 5000); 
-    }
-    return () => clearInterval(interval);
-  }, [showHistoryModal]);
+    if (activeTab === 'history') fetchVisitorHistory();
+  }, [activeTab]);
 
   const openHistoryModal = () => {
     setHistorySearchTerm('');
     setHistoryDateFilter('');
     setHistoryCurrentPage(1);
-    setShowHistoryModal(true);
+    setActiveTab('history');
   };
+
+  const fetchReviews = async () => {
+    setReviewLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE}/visitor-event-reviews`, getAuthHeaders());
+      setReviewEvents(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Failed to load event reviews:', error);
+      toast.error('Unable to load security event reviews.');
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'reviews') fetchReviews();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'live' && mapRef.current) {
+      const timer = setTimeout(() => mapRef.current?.invalidateSize(), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab]);
+
+  const saveReview = async (event) => {
+    const edit = reviewEdits[event.id] || {};
+    const status = edit.status ?? (event.review?.status === 'pending_review'
+      ? 'under_review' : event.review?.status) ?? 'under_review';
+    const notes = (edit.notes ?? event.review?.notes ?? '').trim();
+    if (notes.length < 10 || notes.length > 1000) {
+      toast.error('Investigation notes must be 10–1000 characters.');
+      return;
+    }
+    setSavingReviewId(event.id);
+    try {
+      await axios.put(`${API_BASE}/visitor-event-reviews/${event.id}`, { status, notes }, getAuthHeaders());
+      toast.success('Security review decision saved.');
+      setReviewEdits(previous => { const next = { ...previous }; delete next[event.id]; return next; });
+      await fetchReviews();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not save review decision.');
+    } finally {
+      setSavingReviewId(null);
+    }
+  };
+
+  const filteredReviewEvents = reviewEvents.filter(event => {
+    const status = event.review?.status || 'pending_review';
+    const keyword = reviewSearch.trim().toLowerCase();
+    return (reviewStatusFilter === 'all' || reviewStatusFilter === status) &&
+      (!keyword || [event.visitor_name, event.ble_id, event.current_room, event.event_type]
+        .some(value => String(value || '').toLowerCase().includes(keyword)));
+  });
 
   const filteredHistory = visitorHistory.filter(item => {
     const matchesSearch =
@@ -253,85 +330,40 @@ const BuildingVisitorTracking = () => {
   const historyStartIndex = (historyCurrentPage - 1) * historyRowsPerPage;
   const currentHistoryData = filteredHistory.slice(historyStartIndex, historyStartIndex + historyRowsPerPage);
 
-  const [loiterThresholdMs, setLoiterThresholdMs] = useState(2 * 60 * 1000);
-
+  // V02: Alerts are derived from explicit backend tracking transitions.
+  // A visitor disappearing from this page does NOT imply a lost BLE signal.
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const res = await axios.get(`${API_BASE}/settings`, getAuthHeaders());
-        if (res.data && res.data.loiter_threshold_minutes) {
-          setLoiterThresholdMs(parseInt(res.data.loiter_threshold_minutes, 10) * 60 * 1000);
-        }
-      } catch (err) {
-        console.error('Failed to fetch system settings:', err);
-      }
-    };
-    fetchSettings();
-  }, []);
+    const previous = new Map(prevVisitorsRef.current.map(v => [v.id, v]));
 
-  useEffect(() => {
-    const currentVisitorIds = visitors.map(v => v.id);
-    const now = Date.now();
-    const IDLE_LIMIT_MS = loiterThresholdMs;
+    for (const visitor of visitors) {
+      const prior = previous.get(visitor.id);
+      if (!prior) continue; // Ignore initial hydration.
 
-    prevVisitorsRef.current.forEach(prevVisitor => {
-      if (!currentVisitorIds.includes(prevVisitor.id)) {
+      if (!prior.isDisconnected && visitor.trackingStatus === 'signal_lost') {
         toast.warning(
-          <div>
-            <strong>{prevVisitor.name}</strong> ({prevVisitor.bleId})<br/>
-            <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Signal lost in {prevVisitor.currentRoom}. Removed from map.</span>
-          </div>,
-          { toastId: `disconnect-${prevVisitor.id}`, autoClose: 6000 }
+          `${visitor.name}: BLE signal lost. Last confirmed room: ${visitor.currentRoom}.`,
+          { toastId: `signal-lost-${visitor.id}`, autoClose: 6000 }
         );
-        
-        setDisconnectedVisitors(prev => {
-          if (prev.some(v => v.id === prevVisitor.id)) return prev;
-          return [{
-            ...prevVisitor,
-            disconnectedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }, ...prev];
-        });
-        delete visitorRoomStatsRef.current[prevVisitor.id];
       }
-    });
-
-    visitors.forEach(visitor => {
-      const stats = visitorRoomStatsRef.current[visitor.id];
-      if (!stats || stats.room !== visitor.currentRoom) {
-        visitorRoomStatsRef.current[visitor.id] = { room: visitor.currentRoom, entryTime: now, alertTriggered: false };
-      } else {
-        const timeInRoom = now - stats.entryTime;
-        if (
-          visitor.destination && visitor.destination !== 'Unknown' &&
-          visitor.currentRoom !== 'Unknown' && visitor.currentRoom !== visitor.destination &&
-          timeInRoom >= IDLE_LIMIT_MS && !stats.alertTriggered
-        ) {
-          toast.error(
-            <div>
-              <strong>Security Alert: Loitering</strong><br/>
-              {visitor.name} ({visitor.bleId}) is in <b>{visitor.currentRoom}</b> for over 2 mins.<br/>
-              <span style={{ fontSize: '0.8rem', color: '#64748B' }}>Expected: {visitor.destination}</span>
-            </div>,
-            { toastId: `loiter-${visitor.id}-${stats.entryTime}`, autoClose: 8000 }
-          );
-          
-          visitorRoomStatsRef.current[visitor.id].alertTriggered = true;
-        }
+      if (prior.isDisconnected && visitor.trackingStatus === 'active') {
+        toast.info(`${visitor.name}: BLE signal restored.`,
+          { toastId: `signal-restored-${visitor.id}`, autoClose: 5000 });
       }
-    });
+      if (!prior.loiterAlertSent && visitor.loiterAlertSent &&
+          visitor.trackingStatus === 'active') {
+        toast.warning(
+          `${visitor.name}: unexpected room stay requires review (${visitor.currentRoom}).`,
+          { toastId: `room-review-${visitor.id}-${visitor.currentRoom}`, autoClose: 7000 }
+        );
+      }
+    }
 
-    setDisconnectedVisitors(prev => {
-      const filtered = prev.filter(v => !currentVisitorIds.includes(v.id));
-      if (filtered.length !== prev.length) return filtered;
-      return prev; 
-    });
-
+    setDisconnectedVisitors(visitors.filter(v => v.trackingStatus === 'signal_lost'));
     prevVisitorsRef.current = visitors;
-  }, [visitors, loiterThresholdMs]);
+  }, [visitors]);
 
-  const currentVisitors = visitors.filter(v => 
-    v.floor === currentFloor && 
-    v.lastSeen !== 'Disconnected' 
+  const currentVisitors = visitors.filter(v =>
+    v.floor === currentFloor && v.trackingStatus === 'active'
   );
   
   const totalVisitors = visitors.length;
@@ -339,68 +371,65 @@ const BuildingVisitorTracking = () => {
   const floor3Count = visitors.filter(v => v.floor === '3').length;
   const floor5Count = visitors.filter(v => v.floor === '5').length;
   const percentage = totalVisitors ? Math.round((activeVisitors / totalVisitors) * 100) : 0;
+  const awaitingVisitors = visitors.filter(v => v.trackingStatus === 'awaiting_detection').length;
+  const globallyActiveVisitors = visitors.filter(v => v.trackingStatus === 'active').length;
+  const pendingReviews = reviewEvents.filter(e => (e.review?.status || 'pending_review') === 'pending_review').length;
   const availableRooms = editingVisitor
     ? (editingVisitor.floor === '3' ? thirdFloorRooms : fifthFloorRooms)
     : (currentFloor === '3' ? thirdFloorRooms : fifthFloorRooms);
 
   return (
     <div className="visitor-tracking-container">
-      <div className="tracking-header">
-        <div>
+      <header className="tracking-header">
+        <div className="tracking-heading">
           
-          <p className="subtitle">Live BLE visitor positions, floor overview, and movement alerts.</p>
+          <p className="subtitle">Monitor visitor locations, review recorded movements, and assess security observations.</p>
         </div>
-        <div className="uv-tracking-indicator" role="status"><span className="uv-tracking-dot" /> BLE tracking workspace</div>
-      </div>
+        <div className="uv-tracking-indicator" role="status"><span className="uv-tracking-dot" /> BLE tracking overview</div>
+      </header>
 
-      <div className="stats-row">
-        <div className="stat-card">
-          <div className="stat-number">{totalVisitors}</div>
-          <div className="stat-label">TOTAL VISITORS</div>
-        </div>
-        <div className="stat-card active">
-          <div className="stat-number">{activeVisitors}</div>
-          <div className="stat-label">ACTIVE ON FLOOR {currentFloor}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-number">{disconnectedVisitors.length}</div>
-          <div className="stat-label">DISCONNECTED</div>
-        </div>
-      </div>
+      <nav className="v03-tabs" aria-label="Visitor tracking views">
+        <button type="button" className={activeTab === 'live' ? 'selected' : ''} aria-current={activeTab === 'live' ? 'page' : undefined} onClick={() => setActiveTab('live')}> Live Tracking</button>
+        <button type="button" className={activeTab === 'history' ? 'selected' : ''} aria-current={activeTab === 'history' ? 'page' : undefined} onClick={openHistoryModal}> Tracking History</button>
+        <button type="button" className={activeTab === 'reviews' ? 'selected' : ''} aria-current={activeTab === 'reviews' ? 'page' : undefined} onClick={() => setActiveTab('reviews')}> Event Reviews {activeTab === 'reviews' && pendingReviews > 0 && <span className="v03-tab-count">{pendingReviews}</span>}</button>
+      </nav>
+      <div style={{ display: activeTab === 'live' ? undefined : 'none' }}>
+      <section className="stats-row" aria-label="Tracking summary">
+        <div className="stat-card"><div className="stat-meta"><span>Checked-in visitors</span></div><div className="stat-number">{totalVisitors}</div></div>
+        <div className="stat-card active"><div className="stat-meta"><span>Actively detected</span></div><div className="stat-number">{globallyActiveVisitors}</div></div>
+        <div className="stat-card"><div className="stat-meta"><span>Awaiting first scan</span></div><div className="stat-number">{awaitingVisitors}</div></div>
+        <div className="stat-card warning"><div className="stat-meta"><span>Signal interruptions</span></div><div className="stat-number">{disconnectedVisitors.length}</div></div>
+      </section>
 
       <div className="floor-controls">
-        <div className="floor-toggles">
-          <button className={`floor-btn ${currentFloor === '3' ? 'active' : ''}`} onClick={() => setCurrentFloor('3')}>
-            3rd Floor <span className="count-badge">{floor3Count}</span>
-          </button>
-          <button className={`floor-btn ${currentFloor === '5' ? 'active' : ''}`} onClick={() => setCurrentFloor('5')}>
-            5th Floor <span className="count-badge">{floor5Count}</span>
-          </button>
-        </div>
-        <div className="action-buttons">
-          <button className={`live-btn ${isLive ? 'live' : 'paused'}`} onClick={() => setIsLive(!isLive)}>
-            {isLive ? 'Live' : 'Paused'}
-          </button>
-          <button className="history-btn" onClick={openHistoryModal}>History</button>
+        <div className="floor-toolbar-title"><div><strong>Facility floor plan</strong><span>Select a floor to view confirmed visitor positions</span></div></div>
+        <div className="floor-toolbar-actions">
+          <div className="floor-toggles" aria-label="Choose facility floor">
+            <button type="button" className={`floor-btn ${currentFloor === '3' ? 'active' : ''}`} aria-pressed={currentFloor === '3'} onClick={() => setCurrentFloor('3')}>Floor 3 <span className="count-badge">{floor3Count}</span></button>
+            <button type="button" className={`floor-btn ${currentFloor === '5' ? 'active' : ''}`} aria-pressed={currentFloor === '5'} onClick={() => setCurrentFloor('5')}>Floor 5 <span className="count-badge">{floor5Count}</span></button>
+          </div>
+          
         </div>
       </div>
 
       <div className="tracking-main">
         <div className={`map-panel-wrapper ${isMapExpanded ? 'expanded' : ''}`}>
+          <div className="map-panel-label"> Floor {currentFloor} · Confirmed positions</div>
           <div id="floorMapContainer" className="map-panel"></div>
-          <button className="fullscreen-btn" onClick={toggleMapExpand}>
-            {isMapExpanded ? 'Exit Fullscreen' : 'Expand Map'}
+          <button type="button" className="fullscreen-btn" onClick={toggleMapExpand}>
+            
+            {isMapExpanded ? 'Close expanded view' : 'Expand floor plan'}
           </button>
         </div>
 
         {!isMapExpanded && (
           <div className="visitors-panel">
             <div className="visitors-header">
-              <h3>Active Visitors</h3>
+              <h3>Visitors on this floor</h3>
               <span className="floor-badge">Floor {currentFloor}</span>
             </div>
             <div className="visitors-stats">
-              <div className="visitor-count">{activeVisitors} visitor{activeVisitors !== 1 ? 's' : ''} on Floor {currentFloor}</div>
+              <div className="visitor-count"><strong>{activeVisitors}</strong> actively detected on Floor {currentFloor}</div>
               <div className="percentage-bar"><div className="percentage-fill" style={{ width: `${percentage}%` }}></div></div>
               <div className="percentage-label">{percentage}% of total</div>
             </div>
@@ -412,11 +441,11 @@ const BuildingVisitorTracking = () => {
                 </div>
               ) : (
                 currentVisitors.map(visitor => (
-                  <div key={visitor.id} className="visitor-card" onClick={() => openDestinationModal(visitor)}>
+                  <button type="button" key={visitor.id} className="visitor-card" onClick={() => openDestinationModal(visitor)} aria-label={`Edit destination for ${visitor.name}`}>
                     <div className="visitor-card-header">
                       <div className="visitor-avatar">{visitor.name.charAt(0).toUpperCase()}</div>
                       <div className="visitor-name">{visitor.name}</div>
-                      <div className="visitor-status live"></div>
+                      <span className="visitor-live-tag"><span className="visitor-status live"/> Active</span>
                     </div>
                     <div className="visitor-details">
                       <div className="detail-row"><span>BLE: {visitor.bleId}</span></div>
@@ -433,15 +462,15 @@ const BuildingVisitorTracking = () => {
                           {visitor.isPendingDetection 
                             ? 'Awaiting scanner...' 
                             : visitor.isDisconnected
-                              ? `Signal Lost at: ${visitor.disconnectedAt || (typeof visitor.lastSeen === 'number' ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unknown')}`
+                              ? `Signal Lost at: ${(typeof visitor.disconnectedAt === 'number' ? new Date(visitor.disconnectedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : visitor.disconnectedAt) || (typeof visitor.lastSeen === 'number' ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Unknown')}`
                               : typeof visitor.lastSeen === 'number' 
                                 ? new Date(visitor.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) 
-                                : (visitor.lastSeen || 'Just now')}
+                                : (visitor.lastSeen || 'No scan recorded')}
                         </span>
                       </div>
                     </div>
-                    <div className="edit-destination-hint">Click to edit destination</div>
-                  </div>
+                    <div className="edit-destination-hint">Manage destination </div>
+                  </button>
                 ))
               )}
             </div>
@@ -463,7 +492,7 @@ const BuildingVisitorTracking = () => {
                       <div className="visitor-details">
                         <div className="detail-row"><span className="offline-text">BLE: {visitor.bleId}</span></div>
                         <div className="detail-row"><span className="offline-text">Last Seen: <strong>{visitor.currentRoom}</strong></span></div>
-                        <div className="detail-row last-seen-red"><span>Signal lost at {visitor.disconnectedAt}</span></div>
+                        <div className="detail-row last-seen-red"><span>Signal lost at {typeof visitor.disconnectedAt === 'number' ? new Date(visitor.disconnectedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : (visitor.disconnectedAt || 'Unknown')}</span></div>
                       </div>
                     </div>
                   ))}
@@ -471,13 +500,11 @@ const BuildingVisitorTracking = () => {
               </div>
             )}
 
-            <div className="legend">
-              <span className="legend-item"><span className="legend-dot live"></span> Live</span>
-              <span className="legend-item"><span className="legend-dot selected"></span> Selected</span>
-              <span className="legend-item"><span className="legend-dot pulse"></span> Moving</span>
-            </div>
+            <div className="legend"><span className="legend-item"><span className="legend-dot live" /> Confirmed active position</span><span className="legend-item"><span className="legend-dot offline-dot" /> Signal lost</span></div>
           </div>
         )}
+      </div>
+
       </div>
 
       <FormalModal
@@ -510,16 +537,15 @@ const BuildingVisitorTracking = () => {
         )}
       </FormalModal>
 
-      <FormalModal
-        show={showHistoryModal}
-        onClose={() => setShowHistoryModal(false)}
-        title="Visitor Movement & Alert History"
-        wide
-        footer={<button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>Close Window</button>}
-      >
+      {activeTab === 'history' && (
+        <section className="v03-panel" aria-label="Visitor movement history">
+          <div className="v03-toolbar">
+            <div><div className="v03-section-kicker"> MONITORING RECORDS</div></div>
+            <button type="button" className="v03-refresh" onClick={fetchVisitorHistory} disabled={historyLoading}> Refresh</button>
+          </div>
         <div className="history-modal-toolbar">
           <div className="history-search-box">
-            <Search size={18} className="history-search-icon" />
+            
             <input
               type="text"
               placeholder="Search visitor name, BLE tag, or room..."
@@ -529,25 +555,27 @@ const BuildingVisitorTracking = () => {
           </div>
           
           <div className="history-date-filter">
-            <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginRight: '0.5rem' }}>Filter Date:</label>
+            <label htmlFor="visitor-history-date">Date</label>
             <input
               type="date"
+              id="visitor-history-date"
               value={historyDateFilter}
               onChange={(e) => { setHistoryDateFilter(e.target.value); setHistoryCurrentPage(1); }}
             />
             {historyDateFilter && (
               <button 
                 onClick={() => { setHistoryDateFilter(''); setHistoryCurrentPage(1); }}
-                style={{ background: '#FEE2E2', border: 'none', padding: '0.5rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: '0.5rem' }}
+                className="history-clear-date"
                 title="Clear Date Filter"
+                aria-label="Clear history date filter"
               >
-                <X size={16} color="#DC2626" />
+                Clear
               </button>
             )}
           </div>
         </div>
 
-        {historyLoading ? (
+        {historyLoading && !historyHasLoaded ? (
           <div className="loading-state">
             <div className="spinner"></div>
             <p>Loading history logs...</p>
@@ -576,21 +604,30 @@ const BuildingVisitorTracking = () => {
                     if (record.event_type === 'connect' || record.event_type === 'enter') {
                       badgeStyle = { backgroundColor: '#DEF7EC', color: '#03543F', border: '1px solid #84E1BC' };
                       eventLabel = record.event_type === 'connect' ? 'Connected / Detected' : 'Entered Campus';
+                    } else if (record.event_type === 'signal_lost') {
+                      badgeStyle = { backgroundColor: '#FDE8E8', color: '#9B1C1C', border: '1px solid #F8B4B4' };
+                      eventLabel = 'BLE Signal Lost';
+                    } else if (record.event_type === 'signal_restored') {
+                      badgeStyle = { backgroundColor: '#DEF7EC', color: '#03543F', border: '1px solid #84E1BC' };
+                      eventLabel = 'BLE Signal Restored';
+                    } else if (record.event_type === 'checkout') {
+                      badgeStyle = { backgroundColor: '#E1EFFE', color: '#1E429F', border: '1px solid #A4CAFE' };
+                      eventLabel = 'Visitor Checked Out / Tag Returned';
                     } else if (record.event_type === 'disconnect' || record.event_type === 'Exit / Returned') {
                       badgeStyle = { backgroundColor: '#FDE8E8', color: '#9B1C1C', border: '1px solid #F8B4B4' };
-                      eventLabel = 'Signal Lost / Exited';
+                      eventLabel = 'Disconnect (Unclassified)';
                     } else if (record.event_type === 'move') {
                       badgeStyle = { backgroundColor: '#E1EFFE', color: '#1E429F', border: '1px solid #A4CAFE' };
                       eventLabel = 'Moved Location';
                     } else if (record.event_type && record.event_type.toLowerCase().includes('loitering')) {
                       badgeStyle = { backgroundColor: '#FEECDC', color: '#8A2C0D', border: '1px solid #FDBA8C' };
-                      eventLabel = 'Loitering Warning';
+                      eventLabel = 'Unexpected Room Stay — Review';
                     }
 
                     return (
                       <tr key={record.id}>
                         <td className="history-timestamp">
-                          {new Date(record.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' })}
+                          {String(record.timestamp || '—')}
                         </td>
                         <td>
                           <div className="history-visitor-name">{record.visitor_name}</div>
@@ -619,9 +656,10 @@ const BuildingVisitorTracking = () => {
                   <button
                     className="history-page-btn"
                     disabled={historyCurrentPage === 1}
+                    aria-label="Previous history page"
                     onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
                   >
-                    <ChevronLeft size={16} />
+                    Previous
                   </button>
                   <span className="history-page-current">
                     Page {historyCurrentPage} of {historyTotalPages}
@@ -629,16 +667,81 @@ const BuildingVisitorTracking = () => {
                   <button
                     className="history-page-btn"
                     disabled={historyCurrentPage === historyTotalPages}
+                    aria-label="Next history page"
                     onClick={() => setHistoryCurrentPage(p => Math.min(historyTotalPages, p + 1))}
                   >
-                    <ChevronRight size={16} />
+                    Next
                   </button>
                 </div>
               </div>
             )}
           </>
         )}
-      </FormalModal>
+        </section>
+      )}
+
+      {activeTab === 'reviews' && (
+        <section className="v03-panel" aria-label="Security event review queue">
+          <div className="v03-toolbar">
+            <div><div className="v03-section-kicker"> SECURITY ASSESSMENT</div></div>
+            <button type="button" className="v03-refresh" onClick={fetchReviews} disabled={reviewLoading}> Refresh</button>
+          </div>
+          <div className="v03-review-overview"><div><strong>{reviewEvents.length}</strong><span>Reviewable observations</span></div><div><strong>{pendingReviews}</strong><span>Pending assessment</span></div><div><strong>{reviewEvents.filter(e => e.review?.status === 'under_review').length}</strong><span>Under investigation</span></div></div>
+          <div className="v03-filters">
+            <input aria-label="Search reviews" placeholder="Search visitor, tag, or room" value={reviewSearch}
+              onChange={event => setReviewSearch(event.target.value)} />
+            <select aria-label="Filter review status" value={reviewStatusFilter}
+              onChange={event => setReviewStatusFilter(event.target.value)}>
+              <option value="all">All statuses</option>
+              <option value="pending_review">Pending review</option>
+              <option value="under_review">Under review</option>
+              <option value="dismissed">No confirmed incident</option>
+              <option value="confirmed_incident">Confirmed incident</option>
+            </select>
+          </div>
+          {reviewLoading ? <p>Loading review queue...</p> : filteredReviewEvents.length === 0 ? (
+            <p>No matching reviewable observations found.</p>
+          ) : (
+            <div className="v03-review-grid">
+              {filteredReviewEvents.map(event => {
+                const edit = reviewEdits[event.id] || {};
+                const status = edit.status ?? (event.review?.status === 'pending_review'
+                  ? 'under_review' : event.review?.status) ?? 'under_review';
+                const notes = edit.notes ?? event.review?.notes ?? '';
+                return (
+                  <article key={event.id} className="v03-review-card">
+                    <div className="v03-review-heading"><div><span className="v03-review-ref">EVENT #{event.id}</span><h3>{event.visitor_name || 'Unknown visitor'}</h3></div><span className={`v03-event-type ${event.event_type === 'signal_lost' ? 'signal' : 'room'}`}>{event.event_type === 'signal_lost' ? 'Signal interruption' : 'Unexpected room stay'}</span></div>
+                    <div className="v03-event-meta"><span> {event.ble_id || 'Unknown tag'}</span><span> Floor {event.floor || '—'} · {event.current_room || 'Unknown room'}</span><span> {event.timestamp || '—'} PHT</span></div>
+                    <div className="v03-current-decision"><span>Current review status</span><strong className={`v03-decision-${event.review?.status || 'pending_review'}`}>{event.review?.status === 'pending_review' ? 'Pending review'
+                      : event.review?.status === 'confirmed_incident' ? 'Confirmed incident'
+                      : event.review?.status === 'dismissed' ? 'No confirmed incident'
+                      : 'Under review'}</strong></div>
+                    {event.review?.reviewedAt && (
+                      <p>Last reviewed by {event.review.reviewedBy || 'Authorized user'} on {event.review.reviewedAt}</p>
+                    )}
+                    <div className="v03-review-form"><label htmlFor={`v03-status-${event.id}`}>Review decision</label>
+                    <select id={`v03-status-${event.id}`} value={status}
+                      onChange={e => setReviewEdits(previous => ({
+                        ...previous, [event.id]: { ...previous[event.id], status: e.target.value }
+                      }))}>
+                      <option value="under_review">Under Review</option>
+                      <option value="dismissed">No Confirmed Incident</option>
+                      <option value="confirmed_incident">Confirmed Incident</option>
+                    </select>
+                    <label htmlFor={`v03-notes-${event.id}`}>Investigation notes (10–1000 characters)</label>
+                    <textarea id={`v03-notes-${event.id}`} rows={3} maxLength={1000} value={notes}
+                      onChange={e => setReviewEdits(previous => ({
+                        ...previous, [event.id]: { ...previous[event.id], notes: e.target.value }
+                      }))} placeholder="Record checks performed and findings." />
+                    <div className="v03-review-actions"><span>{notes.trim().length}/1000 characters</span><button type="button" disabled={savingReviewId !== null || notes.trim().length < 10}
+                      onClick={() => saveReview(event)}> {savingReviewId === event.id ? 'Saving...' : 'Save review decision'}</button></div></div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 };

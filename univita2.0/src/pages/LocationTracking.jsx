@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import {
-  RefreshCw, History, Eye, AlertTriangle, ShieldCheck, Clock,
+  RefreshCw, History, Eye, AlertTriangle,
   Search, X, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import FormalModal from '../components/FormalModal';
@@ -15,13 +15,70 @@ const getAuthHeaders = () => ({
 
 const PAGE_SIZE = 25;
 const TIMELINE_PAGE_SIZE = 50;
-const GPS_DISPLAY_GRACE_MS = 60_000;
+const GPS_DISPLAY_GRACE_MS = 180_000;
+
+const getLocationAlertMeta = (alert) => {
+  if (alert?.category && alert?.severity) {
+    return {
+      category: alert.category,
+      severity: alert.severity
+    };
+  }
+
+  const message = String(
+    alert?.alert_message || ''
+  ).trim().toLowerCase();
+
+  if (message === 'gps turned on' || message === 'location signal restored') {
+    return {
+      category: 'GPS Status',
+      severity: 'information'
+    };
+  }
+
+  if (
+    message === 'gps turned off' ||
+    message === 'location signal lost'
+  ) {
+    return {
+      category: 'GPS Status',
+      severity: 'warning'
+    };
+  }
+
+  if (
+    message === 'entered campus perimeter' ||
+    message === 'entered campus'
+  ) {
+    return {
+      category: 'Geofence',
+      severity: 'information'
+    };
+  }
+
+  if (message === 'went outside campus perimeter') {
+    return {
+      category: 'Geofence',
+      severity: 'warning'
+    };
+  }
+
+  return {
+    category: 'Other',
+    severity: 'information'
+  };
+};
+
+const severityLabel = {
+  information: 'Information',
+  warning: 'Warning',
+  requires_review: 'Requires Review'
+};
+
 
 const toLocalISODate = (d = new Date()) =>
   d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 
-// Bare MySQL DATETIME values in this workflow are Philippine wall-clock times.
-// Explicit Z/offset timestamps are absolute instants and retain their timezone.
 const parseVisitorTimestamp = (value) => {
   if (value == null || value === '') return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
@@ -134,6 +191,21 @@ const LocationTracking = () => {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyDate, setHistoryDate] = useState(toLocalISODate());
   const [alertHistory, setAlertHistory] = useState([]);
+
+const [alertCategoryFilter, setAlertCategoryFilter] =
+  useState('all');
+
+const filteredAlertHistory = useMemo(() => {
+  return alertHistory.filter(alert => {
+    if (alertCategoryFilter === 'all') {
+      return true;
+    }
+
+    return getLocationAlertMeta(alert).category ===
+      alertCategoryFilter;
+  });
+}, [alertHistory, alertCategoryFilter]);
+
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const [showTimelineModal, setShowTimelineModal] = useState(false);
@@ -143,6 +215,12 @@ const LocationTracking = () => {
   const [timelinePage, setTimelinePage] = useState(1);
 
   const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
 
@@ -183,6 +261,7 @@ const LocationTracking = () => {
       setInstructors(Array.isArray(statusRes.data) ? statusRes.data : []);
       setAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : []);
       setSuspiciousEvents(Array.isArray(suspiciousRes.data) ? suspiciousRes.data : []);
+      setLastSyncedAt(Date.now());
     } catch (err) {
       if (isAbortError(err, signal)) return;
       console.error('fetchData error:', err);
@@ -235,7 +314,9 @@ const LocationTracking = () => {
     setTimelineData({ timeline: [], alerts: [], start_time: null, end_time: null });
     try {
       const res = await axios.get(
-        `${API_BASE}/location-tracking/instructor-timeline/${inst.employee_id}?date=${selectedDate}`,
+        `${API_BASE}/location-tracking/instructor-timeline/${encodeURIComponent(inst.employee_id)}` +
+          `?date=${encodeURIComponent(selectedDate)}` +
+          (inst.schedule_id ? `&schedule_id=${encodeURIComponent(inst.schedule_id)}` : ''),
         { ...getAuthHeaders(), signal }
       );
       if (signal?.aborted) return;
@@ -263,6 +344,9 @@ const LocationTracking = () => {
 
   useEffect(() => {
     let ws;
+    let reconnectTimer;
+    let suspiciousTimer;
+    let statusRefreshTimer;
     const getWsUrl = () => {
       try {
         if (API_BASE.startsWith('http')) {
@@ -283,6 +367,9 @@ const LocationTracking = () => {
 
     try {
       ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        if (selectedDateRef.current === toLocalISODate()) fetchDataRef.current(toLocalISODate());
+      };
       ws.onmessage = (event) => {
         let data;
         try { data = JSON.parse(event.data); } catch { return; }
@@ -291,22 +378,26 @@ const LocationTracking = () => {
         const today = toLocalISODate();
         if (selectedDateRef.current !== today) return;
 
-        if (data.type === 'instructor_status_update' && data.instructor && data.instructor.employee_id) {
-          setInstructors(prev => prev.map(inst =>
-            inst.employee_id === data.instructor.employee_id
-              ? { ...inst, ...data.instructor }
-              : inst
-          ));
+        if (data.type === 'instructor_status_update') {
+          // Always request complete, schedule-specific status rows. A lightweight
+          // push may omit attendance data or refer to another same-day shift.
+          clearTimeout(statusRefreshTimer);
+          statusRefreshTimer = setTimeout(() => {
+            if (selectedDateRef.current === today) fetchDataRef.current(today);
+          }, 350);
         } else if (data.type === 'new_alert') {
-          fetchDataRef.current(today);
+          clearTimeout(statusRefreshTimer);
+          statusRefreshTimer = setTimeout(() => {
+            if (selectedDateRef.current === today) fetchDataRef.current(today);
+          }, 350);
         } else if (data.type === 'suspicious_location') {
           const ev = data.event || {};
           const name = ev.full_name || ev.employee_id || 'Unknown';
           const reason = ev.flags?.[0]?.reason || 'Suspicious location';
           const detail = ev.flags?.[0]?.detail || '';
 
-          toast.error(
-  `⚠️ Suspicious location flagged: ${name} — ${reason}` + (detail ? ` (${detail})` : ''),
+          toast.warn(
+  `Suspicious location requires review: ${name} — ${reason}` + (detail ? ` (${detail})` : ''),
   { toastId: 'suspicious-loc' }  
 );
 
@@ -316,7 +407,8 @@ const LocationTracking = () => {
             Number(f.speed_kmh) >= 1500
           );
 
-          setTimeout(() => {
+          clearTimeout(suspiciousTimer);
+          suspiciousTimer = setTimeout(() => {
             if (selectedDateRef.current !== today) return;
             fetchSuspiciousRef.current?.(today);
             if (isSevere) fetchDataRef.current(today);
@@ -330,7 +422,8 @@ const LocationTracking = () => {
 
       ws.onclose = () => {
         console.log('WebSocket disconnected. Reconnecting in 5s...');
-        setTimeout(() => {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
           setWsReconnectTrigger(prev => prev + 1);
         }, 5000);
       };
@@ -339,9 +432,15 @@ const LocationTracking = () => {
     }
 
     return () => {
-      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      clearTimeout(reconnectTimer);
+      clearTimeout(suspiciousTimer);
+      clearTimeout(statusRefreshTimer);
+      if (ws) {
         ws.onclose = null;
-        try { ws.close(); } catch { /* noop */ }
+        ws.onmessage = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          try { ws.close(); } catch { /* noop */ }
+        }
       }
     };
   }, [wsReconnectTrigger]);
@@ -359,9 +458,8 @@ const LocationTracking = () => {
     const q = debouncedSearch.toLowerCase();
     if (!q) return instructors;
     return instructors.filter(inst =>
-      inst.full_name?.toLowerCase().includes(q) ||
-      inst.employee_id?.toLowerCase().includes(q) ||
-      inst.schedule_course?.toLowerCase().includes(q)
+      [inst.full_name, inst.employee_id, inst.schedule_course]
+        .some(value => String(value ?? '').toLowerCase().includes(q))
     );
   }, [instructors, debouncedSearch]);
 
@@ -374,17 +472,9 @@ const LocationTracking = () => {
   const pageStart = (safePage - 1) * PAGE_SIZE;
   const pageRows = filteredInstructors.slice(pageStart, pageStart + PAGE_SIZE);
 
-  const activeAlerts = useMemo(() => {
-    const activeEmpIds = new Set(
-      instructors
-        .filter(i => {
-          const s = String(i.attendance_status || '').toLowerCase();
-          return !s.includes('miss') && !s.includes('absent');
-        })
-        .map(i => i.employee_id)
-    );
-    return alerts.filter(a => activeEmpIds.has(a.employee_id));
-  }, [alerts, instructors]);
+  // Location Events shows all recorded events on the selected date,
+  // not a subset inferred from attendance-status text.
+  const locationEventCount = alerts.length;
 
   const todayStr = toLocalISODate();
   const isToday = selectedDate === todayStr;
@@ -397,28 +487,10 @@ const LocationTracking = () => {
   const unifiedEvents = useMemo(() => {
     const events = [];
     const timeline = timelineData.timeline || [];
-    const shiftStart = timelineData.start_time;
-    const shiftEnd = timelineData.end_time;
 
-    const isWithinShiftTime = (timeStr) => {
-      if (!shiftStart || !shiftEnd) return false;
-      try {
-        const safeStr = String(timeStr).includes('T')
-          ? String(timeStr).split('T')[1]
-          : String(timeStr).split(' ')[1] || String(timeStr);
-        const [h, m] = safeStr.split(':').map(Number);
-        const totalMinutes = (h || 0) * 60 + (m || 0);
-        const [sh, sm] = shiftStart.split(':').map(Number);
-        const [eh, em] = shiftEnd.split(':').map(Number);
-        const startTotal = (sh || 0) * 60 + (sm || 0) - 30;
-        const endTotal = (eh || 0) * 60 + (em || 0) + 30;
-        return totalMinutes >= startTotal && totalMinutes <= endTotal;
-      } catch {
-        return true;
-      }
-    };
-
-    const validTimeline = timeline.filter(t => isWithinShiftTime(t.ping_time));
+    // API provides schedule-related telemetry. Do not suppress short or
+    // overnight events again with local clock-only comparisons.
+    const validTimeline = timeline;
 
     if (validTimeline.length > 0) {
       let currentSegment = {
@@ -452,24 +524,21 @@ const LocationTracking = () => {
       }
       segments.push(currentSegment);
 
-      // Drop flicker segments (<2 min) so only stable states show in the timeline.
-      const MIN_DURATION_MS = 120000;
-      const stableSegments = segments.filter((seg, idx) => {
-        if (idx === segments.length - 1) return true;
-        const duration = new Date(seg.endTime).getTime() - new Date(seg.startTime).getTime();
-        return duration >= MIN_DURATION_MS || idx === 0;
-      });
+      // Preserve even brief transitions; the visual timeline must not hide evidence.
+      const stableSegments = segments;
 
       stableSegments.forEach(seg => {
         events.push({
           time: seg.startTime,
-          type: 'GPS',
-          detail: seg.location_enabled ? 'GPS tracking activated (ON)' : 'GPS tracking disabled (OFF)',
+          type: 'GPS Status',
+          severity: seg.location_enabled ? 'information' : 'warning',
+          detail: seg.location_enabled ? 'GPS location observation recorded' : 'GPS-disabled observation recorded',
         });
         if (seg.location_enabled) {
           events.push({
             time: seg.startTime,
-            type: 'Campus',
+            type: 'Geofence',
+            severity: seg.is_inside_campus ? 'information' : 'warning',
             detail: seg.is_inside_campus
               ? `Position inside perimeter — Zone: ${seg.location_name || 'Designated Area'}`
               : `Position outside perimeter — Zone: ${seg.location_name || 'Outside Campus'}`,
@@ -479,14 +548,14 @@ const LocationTracking = () => {
     }
 
     (timelineData.alerts || []).forEach(alert => {
-  if (isWithinShiftTime(alert.created_at)) { 
-    events.push({
-      time: alert.created_at,
-      type: 'Alert',
-      detail: alert.alert_message || 'Geofence compliance alert',
+      const meta = getLocationAlertMeta(alert);
+      events.push({
+        time: alert.created_at,
+        type: meta.category,
+        severity: meta.severity,
+        detail: alert.alert_message || 'Location event',
+      });
     });
-  }
-});
 
     events.sort((a, b) => toTimestamp(a.time) - toTimestamp(b.time));
     return events;
@@ -538,7 +607,9 @@ const LocationTracking = () => {
       <div className="lt-header-row">
         <div className="lt-title-group">
           <div>
-            <p className="lt-page-subtitle">Real-time geofencing and campus compliance monitoring.</p>
+            <p className="lt-page-subtitle">Campus tracking and shift-related geofence monitoring.
+                {lastSyncedAt && ` Last synchronized: ${new Date(lastSyncedAt).toLocaleTimeString('en-US', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' })}.`}
+              </p>
           </div>
         </div>
         <div className="lt-header-actions">
@@ -610,46 +681,42 @@ const LocationTracking = () => {
         <>
           <div className="lt-stats-grid">
             <div className="lt-stat-card">
-              <div className="stat-icon-wrapper active"><Clock size={20} /></div>
+              
               <div className="stat-info">
                 <span className="stat-label">Active Shifts</span>
-                <span className="stat-value">{instructors.length}</span>
+                <span className="stat-value">{isToday ? instructors.filter(i => i.time_in != null && i.time_in !== '--:--' && (i.time_out == null || i.time_out === '--:--')).length : '—'}</span>
               </div>
             </div>
 
             <div className="lt-stat-card">
-              <div className="stat-icon-wrapper success"><ShieldCheck size={20} /></div>
+              
               <div className="stat-info">
                 <span className="stat-label">On-Campus Now</span>
                 <span className="stat-value">
-                  {instructors.filter(i => i.last_is_inside === 1 && i.gps_status === 'GPS ON').length}
+                  {isToday ? instructors.filter(i => {
+                    const ping = toTimestamp(i.last_ping_time);
+                    return i.time_in != null && i.time_in !== '--:--'
+                      && (i.time_out == null || i.time_out === '--:--')
+                      && Number(i.last_is_inside) === 1 && i.gps_status === 'GPS ON'
+                      && Number.isFinite(ping) && nowMs - ping <= GPS_DISPLAY_GRACE_MS
+                      && ping - nowMs <= 10000;
+                  }).length : '—'}
                 </span>
               </div>
             </div>
 
-            <div className="lt-stat-card alert">
-              <div className="stat-icon-wrapper danger"><AlertTriangle size={20} /></div>
+            <div className="lt-stat-card">
+              
               <div className="stat-info">
                 <span className="stat-label">
-                  Daily Alerts
-                  {activeAlerts.length > 0 && (
-                    <span
-                      aria-label={`${activeAlerts.length} alerts`}
-                      style={{
-                        display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-                        background: '#DC2626', marginLeft: 6, verticalAlign: 'middle',
-                        boxShadow: '0 0 0 0 rgba(220,38,38,0.7)',
-                        animation: 'ltAlertPulse 1.8s infinite',
-                      }}
-                    />
-                  )}
+                  Location Events — Selected Date
                 </span>
-                <span className="stat-value">{activeAlerts.length}</span>
+                <span className="stat-value">{locationEventCount}</span>
               </div>
             </div>
 
             <div
-              className="lt-stat-card alert"
+              className="lt-stat-card lt-stat-action"
               role="button"
               tabIndex={0}
               aria-label={`View ${suspiciousEvents.length} suspicious location events`}
@@ -663,21 +730,10 @@ const LocationTracking = () => {
               }}
               style={{ cursor: 'pointer' }}
             >
-              <div className="stat-icon-wrapper danger"><AlertTriangle size={20} /></div>
+              
               <div className="stat-info">
                 <span className="stat-label">
                   Suspicious
-                  {suspiciousEvents.length > 0 && (
-                    <span
-                      aria-label={`${suspiciousEvents.length} suspicious events`}
-                      style={{
-                        display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-                        background: '#DC2626', marginLeft: 6, verticalAlign: 'middle',
-                        boxShadow: '0 0 0 0 rgba(220,38,38,0.7)',
-                        animation: 'ltAlertPulse 1.8s infinite',
-                      }}
-                    />
-                  )}
                 </span>
                 <span className="stat-value">{suspiciousEvents.length}</span>
               </div>
@@ -729,11 +785,25 @@ else if (attStatus.toLowerCase().includes('late')) {
                         ? toTimestamp(inst.last_ping_time)
                         : null;
                       const gpsIsStale =
-                        gpsLastPing !== null &&
-                        Date.now() - gpsLastPing > GPS_DISPLAY_GRACE_MS;
+                        (gpsLastPing === null || !Number.isFinite(gpsLastPing) ||
+                          nowMs - gpsLastPing > GPS_DISPLAY_GRACE_MS ||
+                          gpsLastPing - nowMs > 10000);
 
-                      const displayGpsOn = isMissed ? false : (inst.gps_status === 'GPS ON' && !gpsIsStale);
-                      const displayLocation = isMissed ? null : inst.last_is_inside;
+                      const hasOpenAttendance = inst.time_in != null && inst.time_in !== '--:--'
+                        && (inst.time_out == null || inst.time_out === '--:--');
+                      const reportedGps = String(inst.gps_status || '');
+                       const isExplicitlyDisabled = reportedGps === 'GPS Disabled' ||
+                         inst.last_position_name === 'GPS Disabled';
+                       const trackingLabel = !isToday ? 'HISTORICAL'
+                         : !hasOpenAttendance ? 'INACTIVE'
+                         : isExplicitlyDisabled ? 'GPS DISABLED'
+                         : reportedGps === 'Signal Lost' || (gpsIsStale && gpsLastPing !== null) ? 'SIGNAL LOST'
+                         : gpsIsStale ? 'NO SIGNAL'
+                         : reportedGps === 'GPS ON' ? 'ON' : 'OFF';
+                       const displayGpsOn = trackingLabel === 'ON';
+                       const displayLocation = displayGpsOn ? Number(inst.last_is_inside) : null;
+                       const trackingBadgeClass = trackingLabel === 'ON' ? 'gps-on'
+                         : trackingLabel === 'GPS DISABLED' || trackingLabel === 'SIGNAL LOST' ? 'warning' : 'gps-off';
 
                       const hasClockedIn =
                         inst.time_in !== null &&
@@ -749,12 +819,12 @@ else if (attStatus.toLowerCase().includes('late')) {
                         !gpsIsStale &&
                         shiftIsOpen &&
                         (
-                          inst.gps_status === 'GPS OFF' ||
-                          inst.last_is_inside === 0
+                          reportedGps === 'GPS Disabled' ||
+                           (displayGpsOn && Number(inst.last_is_inside) === 0)
                         );
 
                       return (
-                        <tr key={inst.employee_id} className={isAlert ? 'lt-alert-row' : ''}>
+                        <tr key={`${inst.employee_id}-${inst.schedule_id || 'unassigned'}`} className={isAlert ? 'lt-alert-row' : ''}>
                           <td>
                             <div className="lt-emp-name">
                               {inst.full_name}
@@ -806,8 +876,8 @@ else if (attStatus.toLowerCase().includes('late')) {
                           </td>
 
                           <td className="text-center">
-                            <span className={`lt-status-badge ${displayGpsOn ? 'gps-on' : 'gps-off'}`}>
-                              {displayGpsOn ? 'ON' : 'OFF'}
+                            <span className={`lt-status-badge ${trackingBadgeClass}`}>
+                              {trackingLabel}
                             </span>
                           </td>
 
@@ -861,61 +931,166 @@ else if (attStatus.toLowerCase().includes('late')) {
         </>
       )}
 
-      <FormalModal
-        show={showHistoryModal}
-        onClose={() => setShowHistoryModal(false)}
-        title="Tracking Alert History"
-        wide
-        footer={<button className="btn-modal-cancel" onClick={() => setShowHistoryModal(false)}>Close Window</button>}
-      >
-        <div className="lt-modal-toolbar">
-          <div className="lt-modal-filter">
-            <label>Filter Date</label>
-            <input
-              type="date"
-              value={historyDate}
-              max={todayStr}
-              onChange={handleHistoryDateChange}
-              className="lt-date-input"
-              aria-label="Alert history date"
-            />
-          </div>
-          <button className="btn-lt-primary" onClick={() => fetchAlertHistory(historyDate)} disabled={historyLoading}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-        </div>
+      
+<FormalModal
+  show={showHistoryModal}
+  onClose={() => setShowHistoryModal(false)}
+  title="Location Tracking Alert History"
+  wide
+  footer={
+    <button
+      type="button"
+      className="btn-modal-cancel"
+      onClick={() => setShowHistoryModal(false)}
+    >
+      Close Window
+    </button>
+  }
+>
+  <div className="lt-modal-toolbar">
+    <div className="lt-modal-filter">
+      <label htmlFor="lt-alert-date">
+        Filter Date
+      </label>
 
-        {historyLoading ? (
-          <div className="lt-loading-state" aria-live="polite">Loading history...</div>
-        ) : (
-          <div className="lt-table-wrapper" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
-            <table className="lt-table">
-              <thead>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Instructor</th>
-                  <th>Alert Details</th>
-                  <th>Campus Location</th>
+      <input
+        id="lt-alert-date"
+        type="date"
+        value={historyDate}
+        max={todayStr}
+        onChange={handleHistoryDateChange}
+        className="lt-date-input"
+      />
+    </div>
+
+    <button
+      type="button"
+      className="btn-lt-primary"
+      onClick={() => fetchAlertHistory(historyDate)}
+      disabled={historyLoading}
+    >
+      <RefreshCw size={14} />
+      Refresh
+    </button>
+  </div>
+
+  <div
+    className="lt-alert-tabs"
+    role="group"
+    aria-label="Filter alert category"
+  >
+    {[
+      { value: 'all', label: 'All Alerts' },
+      { value: 'GPS Status', label: 'GPS Status' },
+      { value: 'Geofence', label: 'Geofence' },
+      { value: 'Other', label: 'Other' }
+    ].map(tab => (
+      <button
+        key={tab.value}
+        type="button"
+        className={
+          'lt-alert-tab' +
+          (alertCategoryFilter === tab.value
+            ? ' active'
+            : '')
+        }
+        aria-pressed={alertCategoryFilter === tab.value}
+        onClick={() => setAlertCategoryFilter(tab.value)}
+      >
+        {tab.label}
+      </button>
+    ))}
+  </div>
+
+  <p className="lt-alert-description">
+    GPS Status records location-service and signal events.
+    Geofence records campus entry and exit events.
+    Suspicious activity is displayed separately in
+    Suspicious Location Events.
+  </p>
+
+  {historyLoading ? (
+    <div
+      className="lt-loading-state"
+      aria-live="polite"
+    >
+      Loading alert history...
+    </div>
+  ) : (
+    <div
+      className="lt-table-wrapper"
+      style={{
+        maxHeight: '50vh',
+        overflowY: 'auto'
+      }}
+    >
+      <table className="lt-table">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Instructor</th>
+            <th>Category</th>
+            <th>Severity</th>
+            <th>Alert Message</th>
+            <th>Campus</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {filteredAlertHistory.length === 0 ? (
+            <tr className="lt-empty-row">
+              <td colSpan="6">
+                No matching location alerts recorded.
+              </td>
+            </tr>
+          ) : (
+            filteredAlertHistory.map(alert => {
+              const meta = getLocationAlertMeta(alert);
+
+              return (
+                <tr key={alert.id}>
+                  <td className="lt-time-text">
+                    {formatPHT(alert.created_at)}
+                  </td>
+
+                  <td className="font-semibold text-dark">
+                    {alert.full_name || 'Unknown'}
+                  </td>
+
+                  <td>
+                    <span className="lt-category-label">
+                      {meta.category}
+                    </span>
+                  </td>
+
+                  <td>
+                    <span
+                      className={
+                        `lt-severity-badge ${meta.severity}`
+                      }
+                    >
+                      {severityLabel[meta.severity] ||
+                        'Information'}
+                    </span>
+                  </td>
+
+                  <td className="text-dark">
+                    {alert.alert_message}
+                  </td>
+
+                  <td>
+                    {alert.location_name || '—'}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {alertHistory.length === 0 ? (
-                  <tr className="lt-empty-row"><td colSpan="4">No alerts recorded on this date.</td></tr>
-                ) : (
-                  alertHistory.map(alert => (
-                    <tr key={alert.id}>
-                      <td className="lt-time-text">{formatPHT(alert.created_at)}</td>
-                      <td className="font-semibold text-dark">{alert.full_name}</td>
-                      <td className="text-red-600">{alert.alert_message}</td>
-                      <td>{alert.location_name || '—'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </FormalModal>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  )}
+</FormalModal>
+
 
       <FormalModal
         show={showTimelineModal}
@@ -961,41 +1136,43 @@ else if (attStatus.toLowerCase().includes('late')) {
                 <span className="summary-value">{selectedInstructor?.last_position_name || 'Unavailable'}</span>
               </div>
               <div className="summary-item">
-                <span className="summary-label">Clock in Time</span>
-                <span className="summary-value">{formatTimePHT(selectedInstructor?.campus_entry_time)}</span>
+                  <span className="summary-label">Attendance Clock-In</span>
+                <span className="summary-value">{formatTimePHT(selectedInstructor?.time_in)}</span>
               </div>
               <div className="summary-item">
-                <span className="summary-label">Clock out Time</span>
-                <span className="summary-value">{formatTimePHT(selectedInstructor?.campus_exit_time)}</span>
+                  <span className="summary-label">Attendance Clock-Out</span>
+                <span className="summary-value">{formatTimePHT(selectedInstructor?.time_out)}</span>
               </div>
             </div>
 
+            <p className="lt-alert-description">Telemetry observations describe the recorded location state. Only system-generated alerts confirm a GPS or geofence transition after the configured confirmation period.</p>
             <div className="lt-table-wrapper" style={{ maxHeight: '40vh', overflowY: 'auto' }}>
               <table className="lt-table unified-timeline">
                 <thead>
                   <tr>
                     <th>Timestamp</th>
-                    <th>Event Type</th>
+                    <th>Event Category</th>
+                    <th>Classification</th>
                     <th>Details</th>
                   </tr>
                 </thead>
                 <tbody>
                   {unifiedEvents.length === 0 ? (
-                    <tr className="lt-empty-row"><td colSpan="3">No telemetry events recorded during this shift.</td></tr>
+                    <tr className="lt-empty-row"><td colSpan="4">No telemetry events recorded during this shift.</td></tr>
                   ) : (
                     timelinePageEvents.map((ev, idx) => (
                       <tr
                         key={idx}
-                        className={
-                          ev.type === 'Alert' ? 'bg-red-50'
-                            : ev.type === 'GPS' ? (ev.detail.includes('ON') ? 'bg-blue-50' : 'bg-gray-50')
-                              : ev.type === 'Campus' ? 'bg-yellow-50'
-                                : ''
-                        }
+                        className={ev.severity === 'warning' ? 'bg-yellow-50' : 'bg-blue-50'}
                       >
                         <td className="lt-mono-text">{renderEventTime(ev.time)}</td>
                         <td>
-                          <span className={`lt-event-badge ${ev.type.toLowerCase()}`}>{ev.type}</span>
+                          <span className="lt-category-label">{ev.type}</span>
+                        </td>
+                        <td>
+                          <span className={`lt-severity-badge ${ev.severity || 'information'}`}>
+                            {severityLabel[ev.severity] || 'Information'}
+                          </span>
                         </td>
                         <td className="text-dark">{ev.detail}</td>
                       </tr>
@@ -1034,6 +1211,7 @@ else if (attStatus.toLowerCase().includes('late')) {
         }
       >
         <div className="lt-modal-info">
+          Automated suspicious-location flags require HR/Admin review and do not establish misconduct.
           Showing <strong>{
             (suspiciousFilter
               ? suspiciousEvents.filter(e => e.employee_id === suspiciousFilter)
@@ -1049,6 +1227,7 @@ else if (attStatus.toLowerCase().includes('late')) {
                 <th>Timestamp</th>
                 <th>Instructor</th>
                 <th>Event</th>
+                <th>Classification</th>
                 <th>Flags Detected</th>
                 <th>Coordinates</th>
               </tr>
@@ -1059,7 +1238,7 @@ else if (attStatus.toLowerCase().includes('late')) {
                   ? suspiciousEvents.filter(e => e.employee_id === suspiciousFilter)
                   : suspiciousEvents;
                 if (rows.length === 0) {
-                  return <tr className="lt-empty-row"><td colSpan="5">No suspicious events recorded.</td></tr>;
+                  return <tr className="lt-empty-row"><td colSpan="6">No suspicious events recorded.</td></tr>;
                 }
                 return rows.map((ev) => (
                   <tr key={ev.id}>
@@ -1072,6 +1251,9 @@ else if (attStatus.toLowerCase().includes('late')) {
                       <span className={`lt-status-badge ${ev.event === 'clock_in' ? 'inside' : 'warning'}`}>
                         {ev.event === 'clock_in' ? 'CLOCK-IN' : ev.event === 'clock_out' ? 'CLOCK-OUT' : 'UNKNOWN'}
                       </span>
+                    </td>
+                    <td>
+                      <span className="lt-severity-badge requires_review">Requires Review</span>
                     </td>
                     <td className="text-red-600">
                       {ev.flags && ev.flags.length > 0 ? (
@@ -1096,14 +1278,9 @@ else if (attStatus.toLowerCase().includes('late')) {
           </table>
         </div>
       </FormalModal>
-
-      <style>{`@keyframes ltAlertPulse {
-        0%   { box-shadow: 0 0 0 0 rgba(220,38,38,0.7); }
-        70%  { box-shadow: 0 0 0 6px rgba(220,38,38,0); }
-        100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); }
-      }`}</style>
     </div>
   );
 };
 
 export default LocationTracking;
+

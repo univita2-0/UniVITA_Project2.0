@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowUp, ShieldCheck, LockKeyhole, MapPin, Mail, ExternalLink, List, X } from 'lucide-react';
 import './PrivacyPolicy.css';
 
 const SECTIONS = [
@@ -46,7 +45,7 @@ function PolicySection({ number, id, title, children }) {
   );
 }
 
-export default function PrivacyPolicy() {
+function PrivacyPolicy() {
   const [mobileContentsOpen, setMobileContentsOpen] = useState(false);
 
   useEffect(() => {
@@ -73,13 +72,12 @@ export default function PrivacyPolicy() {
         <div className="pp-page-shell">
           <div className="pp-topline">
             <a className="pp-brand" href="/" aria-label="Return to UniVITA home">
-              <span className="pp-brand-mark"><ShieldCheck size={20} aria-hidden="true" /></span>
-              <span>HCT Academy <span className="pp-brand-divider">/</span> UniVITA</span>
+              <span className="pp-brand-name">Uni<span>VITA</span></span><span className="pp-brand-divider" aria-hidden="true"></span><span className="pp-brand-organization">HCT Academy</span>
             </a>
-            <a className="pp-hero-back" href="/"><ArrowLeft size={16} aria-hidden="true" /> Back to home</a>
+            <a className="pp-hero-back" href="/">Back to home</a>
           </div>
           <div className="pp-hero-main">
-            <span className="pp-eyebrow"><LockKeyhole size={15} aria-hidden="true" /> Privacy &amp; personal data</span>
+            <span className="pp-eyebrow">Legal &amp; privacy information</span>
             <h1>Privacy Policy</h1>
             <p className="pp-hero-intro">How HCT Academy and its UniVITA platform collect, use, protect, and manage personal information across academy services, visitor appointments, recruitment, and employee operations.</p>
             <div className="pp-hero-meta">
@@ -93,7 +91,6 @@ export default function PrivacyPolicy() {
 
       <main className="pp-page-shell pp-main" id="pp-policy-content">
         <div className="pp-summary" aria-label="Privacy overview">
-          <div className="pp-summary-icon"><ShieldCheck size={22} aria-hidden="true" /></div>
           <div>
             <h2>Privacy at a glance</h2>
             <p>We use information to manage academy inquiries, appointments, recruitment, employment, attendance, and campus safety. Access should be limited to authorized personnel based on their responsibilities. Your privacy rights under Philippine law continue to apply.</p>
@@ -107,8 +104,8 @@ export default function PrivacyPolicy() {
           aria-controls="pp-mobile-contents"
           onClick={() => setMobileContentsOpen((open) => !open)}
         >
-          <span><List size={18} aria-hidden="true" /> On this page</span>
-          {mobileContentsOpen ? <X size={18} aria-hidden="true" /> : <span className="pp-expand-label">View sections</span>}
+          <span>On this page</span>
+          <span className="pp-expand-label">{mobileContentsOpen ? 'Hide sections' : 'View sections'}</span>
         </button>
         <nav id="pp-mobile-contents" className={`pp-mobile-toc ${mobileContentsOpen ? 'is-open' : ''}`} aria-label="Mobile privacy policy sections" hidden={!mobileContentsOpen}>
           <NavLinks onNavigate={closeContents} />
@@ -121,7 +118,6 @@ export default function PrivacyPolicy() {
               <NavLinks />
             </nav>
             <div className="pp-sidebar-help">
-              <Mail size={18} aria-hidden="true" />
               <div><strong>Have a privacy concern?</strong><a href="mailto:hctacademy00@gmail.com?subject=Data%20Privacy%20Inquiry">Contact HCT Academy</a></div>
             </div>
           </aside>
@@ -159,7 +155,7 @@ export default function PrivacyPolicy() {
             <PolicySection number={4} id="attendance-location" title="Attendance and Location Data">
               <p>When employees or instructors use UniVITA attendance features, the system may process check-in and check-out times, campus geofence results, device-provided GPS coordinates, and attendance verification photographs. These help confirm whether attendance was recorded at an authorized location and support corrections or appeals.</p>
               <p>Location information can be imprecise because of device settings, connectivity, GPS drift, or building conditions. Employees may use the established attendance correction or appeal process where a record is inaccurate.</p>
-              <div className="pp-inline-note"><MapPin size={20} aria-hidden="true" /><p><strong>Important:</strong> Campus verification and any active-shift location features should be explained to affected personnel before use. The precise collection interval, background-location behavior, and retention period must match the mobile app's actual configuration and authorized academy policy.</p></div>
+              <div className="pp-inline-note"><p><strong>Important:</strong> Campus verification and any active-shift location features should be explained to affected personnel before use. The precise collection interval, background-location behavior, and retention period must match the mobile app's actual configuration and authorized academy policy.</p></div>
             </PolicySection>
 
             <PolicySection number={5} id="ble-tracking" title="BLE Visitor Tracking Information">
@@ -207,7 +203,7 @@ export default function PrivacyPolicy() {
                 <li><strong>Seek damages or file a complaint</strong> through lawful processes, including with the National Privacy Commission.</li>
               </ul>
               <p>To request access, correction, or another privacy-rights action, email HCT Academy using the contact information in Section 16. We may need reasonable identity verification before releasing or changing records. Requests are assessed against applicable law, including requirements to retain certain employment, payroll, or security records.</p>
-              <p>For further guidance, see the <a href="https://privacy.gov.ph/data-subject-rights/" target="_blank" rel="noopener noreferrer">National Privacy Commission's data-subject rights guidance <ExternalLink size={13} aria-hidden="true" /></a>.</p>
+              <p>For further guidance, see the <a href="https://privacy.gov.ph/data-subject-rights/" target="_blank" rel="noopener noreferrer">National Privacy Commission's data-subject rights guidance</a>.</p>
             </PolicySection>
 
             <PolicySection number={12} id="retention" title="Data Retention Policy">
@@ -237,7 +233,6 @@ export default function PrivacyPolicy() {
             <PolicySection number={16} id="contact" title="Contact Information">
               <p>For privacy-related questions, concerns, or requests to exercise your rights, contact HCT Academy through its published contact channel and ask that your inquiry be directed to the person responsible for data privacy.</p>
               <div className="pp-contact-card">
-                <div className="pp-contact-icon"><Mail size={21} aria-hidden="true" /></div>
                 <div>
                   <h3>HCT Academy — Data Privacy Inquiries</h3>
                   <p><strong>Email:</strong> <a href="mailto:hctacademy00@gmail.com?subject=Data%20Privacy%20Inquiry">hctacademy00@gmail.com</a></p>
@@ -245,7 +240,7 @@ export default function PrivacyPolicy() {
                   <p className="pp-contact-help">Please include a brief description of your concern. Do not include passwords or unnecessary sensitive documents in your first message.</p>
                 </div>
               </div>
-              <p>For information about your rights or filing a privacy complaint, visit the <a href="https://privacy.gov.ph/" target="_blank" rel="noopener noreferrer">National Privacy Commission <ExternalLink size={13} aria-hidden="true" /></a>.</p>
+              <p>For information about your rights or filing a privacy complaint, visit the <a href="https://privacy.gov.ph/" target="_blank" rel="noopener noreferrer">National Privacy Commission</a>.</p>
             </PolicySection>
           </article>
         </div>
@@ -253,11 +248,13 @@ export default function PrivacyPolicy() {
         <footer className="pp-footer">
           <div><strong>HCT Academy · UniVITA</strong><span>Privacy information for academy services and authorized system users.</span></div>
           <div className="pp-footer-actions">
-            <a href="/" className="pp-back-btn"><ArrowLeft size={16} aria-hidden="true" /> Back to UniVITA Home</a>
-            <a href="#privacy-policy-top" className="pp-to-top"><ArrowUp size={16} aria-hidden="true" /> Back to top</a>
+            <a href="/" className="pp-back-btn">Back to UniVITA Home</a>
+            <a href="#privacy-policy-top" className="pp-to-top">Back to top</a>
           </div>
         </footer>
       </main>
     </div>
   );
 }
+
+export default PrivacyPolicy;
