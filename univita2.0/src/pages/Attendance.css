@@ -65,3 +65,11 @@
   hyphens: none;
   font-variant-numeric: tabular-nums;
 }
+
+/* Keep UniVITA's approved outer spacing at every viewport. */
+@media screen and (max-width:1050px){.att-container{padding:5px 10px 10px}}
+
+.att-container .att-leave-note{display:block;margin-top:5px;font-size:10px;font-weight:650;color:#0f766e;line-height:1.35}
+.att-container .att-status-badge.on-leave{color:#2563eb;background:#eff6ff;border-color:#bfdbfe}
+
+.att-container .att-status-badge.partial-leave{color:#0f766e;background:#f0fdfa;border-color:#99f6e4}

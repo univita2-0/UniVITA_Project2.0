@@ -1,14 +1,17 @@
 // src/screens/CalendarScreen.js
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, SafeAreaView, RefreshControl,
+  View, Text, StyleSheet, ScrollView, RefreshControl,
   Modal, TouchableOpacity, FlatList, StatusBar
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar } from 'react-native-calendars';
 import { MapPin, Clock, Calendar as CalendarIcon, X, List, Star } from 'lucide-react-native';
-import { fetchEvents } from './api';
+import { API_URL } from './api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
+
+const getPHDateString = (date = new Date()) => date.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 
 export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
@@ -23,6 +26,9 @@ export default function CalendarScreen() {
   const [holidays, setHolidays] = useState([]);
   const [markedDates, setMarkedDates] = useState({});
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [visibleYear, setVisibleYear] = useState(Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }).slice(0,4)));
+  const [displayDate, setDisplayDate] = useState(getPHDateString());
   
   const [showEventsModal, setShowEventsModal] = useState(false);
   const [showHolidaysModal, setShowHolidaysModal] = useState(false);
@@ -31,7 +37,6 @@ export default function CalendarScreen() {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedDateEvents, setSelectedDateEvents] = useState([]);
 
-const getPHDateString = (date = new Date()) => date.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 const todayStr = getPHDateString();
   const leaveCategories = ['Sick Leave', 'Vacation', 'Emergency', 'Other', 'Leave'];
 
@@ -51,19 +56,26 @@ const todayStr = getPHDateString();
 
   const loadData = useCallback(async () => {
     try {
-      const eventData = await fetchEvents();
-      const currentYear = new Date(todayStr).getFullYear();
-      const phHolidays = getPHHolidays(currentYear);
+      const token = await AsyncStorage.getItem('auth_token');
+      if (!token) throw new Error('Not signed in');
+      const response = await fetch(`${API_URL}/events`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`Events service returned HTTP ${response.status}`);
+      const eventData = await response.json();
+      const phHolidays = getPHHolidays(visibleYear);
+      setLoadError('');
 
+      if (!Array.isArray(eventData)) throw new Error('Invalid events response');
+      const leaveTypes = leaveCategories.map(c => c.toLowerCase());
       const cleanEvents = eventData.filter(e =>
-        !leaveCategories.map(c => c.toLowerCase()).includes(e.type?.toLowerCase()) &&
-        !e.title?.startsWith('LEAVE:') &&
-        e.date >= todayStr &&
-        (e.type !== 'Holiday' || !e.id?.toString().startsWith('ph-'))
+        e && typeof e.date === 'string' &&
+        !leaveTypes.includes(String(e.type || '').toLowerCase()) &&
+        !String(e.title || '').startsWith('LEAVE:') &&
+        (e.type !== 'Holiday' || !String(e.id || '').startsWith('ph-'))
       );
-      setEvents(cleanEvents);
+      setEvents(cleanEvents.sort((a,b) => String(a.date).localeCompare(String(b.date))));
 
-      const cleanHolidays = phHolidays.filter(h => h.date >= todayStr);
+      const cleanHolidays = phHolidays;
+      // Upcoming lists filter by date; the calendar itself retains historical events.
       setHolidays(cleanHolidays);
 
       const marks = {};
@@ -85,8 +97,11 @@ const todayStr = getPHDateString();
       });
 
       setMarkedDates(marks);
-    } catch (error) {}
-  }, [todayStr, isLight]);
+    } catch (error) {
+      console.warn('Calendar load failed:', error);
+      setLoadError('Unable to load calendar events. Tap Retry to try again.');
+    }
+  }, [todayStr, isLight, visibleYear]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -101,11 +116,10 @@ const todayStr = getPHDateString();
     const dayEvents = events.filter(e => e.date?.split('T')[0] === date);
     const dayHolidays = holidays.filter(h => h.date === date);
     const allItems = [...dayEvents, ...dayHolidays];
-    if (allItems.length > 0) {
-      setSelectedDate(date);
-      setSelectedDateEvents(allItems);
-      setShowDateModal(true);
-    }
+    setDisplayDate(date);
+    setSelectedDate(date);
+    setSelectedDateEvents(allItems);
+    // Inline date details stay visible without requiring a modal.
   };
 
   const renderEventItem = ({ item }) => (
@@ -146,7 +160,7 @@ const todayStr = getPHDateString();
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
-      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView
           contentContainerStyle={styles.scroll}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />}
@@ -157,6 +171,12 @@ const todayStr = getPHDateString();
             <Text style={styles.title}>Shared Calendar</Text>
           </View>
 
+          {!!loadError && (
+            <TouchableOpacity onPress={loadData} style={{ padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#D97706', marginBottom: 16 }}>
+              <Text style={{ color: colors.textPrimary }}>{loadError}</Text>
+              <Text style={{ color: colors.primary, marginTop: 4 }}>Retry</Text>
+            </TouchableOpacity>
+          )}
           <View style={styles.buttonRow}>
             <TouchableOpacity style={styles.actionButton} onPress={() => setShowEventsModal(true)} activeOpacity={0.8}>
               <List size={16} color={isLight ? "#0F172A" : colors.textPrimary} />
@@ -170,8 +190,9 @@ const todayStr = getPHDateString();
 
           <View style={styles.card}>
             <Calendar
-              markedDates={markedDates}
+              markedDates={{ ...markedDates, [displayDate]: { ...(markedDates[displayDate] || {}), selected: true, selectedColor: colors.primary, selectedTextColor: '#FFFFFF' } }}
               onDayPress={onDayPress}
+              onMonthChange={month => setVisibleYear(month.year)}
               theme={{
                 calendarBackground: 'transparent',
                 todayTextColor: isLight ? '#0F172A' : '#FFFFFF',
@@ -187,6 +208,26 @@ const todayStr = getPHDateString();
                 textDayHeaderFontSize: 11,
               }}
             />
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, marginBottom: 8 }}>
+            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: colors.primary }} />
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Institutional events</Text>
+            <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: '#EF4444', marginLeft: 12 }} />
+            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Reference holidays</Text>
+          </View>
+          <View style={[styles.card, { padding: 16, marginTop: 12, marginBottom: 12 }]}>
+            <Text style={{ fontFamily: 'Inter_18pt-Bold', color: colors.textPrimary, fontSize: 16, marginBottom: 12 }}>Events on {displayDate}</Text>
+            {(() => {
+              const dayEvents = events.filter(e => e.date?.split('T')[0] === displayDate);
+              const dayHolidays = holidays.filter(h => h.date === displayDate);
+              const items = [...dayEvents, ...dayHolidays];
+              return items.length ? items.map((item, i) => (
+                <View key={String(item.id || i)} style={{ marginBottom: 12 }}>
+                  <Text style={{ fontFamily: 'Inter_18pt-Bold', color: colors.textPrimary }}>{item.title || 'Untitled event'}</Text>
+                  <Text style={{ color: colors.textSecondary, marginTop: 4 }}>{item.start_time ? `${item.start_time.slice(0,5)}${item.end_time ? ' – ' + item.end_time.slice(0,5) : ''}` : item.type === 'Holiday' ? 'Philippine holiday' : 'All day'}{item.place ? ` · ${item.place}` : ''}</Text>
+                </View>
+              )) : <Text style={{ color: colors.textSecondary }}>No events scheduled for this date.</Text>;
+            })()}
           </View>
         </ScrollView>
 
@@ -204,7 +245,7 @@ const todayStr = getPHDateString();
                 <Text style={styles.emptyModalText}>No upcoming events found.</Text>
               ) : (
                 <FlatList
-                  data={events}
+                  data={events.filter(e => e.date?.split('T')[0] >= todayStr)}
                   keyExtractor={(item, idx) => (item.id ? item.id.toString() : `event-${idx}`)}
                   renderItem={renderEventItem}
                   showsVerticalScrollIndicator={false}
@@ -227,7 +268,7 @@ const todayStr = getPHDateString();
                 <Text style={styles.emptyModalText}>No upcoming holidays.</Text>
               ) : (
                 <FlatList
-                  data={holidays}
+                  data={holidays.filter(h => h.date >= todayStr)}
                   keyExtractor={item => item.id}
                   renderItem={renderHolidayItem}
                   showsVerticalScrollIndicator={false}

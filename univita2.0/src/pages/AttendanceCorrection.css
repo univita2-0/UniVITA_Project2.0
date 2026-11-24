@@ -1165,3 +1165,9 @@
   .ac-container .ac-summary-item { padding: 13px; min-height: 90px; }
   .ac-container .ac-summary-item strong { font-size: 27px; }
 }
+
+/* HR request review confirmations use the existing formal modal theme. */
+.ac-container button:disabled{opacity:.55;cursor:not-allowed}
+
+/* UniVITA: maintain approved outer page spacing on all screen sizes. */
+@media screen { .ac-container { padding: 5px 10px 10px; } }

@@ -1,11 +1,11 @@
 // src/screens/ProfileScreen.js
 import React, { useState, useEffect, useMemo, useContext, useCallback } from 'react';
 import { 
-  View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, 
-  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform 
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, 
+  Modal, TextInput, Alert, ActivityIndicator, StatusBar, KeyboardAvoidingView, Platform, DeviceEventEmitter 
 } from 'react-native';
 import { Image } from 'expo-image'; // 👈 Using expo-image for better rendering
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { 
   User, Shield, ChevronRight, LogOut, ArrowLeft, Sun, Moon, Lock, Check, X, 
@@ -17,20 +17,19 @@ import axios from 'axios';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 import { API_URL, updateProfile } from './api';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { OFFLINE_QUEUE_KEY } from './api';
+// Offline queue is retained across logout/account switches for later reconciliation.
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function ProfileScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const { isDark, toggleTheme } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
   const styles = useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
   
   const [loading, setLoading] = useState(false);
-  const [daysRemaining, setDaysRemaining] = useState(365);
-  const [userData, setUserData] = useState({ id: '', name: 'Loading...', email: 'loading@gmail.com', role: '' });
+  const [daysRemaining, setDaysRemaining] = useState(null);
+  const [userData, setUserData] = useState({ id: '', name: 'Loading...', email: '', role: '' });
   
   // Profile Picture States
   const [profileImage, setProfileImage] = useState(null);
@@ -70,7 +69,10 @@ export default function ProfileScreen({ navigation }) {
   const hasUppercase = /[A-Z]/.test(newPassword);
   const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(newPassword);
   const passwordsMatch = newPassword.length > 0 && newPassword === confirmPassword;
-  const hasProfileChanges = editName.trim() !== userData.name || editEmail.trim() !== userData.email;
+  const hasProfileChanges = editName.trim() !== userData.name || editEmail.trim().toLowerCase() !== String(userData.email || '').toLowerCase();
+  const validProfileName = editName.trim().length >= 2 && editName.trim().length <= 150;
+  const validProfileEmail = EMAIL_REGEX.test(editEmail.trim()) && editEmail.trim().length <= 254;
+  const canSaveProfile = hasProfileChanges && validProfileName && validProfileEmail && !loading;
 
   // Reset imageError whenever profileImage changes
   useEffect(() => {
@@ -82,12 +84,12 @@ export default function ProfileScreen({ navigation }) {
   // Helper: Safely build the image URL
   const getFullImageUrl = (path) => {
     if (!path) return null;
-    if (path.startsWith('http')) return `${path}?t=${Date.now()}`;
+    if (path.startsWith('http')) return path;
     
     // Safely remove /api from the end of the URL if it exists
     const baseUrl = API_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    return `${baseUrl}${cleanPath}?t=${Date.now()}`;
+    return `${baseUrl}${cleanPath}`;
   };
 
   useFocusEffect(
@@ -149,14 +151,13 @@ export default function ProfileScreen({ navigation }) {
             await AsyncStorage.setItem(`@profile_picture_${userId}`, fullUrl);
           }
 
-          const lastChangedStr = freshUser.password_last_changed || freshUser.password_updated_at;
-          if (lastChangedStr) {
-            const updatedDate = new Date(lastChangedStr);
-            const today = new Date();
-            updatedDate.setHours(0, 0, 0, 0); today.setHours(0, 0, 0, 0);
-            const diffDays = Math.floor((today - updatedDate) / (1000 * 60 * 60 * 24)); 
-            setDaysRemaining(Math.max(0, 365 - diffDays));
-          } else { setDaysRemaining(365); }
+          // Only display a deadline if the authenticated endpoint supplies one.
+          // Password-expiry policy is configurable in System Configuration.
+          const expiryValue = freshUser.password_expires_at || freshUser.password_expiry_date;
+          const expiryMs = expiryValue ? Date.parse(expiryValue) : NaN;
+          setDaysRemaining(Number.isFinite(expiryMs)
+            ? Math.max(0, Math.ceil((expiryMs - Date.now()) / 86400000))
+            : null);
         } catch (error) {
           console.log("Profile fetch error:", error);
           const id = await AsyncStorage.getItem('user_id');
@@ -164,7 +165,7 @@ export default function ProfileScreen({ navigation }) {
           const email = await AsyncStorage.getItem('user_email');
           const role = await AsyncStorage.getItem('user_role');
           const empId = await AsyncStorage.getItem('employee_id');
-          setUserData({ id: id || '', name: name || 'Employee', email: email || 'user@hct.com', role: role || '' });
+          setUserData({ id: id || '', name: name || 'Employee', email: email || '', role: role || '' });
           setFullDetails(prev => ({ ...prev, employee_id: empId || '—', full_name: name || '—', email: email || '—' }));
         }
       };
@@ -229,8 +230,8 @@ export default function ProfileScreen({ navigation }) {
 
   const handleUpdateProfile = async () => {
     if (!hasProfileChanges) return setShowEditModal(false); 
-    if (!editName.trim() || !editEmail.trim()) return Alert.alert("Validation Error", "Name and Email cannot be empty.");
-    if (!EMAIL_REGEX.test(editEmail.trim())) return Alert.alert("Validation Error", "Please enter a valid email address.");
+    if (!validProfileName) return Alert.alert('Invalid name', 'Enter a name between 2 and 150 characters.');
+    if (!validProfileEmail) return Alert.alert('Invalid email', 'Enter a valid email address (maximum 254 characters).');
 
     setLoading(true);
     try {
@@ -250,7 +251,7 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleUpdatePassword = async () => {
-    if (!currentPassword.trim() || !newPassword.trim() || !confirmPassword.trim()) return Alert.alert("Validation Error", "Please complete all password fields.");
+    if (!currentPassword || !newPassword || !confirmPassword) return Alert.alert("Validation Error", "Please complete all password fields.");
     if (!hasLength || !hasUppercase || !hasSpecial) return Alert.alert("Security Requirement", "New password must meet all security criteria.");
     if (currentPassword === newPassword) return Alert.alert("Validation Error", "New password must differ from current.");
     if (!passwordsMatch) return Alert.alert("Validation Error", "New passwords do not match.");
@@ -261,21 +262,23 @@ export default function ProfileScreen({ navigation }) {
       const empIdentifier = (fullDetails.employee_id && fullDetails.employee_id !== '—') ? fullDetails.employee_id : userData.id;
 
       const res = await axios.put(`${API_URL}/users/${empIdentifier}/update-password`,
-        { currentPassword: currentPassword.trim(), newPassword: newPassword.trim() },
+        { currentPassword, newPassword },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
       if (res.data.success) {
         setShowPasswordModal(false);
+        setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
         Alert.alert("Security Updated", "Your password has been changed.", [
           {
             text: "Sign In",
             onPress: async () => {
-              await AsyncStorage.clear();
-              try {
-                await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
-              } catch (e) {}
-              navigation.replace('Login');
+              await AsyncStorage.multiRemove([
+                'auth_token', 'user', 'employee_id', 'user_id',
+                'user_email', 'user_name', 'user_role'
+              ]);
+              await AsyncStorage.setItem('@stay_logged_in', 'false');
+              DeviceEventEmitter.emit('univita:logout');
             }
           }
         ]);
@@ -303,7 +306,7 @@ export default function ProfileScreen({ navigation }) {
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
-      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           
           <View style={styles.topBar}>
@@ -350,8 +353,10 @@ export default function ProfileScreen({ navigation }) {
             </View>
             <Text style={styles.userName}>{userData.name}</Text>
             <Text style={styles.userEmail}>{userData.email}</Text>
-            <View style={styles.expiryBadge}>
-              <Text style={styles.expiryText}>Password expires in {daysRemaining} days</Text>
+            <View style={[styles.expiryBadge, (daysRemaining === null || daysRemaining > 30) && styles.expiryBadgeNeutral]}>
+              <Text style={[styles.expiryText, (daysRemaining === null || daysRemaining > 30) && styles.expiryTextNeutral]}>
+                {daysRemaining === null ? 'Password policy managed by HR' : daysRemaining === 0 ? 'Password expired' : `Password expires in ${daysRemaining} days`}
+              </Text>
             </View>
           </View>
 
@@ -375,13 +380,12 @@ export default function ProfileScreen({ navigation }) {
               {
                 text: "Logout",
                 onPress: async () => {
-                  const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
-                  await AsyncStorage.clear();
-                  try {
-                    await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
-                  } catch (e) {}
-                  if (rememberedEmail) await AsyncStorage.setItem('@remembered_email', rememberedEmail);
-                  navigation.replace('Login');
+                  await AsyncStorage.multiRemove([
+                    'auth_token', 'user', 'employee_id', 'user_id',
+                    'user_email', 'user_name', 'user_role'
+                  ]);
+                  await AsyncStorage.setItem('@stay_logged_in', 'false');
+                  DeviceEventEmitter.emit('univita:logout');
                 },
                 style: 'destructive'
               }
@@ -395,7 +399,7 @@ export default function ProfileScreen({ navigation }) {
 
         {/* --- MODALS --- */}
         <Modal visible={showDetailsModal} animationType="slide" transparent={false} onRequestClose={() => setShowDetailsModal(false)}>
-          <SafeAreaView style={[styles.detailModalSafeArea, { paddingTop: insets.top }]}>
+          <SafeAreaView style={styles.detailModalSafeArea} edges={['top', 'bottom']}>
             <View style={styles.detailModalHeader}>
               <TouchableOpacity onPress={() => setShowDetailsModal(false)} style={styles.detailBackBtn}>
                 <ArrowLeft size={22} color={isLight ? "#0F172A" : colors.textPrimary} />
@@ -462,13 +466,15 @@ export default function ProfileScreen({ navigation }) {
                 <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                   <Text style={styles.inputLabel}>Full Name</Text>
                   <TextInput style={styles.inputField} value={editName} onChangeText={setEditName} placeholder="Enter your full name" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
+                  {editName.length > 0 && !validProfileName && <Text style={styles.fieldError}>Name must be 2–150 characters.</Text>}
                   <Text style={styles.inputLabel}>Email Address</Text>
-                  <TextInput style={styles.inputField} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" placeholder="Enter your email" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
+                  <TextInput style={styles.inputField} value={editEmail} onChangeText={setEditEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} placeholder="Enter your email" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} />
+                  {editEmail.length > 0 && !validProfileEmail && <Text style={styles.fieldError}>Enter a valid email address.</Text>}
                   <View style={styles.modalActions}>
                     <TouchableOpacity style={styles.modalBtnOutline} onPress={() => setShowEditModal(false)}>
                       <Text style={styles.modalBtnTextOutline}>Cancel</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.modalBtnFill, (!hasProfileChanges || loading) && { opacity: 0.6 }]} onPress={handleUpdateProfile} disabled={!hasProfileChanges || loading}>
+                    <TouchableOpacity style={[styles.modalBtnFill, (!canSaveProfile) && { opacity: 0.6 }]} onPress={handleUpdateProfile} disabled={!canSaveProfile}>
                       {loading ? <ActivityIndicator color={isLight ? "#FFFFFF" : colors.buttonText} size="small" /> : <Text style={styles.modalBtnTextFill}>Save Changes</Text>}
                     </TouchableOpacity>
                   </View>
@@ -478,68 +484,63 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </Modal>
 
-        <Modal visible={showPasswordModal} animationType="fade" transparent={true} onRequestClose={() => setShowPasswordModal(false)}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', alignItems: 'center' }}>
-              <View style={[styles.modalContent, { maxHeight: '90%' }]}>
-                <View style={styles.modalHeaderRow}>
-                  <TouchableOpacity onPress={() => setShowPasswordModal(false)}><ArrowLeft size={24} color={isLight ? "#0F172A" : colors.textPrimary} /></TouchableOpacity>
-                  <Text style={styles.modalTitle}>Change Password</Text>
-                  <View style={{ width: 24 }} />
+        <Modal visible={showPasswordModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => !loadingPwd && setShowPasswordModal(false)}>
+          <SafeAreaView style={styles.passwordSheet} edges={['top', 'bottom']}>
+            <View style={styles.passwordSheetHeader}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close change password" disabled={loadingPwd} onPress={() => setShowPasswordModal(false)} style={styles.sheetClose}>
+                <ArrowLeft size={22} color={colors.textPrimary} />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Change Password</Text>
+              <View style={styles.sheetClose} />
+            </View>
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.passwordSheetBody}>
+                <Text style={styles.passwordDescription}>Use a unique password to protect your UniVITA account.</Text>
+                <View style={styles.secInputGroup}>
+                  <Text style={styles.inputLabel}>CURRENT PASSWORD</Text>
+                  <View style={styles.secInputWrapper}>
+                    <Lock size={16} color={colors.textSecondary} style={{ marginLeft: 14 }} />
+                    <TextInput style={styles.secInput} secureTextEntry={!showCurrent} placeholder="Enter current password" placeholderTextColor={colors.textSecondary} value={currentPassword} onChangeText={setCurrentPassword} autoCapitalize="none" autoCorrect={false} textContentType="password" />
+                    <TouchableOpacity accessibilityLabel={showCurrent ? 'Hide current password' : 'Show current password'} onPress={() => setShowCurrent(!showCurrent)} style={styles.eyeButton}>
+                      {showCurrent ? <EyeOff size={18} color={colors.textSecondary} /> : <Eye size={18} color={colors.textSecondary} />}
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 10 }}>
-                  <View style={styles.secInputGroup}>
-                    <Text style={styles.inputLabel}>CURRENT PASSWORD</Text>
-                    <View style={styles.secInputWrapper}>
-                      <Lock size={16} color={colors.textSecondary} style={{ marginLeft: 14 }} />
-                      <TextInput style={styles.secInput} secureTextEntry={!showCurrent} placeholder="Enter current password" placeholderTextColor={colors.textSecondary} value={currentPassword} onChangeText={setCurrentPassword} autoCapitalize="none" />
-                      <TouchableOpacity onPress={() => setShowCurrent(!showCurrent)} style={{ padding: 14 }}>
-                        {showCurrent ? <EyeOff size={18} color={colors.textSecondary} /> : <Eye size={18} color={colors.textSecondary} />}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  <View style={styles.secInputGroup}>
-                    <Text style={styles.inputLabel}>NEW PASSWORD</Text>
-                    <View style={styles.secInputWrapper}>
-                      <Lock size={16} color={colors.textSecondary} style={{ marginLeft: 14 }} />
-                      <TextInput style={styles.secInput} secureTextEntry={!showNew} placeholder="Enter new password" placeholderTextColor={colors.textSecondary} value={newPassword} onChangeText={setNewPassword} autoCapitalize="none" />
-                      <TouchableOpacity onPress={() => setShowNew(!showNew)} style={{ padding: 14 }}>
-                        {showNew ? <EyeOff size={18} color={colors.textSecondary} /> : <Eye size={18} color={colors.textSecondary} />}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  <View style={styles.secChecklistCard}>
-                    <View style={styles.secCheckRow}>{hasLength ? <Check size={14} color="#059669" /> : <X size={14} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasLength && styles.secCheckPassed]}>At least 8 characters</Text></View>
-                    <View style={styles.secCheckRow}>{hasUppercase ? <Check size={14} color="#059669" /> : <X size={14} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasUppercase && styles.secCheckPassed]}>At least 1 uppercase letter</Text></View>
-                    <View style={styles.secCheckRow}>{hasSpecial ? <Check size={14} color="#059669" /> : <X size={14} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasSpecial && styles.secCheckPassed]}>At least 1 special character (!@#$...)</Text></View>
-                  </View>
-                  <View style={styles.secInputGroup}>
-                    <Text style={styles.inputLabel}>CONFIRM NEW PASSWORD</Text>
-                    <View style={styles.secInputWrapper}>
-                      <Lock size={16} color={colors.textSecondary} style={{ marginLeft: 14 }} />
-                      <TextInput style={styles.secInput} secureTextEntry={!showConfirm} placeholder="Re-enter new password" placeholderTextColor={colors.textSecondary} value={confirmPassword} onChangeText={setConfirmPassword} autoCapitalize="none" />
-                      <TouchableOpacity onPress={() => setShowConfirm(!showConfirm)} style={{ padding: 14 }}>
-                        {showConfirm ? <EyeOff size={18} color={colors.textSecondary} /> : <Eye size={18} color={colors.textSecondary} />}
-                      </TouchableOpacity>
-                    </View>
-                    {confirmPassword.length > 0 && (
-                      <Text style={{ fontSize: 11, marginTop: 6, marginLeft: 4, color: passwordsMatch ? '#059669' : '#DC2626', fontFamily: 'Inter_18pt-Medium' }}>
-                        {passwordsMatch ? '✓ Passwords match' : '✕ Passwords do not match'}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={styles.modalActions}>
-                    <TouchableOpacity style={styles.modalBtnOutline} onPress={() => setShowPasswordModal(false)}>
-                      <Text style={styles.modalBtnTextOutline}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.modalBtnFill, loadingPwd && { opacity: 0.6 }]} onPress={handleUpdatePassword} disabled={loadingPwd}>
-                      {loadingPwd ? <ActivityIndicator color={isLight ? "#FFFFFF" : colors.buttonText} size="small" /> : <Text style={styles.modalBtnTextFill}>Save Password</Text>}
+                <View style={styles.secInputGroup}>
+                  <Text style={styles.inputLabel}>NEW PASSWORD</Text>
+                  <View style={styles.secInputWrapper}>
+                    <Lock size={16} color={colors.textSecondary} style={{ marginLeft: 14 }} />
+                    <TextInput style={styles.secInput} secureTextEntry={!showNew} placeholder="Enter new password" placeholderTextColor={colors.textSecondary} value={newPassword} onChangeText={setNewPassword} autoCapitalize="none" autoCorrect={false} textContentType="newPassword" />
+                    <TouchableOpacity accessibilityLabel={showNew ? 'Hide new password' : 'Show new password'} onPress={() => setShowNew(!showNew)} style={styles.eyeButton}>
+                      {showNew ? <EyeOff size={18} color={colors.textSecondary} /> : <Eye size={18} color={colors.textSecondary} />}
                     </TouchableOpacity>
                   </View>
-                </ScrollView>
+                </View>
+                <View style={styles.secChecklistCard}>
+                  <View style={styles.secCheckRow}>{hasLength ? <Check size={16} color="#059669" /> : <X size={16} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasLength && styles.secCheckPassed]}>At least 8 characters</Text></View>
+                  <View style={styles.secCheckRow}>{hasUppercase ? <Check size={16} color="#059669" /> : <X size={16} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasUppercase && styles.secCheckPassed]}>At least one uppercase letter</Text></View>
+                  <View style={styles.secCheckRow}>{hasSpecial ? <Check size={16} color="#059669" /> : <X size={16} color={colors.textSecondary} />}<Text style={[styles.secCheckText, hasSpecial && styles.secCheckPassed]}>At least one special character</Text></View>
+                </View>
+                <View style={styles.secInputGroup}>
+                  <Text style={styles.inputLabel}>CONFIRM NEW PASSWORD</Text>
+                  <View style={styles.secInputWrapper}>
+                    <Lock size={16} color={colors.textSecondary} style={{ marginLeft: 14 }} />
+                    <TextInput style={styles.secInput} secureTextEntry={!showConfirm} placeholder="Re-enter new password" placeholderTextColor={colors.textSecondary} value={confirmPassword} onChangeText={setConfirmPassword} autoCapitalize="none" autoCorrect={false} textContentType="newPassword" />
+                    <TouchableOpacity accessibilityLabel={showConfirm ? 'Hide confirmed password' : 'Show confirmed password'} onPress={() => setShowConfirm(!showConfirm)} style={styles.eyeButton}>
+                      {showConfirm ? <EyeOff size={18} color={colors.textSecondary} /> : <Eye size={18} color={colors.textSecondary} />}
+                    </TouchableOpacity>
+                  </View>
+                  {confirmPassword.length > 0 && <Text style={[styles.matchIndicator, passwordsMatch ? styles.matchPassed : styles.matchFailed]}>{passwordsMatch ? 'Passwords match' : 'Passwords do not match'}</Text>}
+                </View>
+              </ScrollView>
+              <View style={styles.passwordSheetFooter}>
+                <TouchableOpacity style={styles.modalBtnOutline} disabled={loadingPwd} onPress={() => setShowPasswordModal(false)}><Text style={styles.modalBtnTextOutline}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.modalBtnFill, (!currentPassword || !newPassword || !confirmPassword || !hasLength || !hasUppercase || !hasSpecial || !passwordsMatch || loadingPwd) && styles.disabledButton]} disabled={!currentPassword || !newPassword || !confirmPassword || !hasLength || !hasUppercase || !hasSpecial || !passwordsMatch || loadingPwd} onPress={handleUpdatePassword}>
+                  {loadingPwd ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.modalBtnTextFill}>Update Password</Text>}
+                </TouchableOpacity>
               </View>
             </KeyboardAvoidingView>
-          </View>
+          </SafeAreaView>
         </Modal>
       </SafeAreaView>
     </>
@@ -548,33 +549,35 @@ export default function ProfileScreen({ navigation }) {
 
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
-  scroll: { paddingHorizontal: 22, paddingBottom: 120, paddingTop: 10 },
-  topBar: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 10 },
+  scroll: { paddingHorizontal: 20, paddingBottom: 130, paddingTop: 8 },
+  topBar: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 0 },
   themeToggle: { padding: 12, borderRadius: 24, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.2, shadowRadius: 8, elevation: 2 },
   
-  headerSection: { alignItems: 'center', marginBottom: 36 },
-  avatarContainer: { position: 'relative', marginBottom: 20 },
+  headerSection: { alignItems: 'center', marginBottom: 24 },
+  avatarContainer: { position: 'relative', marginBottom: 14 },
   avatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: isLight ? '#0F172A' : colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: isLight ? '#E2E8F0' : colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: isLight ? 0.1 : 0.3, shadowRadius: 10, elevation: 4, overflow: 'hidden' },
   avatarImage: { width: 100, height: 100, borderRadius: 50 },
   uploadOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', borderRadius: 50 },
-  editAvatarBtn: { position: 'absolute', bottom: 0, right: -4, backgroundColor: isLight ? '#A78BFA' : colors.primary, padding: 10, borderRadius: 24, borderWidth: 3, borderColor: isLight ? '#F8FAFC' : colors.background, elevation: 5 },
+  editAvatarBtn: { position: 'absolute', bottom: 0, right: -4, backgroundColor: '#0D9488', padding: 10, borderRadius: 24, borderWidth: 3, borderColor: isLight ? '#F8FAFC' : colors.background, elevation: 5 },
   
   userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 24, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 6 },
   userEmail: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 16 },
   expiryBadge: { backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: isLight ? '#FDE68A' : 'rgba(251, 191, 36, 0.2)' },
   expiryText: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#D97706' : '#FBBF24' },
+  expiryBadgeNeutral: { backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderColor: isLight ? '#E2E8F0' : colors.border },
+  expiryTextNeutral: { color: isLight ? '#64748B' : colors.textSecondary },
   
   menuSection: { marginBottom: 28 },
   sectionHeader: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 12, marginLeft: 4, letterSpacing: 1.2 },
   menuCard: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.15, shadowRadius: 10, elevation: 2 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18, paddingHorizontal: 20 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 18, minHeight: 76 },
   iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },
   menuTextContainer: { flex: 1, marginLeft: 16 },
   menuTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 15, color: isLight ? '#0F172A' : colors.textPrimary },
   menuSub: { fontFamily: 'Inter_18pt-Medium', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, marginTop: 3 },
   divider: { height: 1, backgroundColor: isLight ? '#F1F5F9' : colors.border, marginLeft: 80 },
   
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: isLight ? '#0F172A' : colors.buttonBg, paddingVertical: 18, borderRadius: 30, marginTop: 10, gap: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4 },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: isLight ? '#0F172A' : colors.buttonBg, paddingVertical: 16, borderRadius: 16, marginTop: 2, marginBottom: 12, gap: 10 },
   logoutText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText, fontSize: 15, letterSpacing: 0.5 },
   
   modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: 20 },
@@ -591,6 +594,15 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   modalBtnTextOutline: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#0F172A' : colors.textPrimary },
   modalBtnTextFill: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText },
 
+  fieldError: { fontFamily: 'Inter_18pt-Medium', color: '#DC2626', fontSize: 12, marginTop: -12, marginBottom: 14 },
+  passwordSheet: { flex: 1, backgroundColor: isLight ? '#FFFFFF' : colors.surface },
+  passwordSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: isLight ? '#E2E8F0' : colors.border, paddingHorizontal: 20, paddingVertical: 14 },
+  sheetClose: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  passwordSheetBody: { paddingHorizontal: 22, paddingTop: 20, paddingBottom: 32 },
+  passwordDescription: { fontFamily: 'Inter_18pt-Regular', fontSize: 13, lineHeight: 20, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 22 },
+  eyeButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  passwordSheetFooter: { flexDirection: 'row', gap: 12, padding: 16, borderTopWidth: 1, borderTopColor: isLight ? '#E2E8F0' : colors.border, backgroundColor: isLight ? '#FFFFFF' : colors.surface },
+  disabledButton: { opacity: 0.45 },
   secInputGroup: { marginBottom: 16 },
   secInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderRadius: 16, overflow: 'hidden' },
   secInput: { flex: 1, paddingVertical: 14, paddingHorizontal: 12, fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#0F172A' : colors.textPrimary },

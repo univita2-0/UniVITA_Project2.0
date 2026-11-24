@@ -29,6 +29,7 @@ export const ROUTE_ROLES = {
 
   'audit-logs':            ['admin'],
   'role-management':       ['admin'],
+  'account-management':    ['admin'],
   'system-config':         ['admin'],
   'landing-cms':           ['admin'],
   'manage-request':        ['admin'],

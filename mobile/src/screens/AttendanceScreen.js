@@ -1,79 +1,105 @@
-import React, { useState } from 'react';
-import { View, Text, Alert, TouchableOpacity } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, Alert, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import api from '../services/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AttendanceScreen() {
   const [loading, setLoading] = useState(false);
+  const busy = useRef(false);
 
   const captureSelfie = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Camera permission needed');
-      return null;
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (permission.status !== 'granted') {
+      throw new Error('Camera permission is required to record attendance.');
     }
-    const result = await ImagePicker.launchCameraAsync({ base64: true });
-    if (!result.canceled) return result.assets[0].uri;
-    return null;
+    const result = await ImagePicker.launchCameraAsync({
+      cameraType: 'front',
+      quality: 0.5,
+      allowsEditing: false,
+    });
+    if (result.canceled || !result.assets?.[0]?.uri) return null;
+    return result.assets[0].uri;
   };
 
   const getLocation = async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Location permission needed');
-      return null;
+    if (!(await Location.hasServicesEnabledAsync())) {
+      throw new Error('Enable GPS to record attendance.');
     }
-    const location = await Location.getCurrentPositionAsync({});
-    return location.coords;
+    const permission = await Location.requestForegroundPermissionsAsync();
+    if (permission.status !== 'granted') {
+      throw new Error('Location permission is required to record attendance.');
+    }
+    const reading = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    const { latitude, longitude, accuracy } = reading.coords || {};
+    const age = Date.now() - Number(reading.timestamp);
+    if (
+      !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+      !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+      (latitude === 0 && longitude === 0) ||
+      !Number.isFinite(accuracy) || accuracy < 0 || accuracy > 50 ||
+      !Number.isFinite(age) || age < -30000 || age > 120000 ||
+      reading.mocked === true
+    ) {
+      throw new Error('GPS reading is invalid, inaccurate, or outdated. Try again in an open area.');
+    }
+    return reading;
   };
 
-  const handleClock = async (type) => {
+  const handleClock = async type => {
+    if (busy.current) return;
+    busy.current = true;
     setLoading(true);
     try {
-      // Always require selfie
-      const selfieUri = await captureSelfie();
-      if (!selfieUri) throw new Error('Selfie required');
-
-      const coords = await getLocation();
-      if (!coords) throw new Error('Location required');
-
-      const formData = new FormData();
-      formData.append('selfie', { uri: selfieUri, name: 'selfie.jpg', type: 'image/jpeg' });
-      formData.append('latitude', coords.latitude);
-      formData.append('longitude', coords.longitude);
-      formData.append('biometric_verified', 'false'); // always false (no fingerprint)
+      const selfie = await captureSelfie();
+      if (!selfie) return;
+      const reading = await getLocation();
+      const data = new FormData();
+      data.append('selfie', { uri: selfie, name: 'attendance-selfie.jpg', type: 'image/jpeg' });
+      data.append('latitude', String(reading.coords.latitude));
+      data.append('longitude', String(reading.coords.longitude));
+      data.append('gps_accuracy', String(reading.coords.accuracy));
+      data.append('gps_timestamp', new Date(reading.timestamp).toISOString());
 
       const endpoint = type === 'in' ? '/attendance/clock-in' : '/attendance/clock-out';
-      const res = await api.post(endpoint, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      Alert.alert('Success', res.data.message);
-    } catch (err) {
-      Alert.alert('Error', err.response?.data?.error || err.message);
+      const response = await api.post(endpoint, data, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (response.data?.success === false) {
+        throw new Error(response.data.message || 'Attendance could not be recorded.');
+      }
+      Alert.alert('Attendance', response.data?.message || 'Attendance saved.');
+    } catch (error) {
+      Alert.alert('Attendance unavailable',
+        error.response?.data?.message || error.response?.data?.error || error.message || 'Please try again.');
     } finally {
+      busy.current = false;
       setLoading(false);
     }
   };
 
   return (
     <View style={{ padding: 20 }}>
-      <TouchableOpacity 
-        style={{ backgroundColor: '#00897B', padding: 12, borderRadius: 8, marginBottom: 12 }}
-        onPress={() => handleClock('in')} 
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={{ backgroundColor: '#0D9488', padding: 12, borderRadius: 8, marginBottom: 12, opacity: loading ? 0.6 : 1 }}
+        onPress={() => handleClock('in')}
         disabled={loading}
       >
         <Text style={{ color: 'white', textAlign: 'center', fontWeight: 'bold' }}>Clock In</Text>
       </TouchableOpacity>
-      <TouchableOpacity 
-        style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 8, marginBottom: 12 }}
-        onPress={() => handleClock('out')} 
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={{ backgroundColor: '#B91C1C', padding: 12, borderRadius: 8, marginBottom: 12, opacity: loading ? 0.6 : 1 }}
+        onPress={() => handleClock('out')}
         disabled={loading}
       >
         <Text style={{ color: 'white', textAlign: 'center', fontWeight: 'bold' }}>Clock Out</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => alert('Request correction')}>
-        <Text style={{ textAlign: 'center', color: '#00897B' }}>Forgot to clock?</Text>
-      </TouchableOpacity>
+      {loading && <ActivityIndicator color="#0D9488" />}
+      <Text style={{ textAlign: 'center', color: '#64748B', fontSize: 12 }}>
+        Attendance requires a valid schedule, GPS verification, and a selfie. Approved leave restrictions are enforced by the server.
+      </Text>
     </View>
   );
 }

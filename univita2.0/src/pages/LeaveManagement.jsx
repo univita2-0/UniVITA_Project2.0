@@ -126,6 +126,14 @@ const LeaveManagement = () => {
       return;
     }
     if (!selectedGroup || processing) return;
+    if (actionType === 'Rejected' && remarks.trim().length < 5) {
+      toast.error('Provide at least 5 characters explaining the rejection.');
+      return;
+    }
+    if (remarks.trim().length > 500) {
+      toast.error('Review remarks must not exceed 500 characters.');
+      return;
+    }
     setProcessing(true);
     try {
       await axios.put(
@@ -586,12 +594,13 @@ const LeaveManagement = () => {
               </div>
 
               <div className="expert-form-group">
-                <label>Administrator Remarks (Optional)</label>
+                <label>Administrator Remarks {actionType === 'Rejected' ? '(Required: 5–500 characters)' : '(Optional)'}</label>
                 <textarea
                   rows="3"
                   className="expert-clean-input border"
                   placeholder="Add any comments (visible to the employee)..."
                   value={remarks}
+                  maxLength={500}
                   onChange={e => setRemarks(e.target.value)}
                   disabled={processing}
                 />

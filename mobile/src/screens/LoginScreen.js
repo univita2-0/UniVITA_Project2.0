@@ -9,7 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import axios from 'axios';
-import { loginUser, sendOtp, verifyOtp, verifyResetOtp, forgotPassword, resetPassword, API_URL } from './api';
+import { loginUser, sendOtp, verifyOtp, verifyResetOtp, forgotPassword, resetPassword, API_URL, resetC11SessionNotification } from './api';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, CheckSquare, Square } from 'lucide-react-native';
 
 export default function LoginScreen({ navigation }) {
@@ -44,66 +44,28 @@ export default function LoginScreen({ navigation }) {
   const [resetTimer, setResetTimer] = useState(0);
 
   
-const isStoredTokenUnexpired = (token) => {
-  try {
-    const parts = String(token).split('.');
-    if (parts.length !== 3) return false;
-
-    const base64 = parts[1]
-      .replace(/-/g, '+')
-      .replace(/_/g, '/');
-
-    const payload = JSON.parse(
-      require('base-64').decode(base64)
-    );
-
-    return (
-      payload.purpose === 'session' &&
-      typeof payload.exp === 'number' &&
-      payload.exp * 1000 > Date.now()
-    );
-  } catch {
-    return false;
-  }
-};
-
-
-  // ========================================================
-  // AUTO-LOGIN & SESSION VERIFICATION ON APP LAUNCH
-  // ========================================================
+  // App.js handles session restoration before the navigator is created.
+  // Only restore the email/checkbox on the login form here.
   useEffect(() => {
-    const verifyAuthSession = async () => {
+    let cancelled = false;
+    const restoreLoginPreference = async () => {
       try {
-        const stay = await AsyncStorage.getItem('@stay_logged_in');
-        const token = await AsyncStorage.getItem('auth_token');
-        const userStr = await AsyncStorage.getItem('user');
-
-        // If user enabled "Stay logged in" and token exists, jump straight to Main
-        if (
-  stay === 'true' &&
-  token &&
-  userStr &&
-  isStoredTokenUnexpired(token)
-) {
-  navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
-  return;
-}
-
-        // Restore remembered email if available
-        const rememberedEmail = await AsyncStorage.getItem('@remembered_email');
-        if (rememberedEmail) {
-          setEmail(rememberedEmail);
-          setStayLoggedIn(true);
+        const [[, stay], [, rememberedEmail]] = await AsyncStorage.multiGet([
+          '@stay_logged_in', '@remembered_email'
+        ]);
+        if (!cancelled) {
+          setStayLoggedIn(stay !== 'false');
+          if (rememberedEmail) setEmail(rememberedEmail);
         }
-      } catch (e) {
-        console.log('Error verifying auth session:', e);
+      } catch (error) {
+        console.warn('Unable to restore login preferences:', error);
       } finally {
-        setCheckingSession(false);
+        if (!cancelled) setCheckingSession(false);
       }
     };
-
-    verifyAuthSession();
-  }, [navigation]);
+    restoreLoginPreference();
+    return () => { cancelled = true; };
+  }, []);
 
   const showToast = (message, type = 'error') => {
     setToastMessage(message);
@@ -361,6 +323,7 @@ const handleVerifyOtp = async () => {
 
       // Save the authenticated session BEFORE navigation.
       await saveSession(result.user, result.token);
+      resetC11SessionNotification();
 
       // Remove temporary verification information.
       setPendingLoginToken('');

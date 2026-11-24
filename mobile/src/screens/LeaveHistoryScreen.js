@@ -140,6 +140,7 @@ export default function LeaveHistoryScreen({ navigation }) {
           start_date: leaveDateStr,
           end_date: leaveDateStr,
           days: 1,
+          leave_units: ['1st Half', '2nd Half'].includes(leave.duration) ? 0.5 : 1,
           groupedIds: [leave.id]
         };
         grouped.push(currentGroup);
@@ -151,10 +152,12 @@ export default function LeaveHistoryScreen({ navigation }) {
         const sameType = currentGroup.type === leave.type;
         const sameStatus = (currentGroup.status || '').toLowerCase() === (leave.status || '').toLowerCase();
         const sameReason = (currentGroup.reason || '').trim() === (leave.reason || '').trim();
+        const sameSubmission = Boolean(currentGroup.submitted_at) && currentGroup.submitted_at === leave.submitted_at;
 
-        if (diffDays === 1 && sameType && sameStatus && sameReason) {
+        if (diffDays === 1 && sameType && sameStatus && sameReason && sameSubmission) {
           currentGroup.end_date = leaveDateStr;
           currentGroup.days += 1;
+          currentGroup.leave_units += ['1st Half', '2nd Half'].includes(leave.duration) ? 0.5 : 1;
           currentGroup.groupedIds.push(leave.id);
         } else {
           currentGroup = {
@@ -381,7 +384,7 @@ export default function LeaveHistoryScreen({ navigation }) {
                   <View style={styles.tableRow}>
                     <Text style={styles.tableLabel}>Duration</Text>
                     <Text style={styles.tableValue}>
-                      {item.days} {item.days > 1 ? 'Days' : 'Day'}
+                      {item.leave_units ?? item.days} day(s) across {item.days} date(s)
                     </Text>
                   </View>
 

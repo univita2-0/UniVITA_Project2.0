@@ -1,15 +1,15 @@
 // src/screens/ScheduleScreen.js
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
   ActivityIndicator, RefreshControl, StatusBar, Modal
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Clock, MapPin, BookOpen, ChevronLeft, ChevronRight, Calendar as CalIcon, X
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchUserSchedule } from './api';
+import { API_URL } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext'; 
 
 // Helper function to format time in 12-hour AM/PM format
@@ -49,6 +49,7 @@ export default function ScheduleScreen() {
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // Modal states for multiple schedules on a single day
@@ -57,16 +58,27 @@ export default function ScheduleScreen() {
   const [activeDayTitle, setActiveDayTitle] = useState('');
 
   const fetchSchedules = useCallback(async () => {
+    setLoadError('');
     try {
       const userData = await AsyncStorage.getItem('user');
       if (userData) {
         const user = JSON.parse(userData);
-        const data = await fetchUserSchedule(user.employee_id);
-        setSchedules(Array.isArray(data) ? data : []);
+        if (!user.employee_id) throw new Error('Employee identifier is unavailable.');
+        const token = await AsyncStorage.getItem('auth_token');
+        if (!token) throw new Error('Please sign in to view your schedule.');
+        const response = await fetch(`${API_URL}/schedules/${encodeURIComponent(user.employee_id)}`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+        });
+        if (!response.ok) throw new Error(`Schedule service returned HTTP ${response.status}`);
+        const data = await response.json();
+        if (!Array.isArray(data)) throw new Error('Unexpected schedule response.');
+        setSchedules(data);
+      } else {
+        throw new Error('Your profile is not available. Please sign in again.');
       }
     } catch (err) {
       console.error('Fetch schedule error:', err);
-      setSchedules([]);
+      setLoadError('Unable to load assigned shifts. Check your connection and retry.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -183,7 +195,7 @@ export default function ScheduleScreen() {
     return (
       <>
         <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
-        <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
+        <SafeAreaView edges={['top']} style={styles.safeArea}>
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>Loading schedule...</Text>
@@ -196,7 +208,7 @@ export default function ScheduleScreen() {
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
-      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView
           contentContainerStyle={styles.scroll}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />}
@@ -207,6 +219,12 @@ export default function ScheduleScreen() {
             <Text style={styles.title}>My Schedule</Text>
           </View>
 
+          {!!loadError && (
+            <TouchableOpacity onPress={fetchSchedules} style={{ padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#D97706', marginBottom: 16 }}>
+              <Text style={{ color: colors.textPrimary }}>{loadError}</Text>
+              <Text style={{ color: colors.primary, marginTop: 4 }}>Retry loading</Text>
+            </TouchableOpacity>
+          )}
           {/* Week Navigator */}
           <View style={styles.weekNavigator}>
             <TouchableOpacity onPress={() => changeWeek(-7)} style={styles.navButton} activeOpacity={0.7}>
@@ -220,6 +238,9 @@ export default function ScheduleScreen() {
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity onPress={() => setCurrentDate(new Date())} accessibilityRole="button" style={{ alignSelf: 'flex-end', marginBottom: 14, paddingVertical: 6, paddingHorizontal: 10 }}>
+            <Text style={{ fontFamily: 'Inter_18pt-Bold', color: colors.primary }}>Current week</Text>
+          </TouchableOpacity>
           {/* Daily Cards */}
           {weekDays.map((dayName, index) => {
             const startOfWeek = getStartOfWeek(currentDate);
@@ -234,13 +255,15 @@ export default function ScheduleScreen() {
             const badge = getStatusBadge(evaluatedStatus);
 
             return (
-              <View key={dayName} style={styles.dayCard}>
+              <View key={dayName} style={[styles.dayCard, targetDateStr === getPHDateString() && { borderColor: colors.primary, borderWidth: 1.5 }]}>
                 <View style={styles.dayHeader}>
                   <Text style={styles.dayName}>{dayName.toUpperCase()}</Text>
                   <Text style={styles.dayDate}>{targetDate.getDate()}</Text>
                 </View>
-                <View style={styles.dayContent}>
-                  {primarySchedule ? (
+                <View style={[styles.dayContent, !primarySchedule && { paddingVertical: 12 }]}>
+                  {loadError ? (
+                    <Text style={styles.noSchedule}>Unable to verify assigned shifts</Text>
+                  ) : primarySchedule ? (
                     <View style={styles.scheduleItem}>
                       <View style={styles.courseHeader}>
                         <BookOpen size={16} color={colors.primary} />
@@ -264,16 +287,14 @@ export default function ScheduleScreen() {
                         <Text style={[styles.statusText, { color: badge.color }]}>{badge.label}</Text>
                       </View>
 
-                      {/* See More Button if 2 or more schedules exist on the same day */}
-                      {daySchedules.length > 1 && (
-                        <TouchableOpacity 
-                          style={styles.seeMoreButton} 
-                          onPress={() => openDayModal(dayName, targetDateStr, daySchedules)}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={styles.seeMoreText}>See More (+{daySchedules.length - 1} more session{daySchedules.length > 2 ? 's' : ''})</Text>
-                        </TouchableOpacity>
-                      )}
+                      {daySchedules.slice(1).map((shift, index) => {
+                        const shiftBadge = getStatusBadge(evaluateScheduleStatus(shift, targetDateStr));
+                        return <View key={String(shift.id || index)} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 6, gap: 6 }}>
+                          <Text style={styles.courseText}>{shift.course || 'Assigned shift'}</Text>
+                          <Text style={styles.infoText}>{formatTo12H(shift.start_time)} – {formatTo12H(shift.end_time)} · {shift.place || 'Location not specified'}</Text>
+                          <Text style={{ color: shiftBadge.color, fontSize: 11, fontFamily: 'Inter_18pt-Bold' }}>{shiftBadge.label}</Text>
+                        </View>;
+                      })}
                     </View>
                   ) : (
                     <Text style={styles.noSchedule}>No classes scheduled</Text>

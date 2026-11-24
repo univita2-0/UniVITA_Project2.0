@@ -1,6 +1,6 @@
 // src/screens/OvertimeHistoryScreen.js
 import React, { useState, useEffect, useContext, useMemo } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, StatusBar, Linking, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, StatusBar, Linking, Modal, TextInput, Alert, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar as RNCalendar } from 'react-native-calendars';
 import { ArrowLeft, Calendar as CalendarIcon, Clock, FileText, AlertCircle, CheckCircle, ChevronLeft, ChevronRight, X, Eye, EyeOff } from 'lucide-react-native';
@@ -93,6 +93,8 @@ export default function OvertimeHistoryScreen({ navigation }) {
 
   const [allHistory, setAllHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
   
   const [activeTab, setActiveTab] = useState('pending');
   const [filterDate, setFilterDate] = useState(new Date());
@@ -109,16 +111,18 @@ export default function OvertimeHistoryScreen({ navigation }) {
   useEffect(() => { loadHistory(); }, []);
 
   const loadHistory = async () => {
+    setLoadError('');
     try {
       const token = await AsyncStorage.getItem('auth_token');
       const res = await fetch(`${API_URL}/overtime-requests`, {
         headers: { Authorization: `Bearer ${token || ''}` }
       });
       const data = await res.json();
-      setAllHistory(Array.isArray(data) ? data : []);
+      if (!res.ok || !Array.isArray(data)) throw new Error(data?.message || 'Request history unavailable.');
+      setAllHistory(data);
     } catch (err) {
-      setAllHistory([]);
-    } finally { setLoading(false); }
+      setLoadError(err.message || 'Unable to load history. Pull to retry.');
+    } finally { setLoading(false); setRefreshing(false); }
   };
 
   const handleCancelRequest = async () => {
@@ -135,15 +139,16 @@ export default function OvertimeHistoryScreen({ navigation }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ reason: cancelReason })
+        body: JSON.stringify({ reason: cancelReason.trim() })
       });
       
       const data = await res.json();
       if (res.ok && data.success) {
         Alert.alert("Success", "Request cancelled successfully.");
         setShowCancelModal(false);
+        setSelectedRequestId(null);
         setCancelReason('');
-        loadHistory(); 
+        await loadHistory(); 
       } else {
         Alert.alert("Error", data.message || "Failed to cancel request.");
       }
@@ -238,7 +243,9 @@ export default function OvertimeHistoryScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
+        {loadError ? <Text style={styles.emptyText}>{loadError}</Text> : null}
         <FlatList
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadHistory(); }} />}
           data={paginatedHistory}
           keyExtractor={(item, index) => item.id?.toString() || index.toString()}
           contentContainerStyle={styles.list}
@@ -291,6 +298,7 @@ export default function OvertimeHistoryScreen({ navigation }) {
                     style={{ backgroundColor: '#EF4444', padding: 12, borderRadius: 12, marginTop: 12, alignItems: 'center' }}
                     onPress={() => {
                       setSelectedRequestId(item.id);
+                       setCancelReason('');
                       setShowCancelModal(true);
                     }}
                   >
@@ -381,6 +389,7 @@ export default function OvertimeHistoryScreen({ navigation }) {
                 placeholderTextColor={colors.textSecondary}
                 value={cancelReason}
                 onChangeText={setCancelReason}
+                 maxLength={500}
               />
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
                 <TouchableOpacity onPress={() => setShowCancelModal(false)} style={{ padding: 12 }}>

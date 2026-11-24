@@ -6,7 +6,7 @@
   --em4-muted: #64748b;
   --em4-line: #dfe7ec;
   --em4-surface: #ffffff;
-  padding: 0.5px 5px 5px;
+  padding: 5px 10px 10px;
   min-height: 0;
   width: 100%;
   color: var(--em4-ink);
@@ -188,3 +188,15 @@
 .em4-field input[list="em4-position-options"] {
   font-weight: 500;
 }
+
+/* Employment / compensation field clarity */
+.em4-field-muted { opacity: .65; }
+.em4-field select { appearance: auto; }
+
+/* Enhanced accessibility and employment-record controls */
+.em4-header {display:flex;align-items:center;justify-content:space-between;gap:16px;margin:3px 0 13px;}
+.em4-header-actions {display:flex;align-items:center;gap:8px;}
+.em4-field-help {padding:11px 13px;background:#f0fdfa;border:1px solid #ccfbf1;border-radius:6px;color:#245b56;}
+.em4-field select option {color:#0f172a;}
+.em4-field input:disabled,.em4-field select:disabled {background:#f8fafc;}
+@media(max-width:760px){.em4-header{flex-direction:column;align-items:stretch;}.em4-header-actions{justify-content:flex-start;}}

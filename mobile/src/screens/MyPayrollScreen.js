@@ -1,19 +1,19 @@
 // src/screens/MyPayrollScreen.js
 import React, { useState, useEffect, useCallback, useContext, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, SafeAreaView, ScrollView, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, ActivityIndicator,
   RefreshControl, Modal, TouchableOpacity, StatusBar
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CalendarDays, X, FileText, ChevronRight, Wallet, TrendingDown, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
-import { fetchEmployeePayrollHistory } from './api';
+import { API_URL } from './api';
 
 export default function MyPayrollScreen({ navigation }) {
   const getMonthKey = (str) => {
     if (!str) return null;
-    const s = String(str).trim().replace(/\s+/g, ' ');
+    const s = String(str).trim().replace(/\s+/g, ' ').split(' | ')[0];
     const monthYearMatch = s.match(/^([A-Za-z]+)\s+(\d{4})$/);
     if (monthYearMatch) {
       const monthNames = [
@@ -46,7 +46,7 @@ export default function MyPayrollScreen({ navigation }) {
   const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
   const currentMonthKey = getMonthKey(currentMonth);
 
-  const currentMonthPayslip = allPayslips.find(
+  const currentMonthPayslips = allPayslips.filter(
     record => getMonthKey(record.month_year) === currentMonthKey
   );
   const pastPayslips = allPayslips.filter(
@@ -57,13 +57,24 @@ export default function MyPayrollScreen({ navigation }) {
     setError(false);
     try {
       const employeeId = await AsyncStorage.getItem('employee_id');
-      if (employeeId) {
-        const data = await fetchEmployeePayrollHistory(employeeId);
-        setAllPayslips(Array.isArray(data) ? data : []);
+      if (!employeeId) {
+        throw new Error('Employee ID is unavailable. Please sign in again.');
       }
+      const token = await AsyncStorage.getItem('auth_token');
+      if (!token) throw new Error('Your payroll session is unavailable. Please sign in again.');
+      const response = await fetch(`${API_URL}/payroll/employee-history/${encodeURIComponent(employeeId)}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`Payroll request failed (HTTP ${response.status}).`);
+      const data = await response.json();
+      if (!Array.isArray(data)) {
+        throw new Error('Invalid payroll history response.');
+      }
+      setAllPayslips(data);
     } catch (err) {
       console.error('My Payroll load error:', err);
       setError(true);
+      setAllPayslips([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -90,7 +101,7 @@ export default function MyPayrollScreen({ navigation }) {
   const renderCurrentMonthCard = (record) => {
     const totalDeductions = Number(record.sss_deduction || 0) + Number(record.philhealth_deduction || 0) + 
                             Number(record.pagibig_deduction || 0) + Number(record.tax_deduction || 0) + 
-                            Number(record.loan_deduction || 0) + Number(record.other_deduction || 0) + 
+                            Number(record.loan_deduction || 0) + Number(record.other_deduction || 0) + Number(record.mbf_deduction || 0) +
                             Number(record.late_deduction || 0);
 
     return (
@@ -166,7 +177,9 @@ export default function MyPayrollScreen({ navigation }) {
     // Calculate Itemized Values
     const hourlyRate = Number(p.salary_rate || 0);
     const totalHours = Number(p.total_hours || 0);
-    const basicPay = hourlyRate * totalHours;
+    // An inferred hourly calculation may differ from the finalized monthly-payroll basis.
+    // Display the backend-provided basic pay when available.
+    const basicPay = p.basic_pay != null ? Number(p.basic_pay) : null;
     
     const transport = Number(p.transport_allowance || 0);
     const meal = Number(p.meal_allowance || 0);
@@ -185,7 +198,9 @@ export default function MyPayrollScreen({ navigation }) {
     // ✅ FIX: Use the direct value from the backend instead of reverse-engineering it
     const lateDeduction = Number(p.late_deduction || 0);
 
-    const totalDeductions = tax + sss + philhealth + pagibig + loans + other + lateDeduction;
+    const mbf = Number(p.mbf_deduction || 0);
+    const bonus = Number(p.bonus || 0);
+    const totalDeductions = tax + sss + philhealth + pagibig + mbf + loans + other + lateDeduction;
 
     return (
       <Modal visible={showDetailModal} animationType="fade" transparent onRequestClose={() => setShowDetailModal(false)}>
@@ -209,13 +224,14 @@ export default function MyPayrollScreen({ navigation }) {
                 <Text style={styles.sectionTitle}>Earnings</Text>
                 
                 <View style={styles.receiptRow}>
-                  <Text style={styles.receiptLabel}>Basic Pay ({totalHours.toFixed(1)} hrs @ {formatCurrency(hourlyRate)}/hr)</Text>
-                  <Text style={styles.receiptValue}>{formatCurrency(basicPay)}</Text>
+                  <Text style={styles.receiptLabel}>Basic Pay</Text>
+                  <Text style={styles.receiptValue}>{basicPay == null || !Number.isFinite(basicPay) ? 'Included in gross pay' : formatCurrency(basicPay)}</Text>
                 </View>
 
+                {bonus > 0 && (<View style={styles.receiptRow}><Text style={styles.receiptLabel}>Bonus / 13th Month</Text><Text style={styles.receiptValue}>{formatCurrency(bonus)}</Text></View>)}
                 {otPay > 0 && (
                   <View style={styles.receiptRow}>
-                    <Text style={styles.receiptLabel}>Overtime Pay ({Number(p.overtime_hours).toFixed(1)} hrs)</Text>
+                    <Text style={styles.receiptLabel}>Overtime Pay ({Number(p.overtime_hours || 0).toFixed(1)} hrs)</Text>
                     <Text style={styles.receiptValue}>{formatCurrency(otPay)}</Text>
                   </View>
                 )}
@@ -279,6 +295,7 @@ export default function MyPayrollScreen({ navigation }) {
                   </View>
                 )}
 
+                {mbf > 0 && (<View style={styles.receiptRow}><Text style={styles.receiptLabel}>MBF</Text><Text style={styles.receiptValueRed}>-{formatCurrency(mbf)}</Text></View>)}
                 {loans > 0 && (
                   <View style={styles.receiptRow}>
                     <Text style={styles.receiptLabel}>Loans / Advances</Text>
@@ -323,7 +340,7 @@ export default function MyPayrollScreen({ navigation }) {
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
+      <SafeAreaView edges={['top']} style={styles.container}>
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
@@ -342,8 +359,8 @@ export default function MyPayrollScreen({ navigation }) {
                 <Text style={styles.viewDetailsBtnText}>Tap to Retry</Text>
               </TouchableOpacity>
             </View>
-          ) : currentMonthPayslip ? (
-            renderCurrentMonthCard(currentMonthPayslip)
+          ) : currentMonthPayslips.length > 0 ? (
+            currentMonthPayslips.map(record => <React.Fragment key={record.id}>{renderCurrentMonthCard(record)}</React.Fragment>)
           ) : (
             <View style={styles.emptyCard}>
               <View style={styles.emptyIconWrapper}>
@@ -351,7 +368,7 @@ export default function MyPayrollScreen({ navigation }) {
               </View>
               <Text style={styles.emptyText}>No payslip yet</Text>
               <Text style={styles.emptySubtext}>
-                Your payslip will appear here once HR finalizes the payroll for {currentMonth}.
+                Your finalized payslip will appear here once HR releases it for the applicable payroll cutoff in {currentMonth}.
               </Text>
             </View>
           )}

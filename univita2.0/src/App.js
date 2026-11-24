@@ -20,6 +20,7 @@ import PayrollHistory from './pages/PayrollHistory';
 import PayrollSummary from './pages/PayrollSummary';
 import ReportsWorkspace from './pages/ReportsWorkspace';
 import EmployeeManagement from './pages/EmployeeManagement';
+import AccountManagement from './pages/AccountManagement';
 import LocationsManagement from './pages/LocationsManagement';
 import CoursesManagement from './pages/CoursesManagement';
 import ProgramManagement from './pages/ProgramManagement';
@@ -219,6 +220,7 @@ function App() {
       case 'reports': return { title: 'Reports Dashboard' };
       case 'compliance-reports': return { title: 'Compliance Reports' };
       case 'employee-management': return { title: 'Employee Management' };
+      case 'account-management': return { title: 'Account Access' };
       case 'locations': return { title: 'Location Management' };
       case 'courses': return { title: 'Course Management' };
       case 'programs': return { title: 'Program Management' };
@@ -313,6 +315,7 @@ function App() {
         case 'reports':               return <ReportsWorkspace initialTab="analytics" />;
         case 'compliance-reports':    return <ComplianceReports />;
         case 'employee-management':   return <EmployeeManagement onOpenPinChange={openPinModalForAdmin} />;
+        case 'account-management':    return <AccountManagement />;
         case 'locations':             return <LocationsManagement />;
         case 'courses':               return <CoursesManagement />;
         case 'programs':              return <ProgramManagement />;

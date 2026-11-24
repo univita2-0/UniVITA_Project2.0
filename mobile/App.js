@@ -1,12 +1,12 @@
 // App.js
 import React, { useEffect, useState, useRef, useContext, Suspense, useCallback  } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform, Modal, ActivityIndicator, StatusBar, Alert, AppState, DeviceEventEmitter } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Calendar, Clock, User, AlertCircle, MessageCircle } from 'lucide-react-native';
 import * as TaskManager from 'expo-task-manager';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
@@ -103,6 +103,36 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const navigationRef = createNavigationContainerRef();
+
+// Read only the expiration/role metadata locally; server verification is authoritative.
+const readSessionClaims = (token) => {
+  try {
+    const segments = String(token || '').split('.');
+    if (segments.length !== 3) return null;
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const encoded = segments[1].replace(/-/g, '+').replace(/_/g, '/');
+    let bits = 0, count = 0, output = '';
+    for (const char of encoded) {
+      if (char === '=') break;
+      const value = alphabet.indexOf(char);
+      if (value < 0) return null;
+      bits = (bits << 6) | value;
+      count += 6;
+      if (count >= 8) {
+        count -= 8;
+        output += String.fromCharCode((bits >> count) & 255);
+      }
+    }
+    return JSON.parse(output);
+  } catch {
+    return null;
+  }
+};
+
+const SESSION_STORAGE_KEYS = [
+  'auth_token', 'user', 'employee_id', 'user_id', 'user_email', 'user_name', 'user_role'
+];
 
 // ─────────────────────────────────────────────────────────────
 // MODULE-SCOPE NAVIGATOR COMPONENTS
@@ -143,11 +173,14 @@ function ProfileStack() {
 }
 
 function MainTabs() {
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(0, insets.bottom);
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
 
   const [isChatVisible, setIsChatVisible] = useState(false);
+  const [activeTabName, setActiveTabName] = useState('Home');
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [localRefresh, setLocalRefresh] = useState(0);
   const appStateRef = useRef(AppState.currentState);
@@ -197,13 +230,19 @@ function MainTabs() {
   return (
     <View style={{ flex: 1 }}>
       <Tab.Navigator
+        screenListeners={{ state: (event) => {
+          const current = event.data?.state;
+          const route = current?.routes?.[current.index];
+          if (route?.name) setActiveTabName(route.name);
+        } }}
         screenOptions={{
           headerShown: false,
           tabBarActiveTintColor: colors.textPrimary,
           tabBarInactiveTintColor: colors.textSecondary,
           tabBarStyle: {
-            height: Platform.OS === 'ios' ? 85 : 65,
-            paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+            // Make room for the system gesture area while lifting labels above it.
+            height: 68 + bottomInset,
+            paddingBottom: bottomInset + 8,
             paddingTop: 8,
             backgroundColor: colors.surface,
             borderTopWidth: 1,
@@ -211,7 +250,9 @@ function MainTabs() {
             elevation: 0,
             shadowOpacity: 0,
           },
-          tabBarLabelStyle: { fontFamily: 'Inter_18pt-Medium', fontSize: 11 },
+          tabBarHideOnKeyboard: true,
+          tabBarItemStyle: { paddingVertical: 2 },
+          tabBarLabelStyle: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, marginTop: 3 },
         }}
       >
         <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarIcon: ({ color }) => <Home size={22} color={color} /> }} />
@@ -220,8 +261,8 @@ function MainTabs() {
         <Tab.Screen name="ProfileTab" component={ProfileStack} options={{ title: 'Profile', tabBarIcon: ({ color }) => <User size={22} color={color} /> }} />
       </Tab.Navigator>
 
-      <TouchableOpacity
-        style={[styles.globalFab, { backgroundColor: isLight ? '#0F172A' : colors.primary }]}
+      {activeTabName !== 'ProfileTab' && <TouchableOpacity
+        style={[styles.globalFab, { bottom: 82 + bottomInset, backgroundColor: isLight ? '#0F172A' : colors.primary }]}
         onPress={() => setIsChatVisible(true)}
         activeOpacity={0.85}
       >
@@ -231,7 +272,7 @@ function MainTabs() {
             <Text style={styles.fabBadgeText}>{unreadChatCount > 99 ? '99+' : unreadChatCount}</Text>
           </View>
         )}
-      </TouchableOpacity>
+      </TouchableOpacity>}
 
       <Modal visible={isChatVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setIsChatVisible(false)}>
         <Suspense
@@ -263,6 +304,8 @@ function AppContent() {
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   const [userId, setUserId] = useState(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [initialScreen, setInitialScreen] = useState('Login');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const appState = useRef(AppState.currentState);
   const [showAlertModal, setShowAlertModal] = useState(false);
@@ -272,25 +315,101 @@ function AppContent() {
   const activeAlertId = useRef(null);
   const gpsPromptShown = useRef(false);
 
-  // C11.3: Authentication errors are definitive HTTP 401 responses.
-  // Preserve @attendance_queue and persistent offline selfies for later login.
+  // Restore only sessions explicitly opted into "Stay logged in".
+  // An authenticated employee endpoint verifies the token and account status.
   useEffect(() => {
-    const listener = DeviceEventEmitter.addListener(
-      'univita:session-expired', async () => {
-        try {
-          await AsyncStorage.multiRemove(['auth_token', 'user', 'employee_id']);
-        } catch (error) {
-          console.warn('C11: Unable to clear expired session:', error);
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const [[, stay], [, token], [, rawUser]] = await AsyncStorage.multiGet([
+          '@stay_logged_in', 'auth_token', 'user'
+        ]);
+
+        if (stay !== 'true') {
+          // An unchecked session is valid only for the running app, not a cold start.
+          await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
+          return;
         }
-        setUserId(null);
-        Alert.alert('Session Expired', 'Please log in again to continue. Your offline attendance remains saved.');
+        if (!token || !rawUser) {
+          await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
+          return;
+        }
+        const user = JSON.parse(rawUser);
+        const claims = readSessionClaims(token);
+        if (
+          !claims || claims.purpose !== 'session' ||
+          claims.role !== 'instructor' || user?.role !== 'instructor' ||
+          String(claims.id) !== String(user?.id) ||
+          !Number.isFinite(claims.exp) || claims.exp * 1000 <= Date.now()
+        ) {
+          await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
+          return;
+        }
+
+        let serverRejected = false;
+        try {
+          const controller = new AbortController();
+          const request = fetch(`${API_URL}/employees/${encodeURIComponent(user.id)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal
+          });
+          const result = await Promise.race([
+            request,
+            new Promise((_, reject) => setTimeout(() => {
+              controller.abort();
+              reject(new Error('Session check timed out'));
+            }, 7000))
+          ]);
+          if ([401, 403, 404].includes(result.status)) {
+            serverRejected = true;
+          } else if (result.ok) {
+            const verified = await result.json();
+            serverRejected = String(verified.id) !== String(user.id) || verified.role !== 'instructor';
+          }
+          // 5xx: do not delete an otherwise unexpired session; retry on next API call.
+        } catch (error) {
+          // Offline/timeout: keep the unexpired session for offline attendance support.
+          console.warn('Session check deferred:', error?.message || error);
+        }
+        if (serverRejected) {
+          await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
+          return;
+        }
+        if (!cancelled) {
+          setUserId(user.id);
+          setInitialScreen('Main');
+        }
+      } catch (error) {
+        console.warn('Unable to restore session:', error?.message || error);
+        await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS).catch(() => {});
+      } finally {
+        if (!cancelled) setSessionReady(true);
       }
-    );
-    return () => listener.remove();
+    };
+    restoreSession();
+    return () => { cancelled = true; };
   }, []);
 
-  
-useEffect(() => {
+  // Root-level navigation is necessary because Profile is nested inside MainTabs.
+  useEffect(() => {
+    const resetToLogin = () => {
+      setUserId(null);
+      if (navigationRef.isReady()) {
+        navigationRef.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
+      }
+    };
+    const expired = DeviceEventEmitter.addListener('univita:session-expired', async () => {
+      await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS).catch(error => {
+        console.warn('Failed to clear expired session:', error);
+      });
+      resetToLogin();
+      Alert.alert('Session Expired', 'Please sign in again. Offline attendance remains saved.');
+    });
+    const loggedOut = DeviceEventEmitter.addListener('univita:logout', resetToLogin);
+    return () => { expired.remove(); loggedOut.remove(); };
+  }, []);
+
+  useEffect(() => {
   let cancelled = false;
 
   // C09: Synchronize pending attendance when online.
@@ -568,7 +687,7 @@ useEffect(() => {
     }
   };
 
-  if (!appIsReady) return null; 
+  if (!appIsReady || !sessionReady) return null; 
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -583,8 +702,8 @@ useEffect(() => {
             </View>
           }
         >
-          <NavigationContainer>
-            <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+          <NavigationContainer ref={navigationRef}>
+            <Stack.Navigator initialRouteName={initialScreen} screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
               <Stack.Screen name="Login" component={LoginScreen} />
               <Stack.Screen name="Main" component={MainTabs} />
               <Stack.Screen name="Requests" component={RequestsScreen} options={{ headerShown: false }} />
@@ -662,11 +781,11 @@ const styles = StyleSheet.create({
 
   globalFab: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 100 : 80, 
-    right: 20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    bottom: 90,
+    right: 18,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,

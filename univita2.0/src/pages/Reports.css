@@ -812,3 +812,15 @@
   .formal-rep-visitor-subtabs button.active { color:#0F766E; border-bottom-color:#0D9488; }
   .formal-rep-visitor-subtabs button:focus-visible { outline:2px solid #0D9488; outline-offset:2px; }
 }
+
+/* Payroll cutoff report table and compact printed metadata */
+@media screen {
+  .formal-rep-card .formal-rep-table-wrapper{max-width:100%;overflow-x:auto;}
+  .formal-rep-card .formal-rep-table th{white-space:nowrap;}
+  .formal-rep-card .formal-rep-table td{vertical-align:middle;}
+}
+@media print {
+  .formal-print-table{font-size:6.8pt;}
+  .formal-print-table th{font-size:6pt;padding:5px 5px;}
+  .formal-print-table td{padding:4px 5px;}
+}

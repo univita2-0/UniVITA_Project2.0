@@ -1,14 +1,15 @@
 // src/screens/HomeScreen.js
 import React, { useState, useEffect, useCallback, useRef, useContext, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Alert, RefreshControl, Modal, TextInput, Platform, StatusBar, AppState, ActivityIndicator, DeviceEventEmitter
 } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import NetInfo from '@react-native-community/netinfo';
 import * as TaskManager from 'expo-task-manager';
 import axios from 'axios';
 import {
@@ -192,7 +193,9 @@ const formatNotificationDate = (dateStr) => {
 const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
   let present = 0, late = 0, absent = 0, overtime = 0;
   const currentDateVal = new Date();
-  currentDateVal.setHours(0, 0, 0, 0);
+  const todayPH = currentDateVal.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+  const timeParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(currentDateVal);
+  const nowMinutes = Number(timeParts.find(p => p.type === 'hour')?.value || 0) * 60 + Number(timeParts.find(p => p.type === 'minute')?.value || 0);
 
   const monthSchedules = (scheduleList || []).filter(s => {
     const sDateStr = String(s.date || '').split('T')[0];
@@ -206,29 +209,30 @@ const calculateStatsForMonth = (historyList, scheduleList, monthStr) => {
     const schedDateVal = parseDateOnly(sDateStr);
     if (!schedDateVal) return;
 
-    if (schedDateVal <= currentDateVal) {
-      let record = (historyList || []).find(r => r.schedule_id === s.id && !usedAttendanceIds.has(r.id));
-      if (!record) {
-        record = (historyList || []).find(r => {
-          const rDateStr = String(r.date || r.attendance_date || '').split('T')[0];
-          return rDateStr === sDateStr && !usedAttendanceIds.has(r.id);
-        });
-      }
+    // Future shifts and today's incomplete windows cannot be marked absent.
+    const [endHour, endMinute] = String(s.end_time || '00:00').split(':').map(Number);
+    const shiftEndMinutes = endHour * 60 + (endMinute || 0);
+    const hasShiftEnded = sDateStr < todayPH || (sDateStr === todayPH && nowMinutes > shiftEndMinutes + LATE_GRACE_MINUTES);
+    if (sDateStr <= todayPH) {
+      // Never attach Shift A attendance to Shift B using date-only fallback.
+      const record = (historyList || []).find(r => String(r.schedule_id || '') === String(s.id) && !usedAttendanceIds.has(r.id));
 
       if (record) {
         if (record.id) usedAttendanceIds.add(record.id);
         const status = (record.status || '').toLowerCase();
         
-        if (status === 'late') late++;
+        if (status === 'on leave' || ['Whole Day', '1st Half', '2nd Half'].includes(s.leave_duration)) {
+          if (record.time_in && record.time_in !== '--:--') present++;
+        } else if (status === 'late') late++;
         else if (status === 'present' || status === 'completed' || status === 'auto clock-out (geofence)') present++;
         else if (['absent', 'missed schedule', 'did not attend', 'missed shift', 'did_not_attend', 'absent today'].includes(status)) absent++;
         else {
           if (record.time_in && record.time_in !== '--:--') present++;
-          else absent++;
+          else if (hasShiftEnded) absent++;
         }
-
-        if (parseFloat(record.total_hours) > 8) overtime++;
-      } else {
+        // Do not infer *approved* overtime from clocked hours.
+        // Overtime is reported only when an authoritative approved request feed is available.
+      } else if (hasShiftEnded && !['Whole Day', '1st Half', '2nd Half'].includes(s.leave_duration)) {
         absent++;
       }
     }
@@ -247,6 +251,14 @@ export default function HomeScreen({ navigation }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [user, setUser] = useState({ id: null, name: "Employee", employeeId: "", full_name: "" });
   const [refreshing, setRefreshing] = useState(false);
+  const [isNetworkOnline, setIsNetworkOnline] = useState(null);
+  const [homeLoadError, setHomeLoadError] = useState('');
+  useEffect(() => {
+    const sub = NetInfo.addEventListener(state => {
+      setIsNetworkOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
+    });
+    return () => sub();
+  }, []);
   // C11.2: Keep the attendance UI locked through GPS, selfie and upload.
   const c11ActionRef = useRef(false);
   const [c11ActionBusy, setC11ActionBusy] = useState(false);
@@ -733,6 +745,7 @@ const greeting = useMemo(() => {
   };
 
   const loadData = useCallback(async () => {
+    setHomeLoadError('');
     try {
       const rawUser = await AsyncStorage.getItem('user');
       const token = await AsyncStorage.getItem('auth_token');
@@ -758,7 +771,10 @@ const greeting = useMemo(() => {
         computeMonthlyStats(history || [], schedule || [], selectedMonth);
         await fetchNotifications(empId, token);
       }
-    } catch (error) { console.error("LoadData error:", error); }
+    } catch (error) {
+      console.error('LoadData error:', error);
+      setHomeLoadError('Unable to refresh attendance data. Previously loaded information may be outdated.');
+    }
   }, [selectedMonth, computeMonthlyStats]);
 
   useEffect(() => { computeMonthlyStats(rawHistory, rawSchedule, selectedMonth); }, [selectedMonth, rawHistory, rawSchedule, computeMonthlyStats]);
@@ -1277,6 +1293,12 @@ const result = await clockOut({
   const getModalStatusStyle = (sched) => {
   const status = (sched.computedStatus || sched.attendance_status || '').toUpperCase();
 
+  if (sched.leave_duration === 'Whole Day' || status.includes('ON LEAVE')) {
+    return { label: 'ON LEAVE', bg: isLight ? '#DBEAFE' : 'rgba(37,99,235,.15)', text: isLight ? '#1D4ED8' : '#93C5FD' };
+  }
+  if (['1st Half', '2nd Half'].includes(sched.leave_duration)) {
+    return { label: `${sched.leave_duration.toUpperCase()} LEAVE`, bg: isLight ? '#CCFBF1' : 'rgba(13,148,136,.15)', text: isLight ? '#0F766E' : '#5EEAD4' };
+  }
   if (status.includes('MISSING CLOCK-OUT')) {
     return { label: 'MISSING CLOCK-OUT', bg: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)', text: isLight ? '#DC2626' : '#F87171' };
   }
@@ -1339,12 +1361,15 @@ const canClockOutNow =
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
-      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.scroll} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={isLight ? "#0F172A" : "#FFFFFF"} />} showsVerticalScrollIndicator={false}>
           
           <View style={styles.heroHeaderRow}>
             <Text style={styles.greeting}>{greeting}</Text>
-            <View style={styles.liveBadgeContainer}><View style={styles.liveDot} /><Text style={styles.liveBadgeText}>ONLINE</Text></View>
+            <View style={styles.liveBadgeContainer}>
+              <View style={[styles.liveDot, isNetworkOnline === false && { backgroundColor: '#D97706' }]} />
+              <Text style={styles.liveBadgeText}>{isNetworkOnline === null ? 'CHECKING' : isNetworkOnline ? 'CONNECTED' : 'OFFLINE'}</Text>
+            </View>
           </View>
 
           <View style={styles.userHeaderRow}>
@@ -1363,6 +1388,11 @@ const canClockOutNow =
             </TouchableOpacity>
           </View>
 
+          {!!homeLoadError && (
+            <TouchableOpacity onPress={loadData} accessibilityRole="button" style={{ padding: 12, borderWidth: 1, borderColor: '#D97706', borderRadius: 12, marginBottom: 12 }}>
+              <Text style={{ color: colors.textPrimary }}>{homeLoadError} Tap to retry.</Text>
+            </TouchableOpacity>
+          )}
           {(c12Recovery.missing > 0 || c12Recovery.pendingReview > 0 || c12Recovery.waitingSync > 0) && (
             <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('AttendanceHistory')}
               style={{ backgroundColor: isLight ? '#FFFBEB' : colors.surface, borderColor: '#EAB308', borderWidth: 1,
@@ -1556,14 +1586,16 @@ const canClockOutNow =
               <Text style={styles.sectionTitle}>Performance Overview</Text>
               <TouchableOpacity onPress={() => setShowMonthlyModal(true)} style={styles.eyeIconBtn} activeOpacity={0.7}><Eye size={18} color={isLight ? "#0D9488" : colors.primary} /></TouchableOpacity>
             </View>
-            <TextInput style={styles.monthCycleInput} value={selectedMonth} onChangeText={setSelectedMonth} placeholder="YYYY-MM" placeholderTextColor={isLight ? "#94A3B8" : colors.textSecondary} maxLength={7} />
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Select attendance month" onPress={() => setShowMonthlyModal(true)} style={styles.monthCycleInput}>
+              <Text style={{ color: colors.textPrimary, fontFamily: 'Inter_18pt-Bold' }}>{selectedMonth}</Text>
+            </TouchableOpacity>
           </View>
           
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsScroll} contentContainerStyle={{ gap: 12 }}>
             <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)' }]}><CheckCircle size={24} color={isLight ? "#059669" : "#34D399"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.present}</Text><Text style={styles.statLabel}>PRESENT</Text></View>
             <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#FEE2E2' : 'rgba(248, 113, 113, 0.15)' }]}><XCircle size={24} color={isLight ? "#DC2626" : "#F87171"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.absent}</Text><Text style={styles.statLabel}>ABSENT</Text></View>
             <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.15)' }]}><AlertCircle size={24} color={isLight ? "#D97706" : "#FBBF24"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.late}</Text><Text style={styles.statLabel}>LATE</Text></View>
-            <View style={styles.statCard}><View style={[styles.statIconWrapper, { backgroundColor: isLight ? '#DBEAFE' : 'rgba(96, 165, 250, 0.15)' }]}><TrendingUp size={24} color={isLight ? "#2563EB" : "#60A5FA"} strokeWidth={2} /></View><Text style={styles.statValue}>{stats.overtime}</Text><Text style={styles.statLabel}>OVERTIME</Text></View>
+            
           </ScrollView>
 
           <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Quick Modules</Text></View>
@@ -1663,7 +1695,7 @@ const canClockOutNow =
                       <Text style={styles.monthlySummaryStat}>Present: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#059669' }}>{item.present}</Text></Text>
                       <Text style={styles.monthlySummaryStat}>Absent: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#DC2626' }}>{item.absent}</Text></Text>
                       <Text style={styles.monthlySummaryStat}>Late: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#D97706' }}>{item.late}</Text></Text>
-                      <Text style={styles.monthlySummaryStat}>Overtime: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#2563EB' }}>{item.overtime}</Text></Text>
+
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -1725,7 +1757,7 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   liveBadgeContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, gap: 5 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: isLight ? '#059669' : '#34D399' },
   liveBadgeText: { fontFamily: 'Inter_18pt-Bold', fontSize: 10, color: isLight ? '#059669' : '#34D399', letterSpacing: 0.5 },
-  glassBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 24, padding: 20, borderWidth: isLight ? 1 : 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.2, shadowRadius: 10, elevation: 2 },
+  glassBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 18, padding: 16, borderWidth: isLight ? 1 : 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: isLight ? 0.05 : 0.2, shadowRadius: 10, elevation: 2 },
   bannerContentLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   calendarIconWrapper: { width: 44, height: 44, borderRadius: 22, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, justifyContent: 'center', alignItems: 'center' },
   bannerLabel: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, color: isLight ? '#64748B' : colors.textSecondary, letterSpacing: 0.5, marginBottom: 2 },

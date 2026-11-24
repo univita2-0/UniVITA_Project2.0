@@ -221,6 +221,11 @@ const AttendanceAppeals = () => {
     }
     if (!selectedAppeal) return;
 
+    if (actionType === 'rejected' && adminRemarks.trim().length < 5) {
+      toast.error('A rejection reason of at least 5 characters is required.');
+      return;
+    }
+
     if (adminRemarks.trim().length > 500) {
       toast.error('Remarks are too long (max 500 characters).');
       return;
@@ -424,6 +429,10 @@ const AttendanceAppeals = () => {
                     <span>{formatDate(viewingAppeal.date)}</span>
                   </div>
                   <div className="aa-detail-box">
+                    <label>Assigned Shift</label>
+                    <span>{viewingAppeal.schedule_id ? `Schedule #${viewingAppeal.schedule_id}` : 'Not specified'}</span>
+                  </div>
+                  <div className="aa-detail-box">
                     <label>Submitted Date & Time</label>
                     <span>{viewingAppeal.submitted_at ? new Date(viewingAppeal.submitted_at).toLocaleString() : '—'}</span>
                   </div>
@@ -527,6 +536,10 @@ const AttendanceAppeals = () => {
                       <div className="aa-minimal-body">
                         <div className="aa-minimal-grid">
                           <div className="aa-minimal-field">
+                            <label>Assigned Shift</label>
+                            <span>{appeal.schedule_id ? `Schedule #${appeal.schedule_id}` : 'Not specified'}</span>
+                          </div>
+                          <div className="aa-minimal-field">
                             <label>Requested Time In</label>
                             <span>{formatTo12Hour(appeal.requested_time_in)}</span>
                           </div>
@@ -595,7 +608,7 @@ const AttendanceAppeals = () => {
         </>
       }>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Review Remarks (Optional, max 500 characters)</label>
+          <label style={{ fontSize: '0.75rem', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Review Remarks {actionType === 'rejected' ? '(Required: 5–500 characters)' : '(Optional, max 500 characters)'}</label>
           <textarea
             rows="4"
             maxLength={500}
@@ -606,8 +619,8 @@ const AttendanceAppeals = () => {
             className="aa-clean-input border"
             style={{ resize: 'vertical' }}
           />
-          <small style={{ fontSize: '0.7rem', color: adminRemarks.length > 1000 ? '#DC2626' : '#64748B' }}>
-            {adminRemarks.length} / 1000
+          <small style={{ fontSize: '0.7rem', color: adminRemarks.length > 500 ? '#DC2626' : '#64748B' }}>
+            {adminRemarks.length} / 500
           </small>
         </div>
       </FormalModal>

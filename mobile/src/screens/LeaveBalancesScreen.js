@@ -87,9 +87,7 @@ export default function LeaveBalancesScreen({ navigation }) {
   useEffect(() => {
     const init = async () => {
       try {
-        // Prefer employee_id (consistent with other screens), fall back to user_id
-        const empId = await AsyncStorage.getItem('employee_id');
-        const uid = empId || await AsyncStorage.getItem('user_id');
+        const uid = await AsyncStorage.getItem('user_id');
         setUserId(uid);
         if (uid) {
           await loadBalances(uid);

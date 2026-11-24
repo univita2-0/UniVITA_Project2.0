@@ -132,12 +132,14 @@ export default function AttendanceHistoryScreen({ navigation }) {
             const isPastShift = now > shiftEndDateTime;
 
             const dbStatus = String(record?.status || sched.attendance_record_status || sched.status || '').toLowerCase();
+            const leaveDuration = sched.leave_duration || record?.leave_duration || null;
+            const fullLeave = leaveDuration === 'Whole Day' || (!leaveDuration && dbStatus === 'on leave');
 
             const c12Server = c12Map.get(String(sched.id));
             const c12Offline = (c12Local?.data || []).some(e => String(e.schedule_id) === String(sched.id));
             let computedStatus = 'SCHEDULED';
 
-            if (dbStatus.includes('leave') || (sched.course && sched.course.toLowerCase().includes('leave'))) {
+            if (fullLeave) {
               computedStatus = 'ON LEAVE';
             } else if (hasValidTimeIn && hasValidTimeOut) {
               if (dbStatus.includes('early') || dbStatus.includes('departure')) {
@@ -162,11 +164,13 @@ export default function AttendanceHistoryScreen({ navigation }) {
             }
 
             // Prefer authoritative server status, then show unsent local submissions.
-            if (c12Server?.status === 'OFFLINE_PENDING_REVIEW') computedStatus = 'OFFLINE PENDING HR REVIEW';
+            if (fullLeave) computedStatus = 'ON LEAVE';
+            else if (c12Server?.status === 'OFFLINE_PENDING_REVIEW') computedStatus = 'OFFLINE PENDING HR REVIEW';
             else if (c12Server?.status === 'PENDING_HR_REVIEW') computedStatus = 'PENDING HR REVIEW';
             else if (c12Server?.status === 'MISSING_CLOCK_OUT') computedStatus = 'MISSED CLOCK OUT';
             else if (c12Server?.status === 'IN_PROGRESS') computedStatus = 'IN PROGRESS';
             else if (c12Offline) computedStatus = 'WAITING TO SYNC';
+            if (['1st Half', '2nd Half'].includes(leaveDuration) && !hasValidTimeIn && !c12Offline && !['PENDING HR REVIEW', 'OFFLINE PENDING HR REVIEW'].includes(computedStatus)) computedStatus = 'PARTIAL LEAVE';
             return {
               ...sched,
               time_in: timeIn,
@@ -174,6 +178,7 @@ export default function AttendanceHistoryScreen({ navigation }) {
               hasValidTimeIn,
               hasValidTimeOut,
               computedStatus,
+              leaveDuration,
               c13Guidance: c12Offline ? 'Saved on this device and not yet submitted to HR. Reconnect to sync. Do not delete the app or clear its storage.' : getC13RecoveryGuidance(c12Server),
               c13Resolution: c12Offline ? 'WAITING_TO_SYNC' : (c12Server?.recovery_state || null)
             };
@@ -212,6 +217,9 @@ export default function AttendanceHistoryScreen({ navigation }) {
     }
     if (s.includes('MISSED') || s.includes('ABSENT') || s.includes('DID NOT ATTEND')) {
       return <View style={[styles.badge, styles.badgeDanger]}><XCircle size={12} color="#DC2626" /><Text style={styles.badgeTextDanger}>MISSED SCHEDULE</Text></View>;
+    }
+    if (s.includes('PARTIAL LEAVE')) {
+      return <View style={[styles.badge, styles.badgeInfo]}><CalendarDays size={12} color="#2563EB" /><Text style={styles.badgeTextInfo}>Partial Leave</Text></View>;
     }
     if (s.includes('LEAVE')) {
       return <View style={[styles.badge, styles.badgeInfo]}><CalendarDays size={12} color="#2563EB" /><Text style={styles.badgeTextInfo}>On Leave</Text></View>;
@@ -336,7 +344,7 @@ export default function AttendanceHistoryScreen({ navigation }) {
                   <CalendarDays size={16} color={colors.primary} />
                   <Text style={styles.dateText}>{formatDate(item.date)}</Text>
                 </View>
-                {renderStatusBadge(item.computedStatus)}
+                <View style={{ alignItems: 'flex-end' }}>{renderStatusBadge(item.computedStatus)}{['1st Half', '2nd Half'].includes(item.leaveDuration) && <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700', marginTop: 4 }}>{item.leaveDuration} Leave Approved</Text>}</View>
               </View>
 
               <View style={styles.cardBody}>

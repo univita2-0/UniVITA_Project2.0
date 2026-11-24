@@ -1,11 +1,11 @@
 // src/screens/SecurityScreen.js
 import React, { useState, useContext, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, DeviceEventEmitter,
   Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
   TouchableWithoutFeedback, Keyboard, SafeAreaView, StatusBar, ScrollView
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Eye, EyeOff, ShieldCheck, Lock, Check, X } from 'lucide-react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,7 +13,6 @@ import { API_URL } from './api';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
 
 export default function SecurityScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
@@ -57,9 +56,10 @@ export default function SecurityScreen({ navigation }) {
       if (!id) id = await AsyncStorage.getItem('user_id');
 
       const token = await AsyncStorage.getItem('auth_token');
+      if (!id || !token) throw new Error('Please sign in again.');
       const res = await axios.put(`${API_URL}/users/${id}/update-password`, {
-        currentPassword: currentPassword.trim(),
-        newPassword: newPassword.trim()
+        currentPassword,
+        newPassword
       }, {
         headers: { Authorization: `Bearer ${token || ''}` }
       });
@@ -72,8 +72,9 @@ export default function SecurityScreen({ navigation }) {
             {
               text: "Sign In",
               onPress: async () => {
-                await AsyncStorage.clear();
-                navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+                await AsyncStorage.multiRemove(['auth_token', 'user', 'employee_id', 'user_id', 'user_email', 'user_name', 'user_role']);
+                await AsyncStorage.setItem('@stay_logged_in', 'false');
+                DeviceEventEmitter.emit('univita:logout');
               }
             }
           ]
@@ -91,7 +92,7 @@ export default function SecurityScreen({ navigation }) {
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={styles.safeArea.backgroundColor} />
-      <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <KeyboardAvoidingView 
             style={styles.container} 

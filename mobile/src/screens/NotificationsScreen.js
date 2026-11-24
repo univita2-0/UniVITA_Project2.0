@@ -1,10 +1,10 @@
 // src/screens/NotificationsScreen.js
 import React, { useState, useCallback, useContext } from 'react';
 import {
-  View, Text, StyleSheet, SafeAreaView, ScrollView,
+  View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, StatusBar, Platform, AppState, DeviceEventEmitter
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowLeft, Inbox, CheckCircle, XCircle, FileText,
   Clock, AlertTriangle, Calendar, Bell
@@ -154,6 +154,11 @@ export default function NotificationsScreen({ navigation }) {
 
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [categoryFilter, setCategoryFilter] = useState('All');
+  const filteredNotifications = notifications.filter(item => categoryFilter === 'All' ||
+    (categoryFilter === 'Unread' && item.unread) ||
+    (categoryFilter === 'Emergency' && item.emergency) ||
+    (categoryFilter === 'Requests' && !item.emergency));
   const [c14Error, setC14Error] = useState('');
   const [c15ReadError, setC15ReadError] = useState('');
   const [emergencyError, setEmergencyError] = useState('');
@@ -346,7 +351,7 @@ export default function NotificationsScreen({ navigation }) {
   );
 
   return (
-    <SafeAreaView style={[styles.safeArea, { paddingTop: topInsetPadding }]}>
+    <SafeAreaView edges={['top']} style={styles.safeArea}>
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}
         backgroundColor={isLight ? '#F8FAFC' : colors.background}
@@ -361,6 +366,14 @@ export default function NotificationsScreen({ navigation }) {
         <View style={styles.headerSpacer} />
       </View>
 
+      <View style={{ flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 10, gap: 8 }}>
+        {['All', 'Unread', 'Requests', 'Emergency'].map(filter => (
+          <TouchableOpacity key={filter} onPress={() => setCategoryFilter(filter)} accessibilityRole="button"
+            style={{ paddingHorizontal: 10, paddingVertical: 9, borderRadius: 12, backgroundColor: categoryFilter === filter ? '#0D9488' : colors.surface, borderWidth: 1, borderColor: categoryFilter === filter ? '#0D9488' : colors.border }}>
+            <Text style={{ fontSize: 11, fontFamily: 'Inter_18pt-Bold', color: categoryFilter === filter ? '#FFFFFF' : colors.textPrimary }}>{filter}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -373,14 +386,14 @@ export default function NotificationsScreen({ navigation }) {
         {!!c15ReadError && <Text style={{color:'#B45309',paddingHorizontal:12,paddingBottom:8}}>{c15ReadError}</Text>}
         {loading ? (
           <ActivityIndicator size="large" color="#0D9488" style={{ marginTop: 40 }} />
-        ) : notifications.length === 0 ? (
+        ) : filteredNotifications.length === 0 ? (
           <View style={styles.emptyState}>
             <Inbox size={48} color={colors.textSecondary} opacity={0.5} />
             <Text style={styles.emptyTitle}>All Caught Up!</Text>
-            <Text style={styles.emptySub}>No notifications are available.</Text>
+            <Text style={styles.emptySub}>No notifications match the selected filter.</Text>
           </View>
         ) : (
-          notifications.map(item => (
+          filteredNotifications.map(item => (
             <TouchableOpacity key={item.id} style={[styles.card, item.unread && {borderColor:'#0D9488',borderWidth:1}]} onPress={() => openNotification(item)}>
               <View style={styles.iconBox}>
                 {getIcon(item.type)}
@@ -390,7 +403,7 @@ export default function NotificationsScreen({ navigation }) {
                   <Text style={styles.titleText}>{item.title}</Text>
                   <Text style={styles.dateText}>{formatPHTDateTime(item.date)}</Text>
                 </View>
-                <Text style={styles.remarksText}>{item.remarks}</Text>
+                <Text style={styles.remarksText} numberOfLines={3}>{item.remarks}</Text>
                 <View style={styles.statusWrap}>
                   {item.emergency ? (
                      <View style={styles.badgeNeutral}>

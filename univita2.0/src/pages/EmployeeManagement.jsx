@@ -104,6 +104,8 @@ const isRealEmail = (raw) => {
 const dateValue = value => value ? String(value).slice(0, 10) : '';
 const readable = value => value === null || value === undefined || value === '' ? '—' : String(value);
 // Suggestions only: the position is HR-owned employment data, never inferred from system role.
+const employmentOptions = ['Full-time', 'Part-time', 'Consultant'];
+const contractOptions = { 'Full-time': ['Regular', 'Probationary', 'Project-based'], 'Part-time': ['Part-time'], 'Consultant': ['On-call Simulationist', 'Offsite Consultant'] };
 const positionOptions = [
   'Entry Level Simulationist',
   'Senior Simulationist',
@@ -114,7 +116,7 @@ const positionOptions = [
 ];
 const blank = () => ({
   employee_id: '', first_name: '', middle_initial: '', last_name: '', email: '',
-  phone_number: '', position_level: '', contract_type: 'Full-time',
+  phone_number: '', position_level: '', contract_type: 'Regular', employment_type: 'Full-time', compensation_basis: 'monthly', hourly_rate: '',
   monthly_salary: '', work_days_per_month: '22', date_of_joining: '',
   date_of_birth: '', gender: 'prefer_not_to_say', emergency_contact_name: '',
   emergency_contact_phone: '', region: '', street_address: '', city: '',
@@ -132,6 +134,12 @@ const toForm = person => {
   });
   if (!person.position_level && person.position) source.position_level = person.position;
   if (person.phone_number) source.phone_number = person.phone_number;
+  source.compensation_basis = additional.compensation_basis || 'monthly';
+  source.hourly_rate = additional.hourly_rate ?? '';
+  const oldType = String(source.employment_type || '');
+  const oldContract = String(source.contract_type || '');
+  if (!employmentOptions.includes(oldType)) source.employment_type = ['Part-time'].includes(oldContract) ? 'Part-time' : 'Full-time';
+  if (!(contractOptions[source.employment_type] || []).includes(oldContract)) source.contract_type = oldContract === 'Provisionary' ? 'Probationary' : oldContract;
   source.date_of_joining = dateValue(person.date_of_joining);
   source.date_of_birth = dateValue(person.date_of_birth);
   source.application_date = dateValue(source.application_date);
@@ -147,7 +155,7 @@ const fields = {
     ['employee_id', 'Employee ID', 'text'], ['first_name', 'First name', 'text'],
     ['middle_initial', 'Middle initial', 'text'], ['last_name', 'Last name', 'text'],
     ['email', 'Email address', 'email'], ['phone_number', 'Contact number', 'tel'],
-    ['position_level', 'Employment position / Job title', 'text'], ['contract_type', 'Employment type', 'text'],
+    ['position_level', 'Employment position / Job title', 'text'], ['employment_type', 'Employment type', 'employment'], ['contract_type', 'Contract classification', 'contract'], ['compensation_basis', 'Compensation basis', 'basis'], ['hourly_rate', 'Hourly rate (PHP, if hourly)', 'number'],
     ['monthly_salary', 'Monthly salary', 'number'], ['work_days_per_month', 'Workdays per month', 'number'],
     ['date_of_joining', 'Date hired', 'date']
   ],
@@ -173,7 +181,7 @@ const fields = {
 const infoKeys = ['sss_number', 'pagibig_number', 'philhealth_number', 'tin_number', 'region',
   'application_date', 'interview_date', 'resume_link', 'notes', 'resume_file'];
 const editKeys = ['first_name', 'last_name', 'middle_initial', 'email', 'phone_number',
-  'position_level', 'contract_type', 'monthly_salary', 'work_days_per_month', 'date_of_joining',
+  'position_level', 'contract_type', 'employment_type', 'monthly_salary', 'work_days_per_month', 'date_of_joining',
   'date_of_birth', 'gender', 'emergency_contact_name', 'emergency_contact_phone',
   'street_address', 'city', 'state_province', 'postal_code', 'country'];
 
@@ -242,6 +250,8 @@ const EmployeeManagement = () => {
   };
   const change = (name, value) => setForm(current => {
     const updated = { ...current, [name]: value };
+    if (name === 'employment_type') updated.contract_type = contractOptions[value]?.[0] || '';
+    if (name === 'compensation_basis' && value === 'monthly') updated.hourly_rate = ''; 
     if (name === 'region' && String(value).startsWith('NCR')) updated.state_province = 'Metro Manila';
     if (name === 'city') {
       const city = PH_CITIES.find(item => item.name.toLowerCase() === String(value).toLowerCase());
@@ -254,9 +264,14 @@ const EmployeeManagement = () => {
   const validate = () => {
     if (!form.employee_id.trim() || !form.first_name.trim() || !form.last_name.trim()) return 'Employee ID, first name, and last name are required.';
     if (!String(form.position_level || '').trim()) return 'Enter the actual employment position or job title.';
+    if (!employmentOptions.includes(form.employment_type)) return 'Select a valid employment type.';
+    if (!(contractOptions[form.employment_type] || []).includes(form.contract_type)) return 'Select a valid contract classification.';
+    if (!['monthly','hourly'].includes(form.compensation_basis)) return 'Select a compensation basis.';
+    if (form.compensation_basis === 'hourly' && (!Number.isFinite(Number(form.hourly_rate)) || Number(form.hourly_rate) <= 0 || Number(form.hourly_rate) > 99999999.99)) return 'Enter a valid positive hourly rate.';
+    if (form.date_of_joining && (!/^\d{4}-\d{2}-\d{2}$/.test(form.date_of_joining) || Number.isNaN(new Date(form.date_of_joining + 'T12:00:00').getTime()))) return 'Enter a valid hire date.';
     const emailCheck = isRealEmail(form.email);
     if (!emailCheck.ok) return emailCheck.reason;
-    if (form.monthly_salary === '' || !Number.isFinite(Number(form.monthly_salary)) || Number(form.monthly_salary) < 0 || Number(form.monthly_salary) > 99999999.99) return 'Enter a valid nonnegative monthly salary.';
+    if ((form.compensation_basis === 'monthly' && form.monthly_salary === '') || !Number.isFinite(Number(form.monthly_salary)) || Number(form.monthly_salary) < 0 || Number(form.monthly_salary) > 99999999.99) return 'Enter a valid nonnegative monthly salary.';
     if (resume && (resume.type !== 'application/pdf' && !/\.pdf$/i.test(resume.name))) return 'Only a PDF resume can be uploaded.';
     if (resume && resume.size > 10 * 1024 * 1024) return 'Resume must not exceed 10 MB.';
     const days = Number(form.work_days_per_month);
@@ -273,10 +288,9 @@ const EmployeeManagement = () => {
         payload.append('employee_id', form.employee_id.trim());
         payload.append('full_name', fullName);
         editKeys.forEach(key => payload.append(key, form[key] ?? ''));
-        payload.append('employment_type', form.contract_type);
         payload.append('position', form.position_level.trim());
         // The Phase 3 POST accepts an onboarding JSON object and resume_file.
-        const advanced = Object.fromEntries(infoKeys.map(key => [key, form[key] || '']));
+        const advanced = {...Object.fromEntries(infoKeys.map(key => [key, form[key] || ''])), compensation_basis: form.compensation_basis, hourly_rate: form.compensation_basis === 'hourly' ? Number(form.hourly_rate) : null};
         payload.append('additional_info', JSON.stringify(advanced));
         if (resume) payload.append('resume_file', resume);
         await axios.post(`${API_BASE}/employees`, payload, auth());
@@ -291,7 +305,7 @@ const EmployeeManagement = () => {
         payload.append('full_name', fullName);
         if (selected?.additional_info !== undefined) {
           const oldInfo = parseInfo(selected.additional_info);
-          const advanced = { ...oldInfo, ...Object.fromEntries(infoKeys.map(key => [key, form[key] || ''])) };
+          const advanced = { ...oldInfo, ...Object.fromEntries(infoKeys.map(key => [key, form[key] || ''])), compensation_basis: form.compensation_basis, hourly_rate: form.compensation_basis === 'hourly' ? Number(form.hourly_rate) : null };
           payload.append('additional_info', JSON.stringify(advanced));
           if (resume) payload.append('resume_file', resume);
         }
@@ -326,10 +340,10 @@ const EmployeeManagement = () => {
       <header className="em4-header">
         <div className="em4-header-copy">
           
-          
+          <p>Manage institutional personnel records and employment classifications.</p>
         </div>
         <div className="em4-header-actions">
-          
+          <button type="button" className="em4-secondary" onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</button>
           {isHR && (
             <button type="button" className="em4-primary" onClick={openAdd}>
               <Plus size={15} /> Add Employee
@@ -341,15 +355,15 @@ const EmployeeManagement = () => {
       {/* Summary */}
       <section className="em4-stats" aria-label="Personnel statistics">
         <div className="em4-stat">
-          <Users size={18} />
+          
           <span><strong>{employees.length}</strong>Total records</span>
         </div>
         <div className="em4-stat">
-          <UserCheck size={18} />
+          
           <span><strong>{count('active')}</strong>Active employment</span>
         </div>
         <div className="em4-stat">
-          <UserX size={18} />
+          
           <span><strong>{count('separated')}</strong>Separated</span>
         </div>
       </section>
@@ -514,7 +528,7 @@ const EmployeeManagement = () => {
                 <h2>{modal === 'add' ? 'Add Employee' : modal === 'edit' ? 'Edit Employee' : 'Employee Details'}</h2>
                 <p>
                   {modal === 'add'
-                    ? 'Creates an employee record without login access.'
+                    ? 'Creates an employee record without login access. HR manages employment details; Admin provisions login access.'
                     : `${selected?.full_name || ''} · ${selected?.employee_id || ''}`}
                 </p>
                 
@@ -555,14 +569,15 @@ const EmployeeManagement = () => {
 
               {activeTab === 'general' && (
                 <p className="em4-field-help">
-                  
+                  Employment type, contract classification, position and compensation basis are separate.
+                  Entry-level and senior simulationist salary ranges are references only; HR verifies the agreed amount.
                 </p>
               )}
               <div className="em4-form-grid">
                 {fields[activeTab].map(([key, label, type]) => (
-                  <label className={`em4-field ${type === 'textarea' ? 'wide' : ''}`} key={key}>
+                  <label className={`em4-field ${type === 'textarea' ? 'wide' : ''} ${key === 'hourly_rate' && form.compensation_basis !== 'hourly' ? 'em4-field-muted' : ''}`} key={key}>
                     <span>
-                      {label}{['employee_id', 'first_name', 'last_name', 'email', 'position_level'].includes(key) ? ' *' : ''}
+                      {label}{['employee_id', 'first_name', 'last_name', 'email', 'position_level', 'employment_type', 'contract_type'].includes(key) ? ' *' : ''}
                     </span>
                     {modal === 'view' ? (
                       <div className="em4-display">{readable(form[key])}</div>
@@ -572,6 +587,20 @@ const EmployeeManagement = () => {
                       <div className="em4-display" title="Employee API must return additional_info for safe editing">
                         Details unavailable until API supports additional_info
                       </div>
+                    ) : type === 'employment' ? (
+                      <select value={form.employment_type || ''} onChange={event => change(key, event.target.value)}>
+                        {employmentOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                    ) : type === 'contract' ? (
+                      <select value={form.contract_type || ''} onChange={event => change(key, event.target.value)}>
+                        {!((contractOptions[form.employment_type] || []).includes(form.contract_type)) && <option value={form.contract_type}>{form.contract_type || 'Choose classification'} — review required</option>}
+                        {(contractOptions[form.employment_type] || []).map(v => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                    ) : type === 'basis' ? (
+                      <select value={form.compensation_basis || 'monthly'} onChange={event => change(key, event.target.value)}>
+                        <option value="monthly">Monthly salary</option>
+                        <option value="hourly">Hourly rate</option>
+                      </select>
                     ) : type === 'textarea' ? (
                       <textarea rows={3} value={form[key] || ''} onChange={event => change(key, event.target.value)} />
                     ) : type === 'select' ? (

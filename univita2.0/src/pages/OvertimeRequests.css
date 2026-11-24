@@ -1079,3 +1079,9 @@
   .ot-container .ot-summary-card { padding: 13px; min-height: 90px; }
   .ot-container .ot-summary-card strong { font-size: 27px; }
 }
+
+/* HR requests: rejected decisions require review remarks. */
+.ot-container textarea:disabled{opacity:.6;cursor:not-allowed}
+
+/* UniVITA: maintain approved outer page spacing on all screen sizes. */
+@media screen { .ot-container { padding: 5px 10px 10px; } }

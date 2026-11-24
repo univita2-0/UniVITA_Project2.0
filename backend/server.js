@@ -3139,50 +3139,376 @@ clockOutSaved = true;
 });
 
 
-app.put('/api/attendance/update/:id', authenticateToken, requireAction('attendance:update'), async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
-  }
+async function uvIsPayrollSnapshotLocked(
+  connection,
+  userId,
+  workDate
+) {
+  const [rows] = await connection.query(
+    `SELECT id
+     FROM payroll
+     WHERE user_id = ?
+       AND (
+         (
+           period_start IS NOT NULL
+           AND DATE(?) BETWEEN period_start AND period_end
+         )
+         OR (
+           period_start IS NULL
+           AND month_year = DATE_FORMAT(DATE(?), '%M %Y')
+         )
+       )
+     LIMIT 1`,
+    [userId, workDate, workDate]
+  );
 
-  const recordId = req.params.id;
-  const { time_in, time_out, status, location } = req.body;
+  // A saved payroll row is already a payroll snapshot.
+  // Its 'pending' status means awaiting payment confirmation.
+  return rows.length > 0;
+}
 
-  try {
-    const validStatuses = ['present', 'late', 'absent', 'on leave'];
-    if (status && !validStatuses.includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status value.' });
+async function uvSyncCorrectionPending(
+  connection,
+  internalId,
+  employeeId,
+  scheduleId,
+  workDate
+) {
+  if (!scheduleId) return;
+
+  const [pending] = await connection.query(
+    `SELECT id
+     FROM attendance_corrections
+     WHERE (user_id = ? OR user_id = ?)
+       AND schedule_id = ?
+       AND DATE(attendance_date) = DATE(?)
+       AND status = 'pending'
+     LIMIT 1`,
+    [internalId, employeeId, scheduleId, workDate]
+  );
+
+  const [latest] = await connection.query(
+    `SELECT status
+     FROM attendance_corrections
+     WHERE (user_id = ? OR user_id = ?)
+       AND schedule_id = ?
+       AND DATE(attendance_date) = DATE(?)
+     ORDER BY id DESC
+     LIMIT 1`,
+    [internalId, employeeId, scheduleId, workDate]
+  );
+
+  const hasPending = pending.length > 0;
+  const correctionStatus = hasPending
+    ? 'pending'
+    : (latest[0]?.status || null);
+
+  await connection.query(
+    `UPDATE attendance
+     SET correction_requested = ?,
+         correction_status = ?
+     WHERE (user_id = ? OR user_id = ?)
+       AND schedule_id = ?
+       AND DATE(date) = DATE(?)`,
+    [
+      hasPending ? 1 : 0,
+      correctionStatus,
+      employeeId,
+      internalId,
+      scheduleId,
+      workDate
+    ]
+  );
+}
+
+
+app.put(
+  '/api/attendance/update/:id',
+  authenticateToken,
+  requireAction('attendance:update'),
+  async (req, res) => {
+    if (req.user.role !== 'hr_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'HR access required.'
+      });
     }
 
-    const sql = `
-      UPDATE attendance 
-      SET time_in = ?, 
-          time_out = ?, 
-          status = ?, 
-          location = ?,
-          correction_requested = 1,
-          correction_status = 'approved',
-          reviewed_at = NOW(),
-          updated_at = NOW()
-      WHERE id = ?
-    `;
-    
-    db.query(sql, [time_in || null, time_out || null, status || null, location || null, recordId], (err, results) => {
-      if (err) {
-        console.error("Database error during attendance update:", err);
-        return res.status(500).json({ success: false, message: "Database error" });
+    const id = Number(req.params.id);
+    const { time_in, time_out, status, location } = req.body || {};
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid attendance record ID.'
+      });
+    }
+
+    const allowedStatuses = ['present', 'late', 'absent', 'on leave'];
+
+    if (
+      status !== undefined &&
+      !allowedStatuses.includes(status)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid attendance status.'
+      });
+    }
+
+    const normalizeTime = value => {
+      if (value === null || value === '') return null;
+
+      if (
+        typeof value !== 'string' ||
+        !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(value)
+      ) {
+        throw new RangeError('Invalid clock time format.');
       }
-      if (results.affectedRows === 0) {
-        return res.status(404).json({ success: false, message: "Record not found" });
+
+      return value.length === 5 ? `${value}:00` : value;
+    };
+
+    let connection;
+    let transactionStarted = false;
+
+    try {
+      connection = await db.promise().getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const [rows] = await connection.query(
+        `SELECT
+           a.*,
+           u.id AS internal_user_id
+         FROM attendance a
+         JOIN users u
+           ON u.employee_id = a.user_id
+         WHERE a.id = ?
+         FOR UPDATE`,
+        [id]
+      );
+
+      if (rows.length !== 1) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(rows.length === 0 ? 404 : 409).json({
+          success: false,
+          message: rows.length === 0
+            ? 'Attendance record not found.'
+            : 'Attendance ownership is ambiguous.'
+        });
       }
-      
-      logAction(req.user.id, 'MANUAL_UPDATE_ATTENDANCE', 'attendance', recordId, req);
-      res.json({ success: true, message: "Attendance updated successfully" });
-    });
-  } catch (error) {
-    console.error("Update error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+
+      const original = rows[0];
+
+      if (
+        await uvIsPayrollSnapshotLocked(
+          connection,
+          original.internal_user_id,
+          original.date
+        )
+      ) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message:
+            'Payroll already exists for this attendance period. ' +
+            'Use an authorized payroll adjustment workflow.'
+        });
+      }
+
+      const [pending] = await connection.query(
+        `SELECT id
+         FROM attendance_corrections
+         WHERE (user_id = ? OR user_id = ?)
+           AND schedule_id = ?
+           AND DATE(attendance_date) = DATE(?)
+           AND LOWER(status) = 'pending'
+         LIMIT 1`,
+        [
+          original.internal_user_id,
+          original.user_id,
+          original.schedule_id,
+          original.date
+        ]
+      );
+
+      if (pending.length > 0) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message:
+            'An attendance correction is pending for this shift. ' +
+            'Review the request before editing attendance.'
+        });
+      }
+
+      const nextIn = time_in === undefined
+        ? original.time_in
+        : normalizeTime(time_in);
+
+      const nextOut = time_out === undefined
+        ? original.time_out
+        : normalizeTime(time_out);
+
+      const nextStatus = status === undefined
+        ? original.status
+        : status;
+
+      const nextLocation = location === undefined
+        ? original.location
+        : location === null
+          ? null
+          : typeof location === 'string'
+            ? location.trim()
+            : null;
+
+      if (
+        location !== undefined &&
+        location !== null &&
+        typeof location !== 'string'
+      ) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(400).json({
+          success: false,
+          message: 'Location must be a text value.'
+        });
+      }
+
+      if (String(nextLocation || '').length > 200) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(400).json({
+          success: false,
+          message: 'Location must not exceed 200 characters.'
+        });
+      }
+
+      if (!nextIn && nextOut) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(400).json({
+          success: false,
+          message: 'Clock-out requires an existing clock-in.'
+        });
+      }
+
+      let totalHours = 0;
+
+      if (nextIn && nextOut) {
+        totalHours = c10AttendanceHours(nextIn, nextOut);
+
+        if (totalHours === null) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(400).json({
+            success: false,
+            message:
+              'Attendance duration must be greater than zero ' +
+              'and no more than 16 hours.'
+          });
+        }
+      }
+
+      const oldValues = {
+        time_in: original.time_in,
+        time_out: original.time_out,
+        status: original.status,
+        location: original.location,
+        total_hours: original.total_hours
+      };
+
+      const newValues = {
+        time_in: nextIn,
+        time_out: nextOut,
+        status: nextStatus,
+        location: nextLocation,
+        total_hours: Number(totalHours.toFixed(2))
+      };
+
+      const [result] = await connection.query(
+        `UPDATE attendance
+         SET time_in = ?,
+             time_out = ?,
+             status = ?,
+             location = ?,
+             total_hours = ?,
+             reviewed_at = NOW(),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [
+          newValues.time_in,
+          newValues.time_out,
+          newValues.status,
+          newValues.location,
+          newValues.total_hours,
+          id
+        ]
+      );
+
+      if (result.affectedRows !== 1) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message: 'Attendance could not be updated.'
+        });
+      }
+
+      await connection.commit();
+      transactionStarted = false;
+
+      logAction(
+        req.user.id,
+        'MANUAL_UPDATE_ATTENDANCE',
+        'attendance',
+        id,
+        req,
+        oldValues,
+        newValues
+      );
+
+      return res.json({
+        success: true,
+        message: 'Attendance updated successfully.'
+      });
+
+    } catch (error) {
+      if (connection && transactionStarted) {
+        await connection.rollback().catch(console.error);
+      }
+
+      if (error instanceof RangeError) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        });
+      }
+
+      console.error('Attendance update error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Attendance update failed.'
+      });
+
+    } finally {
+      if (connection) connection.release();
+    }
   }
-});
+);
 
 // ============================================
 // ATTENDANCE CORRECTIONS (Secured, Validated & Timezone-Synchronized)
@@ -3288,38 +3614,58 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
         });
       }
 
-      let scheduleRow;
-      if (!schedule_id || schedule_id === 'undefined' || schedule_id === 'null') {
-        const [schedRows] = await connection.query(
-          `SELECT id, start_time, end_time FROM schedules
-            WHERE (user_id = ? OR user_id = ?) AND date = ?
-            ORDER BY start_time ASC`,
-          [resolvedEmployeeId, userId, date]
-        );
-        if (schedRows.length === 0) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: 'No schedule found for this date. Correction not allowed.'
-          });
-        }
-        scheduleRow = schedRows[0];
-        schedule_id = scheduleRow.id;
-      } else {
-        const [schedVerify] = await connection.query(
-          `SELECT id, start_time, end_time FROM schedules
-            WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?`,
-          [schedule_id, resolvedEmployeeId, userId, date]
-        );
-        if (schedVerify.length === 0) {
-          await connection.rollback();
-          return res.status(400).json({
-            success: false,
-            message: 'Invalid schedule selected for this date.'
-          });
-        }
-        scheduleRow = schedVerify[0];
-      }
+      
+let scheduleRow;
+
+if (
+  !schedule_id ||
+  schedule_id === 'undefined' ||
+  schedule_id === 'null'
+) {
+  const [schedRows] = await connection.query(
+    `SELECT id, start_time, end_time
+     FROM schedules
+     WHERE (user_id = ? OR user_id = ?)
+       AND DATE(date) = DATE(?)
+     ORDER BY start_time ASC
+     LIMIT 2`,
+    [resolvedEmployeeId, userId, date]
+  );
+
+  if (schedRows.length !== 1) {
+    await connection.rollback();
+
+    return res.status(409).json({
+      success: false,
+      message: schedRows.length === 0
+        ? 'No assigned schedule found for this date.'
+        : 'Multiple assigned shifts found. Select the specific shift before submitting a correction.'
+    });
+  }
+
+  scheduleRow = schedRows[0];
+  schedule_id = scheduleRow.id;
+} else {
+  const [schedVerify] = await connection.query(
+    `SELECT id, start_time, end_time
+     FROM schedules
+     WHERE id = ?
+       AND (user_id = ? OR user_id = ?)
+       AND DATE(date) = DATE(?)`,
+    [schedule_id, resolvedEmployeeId, userId, date]
+  );
+
+  if (schedVerify.length !== 1) {
+    await connection.rollback();
+
+    return res.status(400).json({
+      success: false,
+      message: 'The selected schedule does not belong to this instructor and date.'
+    });
+  }
+
+  scheduleRow = schedVerify[0];
+}
 
       const toMinutes = (t) => {
         const [h, m] = String(t).split(':').map(Number);
@@ -3376,53 +3722,49 @@ app.post('/api/attendance/correction-request', authenticateToken, uploadCorrecti
         });
       }
 
-      const [insertResult] = await connection.query(
-        `INSERT INTO attendance_corrections
-           (user_id, attendance_date, schedule_id,
-            requested_clock_in, requested_clock_out,
-            reason, selfie_url, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        [
-          userId,
-          date,
-          schedule_id,
-          isClockInRequest  ? normalizedTime : null,
-          !isClockInRequest ? normalizedTime : null,
-          trimmedReason,
-          attachmentPath,
-          phNow
-        ]
-      );
-
       
-      const [existingAtt] = await connection.query(
-        `SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
-        [resolvedEmployeeId, userId, schedule_id]
-      );
+const [insertResult] = await connection.query(
+  `INSERT INTO attendance_corrections
+   (
+     user_id,
+     attendance_date,
+     schedule_id,
+     correction_type,
+     requested_clock_in,
+     requested_clock_out,
+     reason,
+     selfie_url,
+     status,
+     created_at
+   )
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+  [
+    userId,
+    date,
+    schedule_id,
+    type,
+    type === 'clock_in' ? normalizedTime : null,
+    type !== 'clock_in' ? normalizedTime : null,
+    trimmedReason,
+    attachmentPath,
+    phNow
+  ]
+);
 
-      if (existingAtt.length === 0) {
-        await connection.query(
-          `INSERT INTO attendance (user_id, schedule_id, date, status, correction_requested, correction_status)
-           VALUES (?, ?, ?, 'absent', 1, 'pending')`,
-          [resolvedEmployeeId, schedule_id, date]
-        );
-      }
-
-      await connection.query(
-        `UPDATE attendance
-            SET correction_requested = 1,
-                correction_status    = 'pending',
-                status               = 'pending'
-          WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
-        [resolvedEmployeeId, userId, schedule_id]
-      );
-
-      if (type === 'clock_out' || type === 'early_out') {
-        await connection.query(
-          "UPDATE users SET location_tracking_enabled = 0 WHERE employee_id = ?",
-          [resolvedEmployeeId]
-        );
-      }
+await connection.query(
+  `UPDATE attendance
+   SET correction_requested = 1,
+       correction_status = 'pending'
+   WHERE (user_id = ? OR user_id = ?)
+     AND schedule_id = ?
+     AND DATE(date) = DATE(?)`,
+  [
+    resolvedEmployeeId,
+    userId,
+    schedule_id,
+    date
+  ]
+);
 
       await connection.commit();
 
@@ -3447,6 +3789,7 @@ app.get('/api/attendance/corrections/user/:employeeId', authenticateToken, verif
     const [results] = await db.promise().query(
       `SELECT c.id, 
               c.schedule_id,
+              c.correction_type,
               c.requested_clock_in, 
               c.requested_clock_out, 
               c.reason, 
@@ -3525,6 +3868,17 @@ app.put(
         message: 'Admin remarks must be 500 characters or fewer.'
       });
     }
+
+    if (
+  status === 'rejected' &&
+  (!cleanAdminRemarks || cleanAdminRemarks.length < 5)
+) {
+  return res.status(400).json({
+    success: false,
+    message:
+      'A rejection reason of 5–500 characters is required.'
+  });
+}
 
     let connection = null;
     let transactionStarted = false;
@@ -3675,6 +4029,27 @@ app.put(
       // 7. Approval processing
       if (status === 'approved') {
 
+
+if (
+  await uvIsPayrollSnapshotLocked(
+    connection,
+    internalUserId,
+    record.attendance_date
+  )
+) {
+  await connection.rollback();
+  transactionStarted = false;
+
+  return res.status(409).json({
+    success: false,
+    message:
+      'Payroll for this date is already finalized. ' +
+      'Use an authorized payroll adjustment before ' +
+      'changing attendance.'
+  });
+}
+
+
         // Lock attendance record for this schedule.
         const [existing] = await connection.query(
           `SELECT id, user_id, time_in, time_out, date
@@ -3776,10 +4151,32 @@ app.put(
           }
         }
 
-        const attendanceStatus =
-          finalIn && finalOut && finalOut !== '--:--'
-            ? 'completed'
-            : 'missing clock-out';
+        
+const [shift] = await connection.query(
+  `SELECT start_time
+   FROM schedules
+   WHERE id = ?
+   LIMIT 1`,
+  [targetScheduleId]
+);
+
+const scheduledStart = c10ParseTimeSeconds(
+  shift[0]?.start_time
+);
+
+const actualStart = c10ParseTimeSeconds(finalIn);
+
+const attendanceStatus =
+  !finalOut || finalOut === '--:--'
+    ? 'missing clock-out'
+    : (
+        scheduledStart !== null &&
+        actualStart !== null &&
+        actualStart > scheduledStart + 30 * 60
+      )
+      ? 'late'
+      : 'present';
+
 
         // 9. Insert or update the attendance record.
         if (!currentAttendance) {
@@ -3845,7 +4242,7 @@ app.put(
 
       } else {
         // 10. Rejection processing.
-        // C06 offline rejections must not erase online attendance.
+      
         if (!isOfflineCorrection && targetScheduleId) {
           await connection.query(
             `UPDATE attendance
@@ -3891,7 +4288,17 @@ app.put(
         });
       }
 
-      // C10.1 + C10.3: audit and correction decision commit atomically.
+      
+if (!isOfflineCorrection && targetScheduleId) {
+  await uvSyncCorrectionPending(
+    connection,
+    internalUserId,
+    empIdString,
+    targetScheduleId,
+    record.attendance_date
+  );
+}
+
       // If the audit insert fails, the existing catch rolls back everything.
       const oldAuditValue = {
         status: record.status,
@@ -4060,13 +4467,31 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
   if (time_out && !HHMM_APPEAL_REGEX.test(String(time_out).trim())) {
     return res.status(400).json({ success: false, error: "Invalid time_out format. Expected HH:mm or HH:mm:ss." });
   }
-  const normalizeHHMM = (t) => {
-    const s = String(t).trim();
-    return s.length === 5 ? `${s}:00` : s;
-  };
-  if (time_in && time_out && normalizeHHMM(time_in) >= normalizeHHMM(time_out)) {
-    return res.status(400).json({ success: false, error: "Clock-out must be after clock-in." });
-  }
+  
+
+const normalizeHHMM = (t) => {
+  const s = String(t).trim();
+  return s.length === 5 ? `${s}:00` : s;
+};
+
+if (!time_in && !time_out) {
+  return res.status(400).json({
+    success: false,
+    error: 'Provide at least one requested attendance time.'
+  });
+}
+
+if (
+  time_in &&
+  time_out &&
+  c10AttendanceHours(time_in, time_out) == null
+) {
+  return res.status(400).json({
+    success: false,
+    error: 'Requested attendance duration must be between 0 and 16 hours.'
+  });
+}
+
 
   try {
     const [userRows] = await db.promise().query(
@@ -4104,14 +4529,23 @@ app.post('/api/attendance-appeals', authenticateToken, uploadAppeal.single('imag
       let targetScheduleId = schedule_id;
       if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
         const [schedRows] = await connection.query(
-          "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
+          "SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 2",
           [employee_id, userId, date]
         );
-        if (schedRows.length === 0) {
-          await connection.rollback();
-          return res.status(400).json({ success: false, error: "No schedule found for this date. Cannot submit appeal." });
-        }
-        targetScheduleId = schedRows[0].id;
+        
+if (schedRows.length !== 1) {
+  await connection.rollback();
+
+  return res.status(409).json({
+    success: false,
+    error: schedRows.length === 0
+      ? 'No schedule found for this date.'
+      : 'Multiple shifts found. Select the specific shift before submitting an appeal.'
+  });
+}
+
+targetScheduleId = schedRows[0].id;
+
       } else {
         const [schedVerify] = await connection.query(
           "SELECT id FROM schedules WHERE id = ? AND (user_id = ? OR user_id = ?) AND date = ?",
@@ -4189,146 +4623,283 @@ app.get('/api/attendance-appeals/pending', authenticateToken, (req, res) => {
   });
 });
 
-// C10.3: Atomic attendance appeal review (preserves existing endpoint contract).
+
 app.put('/api/attendance-appeals/:id/status', authenticateToken, requireAction('appeals:review'), async (req, res) => {
   if (!['admin', 'hr_admin'].includes(req.user.role)) {
-    return res.status(403).json({ success: false, message: 'Forbidden' });
+    return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
-  const appealId = req.params.id;
+
+  const id = Number(req.params.id);
   const { status, admin_remarks } = req.body || {};
-  if (!/^\d+$/.test(String(appealId)) || Number(appealId) <= 0 ||
-      !['approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ success: false, message: 'Invalid appeal ID or status.' });
-  }
   const remarks = admin_remarks == null ? null : String(admin_remarks).trim() || null;
-  if (remarks && remarks.length > 500) {
-    return res.status(400).json({ success: false, message: 'Admin remarks must be 500 characters or fewer.' });
+
+  if (!Number.isSafeInteger(id) || id <= 0 || !['approved', 'rejected'].includes(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid appeal ID or decision.' });
   }
-  const phNow = getPHDateTime();
+
+  if ((remarks && remarks.length > 500) || (status === 'rejected' && (!remarks || remarks.length < 5))) {
+    return res.status(400).json({
+      success: false,
+      message: 'Rejection requires 5–500 characters; other remarks are limited to 500.'
+    });
+  }
+
   let connection;
   let started = false;
+
   try {
     connection = await db.promise().getConnection();
     await connection.beginTransaction();
     started = true;
-    const [appeals] = await connection.query(
-      `SELECT * FROM attendance_appeals WHERE id = ? FOR UPDATE`, [appealId]
+
+    const [rows] = await connection.query(
+      'SELECT * FROM attendance_appeals WHERE id = ? FOR UPDATE',
+      [id]
     );
-    if (appeals.length !== 1) {
-      await connection.rollback(); started = false;
-      return res.status(404).json({ success: false, message: 'Appeal not found.' });
+
+    if (rows.length !== 1) {
+      throw uvLeaveApprovalConflict('Appeal not found.', 404);
     }
-    const appeal = appeals[0];
-    if (appeal.status !== 'pending') {
-      await connection.rollback(); started = false;
-      return res.status(409).json({ success: false, message: `Appeal already ${appeal.status}.` });
+
+    const appeal = rows[0];
+
+    if (String(appeal.status).toLowerCase() !== 'pending') {
+      throw uvLeaveApprovalConflict('Appeal has already been reviewed.');
     }
+
     const [owners] = await connection.query(
-      `SELECT id, employee_id FROM users WHERE id = ? OR employee_id = ? FOR UPDATE`,
+      'SELECT id, employee_id FROM users WHERE id = ? OR employee_id = ? FOR UPDATE',
       [appeal.user_id, appeal.user_id]
     );
+
     if (owners.length !== 1) {
-      await connection.rollback(); started = false;
-      return res.status(409).json({ success: false, message: 'Appeal owner is ambiguous or missing.' });
+      throw uvLeaveApprovalConflict('Appeal owner is missing or ambiguous.');
     }
+
     const owner = owners[0];
+
     if (String(owner.id) === String(req.user.id)) {
-      await connection.rollback(); started = false;
-      return res.status(403).json({ success: false, message: 'You cannot review your own appeal.' });
+      throw uvLeaveApprovalConflict('You cannot review your own appeal.', 403);
     }
-    const empId = String(owner.employee_id);
+
     let targetScheduleId = appeal.schedule_id;
+
     if (!targetScheduleId) {
       const [matches] = await connection.query(
         `SELECT id FROM schedules
-         WHERE (user_id = ? OR user_id = ?) AND DATE(date) = DATE(?)
-         ORDER BY start_time LIMIT 2`,
-        [empId, owner.id, appeal.date]
+         WHERE (user_id = ? OR user_id = ?)
+           AND DATE(date) = DATE(?)
+         ORDER BY start_time
+         LIMIT 2`,
+        [owner.employee_id, owner.id, appeal.date]
       );
-      if (matches.length === 1) targetScheduleId = matches[0].id;
-    }
-    if (status === 'approved' && !targetScheduleId) {
-      await connection.rollback(); started = false;
-      return res.status(409).json({ success: false, message: 'A unique matching schedule is required for approval.' });
-    }
-    let scheduled = null;
-    if (targetScheduleId) {
-      const [schedules] = await connection.query(
-        `SELECT id, start_time, end_time FROM schedules
-         WHERE id = ? AND (user_id = ? OR user_id = ?)
-           AND DATE(date) = DATE(?) LIMIT 1`,
-        [targetScheduleId, empId, owner.id, appeal.date]
-      );
-      if (!schedules.length) {
-        await connection.rollback(); started = false;
-        return res.status(409).json({ success: false, message: 'Appeal schedule does not match this employee and date.' });
+
+      if (matches.length === 1) {
+        targetScheduleId = matches[0].id;
       }
-      scheduled = schedules[0];
     }
+
     if (status === 'approved') {
-      const finalIn = appeal.requested_time_in || scheduled.start_time;
-      const finalOut = appeal.requested_time_out || scheduled.end_time;
-      const hours = c10AttendanceHours(finalIn, finalOut);
-      if (hours == null) {
-        await connection.rollback(); started = false;
-        return res.status(409).json({ success: false, message: 'Invalid appeal time range (maximum 16 hours).' });
+      if (!targetScheduleId) {
+        throw uvLeaveApprovalConflict('Select the specific scheduled shift before approval.');
       }
-      const [attendance] = await connection.query(
-        `SELECT id, user_id FROM attendance WHERE schedule_id = ? FOR UPDATE`, [targetScheduleId]
+
+      const [schedules] = await connection.query(
+        `SELECT id, start_time
+         FROM schedules
+         WHERE id = ?
+           AND (user_id = ? OR user_id = ?)
+           AND DATE(date) = DATE(?)
+         LIMIT 1`,
+        [targetScheduleId, owner.employee_id, owner.id, appeal.date]
       );
-      if (attendance.length > 1 || (attendance.length && ![empId, String(owner.id)].includes(String(attendance[0].user_id)))) {
-        await connection.rollback(); started = false;
-        return res.status(409).json({ success: false, message: 'Attendance owner or duplicate record conflict.' });
+
+      if (schedules.length !== 1) {
+        throw uvLeaveApprovalConflict('Appeal schedule does not belong to this employee and date.');
       }
-      if (attendance.length) {
+
+      if (await uvIsPayrollSnapshotLocked(connection, owner.id, appeal.date)) {
+        throw uvLeaveApprovalConflict(
+          'Payroll has already been saved for this attendance date. Use an authorized adjustment.'
+        );
+      }
+
+      const [pendingCorrections] = await connection.query(
+        `SELECT id
+         FROM attendance_corrections
+         WHERE (user_id = ? OR user_id = ?)
+           AND schedule_id = ?
+           AND DATE(attendance_date) = DATE(?)
+           AND status = 'pending'
+         LIMIT 1`,
+        [owner.id, owner.employee_id, targetScheduleId, appeal.date]
+      );
+
+      if (pendingCorrections.length) {
+        throw uvLeaveApprovalConflict(
+          'Review the existing attendance correction before approving this appeal.'
+        );
+      }
+
+      const [attendance] = await connection.query(
+        `SELECT id, user_id, time_in, time_out, status, location, total_hours
+         FROM attendance
+         WHERE schedule_id = ?
+         FOR UPDATE`,
+        [targetScheduleId]
+      );
+
+      if (
+        attendance.length > 1 ||
+        (
+          attendance.length &&
+          ![String(owner.id), String(owner.employee_id)]
+            .includes(String(attendance[0].user_id))
+        )
+      ) {
+        throw uvLeaveApprovalConflict('Attendance ownership or duplicate record conflict.');
+      }
+
+      const original = attendance[0] || null;
+      const finalIn = appeal.requested_time_in || original?.time_in || null;
+      const finalOut = appeal.requested_time_out || original?.time_out || null;
+
+      if (!finalIn || !finalOut) {
+        throw uvLeaveApprovalConflict(
+          'Approval requires a verified clock-in and clock-out. A scheduled time cannot replace missing evidence.'
+        );
+      }
+
+      const hours = c10AttendanceHours(finalIn, finalOut);
+
+      if (hours == null) {
+        throw uvLeaveApprovalConflict('Invalid verified attendance interval (maximum 16 hours).');
+      }
+
+      const shiftStart = c10ParseTimeSeconds(schedules[0].start_time);
+      const checkIn = c10ParseTimeSeconds(finalIn);
+
+      if (shiftStart == null || checkIn == null) {
+        throw uvLeaveApprovalConflict(
+          'Unable to determine attendance status: invalid schedule or clock-in.'
+        );
+      }
+
+      const offset = (checkIn - shiftStart + 86400) % 86400;
+      const newStatus = offset > 1800 && offset <= 16 * 3600 ? 'late' : 'present';
+
+      if (original) {
         await connection.query(
-          `UPDATE attendance SET time_in = ?, time_out = ?, status = 'completed',
-                  total_hours = ?, location = 'Appeal Approved' WHERE id = ?`,
-          [finalIn, finalOut, hours, attendance[0].id]
+          `UPDATE attendance
+           SET time_in = ?,
+               time_out = ?,
+               status = ?,
+               total_hours = ?
+           WHERE id = ?`,
+          [finalIn, finalOut, newStatus, hours, original.id]
         );
       } else {
         await connection.query(
-          `INSERT INTO attendance (user_id, schedule_id, date, time_in, time_out,
-                                   status, location, total_hours)
-           VALUES (?, ?, ?, ?, ?, 'completed', 'Appeal Approved', ?)`,
-          [empId, targetScheduleId, appeal.date, finalIn, finalOut, hours]
+          `INSERT INTO attendance
+             (user_id, schedule_id, date, time_in, time_out, status, total_hours)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            owner.employee_id,
+            targetScheduleId,
+            appeal.date,
+            finalIn,
+            finalOut,
+            newStatus,
+            hours
+          ]
         );
       }
+    } else if (targetScheduleId) {
+      const [schedules] = await connection.query(
+        `SELECT id FROM schedules
+         WHERE id = ?
+           AND (user_id = ? OR user_id = ?)
+           AND DATE(date) = DATE(?)
+         LIMIT 1`,
+        [targetScheduleId, owner.employee_id, owner.id, appeal.date]
+      );
+
+      if (!schedules.length) {
+        throw uvLeaveApprovalConflict('Appeal schedule ownership mismatch.');
+      }
     }
-    // Rejected appeal does NOT erase or mark unrelated valid attendance absent.
-    const [result] = await connection.query(
-      `UPDATE attendance_appeals SET status = ?, admin_remarks = ?, reviewed_at = ?
+
+    const [updated] = await connection.query(
+      `UPDATE attendance_appeals
+       SET status = ?,
+           admin_remarks = ?,
+           reviewed_at = ?
        WHERE id = ? AND status = 'pending'`,
-      [status, remarks, phNow, appealId]
+      [status, remarks, getPHDateTime(), id]
     );
-    if (result.affectedRows !== 1) {
-      await connection.rollback(); started = false;
-      return res.status(409).json({ success: false, message: 'Appeal already reviewed.' });
+
+    if (updated.affectedRows !== 1) {
+      throw uvLeaveApprovalConflict('Appeal was already reviewed.');
     }
-    const rawIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null;
+
+    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null;
+
     await connection.query(
-      `INSERT INTO audit_logs (user_id, action, target_type, target_id, old_value,
-                               new_value, ip_address, user_agent, created_at)
+      `INSERT INTO audit_logs
+         (user_id, action, target_type, target_id, old_value,
+          new_value, ip_address, user_agent, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [req.user.id, status === 'approved' ? 'APPROVE_APPEAL' : 'REJECT_APPEAL',
-       'attendance_appeal', appealId,
-       JSON.stringify({ status: appeal.status, admin_remarks: appeal.admin_remarks || null }),
-       JSON.stringify({ status, admin_remarks: remarks, reviewed_by: req.user.id,
-                        schedule_id: targetScheduleId || null }),
-       rawIp ? String(rawIp).split(',')[0].trim() : null,
-       req.headers['user-agent'] || null, phNow]
+      [
+        req.user.id,
+        status === 'approved' ? 'APPROVE_APPEAL' : 'REJECT_APPEAL',
+        'attendance_appeal',
+        String(id),
+        JSON.stringify({
+          status: appeal.status,
+          admin_remarks: appeal.admin_remarks || null
+        }),
+        JSON.stringify({
+          status,
+          admin_remarks: remarks,
+          schedule_id: targetScheduleId || null,
+          reviewed_by: req.user.id
+        }),
+        ip ? String(ip).split(',')[0].trim() : null,
+        req.headers['user-agent'] || null,
+        getPHDateTime()
+      ]
     );
-    await connection.commit(); started = false;
-    void c14NotifyInstructorDecision(owner.id, 'appeal', appealId, status).catch(err => console.warn('C14 appeal decision notify:',err.message));
-    return res.json({ success: true, message: `Appeal successfully ${status}.` });
+
+    await connection.commit();
+    started = false;
+
+    void c14NotifyInstructorDecision(owner.id, 'appeal', id, status)
+      .catch(error => console.warn('Appeal notification:', error.message));
+
+    return res.json({
+      success: true,
+      message: `Appeal successfully ${status}.`
+    });
   } catch (error) {
-    if (connection && started) await connection.rollback().catch(() => {});
-    console.error('C10 attendance appeal review error:', error);
-    return res.status(500).json({ success: false, message: 'Unable to review attendance appeal.' });
+    if (started && connection) {
+      await connection.rollback().catch(() => {});
+    }
+
+    if (!error.httpStatus) {
+      console.error('Appeal review error:', error);
+    }
+
+    return res.status(error.httpStatus || 500).json({
+      success: false,
+      message: error.httpStatus
+        ? error.message
+        : 'Unable to review appeal.'
+    });
   } finally {
     if (connection) connection.release();
   }
 });
+
 
 app.get('/api/attendance-appeals/history', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -4571,8 +5142,11 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       });
     }
 
-    const leaveTypeId = typeRows[0].id;
-    const annualQuota = Number(typeRows[0].annual_quota);
+    
+const leaveTypeId = typeRows[0].id;
+const canonicalLeaveType = typeRows[0].name;
+const annualQuota = Number(typeRows[0].annual_quota);
+
 
     if (
       typeRows[0].annual_quota == null ||
@@ -4601,11 +5175,19 @@ app.post('/api/leave-requests', authenticateToken, upload.single('image'), async
       for (const [yearStr, totalCost] of Object.entries(costsByYear)) {
         const year = parseInt(yearStr, 10);
         
-        await connection.query(
-          `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated)
-           VALUES (?, ?, ?, ?, CURDATE())`,
-          [userId, leaveTypeId, annualQuota, year]
-        );
+       
+const initialBalance =
+  /compensatory|cto|cpo/i.test(canonicalLeaveType)
+    ? 0
+    : annualQuota;
+
+await connection.query(
+  `INSERT IGNORE INTO employee_leave_balances
+     (user_id, leave_type_id, remaining_days, year, last_updated)
+   VALUES (?, ?, ?, ?, CURDATE())`,
+  [userId, leaveTypeId, initialBalance, year]
+);
+
 
         const [balanceRows] = await connection.query(
           `SELECT remaining_days FROM employee_leave_balances
@@ -4654,7 +5236,17 @@ if (existingReq.length > 0) {
         `INSERT INTO leave_requests
            (user_id, request_date, duration, is_paid, reason, type, image_url, status, submitted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'Pending', ?)`,
-        [employee_id, reqDate, reqDuration, isPaidInt, trimmedReason, cleanType, image_url, phNow]
+        
+[
+  employee_id,
+  reqDate,
+  reqDuration,
+  isPaidInt,
+  trimmedReason,
+  canonicalLeaveType,
+  image_url,
+  phNow
+]
       );
       
       insertedIds.push(result.insertId);
@@ -4742,7 +5334,7 @@ app.get('/api/leave-requests/user/:employeeId', authenticateToken, verifyOwnersh
   const { employeeId } = req.params;
   const sql = `
     SELECT 
-      id, user_id, type, reason, status, image_url, admin_remarks, is_hidden,
+      id, user_id, type, duration, is_paid, reason, status, image_url, admin_remarks, is_hidden,
       DATE_FORMAT(request_date, '%Y-%m-%d') AS request_date,
       DATE_FORMAT(submitted_at, '%Y-%m-%d %H:%i:%s') AS submitted_at,
       DATE_FORMAT(submitted_at, '%Y-%m-%d %H:%i:%s') AS created_at,
@@ -4758,177 +5350,324 @@ app.get('/api/leave-requests/user/:employeeId', authenticateToken, verifyOwnersh
   });
 });
 
-app.put('/api/leave-requests/:id/status', authenticateToken, requireAction('leaves:approve'), async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
-  }
 
-  const { status, admin_remarks } = req.body;
-  const requestId = req.params.id;
-  const phtNow = getPHDateTime();
-
-  if (!['Approved', 'Rejected'].includes(status)) {
-    return res.status(400).json({ success: false, message: 'Invalid status update.' });
-  }
-
-  const cleanAdminRemarks = admin_remarks ? String(admin_remarks).trim() : null;
-  if (cleanAdminRemarks && cleanAdminRemarks.length > 500) {
-    return res.status(400).json({ success: false, message: 'Admin remarks must be 500 characters or fewer.' });
-  }
-
-  const connection = await db.promise().getConnection();
-  await connection.beginTransaction();
-
-  try {
-    // 🚨 FIX: Fetch status and lock the row to prevent race conditions
-    const [leaveRows] = await connection.query(
-      `SELECT user_id, request_date, type, duration, status FROM leave_requests WHERE id = ? FOR UPDATE`,
-      [requestId]
-    );
-    
-    if (leaveRows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ success: false, message: "Leave request not found." });
-    }
-
-    // 🚨 FIX: Prevent double processing / double deduction
-    if (leaveRows[0].status !== 'Pending') {
-      await connection.rollback();
-      return res.status(400).json({ success: false, message: "This leave request has already been processed." });
-    }
-
-    const { user_id: employee_id, request_date, type, duration } = leaveRows[0];
-
-    const [requesterRows] = await connection.query(
-  "SELECT id FROM users WHERE employee_id = ? LIMIT 1",
-  [employee_id]
-);
-if (requesterRows.length > 0 && requesterRows[0].id === req.user.id) {
-  await connection.rollback();
-  return res.status(403).json({
-    success: false,
-    message: "You cannot approve your own leave request."
-  });
+function uvLeaveApprovalConflict(message, httpStatus = 409) {
+  const error = new Error(message);
+  error.httpStatus = httpStatus;
+  return error;
 }
 
-    const deductionAmount = (duration === '1st Half' || duration === '2nd Half') ? 0.5 : 1.0;
+async function uvApplyApprovedLeave(connection, leave, reviewerId) {
+  const {
+    id,
+    user_id: requestUserId,
+    type,
+    duration
+  } = leave;
 
-    const [userRows] = await connection.query(
-      "SELECT id FROM users WHERE employee_id = ? OR id = ?",
-      [employee_id, employee_id]
+  const requestDate = leave.date_key;
+
+  const [owners] = await connection.query(
+    `SELECT id, employee_id
+     FROM users
+     WHERE id = ? OR employee_id = ?
+     FOR UPDATE`,
+    [requestUserId, requestUserId]
+  );
+
+  if (owners.length !== 1) {
+    throw uvLeaveApprovalConflict('Leave owner is missing or ambiguous.');
+  }
+
+  const owner = owners[0];
+
+  if (String(owner.id) === String(reviewerId)) {
+    throw uvLeaveApprovalConflict(
+      'You cannot review your own leave request.',
+      403
     );
-    if (userRows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ success: false, message: "Associated user account not found." });
+  }
+
+  if (!['Whole Day', '1st Half', '2nd Half'].includes(duration)) {
+    throw uvLeaveApprovalConflict('Invalid leave duration.');
+  }
+
+  if (
+    await uvIsPayrollSnapshotLocked(
+      connection,
+      owner.id,
+      requestDate
+    )
+  ) {
+    throw uvLeaveApprovalConflict(
+      'Payroll is already saved for this leave date. Use a separate authorized adjustment workflow.'
+    );
+  }
+
+  const [conflicts] = await connection.query(
+    `SELECT id
+     FROM leave_requests
+     WHERE (user_id = ? OR user_id = ?)
+       AND request_date = ?
+       AND status IN ('Pending', 'Approved')
+       AND id <> ?
+     LIMIT 1`,
+    [owner.id, owner.employee_id, requestDate, id]
+  );
+
+  if (conflicts.length) {
+    throw uvLeaveApprovalConflict(
+      'Another pending or approved leave exists for this date.'
+    );
+  }
+
+  const [types] = await connection.query(
+    'SELECT id FROM leave_types WHERE name = ? LIMIT 1',
+    [type]
+  );
+
+  if (types.length !== 1) {
+    throw uvLeaveApprovalConflict(
+      'The stored leave type is not configured.'
+    );
+  }
+
+  const cost = duration === 'Whole Day' ? 1 : 0.5;
+  const year = Number(String(requestDate).slice(0, 4));
+
+  const [balances] = await connection.query(
+    `SELECT remaining_days
+     FROM employee_leave_balances
+     WHERE user_id = ?
+       AND leave_type_id = ?
+       AND year = ?
+     FOR UPDATE`,
+    [owner.id, types[0].id, year]
+  );
+
+  if (
+    balances.length !== 1 ||
+    Number(balances[0].remaining_days) < cost
+  ) {
+    throw uvLeaveApprovalConflict(
+      'Insufficient configured leave balance for this request.'
+    );
+  }
+
+  const [attendance] = await connection.query(
+    `SELECT id, schedule_id, time_in, time_out
+     FROM attendance
+     WHERE (user_id = ? OR user_id = ?)
+       AND DATE(date) = DATE(?)
+     FOR UPDATE`,
+    [owner.id, owner.employee_id, requestDate]
+  );
+
+  if (
+    duration === 'Whole Day' &&
+    attendance.some(a => a.time_in != null || a.time_out != null)
+  ) {
+    throw uvLeaveApprovalConflict(
+      'Recorded attendance exists for this date. Full-day leave cannot replace actual work.'
+    );
+  }
+
+  const [deduction] = await connection.query(
+    `UPDATE employee_leave_balances
+     SET remaining_days = remaining_days - ?,
+         last_updated = CURDATE()
+     WHERE user_id = ?
+       AND leave_type_id = ?
+       AND year = ?
+       AND remaining_days >= ?`,
+    [
+      cost,
+      owner.id,
+      types[0].id,
+      year,
+      cost
+    ]
+  );
+
+  if (deduction.affectedRows !== 1) {
+    throw uvLeaveApprovalConflict(
+      'Leave balance changed during review. Refresh and retry.'
+    );
+  }
+
+  if (duration !== 'Whole Day') {
+    return;
+  }
+
+  
+  const [schedules] = await connection.query(
+    `SELECT id
+     FROM schedules
+     WHERE (user_id = ? OR user_id = ?)
+       AND DATE(date) = DATE(?)`,
+    [owner.id, owner.employee_id, requestDate]
+  );
+
+  for (const shift of schedules) {
+    const [rows] = await connection.query(
+      `SELECT id, user_id, time_in, time_out
+       FROM attendance
+       WHERE schedule_id = ?
+       FOR UPDATE`,
+      [shift.id]
+    );
+
+    if (
+      rows.length > 1 ||
+      rows.some(row =>
+        ![String(owner.id), String(owner.employee_id)]
+          .includes(String(row.user_id)) ||
+        row.time_in != null ||
+        row.time_out != null
+      )
+    ) {
+      throw uvLeaveApprovalConflict(
+        'Attendance conflict. Full-day leave cannot overwrite recorded work.'
+      );
     }
-    const internalUserId = userRows[0].id;
 
-    await connection.query(
-      `UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?`, 
-      [status, cleanAdminRemarks, phtNow, requestId]
+    if (rows.length === 1) {
+      await connection.query(
+        `UPDATE attendance
+         SET status = 'on leave'
+         WHERE id = ?`,
+        [rows[0].id]
+      );
+    } else {
+      await connection.query(
+        `INSERT INTO attendance
+           (user_id, schedule_id, date, status, location)
+         VALUES (?, ?, ?, 'on leave', 'Remote/Leave')`,
+        [owner.employee_id, shift.id, requestDate]
+      );
+    }
+  }
+}
+
+
+
+app.put('/api/leave-requests/:id/status', authenticateToken, requireAction('leaves:approve'), async (req, res) => {
+  if (!['admin', 'hr_admin'].includes(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Forbidden.'
+    });
+  }
+
+  const id = Number(req.params.id);
+  const { status, admin_remarks } = req.body || {};
+  const remarks = admin_remarks == null
+    ? null
+    : String(admin_remarks).trim() || null;
+
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    !['Approved', 'Rejected'].includes(status)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid leave request or decision.'
+    });
+  }
+
+  if (
+    (remarks && remarks.length > 500) ||
+    (status === 'Rejected' && (!remarks || remarks.length < 5))
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Rejection requires 5–500 characters; other remarks are limited to 500.'
+    });
+  }
+
+  let connection;
+  let started = false;
+
+  try {
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+    started = true;
+
+    const [rows] = await connection.query(
+      `SELECT *,
+              DATE_FORMAT(request_date, '%Y-%m-%d') AS date_key
+       FROM leave_requests
+       WHERE id = ?
+       FOR UPDATE`,
+      [id]
     );
+
+    if (rows.length !== 1) {
+      throw uvLeaveApprovalConflict('Leave request not found.', 404);
+    }
+
+    const leave = rows[0];
+
+    if (String(leave.status).toLowerCase() !== 'pending') {
+      throw uvLeaveApprovalConflict(
+        'Leave request has already been reviewed.'
+      );
+    }
 
     if (status === 'Approved') {
-      // 🚨 NEW: Prevent HR from approving leave if they already clocked in that day
-      const [existingAtt] = await connection.query(
-        "SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND date = ? AND time_in IS NOT NULL",
-        [employee_id, internalUserId, request_date]
-      );
-      
-      if (existingAtt.length > 0) {
-        await connection.rollback();
-        return res.status(400).json({ 
-          success: false, 
-          message: "Cannot approve leave: Employee has already clocked in and worked on this date." 
-        });
-      }
+      await uvApplyApprovedLeave(connection, leave, req.user.id);
+    }
 
-      // 🚨 NEW (Defense-in-depth): Enforce "one leave per date, no exceptions".
-      // Blocks approval if ANY other Pending or Approved leave exists for this
-      // employee on the same date. Catches legacy duplicates created before the
-      // submission-time conflict check was deployed.
-      const [otherLeaves] = await connection.query(
-        `SELECT id, status FROM leave_requests
-          WHERE (user_id = ? OR user_id = ?)
-            AND request_date = ?
-            AND status IN ('Pending', 'Approved')
-            AND id <> ?
-          LIMIT 1`,
-        [employee_id, internalUserId, request_date, requestId]
-      );
+    const [updated] = await connection.query(
+      `UPDATE leave_requests
+       SET status = ?,
+           admin_remarks = ?,
+           reviewed_at = ?
+       WHERE id = ?
+         AND status = 'Pending'`,
+      [status, remarks, getPHDateTime(), id]
+    );
 
-      if (otherLeaves.length > 0) {
-        await connection.rollback();
-        const other = otherLeaves[0];
-        return res.status(409).json({
-          success: false,
-          message: `Cannot approve: another ${other.status.toLowerCase()} leave already exists for ${request_date}. Only one leave per date is allowed. Please resolve the other request first.`
-        });
-      }
-
-      const leaveYear = parseInt(String(request_date).split('-')[0], 10) || new Date().getFullYear();
-      const [typeRows] = await connection.query(`SELECT id FROM leave_types WHERE name = ?`, [type]);
-      if (typeRows.length === 0) {
-        await connection.rollback();
-        return res.status(400).json({ success: false, message: "Invalid leave type detected in database." });
-      }
-      const leaveTypeId = typeRows[0].id;
-
-      const [balanceRows] = await connection.query(
-        `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ? FOR UPDATE`,
-        [internalUserId, leaveTypeId, leaveYear]
-      );
-      
-      if (balanceRows.length === 0 || balanceRows[0].remaining_days < deductionAmount) {
-        await connection.rollback();
-        return res.status(400).json({ 
-          success: false, 
-          message: `Cannot approve: Insufficient ${type} balance for ${leaveYear} (Required: ${deductionAmount} day(s), Available: ${balanceRows[0]?.remaining_days || 0}).` 
-        });
-      }
-      
-      const newBalance = balanceRows[0].remaining_days - deductionAmount;
-      await connection.query(
-        `UPDATE employee_leave_balances SET remaining_days = ?, last_updated = CURDATE() WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-        [newBalance, internalUserId, leaveTypeId, leaveYear]
-      );
-      
-      const [targetSchedules] = await connection.query(
-        `SELECT id FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ?`,
-        [employee_id, internalUserId, request_date]
-      );
-
-      if (targetSchedules.length > 0) {
-        for (const sched of targetSchedules) {
-          await connection.query(
-            `INSERT INTO attendance (user_id, schedule_id, date, status, location) 
-             VALUES (?, ?, ?, 'on leave', 'Remote/Leave') 
-             ON DUPLICATE KEY UPDATE status = 'on leave'`,
-            [employee_id, sched.id, request_date]
-          );
-        }
-      } else {
-        await connection.query(
-          `INSERT INTO attendance (user_id, date, status, location) 
-           VALUES (?, ?, 'on leave', 'Remote/Leave') 
-           ON DUPLICATE KEY UPDATE status = 'on leave'`,
-          [employee_id, request_date]
-        );
-      }
+    if (updated.affectedRows !== 1) {
+      throw uvLeaveApprovalConflict('Leave review conflict.');
     }
 
     await connection.commit();
-    const action = status === 'Approved' ? 'APPROVE_LEAVE' : 'REJECT_LEAVE';
-    logAction(req.user.id, action, 'leave_request', requestId, req);
-    res.json({ success: true, message: `Leave request successfully ${status.toLowerCase()}.` });
-  } catch (err) {
-    await connection.rollback();
-    console.error("Error updating leave request status:", err);
-    res.status(500).json({ success: false, message: err.message || "Server connection failed while updating status." });
+    started = false;
+
+    logAction(
+      req.user.id,
+      status === 'Approved' ? 'APPROVE_LEAVE' : 'REJECT_LEAVE',
+      'leave_request',
+      id,
+      req
+    );
+
+    return res.json({
+      success: true,
+      message: `Leave request successfully ${status.toLowerCase()}.`
+    });
+  } catch (error) {
+    if (started && connection) {
+      await connection.rollback().catch(() => {});
+    }
+
+    if (!error.httpStatus) {
+      console.error('Leave review error:', error);
+    }
+
+    return res.status(error.httpStatus || 500).json({
+      success: false,
+      message: error.httpStatus
+        ? error.message
+        : 'Leave review failed.'
+    });
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 });
+
 
 app.put('/api/leave-requests/:id/dismiss', authenticateToken, async (req, res) => {
   const { id } = req.params;
@@ -4974,31 +5713,85 @@ app.get('/api/leave-types', authenticateToken,(req, res) => {
   });
 });
 
+
 app.get('/api/leave-balances/:userId', authenticateToken, verifyOwnership, async (req, res) => {
-  const userId = req.params.userId;
-  const year = req.query.year || new Date().getFullYear();
+  const userId = Number(req.params.userId);
+  const year = Number(req.query.year || new Date().getFullYear());
+
+  if (
+    !Number.isSafeInteger(userId) ||
+    userId <= 0 ||
+    !Number.isInteger(year) ||
+    year < 2000 ||
+    year > 2100
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid user ID or leave year.'
+    });
+  }
+
   try {
-    const [types] = await db.promise().query("SELECT id, name, annual_quota FROM leave_types WHERE is_active = 1");
-    for (let type of types) {
+    const [types] = await db.promise().query(
+      `SELECT id, name, annual_quota
+       FROM leave_types
+       WHERE is_active = 1`
+    );
+
+    for (const type of types) {
+      const isCto = /compensatory|cto|cpo/i.test(type.name || '');
+
+      if (!isCto && type.annual_quota == null) {
+        continue;
+      }
+
+      const initialBalance = isCto
+        ? 0
+        : Number(type.annual_quota);
+
+      if (
+        !Number.isFinite(initialBalance) ||
+        initialBalance < 0
+      ) {
+        continue;
+      }
+
       await db.promise().query(
-        `INSERT IGNORE INTO employee_leave_balances (user_id, leave_type_id, remaining_days, year, last_updated)
+        `INSERT IGNORE INTO employee_leave_balances
+           (user_id, leave_type_id, remaining_days, year, last_updated)
          VALUES (?, ?, ?, ?, CURDATE())`,
-        [userId, type.id, type.annual_quota || 15, year]
+        [
+          userId,
+          type.id,
+          initialBalance,
+          year
+        ]
       );
     }
+
     const [results] = await db.promise().query(
-      `SELECT lt.name as leave_type, eb.remaining_days, lt.annual_quota 
-       FROM employee_leave_balances eb 
-       JOIN leave_types lt ON eb.leave_type_id = lt.id 
-       WHERE eb.user_id = ? AND eb.year = ?`,
+      `SELECT
+         lt.name AS leave_type,
+         eb.remaining_days,
+         lt.annual_quota
+       FROM employee_leave_balances eb
+       JOIN leave_types lt ON lt.id = eb.leave_type_id
+       WHERE eb.user_id = ?
+         AND eb.year = ?`,
       [userId, year]
     );
-    res.json(results || []);
-  } catch (err) {
-    console.error("Leave balances error:", err);
-    res.status(500).json({ success: false, message: "Failed to load leave balances." });
+
+    return res.json(results || []);
+  } catch (error) {
+    console.error('Leave balances error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load leave balances.'
+    });
   }
 });
+
 
 app.put('/api/leave-balances/:userId', authenticateToken, requireAction('leave-balances:write'), async (req, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
@@ -5582,27 +6375,61 @@ app.get('/api/attendance/user/:employeeId', authenticateToken, verifyOwnership, 
   });
 });
 
-app.get('/api/payroll/employee-history/:employeeId', authenticateToken, verifyOwnership, (req, res) => {
-  const { employeeId } = req.params;
-  const sql = `
-    SELECT p.id, p.month_year, p.salary_rate, p.total_hours, p.overtime_hours,
-           p.overtime_pay, p.transport_allowance, p.meal_allowance, p.housing_allowance,
-           p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.loan_deduction,
-           p.other_deduction, p.late_deduction, p.gross_pay, p.tax_deduction, p.net_pay, p.status
-    FROM payroll p
-    JOIN users u ON p.user_id = u.id
-    WHERE u.employee_id = ?
-    ORDER BY p.id DESC
-    LIMIT 12
-  `;
-  db.query(sql, [employeeId], (err, results) => {
-    if (err) return res.status(500).json({ success: false, message: 'Failed to load payroll history.' });
-    res.json(results || []);
-  });
-});
 
-// PHASE 3 HRIS PERSONNEL / ACCOUNT LIFECYCLE API
-// Requires the accompanying Phase 3 schema migration before deployment.
+app.get(
+  '/api/payroll/employee-history/:employeeId',
+  authenticateToken,
+  verifyOwnership,
+  (req, res) => {
+    const { employeeId } = req.params;
+
+    const sql = `
+      SELECT
+        p.id,
+        p.month_year,
+        p.period_start,
+        p.period_end,
+        p.salary_rate,
+        p.total_hours,
+        p.overtime_hours,
+        p.overtime_pay,
+        p.transport_allowance,
+        p.meal_allowance,
+        p.housing_allowance,
+        p.bonus,
+        p.sss_deduction,
+        p.philhealth_deduction,
+        p.pagibig_deduction,
+        p.mbf_deduction,
+        p.loan_deduction,
+        p.other_deduction,
+        p.late_deduction,
+        p.gross_pay,
+        p.tax_deduction,
+        p.net_pay,
+        p.status
+      FROM payroll p
+      JOIN users u ON p.user_id = u.id
+      WHERE u.employee_id = ?
+      ORDER BY p.id DESC
+      LIMIT 36
+    `;
+
+    db.query(sql, [employeeId], (err, results) => {
+      if (err) {
+        console.error('Payroll history error:', err);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to load payroll history.'
+        });
+      }
+
+      res.json(results || []);
+    });
+  }
+);
+
+
 app.put('/api/employees/:id/employment-status', authenticateToken,
   requireAction('employees:change-status'), async (req,res) => {
   const { employment_status } = req.body || {};
@@ -5750,12 +6577,63 @@ app.post('/api/employees', authenticateToken, requireAction('employees:create'),
   }
   const emailCheck = await validateEmailForAccount(email, { checkDns:true });
   if (!emailCheck.valid) return res.status(400).json({success:false,message:emailCheck.reason});
-  const salary = monthly_salary === undefined || monthly_salary === '' ? 0 : Number(monthly_salary);
-  const workdays = work_days_per_month === undefined || work_days_per_month === '' ? 22 : Number(work_days_per_month);
-  if (!Number.isFinite(salary) || salary < 0 || salary > 99999999.99 ||
-      !Number.isInteger(workdays) || workdays < 1 || workdays > 31) {
-    return res.status(400).json({success:false,message:'Invalid salary or workdays per month.'});
-  }
+  
+
+const salary =
+  monthly_salary === undefined || monthly_salary === ''
+    ? 0
+    : Number(monthly_salary);
+
+const workdays =
+  work_days_per_month === undefined ||
+  work_days_per_month === ''
+    ? 22
+    : Number(work_days_per_month);
+
+if (
+  !Number.isFinite(salary) ||
+  salary < 0 ||
+  salary > 99999999.99 ||
+  !Number.isInteger(workdays) ||
+  workdays < 1 ||
+  workdays > 31
+) {
+  return res.status(400).json({
+    success: false,
+    message: 'Invalid salary or workdays per month.'
+  });
+}
+
+const allowedEmployment = {
+  'Full-time': [
+    'Regular',
+    'Probationary',
+    'Project-based'
+  ],
+  'Part-time': [
+    'Part-time'
+  ],
+  'Consultant': [
+    'On-call Simulationist',
+    'Offsite Consultant'
+  ]
+};
+
+const selectedType = employment_type || 'Full-time';
+const selectedContract = contract_type || 'Regular';
+
+if (
+  !(
+    allowedEmployment[selectedType] || []
+  ).includes(selectedContract)
+) {
+  return res.status(400).json({
+    success: false,
+    message:
+      'Employment type and contract classification must match.'
+  });
+}
+
   let finalPin = null;
   if (payroll_pin !== undefined && payroll_pin !== null && String(payroll_pin).trim()) {
     const pin = String(payroll_pin).trim();
@@ -5772,6 +6650,35 @@ app.post('/api/employees', authenticateToken, requireAction('employees:create'),
       return res.status(400).json({success:false,message:'Invalid onboarding data.'});
     }
   }
+
+
+if (infoObj.compensation_basis !== undefined) {
+  const basis = infoObj.compensation_basis;
+  const hourlyRate = Number(infoObj.hourly_rate);
+
+  if (!['monthly', 'hourly'].includes(basis)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid compensation basis.'
+    });
+  }
+
+  if (
+    basis === 'hourly' &&
+    (
+      !Number.isFinite(hourlyRate) ||
+      hourlyRate <= 0 ||
+      hourlyRate > 99999999.99
+    )
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'A valid positive hourly rate is required.'
+    });
+  }
+}
+
+
   if (req.file) infoObj.resume_file = `/uploads/resumes/${req.file.filename}`;
   try {
     const sql = `INSERT INTO users
@@ -5782,7 +6689,9 @@ app.post('/api/employees', authenticateToken, requireAction('employees:create'),
        street_address,city,state_province,postal_code,country,additional_info,position,password_last_changed)
       VALUES (?,?,?,?,?,NULL,NULL,'not_provisioned','active',?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`;
     const params = [employee_id.trim(),full_name.trim(),first_name || null,last_name || null,email.trim().toLowerCase(),
-      employment_type || 'Full-time',position_level || 'Entry Level Simulationist',contract_type || employment_type || 'Full-time',
+      selectedType,
+position_level || 'Entry Level Simulationist',
+selectedContract,
       salary,workdays,payroll_access || 0,finalPin,middle_initial || null,date_of_joining || null,
       date_of_birth || null,phone_number || null,gender || 'prefer_not_to_say',
       emergency_contact_name || null,emergency_contact_phone || null,
@@ -5860,6 +6769,50 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
         }
       }
     }
+
+
+
+if (
+  isHR &&
+  (
+    updates.employment_type !== undefined ||
+    updates.contract_type !== undefined
+  )
+) {
+  const type =
+    updates.employment_type ??
+    oldData.employment_type;
+
+  const contract =
+    updates.contract_type ??
+    oldData.contract_type;
+
+  const allowedEmployment = {
+    'Full-time': [
+      'Regular',
+      'Probationary',
+      'Project-based'
+    ],
+    'Part-time': [
+      'Part-time'
+    ],
+    'Consultant': [
+      'On-call Simulationist',
+      'Offsite Consultant'
+    ]
+  };
+
+  if (
+    !(allowedEmployment[type] || []).includes(contract)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message:
+        'Employment type and contract classification do not match.'
+    });
+  }
+}
+
 
     if (updates.role !== undefined) updates.role = normalizeRole(updates.role);
     if (updates.system_role !== undefined) updates.system_role = normalizeRole(updates.system_role);
@@ -5940,6 +6893,34 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       }
     }
 
+
+if (isHR) {
+  const salary =
+    updates.monthly_salary !== undefined
+      ? Number(updates.monthly_salary)
+      : Number(oldData.monthly_salary);
+
+  const days =
+    updates.work_days_per_month !== undefined
+      ? Number(updates.work_days_per_month)
+      : Number(oldData.work_days_per_month);
+
+  if (
+    !Number.isFinite(salary) ||
+    salary < 0 ||
+    salary > 99999999.99 ||
+    !Number.isInteger(days) ||
+    days < 1 ||
+    days > 31
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid salary or working days.'
+    });
+  }
+}
+
+
    
     if (typeof updates.email === 'string' && updates.email.trim() !== '') {
       const incoming = normalizeEmail(updates.email);
@@ -5967,6 +6948,30 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
             infoObj.resume_file = oldInfo.resume_file || '';
           }
         }
+
+if (infoObj.compensation_basis !== undefined) {
+  const basis = infoObj.compensation_basis;
+  const hourlyRate = Number(infoObj.hourly_rate);
+
+  if (
+    !['monthly', 'hourly'].includes(basis) ||
+    (
+      basis === 'hourly' &&
+      (
+        !Number.isFinite(hourlyRate) ||
+        hourlyRate <= 0 ||
+        hourlyRate > 99999999.99
+      )
+    )
+  ) {
+    return res.status(400).json({
+      success: false,
+      message:
+        'Invalid compensation basis or hourly rate.'
+    });
+  }
+}
+
         updates.additional_info = JSON.stringify(infoObj);
       } catch(e) {
         console.error("Failed to parse additional_info:", e);
@@ -5983,6 +6988,7 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
       phone_number: 'phone_number',
       position_level: 'position_level',
       contract_type: 'contract_type',
+      employment_type: 'employment_type',
       status: 'status',
       role: 'role',
       system_role: 'role',
@@ -6433,84 +7439,180 @@ app.get('/api/attendance/recovery/queue', authenticateToken, allowRoles('admin',
     }};
   }));
 
+
 app.get('/api/attendance-report', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
+  if (!['admin', 'hr_admin'].includes(req.user.role)) {
     return res.status(403).json({ success: false, message: 'Forbidden.' });
   }
 
   const { date, month } = req.query;
-  let dateCondition = "DATE(s.date) = DATE(?)";
-  let queryParam = date;
+  let dateCondition;
+  let queryParam;
 
-  if (month) {
+  if (month !== undefined) {
+    if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return res.status(400).json({ success: false, message: 'Invalid month.' });
+    }
+
     dateCondition = "DATE_FORMAT(s.date, '%Y-%m') = ?";
     queryParam = month;
-  } else if (!date) {
-    return res.status(400).json({ success: false, message: "A valid date or month parameter is required." });
+  } else {
+    if (!isValidISOCalendarDate(date)) {
+      return res.status(400).json({ success: false, message: 'Invalid date.' });
+    }
+
+    dateCondition = 'DATE(s.date) = DATE(?)';
+    queryParam = date;
   }
 
   const sql = `
-    SELECT 
-      u.id AS user_db_id, u.full_name, u.employee_id, 
-      
-      -- ✅ STATUS
-      CASE 
-          WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 'Pending'
-          WHEN ap.id IS NOT NULL AND ap.status = 'pending' THEN 'Pending'
-          WHEN a.time_out IS NOT NULL AND a.time_out != '--:--' THEN 'Present'
-          WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') AND TIMESTAMP(DATE(s.date), s.end_time) + INTERVAL (s.end_time <= s.start_time) DAY < NOW() THEN 'Missing Clock-Out'
-          WHEN a.time_in IS NOT NULL AND (a.time_out IS NULL OR a.time_out = '--:--') THEN 'In Progress'
-          WHEN a.time_in IS NULL AND TIMESTAMP(DATE(s.date), s.end_time) + INTERVAL (s.end_time <= s.start_time) DAY < NOW() THEN 'Absent'
-          ELSE COALESCE(a.status, 'Scheduled')
+    SELECT
+      u.id AS user_db_id,
+      u.full_name,
+      u.employee_id,
+      lv.duration AS leave_duration,
+
+      CASE
+        WHEN lv.duration = 'Whole Day' THEN 'On Leave'
+
+        WHEN EXISTS (
+          SELECT 1
+          FROM attendance_corrections ac
+          WHERE ac.schedule_id = s.id
+            AND ac.status = 'pending'
+        ) THEN 'Pending'
+
+        WHEN EXISTS (
+          SELECT 1
+          FROM attendance_appeals ap
+          WHERE ap.schedule_id = s.id
+            AND ap.status = 'pending'
+        ) THEN 'Pending'
+
+        WHEN a.time_out IS NOT NULL
+          AND a.time_out <> '--:--' THEN
+          CASE
+            WHEN LOWER(TRIM(a.status)) = 'late'
+              THEN 'Late'
+
+            WHEN LOWER(TRIM(a.status)) = 'present'
+              THEN 'Present'
+
+            WHEN TIMESTAMP(DATE(s.date), a.time_in)
+                   + INTERVAL (
+                     s.end_time <= s.start_time
+                     AND a.time_in < s.start_time
+                   ) DAY
+                 > TIMESTAMP(DATE(s.date), s.start_time)
+                   + INTERVAL 30 MINUTE
+              THEN 'Late'
+
+            ELSE 'Present'
+          END
+
+        WHEN a.time_in IS NOT NULL
+          AND (a.time_out IS NULL OR a.time_out = '--:--')
+          AND TIMESTAMP(DATE(s.date), s.end_time)
+              + INTERVAL (s.end_time <= s.start_time) DAY < NOW()
+          THEN 'Missing Clock-Out'
+
+        WHEN a.time_in IS NOT NULL
+          AND (a.time_out IS NULL OR a.time_out = '--:--')
+          THEN 'In Progress'
+
+        WHEN lv.duration IN ('1st Half', '2nd Half')
+          AND a.time_in IS NULL
+          THEN 'Partial Leave'
+
+        WHEN a.time_in IS NULL
+          AND TIMESTAMP(DATE(s.date), s.end_time)
+              + INTERVAL (s.end_time <= s.start_time) DAY < NOW()
+          THEN 'Absent'
+
+        ELSE COALESCE(a.status, 'Scheduled')
       END AS status,
 
-      -- ✅ TIME IN (Actual)
-      COALESCE(a.time_in, '--:--') AS time_in, 
-      
-      -- ✅ TIME OUT (Displays the ACTUAL time tapped by the instructor)
-      COALESCE(NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'), '--:--') AS time_out,
-      
-      a.location, a.clock_in_latitude, a.clock_in_longitude,
-      a.clock_out_latitude, a.clock_out_longitude,
-      a.clock_in_selfie, a.clock_out_selfie,
-      s.id AS schedule_id, s.start_time AS scheduled_start, s.end_time AS scheduled_end, s.course,
-      DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date, 
+      COALESCE(a.time_in, '--:--') AS time_in,
 
-      -- ✅ TOTAL HOURS (With Grace Period Cap)
-      CASE 
-        WHEN ac.id IS NOT NULL AND ac.status = 'pending' THEN 0
-        WHEN a.time_in IS NULL OR a.time_out IS NULL OR a.time_out = '--:--' THEN 0
+      COALESCE(
+        NULLIF(NULLIF(a.time_out, '--:--'), '00:00:00'),
+        '--:--'
+      ) AS time_out,
+
+      a.location,
+      a.clock_in_latitude,
+      a.clock_in_longitude,
+      a.clock_out_latitude,
+      a.clock_out_longitude,
+      a.clock_in_selfie,
+      a.clock_out_selfie,
+
+      s.id AS schedule_id,
+      s.start_time AS scheduled_start,
+      s.end_time AS scheduled_end,
+      s.course,
+
+      DATE_FORMAT(s.date, '%Y-%m-%d') AS attendance_date,
+
+      CASE
+        WHEN a.time_in IS NULL
+          OR a.time_out IS NULL
+          OR a.time_out = '--:--'
+          THEN 0
+
         ELSE GREATEST(0, ROUND(
           MOD(
             TIME_TO_SEC(
               CASE
-                WHEN MOD(TIME_TO_SEC(a.time_out) - TIME_TO_SEC(s.end_time) + 43200, 86400) - 43200
-                     BETWEEN -300 AND 900 THEN s.end_time
+                WHEN MOD(
+                  TIME_TO_SEC(a.time_out)
+                  - TIME_TO_SEC(s.end_time)
+                  + 43200,
+                  86400
+                ) - 43200 BETWEEN -300 AND 900
+                  THEN s.end_time
                 ELSE a.time_out
               END
             ) - TIME_TO_SEC(a.time_in) + 86400,
             86400
-          ) / 3600, 2
+          ) / 3600,
+          2
         ))
       END AS total_hours
 
     FROM users u
-    INNER JOIN schedules s ON u.employee_id = s.user_id 
-    LEFT JOIN attendance a ON s.id = a.schedule_id
-    LEFT JOIN attendance_corrections ac ON s.id = ac.schedule_id AND ac.status = 'pending'
-    LEFT JOIN attendance_appeals ap ON s.id = ap.schedule_id AND ap.status = 'pending'
-    WHERE LOWER(u.role) = 'instructor' 
-      AND u.status IN ('active', 'deactivated') 
+
+    INNER JOIN schedules s
+      ON (u.employee_id = s.user_id OR u.id = s.user_id)
+
+    LEFT JOIN attendance a
+      ON s.id = a.schedule_id
+      AND (a.user_id = u.employee_id OR a.user_id = u.id)
+
+    LEFT JOIN leave_requests lv
+      ON (lv.user_id = u.employee_id OR lv.user_id = u.id)
+      AND DATE(lv.request_date) = DATE(s.date)
+      AND lv.status = 'Approved'
+
+    WHERE LOWER(u.role) = 'instructor'
+      AND u.status IN ('active', 'deactivated')
       AND ${dateCondition}
+
     ORDER BY u.full_name ASC, s.start_time ASC
   `;
 
   db.query(sql, [queryParam], (err, result) => {
-    if (err) return res.status(500).json({ success: false, message: "Database query failed." });
-    res.json(result || []);
+    if (err) {
+      console.error('Attendance report error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Database query failed.'
+      });
+    }
+
+    return res.json(result || []);
   });
 });
-
 
 app.delete('/api/employees/:id', authenticateToken, async (req, res) => {
   
@@ -7480,16 +8582,18 @@ setInterval(async () => {
       "SELECT config_value FROM system_settings WHERE config_key = 'loiter_threshold_minutes'"
     );
 
-    const configuredMinutes = rows.length > 0
-      ? Number(rows[0].config_value)
-      : 2;
+    
+const configuredMinutes = rows.length > 0
+  ? Number(rows[0].config_value)
+  : UV_CONFIG_DEFAULT_LOITER_MINUTES;
 
-    const thresholdMinutes =
-      Number.isFinite(configuredMinutes) &&
-      configuredMinutes >= 1 &&
-      configuredMinutes <= 60
-        ? configuredMinutes
-        : 2;
+const thresholdMinutes =
+  Number.isSafeInteger(configuredMinutes) &&
+  configuredMinutes >= 1 &&
+  configuredMinutes <= 180
+    ? configuredMinutes
+    : UV_CONFIG_DEFAULT_LOITER_MINUTES;
+
 
     const LOITER_THRESHOLD_MS = thresholdMinutes * 60 * 1000;
     const SIGNAL_FRESHNESS_MS = 45000;
@@ -10298,7 +11402,11 @@ app.get('/api/attendance-monthly', authenticateToken, allowRoles('admin','hr_adm
   
   const { program_id, course } = req.query;
   let filterSql = "";
-  let queryParams = [startDate, endDate];
+  let queryParams = [
+  startDate, endDate, 
+  startDate, endDate, 
+  startDate, endDate  
+];
 
   if (course) {
     filterSql += " AND s.course = ?";
@@ -10308,31 +11416,129 @@ app.get('/api/attendance-monthly', authenticateToken, allowRoles('admin','hr_adm
     queryParams.push(program_id);
   }
 
-  const sql = `
-    SELECT 
-      u.employee_id, 
-      u.full_name,
-      COALESCE(SUM(TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out) / 60), 0) AS regular_hours,
-      0 AS overtime_hours,
-      COALESCE(SUM(CASE WHEN a.status = 'on leave' THEN 1 ELSE 0 END), 0) AS leave_days,
-      COALESCE(SUM(
-        CASE 
-          WHEN a.time_in IS NOT NULL 
-               AND s.start_time IS NOT NULL 
-               AND TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) > 900
-          THEN TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) / 60
-          ELSE 0
-        END
-      ), 0) AS late_minutes
-    FROM users u
-    LEFT JOIN attendance a ON u.employee_id = a.user_id 
-      AND a.date BETWEEN ? AND ? 
-      AND a.status NOT IN ('on leave', 'absent')
-    LEFT JOIN schedules s ON a.schedule_id = s.id
-    LEFT JOIN courses c ON s.course = c.name   -- 🚨 NEW JOIN
-    WHERE u.role = 'instructor' AND u.status = 'active' ${filterSql} -- 🚨 NEW FILTER
-    GROUP BY u.id
-  `;
+  
+const sql = `
+  SELECT
+    u.employee_id,
+    u.full_name,
+
+    COALESCE(SUM(
+      CASE
+        
+WHEN a.time_in IS NOT NULL
+ AND a.time_out IS NOT NULL
+ AND s.start_time IS NOT NULL
+ AND s.end_time IS NOT NULL
+ AND a.time_in <> a.time_out
+ AND LOWER(TRIM(COALESCE(a.status, ''))) NOT IN (
+   'on leave',
+   'absent',
+   'system auto-clock out'
+ )
+
+        THEN GREATEST(
+          0,
+          TIMESTAMPDIFF(
+            MINUTE,
+            GREATEST(
+              TIMESTAMP(DATE(s.date), s.start_time),
+              TIMESTAMP(DATE(a.date), a.time_in)
+                + INTERVAL (
+                  s.end_time <= s.start_time
+                  AND a.time_in < s.start_time
+                ) DAY
+            ),
+            LEAST(
+              TIMESTAMP(DATE(s.date), s.end_time)
+                + INTERVAL (s.end_time <= s.start_time) DAY,
+              TIMESTAMP(DATE(a.date), a.time_out)
+                + INTERVAL (
+                  a.time_out < a.time_in
+                  OR (
+                    s.end_time <= s.start_time
+                    AND a.time_out < s.start_time
+                  )
+                ) DAY
+            )
+          )
+        ) / 60
+        ELSE 0
+      END
+    ), 0) AS regular_hours,
+
+    
+COALESCE((
+  SELECT ROUND(
+    SUM(
+      (TIME_TO_SEC(o.end_time) - TIME_TO_SEC(o.start_time))
+      / 3600
+    ),
+    2
+  )
+  FROM overtime_requests o
+  WHERE (o.user_id = u.id OR o.user_id = u.employee_id)
+    AND LOWER(TRIM(o.status)) = 'approved'
+    AND DATE(o.date) BETWEEN ? AND ?
+    AND o.start_time IS NOT NULL
+    AND o.end_time IS NOT NULL
+    AND TIME_TO_SEC(o.end_time) > TIME_TO_SEC(o.start_time)
+    AND TIME_TO_SEC(o.end_time) - TIME_TO_SEC(o.start_time)
+        BETWEEN 1800 AND 43200
+    AND TIMESTAMP(DATE(o.date), o.end_time) <= NOW()
+), 0) AS overtime_hours,
+
+
+    
+COALESCE((
+  SELECT SUM(
+    CASE
+      WHEN lr.duration IN ('1st Half', '2nd Half')
+        THEN 0.5
+      ELSE 1
+    END
+  )
+  FROM leave_requests lr
+  WHERE (lr.user_id = u.id OR lr.user_id = u.employee_id)
+    AND lr.status = 'Approved'
+    AND DATE(lr.request_date) BETWEEN ? AND ?
+), 0) AS leave_days,
+
+
+    COALESCE(SUM(
+      CASE
+        WHEN a.time_in IS NOT NULL
+         AND s.start_time IS NOT NULL
+         AND TIME_TO_SEC(
+           TIMEDIFF(a.time_in, s.start_time)
+         ) > 1800
+        THEN TIME_TO_SEC(
+          TIMEDIFF(a.time_in, s.start_time)
+        ) / 60
+        ELSE 0
+      END
+    ), 0) AS late_minutes
+
+  FROM users u
+
+  
+LEFT JOIN attendance a
+  ON u.employee_id = a.user_id
+ AND a.date BETWEEN ? AND ?
+
+
+  LEFT JOIN schedules s
+    ON a.schedule_id = s.id
+
+  LEFT JOIN courses c
+    ON s.course = c.name
+
+  WHERE u.role = 'instructor'
+    AND u.status = 'active'
+    ${filterSql}
+
+  GROUP BY u.id
+`;
+
 
   db.query(sql, queryParams, (err, results) => {
     if (err) {
@@ -10343,35 +11549,67 @@ app.get('/api/attendance-monthly', authenticateToken, allowRoles('admin','hr_adm
   });
 });
 
-app.get('/api/payroll/history', authenticateToken, allowRoles('hr_admin'), (req, res) => {
-  if (req.user.role !== 'hr_admin') {
-    return res.status(403).json({
-      success: false,
-      message: 'HR access required for payroll history.'
+
+app.get(
+  '/api/payroll/history',
+  authenticateToken,
+  allowRoles('hr_admin'),
+  (req, res) => {
+    if (req.user.role !== 'hr_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'HR access required for payroll history.'
+      });
+    }
+
+    const sql = `
+      SELECT
+        p.id,
+        p.user_id,
+        p.month_year,
+        p.period_start,
+        p.period_end,
+        p.gross_pay,
+        p.net_pay,
+        p.tax_deduction,
+        p.sss_deduction,
+        p.philhealth_deduction,
+        p.pagibig_deduction,
+        p.mbf_deduction,
+        p.loan_deduction,
+        p.other_deduction,
+        p.bonus,
+        p.status,
+        p.salary_rate,
+        p.total_hours,
+        p.overtime_hours,
+        p.overtime_pay,
+        p.transport_allowance,
+        p.meal_allowance,
+        p.housing_allowance,
+        p.late_deduction,
+        p.total_earnings,
+        u.full_name,
+        u.employee_id
+      FROM payroll p
+      JOIN users u ON p.user_id = u.id
+      ORDER BY p.id DESC
+    `;
+
+    db.query(sql, (err, results) => {
+      if (err) {
+        console.error('Payroll history error:', err);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to retrieve payroll history.'
+        });
+      }
+
+      res.json(results || []);
     });
   }
+);
 
-  const sql = `
-    SELECT 
-      p.id, p.user_id, p.month_year, p.gross_pay, p.net_pay, p.tax_deduction,
-      p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction,
-      p.loan_deduction, p.other_deduction, p.status,
-      p.salary_rate, p.total_hours, p.overtime_hours, p.overtime_pay,
-      p.transport_allowance, p.meal_allowance, p.housing_allowance,
-      p.late_deduction, p.total_earnings,
-      u.full_name, u.employee_id
-    FROM payroll p
-    JOIN users u ON p.user_id = u.id
-    ORDER BY p.id DESC
-  `;
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error("Payroll history error:", err);
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(results);
-  });
-});
 
 app.get('/api/school-locations', authenticateToken, (req, res) => {
   db.query("SELECT id, name, latitude, longitude, radius FROM school_locations ORDER BY name", (err, results) => {
@@ -11159,14 +12397,8 @@ app.put(
   }
 );
 
-
-// ============================================
 // 12. PAYROLL (Secured & Validated)
-// ============================================
 
-// R01 — Server-authoritative payroll snapshots and employee/period uniqueness.
-// The rates below deliberately retain the existing capstone formulas; statutory
-// rate verification and payment status policy are handled separately in R02.
 const R01_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const r01Money = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
@@ -11204,24 +12436,106 @@ async function r01LoadPayrollSource(connection, userId, month, year) {
     throw error;
   }
   const emp = employees[0];
-  const [attendance] = await connection.query(
-    `SELECT COALESCE(SUM(CASE WHEN a.time_in IS NOT NULL AND a.time_out IS NOT NULL
-                              THEN GREATEST(0, TIMESTAMPDIFF(MINUTE, a.time_in, a.time_out)) / 60
-                              ELSE 0 END), 0) AS regular_hours,
-            COALESCE(SUM(CASE WHEN a.time_in IS NOT NULL AND s.start_time IS NOT NULL
-                                   AND TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) > 900
-                              THEN TIME_TO_SEC(TIMEDIFF(a.time_in, s.start_time)) / 60
-                              ELSE 0 END), 0) AS late_minutes
-     FROM attendance a LEFT JOIN schedules s ON s.id = a.schedule_id
-     WHERE a.user_id = ? AND a.date BETWEEN ? AND ?
-       AND LOWER(TRIM(a.status)) NOT IN ('on leave', 'absent', 'system auto-clock out')`,
-    [emp.employee_id, start, end]);
-  const [overtime] = await connection.query(
-    `SELECT COALESCE(SUM(GREATEST(0, TIMESTAMPDIFF(MINUTE, start_time, end_time)) / 60), 0) AS overtime_hours
-     FROM overtime_requests WHERE user_id = ? AND date BETWEEN ? AND ? AND LOWER(status) = 'approved'`,
-    [emp.id, start, end]);
-  // Count only individually approved paid leave dates; ignore cancelled/unpaid requests.
-  // A day with recorded attendance is not paid twice as both worked time and full-day leave.
+  
+
+const [attendance] = await connection.query(
+  `SELECT
+    COALESCE(SUM(
+      CASE
+        WHEN a.time_in IS NOT NULL
+         AND a.time_out IS NOT NULL
+         AND s.start_time IS NOT NULL
+         AND s.end_time IS NOT NULL
+         AND a.time_in <> a.time_out
+        THEN GREATEST(
+          0,
+          TIMESTAMPDIFF(
+            MINUTE,
+            GREATEST(
+              TIMESTAMP(DATE(s.date), s.start_time),
+              TIMESTAMP(DATE(a.date), a.time_in)
+                + INTERVAL (
+                  s.end_time <= s.start_time
+                  AND a.time_in < s.start_time
+                ) DAY
+            ),
+            LEAST(
+              TIMESTAMP(DATE(s.date), s.end_time)
+                + INTERVAL (s.end_time <= s.start_time) DAY,
+              TIMESTAMP(DATE(a.date), a.time_out)
+                + INTERVAL (
+                  a.time_out < a.time_in
+                  OR (
+                    s.end_time <= s.start_time
+                    AND a.time_out < s.start_time
+                  )
+                ) DAY
+            )
+          )
+        ) / 60
+        ELSE 0
+      END
+    ), 0) AS regular_hours,
+
+    COALESCE(SUM(
+      CASE
+        WHEN a.time_in IS NOT NULL
+         AND s.start_time IS NOT NULL
+         AND TIME_TO_SEC(
+           TIMEDIFF(a.time_in, s.start_time)
+         ) > 1800
+        THEN TIME_TO_SEC(
+          TIMEDIFF(a.time_in, s.start_time)
+        ) / 60
+        ELSE 0
+      END
+    ), 0) AS late_minutes
+
+  FROM attendance a
+
+  LEFT JOIN schedules s
+    ON s.id = a.schedule_id
+
+  WHERE a.user_id = ?
+    AND a.date BETWEEN ? AND ?
+    AND LOWER(TRIM(a.status)) NOT IN (
+      'on leave',
+      'absent',
+      'system auto-clock out'
+    )`,
+  [emp.employee_id, start, end]
+);
+
+const [overtime] = await connection.query(
+  `SELECT
+     COALESCE(
+       SUM(
+         GREATEST(
+           0,
+           TIMESTAMPDIFF(
+             MINUTE,
+             start_time,
+             end_time
+           )
+         ) / 60
+       ), 0
+     ) AS overtime_hours
+   FROM overtime_requests
+   WHERE user_id = ?
+     AND date BETWEEN ? AND ?
+     AND LOWER(TRIM(status)) = 'approved'
+     AND COALESCE(
+       NULLIF(TRIM(overtime_type), ''),
+       'Regular Overtime'
+     ) = 'Regular Overtime'`,
+  [
+    emp.id,
+    start,
+    end
+  ]
+);
+
+
   const [leaves] = await connection.query(
     `SELECT COUNT(*) AS paid_leave_days FROM (
        SELECT DISTINCT DATE(l.request_date) AS leave_date
@@ -11262,11 +12576,20 @@ function r01Calculate(source, adjustments = {}) {
       throw error;
     }
   }
-  const hourlyRate = monthlySalary / workDays / 8;
-  const paidLeaveHours = source.paidLeaveDays * 8;
-  const baseEarnings = (source.regularHours + paidLeaveHours) * hourlyRate;
-  const overtimePay = source.overtimeHours * hourlyRate * 1.25;
-  const lateDeduction = source.lateMinutes / 60 * hourlyRate;
+  
+
+const hourlyRate = monthlySalary / workDays / 8;
+const paidLeaveHours = source.paidLeaveDays * 8;
+
+const baseEarnings =
+  (source.regularHours + paidLeaveHours) * hourlyRate;
+
+const overtimePay =
+  source.overtimeHours * hourlyRate * 1.25;
+
+const lateDeduction = 0;
+
+
   const transport = adjustments.transport || 0;
   const meal = adjustments.meal || 0;
   const housing = adjustments.housing || 0;
@@ -11323,8 +12646,683 @@ function r01Error(res, err, context) {
   return res.status(500).json({ success: false, message: 'Unable to finalize payroll. Please try again or contact the administrator.' });
 }
 
+const UV_MONTHS = [
+  'January', 'February', 'March', 'April',
+  'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December'
+];
+
+const uvRound = value =>
+  Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+const uvPayrollError = (message, status = 422) => {
+  const error = new Error(message);
+  error.httpStatus = status;
+  return error;
+};
+
+const uvLocalToday = () => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+
+  const get = type =>
+    parts.find(part => part.type === type)?.value;
+
+  return `${get('year')}-${get('month')}-${get('day')}`;
+};
+
+function uvCutoff(label) {
+  const pattern =
+    /^(January|February|March|April|May|June|July|August|September|October|November|December) (20\d{2}) \| (26-10|11-25)$/;
+
+  const match = pattern.exec(String(label || ''));
+
+  if (!match) return null;
+
+  const month = UV_MONTHS.indexOf(match[1]) + 1;
+  const year = Number(match[2]);
+  const code = match[3];
+
+  const pad = number => String(number).padStart(2, '0');
+
+  const previousMonth = new Date(
+    Date.UTC(year, month - 2, 26)
+  );
+
+  const start = code === '26-10'
+    ? `${previousMonth.getUTCFullYear()}-${pad(
+        previousMonth.getUTCMonth() + 1
+      )}-26`
+    : `${year}-${pad(month)}-11`;
+
+  const end = `${year}-${pad(month)}-${
+    code === '26-10' ? '10' : '25'
+  }`;
+
+  return {
+    label,
+    start,
+    end,
+    month,
+    year,
+    code
+  };
+}
+
+function uvAdjustment(value, name) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
+    return 0;
+  }
+
+  if (
+    !/^\d+(?:\.\d{1,2})?$/.test(String(value)) ||
+    Number(value) > 1000000
+  ) {
+    throw uvPayrollError(
+      `${name} must be a non-negative amount up to ` +
+      `₱1,000,000 with at most two decimal places.`,
+      400
+    );
+  }
+
+  return uvRound(value);
+}
+
+function uvAdjustments(body) {
+  const fields = [
+    'transport_allowance',
+    'meal_allowance',
+    'housing_allowance',
+    'bonus',
+    'mbf_deduction',
+    'loan_deduction',
+    'other_deduction'
+  ];
+
+  return Object.fromEntries(
+    fields.map(field => [
+      field,
+      uvAdjustment(body?.[field], field)
+    ])
+  );
+}
+
+async function uvCutoffSource(connection, userId, period) {
+  const [employees] = await connection.query(
+    `SELECT
+       id,
+       employee_id,
+       full_name,
+       monthly_salary,
+       work_days_per_month,
+       employment_type,
+       contract_type,
+       employment_status,
+       additional_info
+     FROM users
+     WHERE id = ?
+       AND role = 'instructor'
+       AND status = 'active'`,
+    [userId]
+  );
+
+  if (!employees.length) {
+    throw uvPayrollError(
+      'Active instructor not found.',
+      404
+    );
+  }
+
+  const employee = employees[0];
+
+  if (
+    employee.employment_status &&
+    employee.employment_status !== 'active'
+  ) {
+    throw uvPayrollError(
+      'Separated employee cannot be finalized ' +
+      'for an active payroll run.'
+    );
+  }
+
+  let info = {};
+
+  try {
+    info = typeof employee.additional_info === 'string'
+      ? JSON.parse(employee.additional_info || '{}')
+      : (employee.additional_info || {});
+  } catch {
+    throw uvPayrollError(
+      'Invalid compensation metadata in employee profile.'
+    );
+  }
+
+  
+const [attendance] = await connection.query(
+  `SELECT
+    COALESCE(SUM(
+      CASE
+        WHEN a.time_in IS NOT NULL
+         AND a.time_out IS NOT NULL
+         AND s.start_time IS NOT NULL
+         AND s.end_time IS NOT NULL
+         AND a.time_in <> a.time_out
+        THEN GREATEST(
+          0,
+          TIMESTAMPDIFF(
+            MINUTE,
+            GREATEST(
+              TIMESTAMP(DATE(s.date), s.start_time),
+              TIMESTAMP(DATE(a.date), a.time_in)
+                + INTERVAL (
+                  s.end_time <= s.start_time
+                  AND a.time_in < s.start_time
+                ) DAY
+            ),
+            LEAST(
+              TIMESTAMP(DATE(s.date), s.end_time)
+                + INTERVAL (s.end_time <= s.start_time) DAY,
+              TIMESTAMP(DATE(a.date), a.time_out)
+                + INTERVAL (
+                  a.time_out < a.time_in
+                  OR (
+                    s.end_time <= s.start_time
+                    AND a.time_out < s.start_time
+                  )
+                ) DAY
+            )
+          )
+        ) / 60
+        ELSE 0
+      END
+    ), 0) AS regular_hours,
+
+    COALESCE(SUM(
+      CASE
+        WHEN a.time_in IS NOT NULL
+         AND s.start_time IS NOT NULL
+         AND TIME_TO_SEC(
+           TIMEDIFF(a.time_in, s.start_time)
+         ) > 1800
+        THEN TIME_TO_SEC(
+          TIMEDIFF(a.time_in, s.start_time)
+        ) / 60
+        ELSE 0
+      END
+    ), 0) AS late_minutes
+
+  FROM attendance a
+
+  LEFT JOIN schedules s
+    ON s.id = a.schedule_id
+
+  WHERE a.user_id = ?
+    AND a.date BETWEEN ? AND ?
+    AND LOWER(TRIM(a.status)) NOT IN (
+      'on leave',
+      'absent',
+      'system auto-clock out'
+    )`,
+  [
+    employee.employee_id,
+    period.start,
+    period.end
+  ]
+);
+
+const [overtime] = await connection.query(
+  `SELECT
+     COALESCE(
+       SUM(
+         GREATEST(
+           0,
+           TIMESTAMPDIFF(
+             MINUTE,
+             start_time,
+             end_time
+           )
+         ) / 60
+       ), 0
+     ) AS overtime_hours
+   FROM overtime_requests
+   WHERE user_id = ?
+     AND date BETWEEN ? AND ?
+     AND LOWER(TRIM(status)) = 'approved'
+     AND COALESCE(
+       NULLIF(TRIM(overtime_type), ''),
+       'Regular Overtime'
+     ) = 'Regular Overtime'`,
+  [
+    employee.id,
+    period.start,
+    period.end
+  ]
+);
+
+
+  const [leave] = await connection.query(
+    `SELECT COUNT(*) AS paid_leave_days
+     FROM (
+       SELECT DISTINCT DATE(l.request_date) AS day
+       FROM leave_requests l
+       WHERE (
+         l.employee_id = ?
+         OR l.user_id = ?
+         OR l.user_id = ?
+       )
+       AND DATE(l.request_date) BETWEEN ? AND ?
+       AND LOWER(TRIM(l.status)) = 'approved'
+       AND l.is_paid = 1
+       AND LOWER(
+         COALESCE(l.duration, 'Whole Day')
+       ) = 'whole day'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM attendance a
+         WHERE a.user_id = ?
+           AND a.date = DATE(l.request_date)
+           AND a.time_in IS NOT NULL
+           AND a.time_out IS NOT NULL
+           AND LOWER(TRIM(a.status)) NOT IN (
+             'absent',
+             'on leave',
+             'system auto-clock out'
+           )
+       )
+     ) AS unique_leave_days`,
+    [
+      employee.employee_id,
+      String(employee.id),
+      employee.employee_id,
+      period.start,
+      period.end,
+      employee.employee_id
+    ]
+  );
+
+  return {
+    ...employee,
+    info,
+    period,
+    regularHours:
+      Number(attendance[0]?.regular_hours || 0),
+    lateMinutes:
+      Number(attendance[0]?.late_minutes || 0),
+    overtimeHours:
+      Number(overtime[0]?.overtime_hours || 0),
+    paidLeaveDays:
+      Number(leave[0]?.paid_leave_days || 0)
+  };
+}
+
+function uvCutoffCalculate(source, adjustments) {
+  /*
+   * An explicit configuration is required.
+   * EQUAL_SPLIT must not be enabled without
+   * written HR approval and calculation testing.
+   */
+  const policy =
+    process.env.PAYROLL_CUTOFF_DEDUCTION_POLICY;
+
+  if (policy !== 'EQUAL_SPLIT') {
+    throw uvPayrollError(
+      'HR must confirm the statutory deduction ' +
+      'and withholding-tax allocation policy.',
+      409
+    );
+  }
+
+  const salary = Number(source.monthly_salary);
+  const workDays = Number(source.work_days_per_month);
+
+  if (
+    !Number.isFinite(salary) ||
+    salary < 0 ||
+    !Number.isInteger(workDays) ||
+    workDays < 1 ||
+    workDays > 31
+  ) {
+    throw uvPayrollError(
+      'Invalid salary or workdays on employee profile.'
+    );
+  }
+
+  const basis =
+    source.info?.compensation_basis === 'hourly'
+      ? 'hourly'
+      : 'monthly';
+
+  const hourlyRate = basis === 'hourly'
+    ? Number(source.info?.hourly_rate)
+    : salary / workDays / 8;
+
+  if (
+    !Number.isFinite(hourlyRate) ||
+    hourlyRate <= 0
+  ) {
+    throw uvPayrollError(
+      'Hourly compensation rate is missing or invalid.'
+    );
+  }
+
+  const type = String(
+    source.employment_type || ''
+  ).toLowerCase();
+
+  const contract = String(
+    source.contract_type || ''
+  ).toLowerCase();
+
+  const allowanceEligible =
+    contract === 'regular' ||
+    type === 'part-time';
+
+  if (
+    !allowanceEligible &&
+    [
+      'transport_allowance',
+      'meal_allowance',
+      'housing_allowance'
+    ].some(field => adjustments[field] > 0)
+  ) {
+    throw uvPayrollError(
+      'This employment classification does not permit allowances.'
+    );
+  }
+
+  const paidLeaveHours = basis === 'monthly'
+    ? source.paidLeaveDays * 8
+    : 0;
+
+  const baseEarnings =
+    (source.regularHours + paidLeaveHours) *
+    hourlyRate;
+
+  const overtimePay =
+    source.overtimeHours * hourlyRate * 1.25;
+
+  /*
+   * Actual recorded hours are used as the base.
+   * Late minutes are not deducted again,
+   * to avoid double-reducing compensation.
+   */
+  const lateDeduction = 0;
+
+  const grossPay =
+    baseEarnings +
+    overtimePay +
+    adjustments.transport_allowance +
+    adjustments.meal_allowance +
+    adjustments.housing_allowance +
+    adjustments.bonus;
+
+  /*
+   * These helpers already exist in server.js.
+   * Do not define duplicate versions:
+   * calcPHSSS
+   * calcPHPhilHealth
+   * calcPHPagIbig
+   */
+  const fullSSS = calcPHSSS(
+    salary,
+    source.period.year
+  );
+
+  const fullPhilHealth = calcPHPhilHealth(salary);
+
+  const fullPagIbig = calcPHPagIbig(
+    salary,
+    source.period.year,
+    source.period.month
+  );
+
+  const sss = uvRound(fullSSS / 2);
+  const philhealth = uvRound(fullPhilHealth / 2);
+  const pagibig = uvRound(fullPagIbig / 2);
+
+  const monthlyTaxable = Math.max(
+    0,
+    salary -
+      fullSSS -
+      fullPhilHealth -
+      fullPagIbig
+  );
+
+  const brackets = [
+    { min: 0, max: 20833, rate: 0, base: 0 },
+    { min: 20833, max: 33332, rate: 0.15, base: 0 },
+    { min: 33332, max: 66666, rate: 0.20, base: 1875 },
+    { min: 66666, max: 166666, rate: 0.25, base: 8541.80 },
+    { min: 166666, max: 666666, rate: 0.30, base: 33541.80 },
+    { min: 666666, max: Infinity, rate: 0.35, base: 183541.80 }
+  ];
+
+  const bracket = brackets.find(
+    item =>
+      monthlyTaxable > item.min &&
+      monthlyTaxable <= item.max
+  );
+
+  const tax = uvRound(
+    (
+      bracket
+        ? bracket.base +
+          (monthlyTaxable - bracket.min) *
+          bracket.rate
+        : 0
+    ) / 2
+  );
+
+  const totalDeductions = uvRound(
+    sss +
+    philhealth +
+    pagibig +
+    tax +
+    adjustments.mbf_deduction +
+    adjustments.loan_deduction +
+    adjustments.other_deduction +
+    lateDeduction
+  );
+
+  if (totalDeductions > grossPay) {
+    throw uvPayrollError(
+      'Deductions exceed gross pay. Review the payroll record.'
+    );
+  }
+
+  return {
+    salary_rate: uvRound(hourlyRate),
+    total_hours: uvRound(
+      source.regularHours + paidLeaveHours
+    ),
+    overtime_hours: uvRound(source.overtimeHours),
+    overtime_pay: uvRound(overtimePay),
+    ...adjustments,
+    sss_deduction: sss,
+    philhealth_deduction: philhealth,
+    pagibig_deduction: pagibig,
+    tax_deduction: tax,
+    late_deduction: lateDeduction,
+    gross_pay: uvRound(grossPay),
+    net_pay: uvRound(
+      grossPay - totalDeductions
+    ),
+    total_earnings: uvRound(
+      grossPay - totalDeductions
+    )
+  };
+}
+
+
+const UV_PAYROLL_COLUMNS = [
+  'user_id',
+  'month_year',
+  'period_start',
+  'period_end',
+  'salary_rate',
+  'total_hours',
+  'overtime_hours',
+  'overtime_pay',
+  'transport_allowance',
+  'meal_allowance',
+  'housing_allowance',
+  'bonus',
+  'sss_deduction',
+  'philhealth_deduction',
+  'pagibig_deduction',
+  'mbf_deduction',
+  'loan_deduction',
+  'other_deduction',
+  'late_deduction',
+  'gross_pay',
+  'tax_deduction',
+  'net_pay',
+  'total_earnings',
+  'status'
+];
+
+async function uvInsertCutoff(
+  connection,
+  userId,
+  period,
+  calculated
+) {
+  const data = {
+    user_id: userId,
+    month_year: period.label,
+    period_start: period.start,
+    period_end: period.end,
+    ...calculated,
+    status: 'pending'
+  };
+
+  const placeholders =
+    UV_PAYROLL_COLUMNS.map(() => '?').join(',');
+
+  const sql = `
+    INSERT INTO payroll
+    (${UV_PAYROLL_COLUMNS.join(',')})
+    VALUES (${placeholders})
+  `;
+
+  const values = UV_PAYROLL_COLUMNS.map(
+    column => data[column]
+  );
+
+  const [result] = await connection.query(sql, values);
+
+  return result.insertId;
+}
+
+async function uvCutoffHandler(
+  req,
+  res,
+  finalize = false
+) {
+  if (req.user.role !== 'hr_admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'HR access required.'
+    });
+  }
+
+  try {
+    const period = uvCutoff(req.body?.month_year);
+    const userId = Number(req.body?.user_id);
+
+    if (
+      !period ||
+      !Number.isSafeInteger(userId) ||
+      userId < 1
+    ) {
+      throw uvPayrollError(
+        'Invalid cutoff label or instructor.',
+        400
+      );
+    }
+
+    const adjustments = uvAdjustments(req.body);
+
+    const source = await uvCutoffSource(
+      db.promise(),
+      userId,
+      period
+    );
+
+    const calculated = uvCutoffCalculate(
+      source,
+      adjustments
+    );
+
+    if (
+      finalize &&
+      period.end > uvLocalToday()
+    ) {
+      throw uvPayrollError(
+        'Cutoff is still open. Finalization is not permitted.',
+        400
+      );
+    }
+
+    if (finalize) {
+      const payrollId = await uvInsertCutoff(
+        db.promise(),
+        userId,
+        period,
+        calculated
+      );
+
+      logAction(
+        req.user.id,
+        'FINALIZE_CUTOFF_PAYROLL',
+        'payroll',
+        payrollId,
+        req
+      );
+
+      return res.json({
+        success: true,
+        payroll_id: payrollId,
+        calculated
+      });
+    }
+
+    return res.json({
+      success: true,
+      calculated,
+      source: {
+        regular_hours: uvRound(source.regularHours),
+        paid_leave_days: source.paidLeaveDays,
+        overtime_hours: uvRound(source.overtimeHours),
+        late_minutes: uvRound(source.lateMinutes)
+      }
+    });
+  } catch (error) {
+    return r01Error(
+      res,
+      error,
+      'Cutoff payroll error:'
+    );
+  }
+}
+
+
 // Authoritative preview for HR confirmation, not a separate payroll record.
 app.post('/api/payroll/preview', verifyPayrollAccess, requireAction('payroll:finalize'), async (req, res) => {
+  if (
+    String(req.body?.month_year || '').includes(' | ')
+  ) {
+    return uvCutoffHandler(req, res, false);
+  }
+  
   if (!['admin','hr_admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Forbidden.' });
   const userId = Number(req.body.user_id);
   const period = r01PeriodFromLabel(req.body.month_year);
@@ -11350,6 +13348,12 @@ app.post('/api/payroll/preview', verifyPayrollAccess, requireAction('payroll:fin
 // Existing endpoint, request URL, and successful response keys are preserved.
 // Legacy submitted totals and deduction overrides are not trusted as calculations.
 app.post('/api/payroll/finalize', verifyPayrollAccess, requireAction('payroll:finalize'), async (req, res) => {
+  if (
+  String(req.body?.month_year || '').includes(' | ')
+) {
+  return uvCutoffHandler(req, res, true);
+}
+  
   if (!['admin','hr_admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Forbidden.' });
   const userId = Number(req.body.user_id);
   const period = r01PeriodFromLabel(req.body.month_year);
@@ -11426,6 +13430,146 @@ app.post('/api/payroll/:id/mark-paid', verifyPayrollAccess, requireAction('payro
     return res.status(500).json({ success: false, message: 'Unable to confirm payment.' });
   }
 });
+
+
+app.post(
+  '/api/payroll/run-cutoff',
+  verifyPayrollAccess,
+  requireAction('payroll:run'),
+  async (req, res) => {
+    if (req.user.role !== 'hr_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'HR access required.'
+      });
+    }
+
+    if (
+      process.env
+        .PAYROLL_BATCH_ZERO_ADJUSTMENTS_APPROVED !== 'true'
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          'Batch payroll is disabled until HR approves ' +
+          'zero-adjustment batch processing. ' +
+          'Use individual payroll review instead.'
+      });
+    }
+
+    let connection;
+
+    try {
+      const period = uvCutoff(
+        req.body?.month_year
+      );
+
+      if (!period) {
+        throw uvPayrollError(
+          'Invalid cutoff label.',
+          400
+        );
+      }
+
+      if (period.end > uvLocalToday()) {
+        throw uvPayrollError(
+          'Cutoff is still open.',
+          400
+        );
+      }
+
+      connection =
+        await db.promise().getConnection();
+
+      await connection.beginTransaction();
+
+      const [employees] = await connection.query(
+        `SELECT id
+         FROM users
+         WHERE role = 'instructor'
+           AND status = 'active'
+           AND employment_status = 'active'
+         ORDER BY id`
+      );
+
+      let processed = 0;
+      let skipped = 0;
+      const savedIds = [];
+
+      for (const employee of employees) {
+        try {
+          const source = await uvCutoffSource(
+            connection,
+            employee.id,
+            period
+          );
+
+          const calculated = uvCutoffCalculate(
+            source,
+            uvAdjustments({})
+          );
+
+          const payrollId = await uvInsertCutoff(
+            connection,
+            employee.id,
+            period,
+            calculated
+          );
+
+          savedIds.push(payrollId);
+          processed++;
+        } catch (error) {
+          if (error.code === 'ER_DUP_ENTRY') {
+            skipped++;
+            continue;
+          }
+
+          throw error;
+        }
+      }
+
+      await connection.commit();
+
+      for (const id of savedIds) {
+        logAction(
+          req.user.id,
+          'FINALIZE_CUTOFF_PAYROLL',
+          'payroll',
+          id,
+          req
+        );
+      }
+
+      return res.json({
+        success: true,
+        processed,
+        skipped
+      });
+    } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (rollbackError) {
+          console.error(
+            'Cutoff rollback error:',
+            rollbackError
+          );
+        }
+      }
+
+      return r01Error(
+        res,
+        error,
+        'Cutoff batch error:'
+      );
+    } finally {
+      if (connection) {
+        connection.release();
+      }
+    }
+  }
+);
+
 
 app.post('/api/payroll/run-monthly', verifyPayrollAccess, requireAction('payroll:run'), async (req, res) => {
   if (!['admin','hr_admin'].includes(req.user.role)) return res.status(403).json({ success: false, message: 'Forbidden.' });
@@ -11589,57 +13733,235 @@ db.query(createConfigTable, (err) => {
   }
 });
 
-app.get('/api/system-config', authenticateToken, allowRoles('admin'), async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const cfg = await getSystemConfig();
-  res.json(cfg);
-});
 
-app.put('/api/system-config', authenticateToken, requireAction('system:config'), async (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
-  }
-  
-  const { password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts } = req.body;
-  
-  if (password_expiry_days === undefined || password_expiry_days < 0 || password_expiry_days > 1095) {
-    return res.status(400).json({ success: false, message: 'Password expiry days must be between 0 (disabled) and 1095 days.' });
-  }
-  if (!otp_expiry_minutes || otp_expiry_minutes < 1 || otp_expiry_minutes > 60) {
-    return res.status(400).json({ success: false, message: 'OTP expiry must be between 1 and 60 minutes.' });
-  }
-  if (!geofence_default_radius || geofence_default_radius < 50 || geofence_default_radius > 2000) {
-    return res.status(400).json({ success: false, message: 'Geofence radius must be between 50 and 2000 meters.' });
-  }
-  if (!max_login_attempts || max_login_attempts < 1 || max_login_attempts > 10) {
-    return res.status(400).json({ success: false, message: 'Max login attempts must be between 1 and 10.' });
-  }
+const UV_CONFIG_DEFAULT_LOITER_MINUTES = 30;
 
-  try {
-    const sql = `UPDATE system_config SET 
-      password_expiry_days = ?, 
-      otp_expiry_minutes = ?, 
-      geofence_default_radius = ?, 
-      max_login_attempts = ? 
-      WHERE id = 1`;
+const uvConfigInteger = (value, min, max) =>
+  typeof value === 'number' &&
+  Number.isSafeInteger(value) &&
+  value >= min &&
+  value <= max;
+
+app.get(
+  '/api/system-config',
+  authenticateToken,
+  allowRoles('admin'),
+  async (req, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'System Administrator access required.'
+      });
+    }
+
+    try {
       
-    await db.promise().query(sql, [password_expiry_days, otp_expiry_minutes, geofence_default_radius, max_login_attempts]);
-    
-    // Update live memory cache immediately so all routes reflect changes with zero restarts
-    systemConfigCache = {
-      password_expiry_days: Number(password_expiry_days),
-      otp_expiry_minutes: Number(otp_expiry_minutes),
-      geofence_default_radius: Number(geofence_default_radius),
-      max_login_attempts: Number(max_login_attempts)
-    };
+const [configRows] = await db.promise().query(
+  `SELECT password_expiry_days,
+          otp_expiry_minutes,
+          geofence_default_radius,
+          max_login_attempts
+   FROM system_config
+   WHERE id = 1
+   LIMIT 1`
+);
 
-    logAction(req.user.id, 'UPDATE_SYSTEM_CONFIG', 'system_config', 1, req, null, systemConfigCache);
-    res.json({ success: true, message: 'System configuration saved and actively enforced.' });
-  } catch (err) {
-    console.error("System config update error:", err);
-    res.status(500).json({ success: false, message: 'Server error while updating configuration.' });
+if (configRows.length !== 1) {
+  return res.status(503).json({
+    success: false,
+    message: 'System configuration is not initialized.'
+  });
+}
+
+const config = configRows[0];
+
+const [settings] = await db.promise().query(
+  `SELECT config_value
+   FROM system_settings
+   WHERE config_key = 'loiter_threshold_minutes'
+   LIMIT 1`
+);
+
+      const loiter = settings.length
+        ? Number(settings[0].config_value)
+        : UV_CONFIG_DEFAULT_LOITER_MINUTES;
+
+      return res.json({
+        ...config,
+        loiter_threshold_minutes: loiter
+      });
+    } catch (error) {
+      console.error('System configuration retrieval failed:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to retrieve system configuration.'
+      });
+    }
   }
-});
+);
+
+app.put(
+  '/api/system-config',
+  authenticateToken,
+  requireAction('system:config'),
+  async (req, res) => {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'System Administrator access required.'
+      });
+    }
+
+    const {
+      password_expiry_days,
+      otp_expiry_minutes,
+      geofence_default_radius,
+      max_login_attempts,
+      loiter_threshold_minutes
+    } = req.body || {};
+
+    const fields = [
+      ['Password expiry', password_expiry_days, 0, 1095],
+      ['OTP expiry', otp_expiry_minutes, 1, 15],
+      ['Default geofence radius', geofence_default_radius, 50, 2000],
+      ['Maximum login attempts', max_login_attempts, 1, 10],
+      ['Loitering threshold', loiter_threshold_minutes, 1, 180]
+    ];
+
+    for (const [label, value, min, max] of fields) {
+      if (!uvConfigInteger(value, min, max)) {
+        return res.status(400).json({
+          success: false,
+          message: `${label} must be a whole number from ${min} to ${max}.`
+        });
+      }
+    }
+
+    let connection;
+    let transactionStarted = false;
+
+    try {
+      connection = await db.promise().getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      const [oldRows] = await connection.query(
+        `SELECT password_expiry_days,
+                otp_expiry_minutes,
+                geofence_default_radius,
+                max_login_attempts
+         FROM system_config
+         WHERE id = 1
+         FOR UPDATE`
+      );
+
+      if (oldRows.length !== 1) {
+        const error = new Error(
+          'System configuration is not initialized.'
+        );
+        error.httpStatus = 409;
+        throw error;
+      }
+
+      const [oldLoiterRows] = await connection.query(
+        `SELECT config_value
+         FROM system_settings
+         WHERE config_key = 'loiter_threshold_minutes'
+         FOR UPDATE`
+      );
+
+      const previousValues = {
+        ...oldRows[0],
+        loiter_threshold_minutes: oldLoiterRows.length
+          ? Number(oldLoiterRows[0].config_value)
+          : UV_CONFIG_DEFAULT_LOITER_MINUTES
+      };
+
+      const [updated] = await connection.query(
+        `UPDATE system_config
+         SET password_expiry_days = ?,
+             otp_expiry_minutes = ?,
+             geofence_default_radius = ?,
+             max_login_attempts = ?
+         WHERE id = 1`,
+        [
+          password_expiry_days,
+          otp_expiry_minutes,
+          geofence_default_radius,
+          max_login_attempts
+        ]
+      );
+
+      if (updated.affectedRows !== 1) {
+        const error = new Error(
+          'The system configuration could not be updated.'
+        );
+        error.httpStatus = 409;
+        throw error;
+      }
+
+      await connection.query(
+        `INSERT INTO system_settings
+           (config_key, config_value)
+         VALUES ('loiter_threshold_minutes', ?)
+         ON DUPLICATE KEY UPDATE
+           config_value = VALUES(config_value)`,
+        [loiter_threshold_minutes]
+      );
+
+      await connection.commit();
+      transactionStarted = false;
+
+      const savedValues = {
+        password_expiry_days,
+        otp_expiry_minutes,
+        geofence_default_radius,
+        max_login_attempts,
+        loiter_threshold_minutes
+      };
+
+      systemConfigCache = {
+        password_expiry_days,
+        otp_expiry_minutes,
+        geofence_default_radius,
+        max_login_attempts
+      };
+
+      logAction(
+        req.user.id,
+        'UPDATE_SYSTEM_CONFIG',
+        'system_config',
+        1,
+        req,
+        previousValues,
+        savedValues
+      );
+
+      return res.json({
+        success: true,
+        message: 'System configuration saved successfully.',
+        config: savedValues
+      });
+    } catch (error) {
+      if (transactionStarted && connection) {
+        await connection.rollback().catch(console.error);
+      }
+
+      console.error('System configuration update failed:', error);
+
+      return res.status(error.httpStatus || 500).json({
+        success: false,
+        message: error.httpStatus
+          ? error.message
+          : 'Unable to save system configuration.'
+      });
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+);
+
 
 app.get('/api/visitor-requests', authenticateToken, allowRoles('admin','security'), (req, res) => {
   const { date, status } = req.query;
@@ -13829,7 +16151,10 @@ app.get(
            FROM audit_logs a
            WHERE a.action = 'REVIEW_VISITOR_EVENT'
              AND a.target_type = 'visitor_history'
-             AND a.target_id = CAST(vh.id AS CHAR)
+             
+AND a.target_id COLLATE utf8mb4_0900_ai_ci =
+    CAST(vh.id AS CHAR CHARACTER SET utf8mb4)
+    COLLATE utf8mb4_0900_ai_ci
          )
          LEFT JOIN users u ON u.id = al.user_id
          WHERE ${conditions.join(' AND ')}
@@ -14101,6 +16426,21 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
     return res.status(400).json({ success: false, message: 'All overtime fields are required.' });
   }
 
+  const overtimeProof =
+    req.files?.attachment?.[0] ||
+    req.files?.image?.[0] ||
+    req.file ||
+    null;
+
+  if (!overtimeProof) {
+    return res.status(400).json({
+      success: false,
+      message:
+        'A supporting attachment is required for overtime requests. ' +
+        'Upload an image, PDF, or document before submitting.'
+    });
+  }
+
   const cleanReason = String(reason).trim();
   if (cleanReason.length < 5) {
     return res.status(400).json({ success: false, message: 'Please provide a more detailed reason for overtime (minimum 5 characters).' });
@@ -14157,18 +16497,19 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
     return res.status(400).json({ success: false, message: 'Invalid overtime type.' });
   }
 
-  // ---- 5. Date window (Strict: Block Future, Allow 7 Days Back) ----
   const { date: today } = getPHTime();
   const todayObj = new Date(`${today}T00:00:00`);
-  const daysDiff = Math.round((dateObjCheck - todayObj) / (1000 * 60 * 60 * 24));
+  const daysDiff = Math.round(
+    (dateObjCheck - todayObj) / (1000 * 60 * 60 * 24)
+  );
 
-  // Block any future dates
-  if (daysDiff > 0) {
-    return res.status(400).json({ success: false, message: 'Overtime cannot be filed for future dates. Please file on or after the date of the shift.' });
-  }
-  // Allow backdating up to 7 days
   if (daysDiff < -OT_BACKDATE_LIMIT_DAYS) {
-    return res.status(400).json({ success: false, message: `Overtime can only be filed up to ${OT_BACKDATE_LIMIT_DAYS} days in the past.` });
+    return res.status(400).json({
+      success: false,
+      message:
+        `Overtime can only be filed up to ` +
+        `${OT_BACKDATE_LIMIT_DAYS} days in the past.`
+    });
   }
 
   try {
@@ -14205,10 +16546,27 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
     let shiftEndMin   = null;
 
     if (!targetScheduleId || targetScheduleId === 'undefined' || targetScheduleId === 'null') {
-      const [schedRows] = await db.promise().query(
-        "SELECT id, start_time, end_time FROM schedules WHERE (user_id = ? OR user_id = ?) AND date = ? ORDER BY start_time ASC LIMIT 1",
-        [employeeId, userId, date]
-      );
+
+      
+const [schedRows] = await db.promise().query(
+  `SELECT id, start_time, end_time
+   FROM schedules
+   WHERE (user_id = ? OR user_id = ?)
+     AND DATE(date) = DATE(?)
+   ORDER BY start_time ASC
+   LIMIT 2`,
+  [employeeId, userId, date]
+);
+
+if (schedRows.length > 1) {
+  return res.status(409).json({
+    success: false,
+    message:
+      'Multiple schedules exist on this date. ' +
+      'Please select the specific shift for overtime.'
+  });
+}
+
       if (schedRows.length > 0) {
         targetScheduleId = schedRows[0].id;
         shiftStartStr = schedRows[0].start_time;
@@ -14303,8 +16661,10 @@ app.post('/api/overtime-requests', authenticateToken, uploadOvertimeFiles, async
       }
 
       
-      const uploadedFile = req.file || (req.files && (req.files['attachment']?.[0] || req.files['image']?.[0]));
-      const attachment = uploadedFile ? `/uploads/leave_images/${uploadedFile.filename}` : null;
+      
+const attachment =
+  `/uploads/leave_images/${overtimeProof.filename}`;
+
 
       
       const [result] = await connection.query(
@@ -14413,146 +16773,395 @@ app.get('/api/overtime-requests/pending', authenticateToken, (req, res) => {
   });
 });
 
-app.put('/api/overtime-requests/:id/status', authenticateToken, requireAction('overtime:approve'), async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. You do not have permission.' });
-  }
 
-  const { id } = req.params;
-  const { status, admin_remarks } = req.body;
-  const phNow = getPHDateTime();
-
-  if (!['approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ success: false, message: 'Invalid status update provided.' });
-  }
-
-  // Fix 10.4 — cap admin_remarks length
-  const cleanAdminRemarks = admin_remarks ? String(admin_remarks).trim() : null;
-  if (cleanAdminRemarks && cleanAdminRemarks.length > 500) {
-    return res.status(400).json({ success: false, message: 'Admin remarks must be 500 characters or fewer.' });
-  }
-
-  const connection = await db.promise().getConnection();
-  await connection.beginTransaction();
-
-  try {
-    const [rows] = await connection.query(
-      `SELECT o.*, u.employee_id, u.id as internal_user_id
-         FROM overtime_requests o
-         JOIN users u ON (o.user_id = u.id OR o.user_id = u.employee_id)
-        WHERE o.id = ? AND o.status = 'pending' FOR UPDATE`,
-      [id]
-    );
-
-    if (rows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ success: false, message: 'Request not found or has already been reviewed.' });
+app.put(
+  '/api/overtime-requests/:id/status',
+  authenticateToken,
+  requireAction('overtime:approve'),
+  async (req, res) => {
+    if (!['admin', 'hr_admin'].includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden. You do not have permission.'
+      });
     }
 
-    const reqData = rows[0];
+    const id = Number(req.params.id);
+    
+const {
+  status,
+  admin_remarks,
+  evidence_verified
+} = req.body || {};
 
-if (reqData.internal_user_id === req.user.id) {
-  await connection.rollback();
-  return res.status(403).json({
+    const phNow = getPHDateTime();
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid overtime request ID.'
+      });
+    }
+
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status update.'
+      });
+    }
+
+    const cleanAdminRemarks = admin_remarks == null
+      ? null
+      : String(admin_remarks).trim() || null;
+
+    if (cleanAdminRemarks && cleanAdminRemarks.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'Admin remarks must not exceed 500 characters.'
+      });
+    }
+
+    if (
+      status === 'rejected' &&
+      (!cleanAdminRemarks || cleanAdminRemarks.length < 5)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide a rejection reason of 5–500 characters.'
+      });
+    }
+
+
+if (status === 'approved' && evidence_verified !== true) {
+  return res.status(400).json({
     success: false,
-    message: "You cannot approve your own overtime request."
+    message:
+      'HR must confirm verification of the completed ' +
+      'overtime evidence before approval.'
   });
 }
 
-    // Defensive re-validation on approval
-    if (status === 'approved') {
-      // ✅ ENFORCE TWO-OPTION CONTRACT: Timing must be 'Early OT' or 'Normal OT'
-      if (!ALLOWED_OT_SCENARIOS.includes(reqData.scenario_type)) {
+
+    let connection;
+    let transactionStarted = false;
+
+    try {
+      connection = await db.promise().getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      
+const [rows] = await connection.query(
+  `SELECT
+     o.*,
+     u.employee_id,
+     u.id AS internal_user_id,
+     DATE_FORMAT(o.date, '%Y-%m-%d') AS overtime_work_date
+   FROM overtime_requests o
+   JOIN users u
+     ON (o.user_id = u.id OR o.user_id = u.employee_id)
+   WHERE o.id = ?
+     AND o.status = 'pending'
+   FOR UPDATE`,
+  [id]
+);
+
+
+      if (rows.length !== 1) {
         await connection.rollback();
-        return res.status(400).json({
+        transactionStarted = false;
+
+        return res.status(rows.length === 0 ? 404 : 409).json({
           success: false,
-          message: `Cannot approve: invalid timing "${reqData.scenario_type || 'null'}". Timing must be "Early OT" or "Normal OT". Please reject this request and ask the employee to re-submit.`
+          message: rows.length === 0
+            ? 'Overtime request not found or already reviewed.'
+            : 'Overtime request ownership is ambiguous.'
         });
       }
 
-      // ✅ ENFORCE TWO-OPTION CONTRACT: Type must be 'Regular Overtime' or 'CTO'
-      const reqOtType = reqData.overtime_type || 'Regular Overtime';
-      if (!ALLOWED_OT_TYPES.includes(reqOtType)) {
+      const reqData = rows[0];
+
+      if (String(reqData.internal_user_id) === String(req.user.id)) {
         await connection.rollback();
-        return res.status(400).json({
+        transactionStarted = false;
+
+        return res.status(403).json({
           success: false,
-          message: `Cannot approve: invalid overtime type "${reqData.overtime_type || 'null'}". Type must be "Regular Overtime" or "Compensatory Time Off (CTO)".`
+          message: 'You cannot review your own overtime request.'
         });
       }
 
-      const sMin = toMinutes((reqData.start_time || '').substring(0, 5));
-      const eMin = toMinutes((reqData.end_time   || '').substring(0, 5));
-      if (sMin === null || eMin === null || sMin >= eMin) {
-        await connection.rollback();
-        return res.status(400).json({ success: false, message: 'Cannot approve: invalid overtime time range.' });
-      }
+      
+if (status === 'approved') {
+  // UniVITA's current overtime request form supports
+  // same-day intervals. Compare against Philippine time.
+  const overtimeEndClock =
+    String(reqData.end_time || '').slice(0, 8);
 
-      const dur = eMin - sMin;
-      if (dur < MIN_OT_MINUTES) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: `Cannot approve: overtime duration is below ${MIN_OT_MINUTES} minutes.`
-        });
-      }
-      if (dur > MAX_OT_MINUTES) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: `Cannot approve: overtime duration exceeds ${MAX_OT_MINUTES / 60} hours.`
-        });
-      }
+  const overtimeEnd = `${reqData.overtime_work_date} ${
+    overtimeEndClock.length === 5
+      ? `${overtimeEndClock}:00`
+      : overtimeEndClock
+  }`;
 
-      // Reject if ANY overlapping request is pending OR approved (not just approved)
-      const [overlap] = await connection.query(
-        `SELECT id, status FROM overtime_requests
-          WHERE (user_id = ? OR user_id = ?)
-            AND date = ?
-            AND status IN ('pending', 'approved')
-            AND id <> ?
-            AND NOT (end_time <= ? OR start_time >= ?)`,
-        [reqData.employee_id, reqData.user_id, reqData.date,
-         id, reqData.start_time, reqData.end_time]
-      );
-      if (overlap.length > 0) {
-        await connection.rollback();
-        return res.status(409).json({
-          success: false,
-          message: `Cannot approve: overlaps with another ${overlap[0].status} overtime request on this date.`
-        });
-      }
+  if (
+    !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(overtimeEnd) ||
+    overtimeEnd > phNow
+  ) {
+    await connection.rollback();
+    transactionStarted = false;
 
-      // CTO requires at least 1 hour
-      if (reqOtType === 'Compensatory Time Off (CTO)' && dur < 60) {
-        await connection.rollback();
-        return res.status(400).json({
-          success: false,
-          message: 'Cannot approve: CTO conversion requires at least 1 hour of overtime.'
-        });
-      }
-    }
+    return res.status(409).json({
+      success: false,
+      message:
+        'Overtime has not ended. Keep this request Pending ' +
+        'until the stated interval is completed.'
+    });
+  }
 
-    await connection.query(
-      `UPDATE overtime_requests
-          SET status = ?, admin_remarks = ?, reviewed_at = ?
-        WHERE id = ?`,
-      [status, cleanAdminRemarks, phNow, id]
-    );
+  const reqOtType =
+    reqData.overtime_type || 'Regular Overtime';
 
-    if (status === 'approved') {
-      const overtimeHours = calculateHours(reqData.start_time, reqData.end_time);
-      const isCTO = reqData.overtime_type === 'Compensatory Time Off (CTO)';
 
-      if (isCTO) {
-        const earnedDays = overtimeHours / 8;
-        const leaveYear = new Date(reqData.date).getFullYear();
+        if (!ALLOWED_OT_SCENARIOS.includes(reqData.scenario_type)) {
+          await connection.rollback();
+          transactionStarted = false;
 
-        const [typeRows] = await connection.query(
-          `SELECT id FROM leave_types
-            WHERE name = 'Compensatory Paid Off' OR name LIKE '%Compensatory%' LIMIT 1`
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid overtime timing. Reject and request resubmission.'
+          });
+        }
+
+        if (!ALLOWED_OT_TYPES.includes(reqOtType)) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid overtime type.'
+          });
+        }
+
+        
+const workDate = reqData.overtime_work_date;
+
+
+        const [schedules] = await connection.query(
+          `SELECT id, start_time, end_time
+           FROM schedules
+           WHERE id = ?
+             AND (user_id = ? OR user_id = ?)
+             AND DATE(date) = DATE(?)
+           LIMIT 1`,
+          [
+            reqData.schedule_id,
+            reqData.employee_id,
+            reqData.internal_user_id,
+            workDate
+          ]
         );
 
-        if (typeRows.length > 0) {
+        if (schedules.length !== 1) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message:
+              'The overtime request must match an assigned schedule.'
+          });
+        }
+
+        const shift = schedules[0];
+        const startMin = toMinutes(String(reqData.start_time || ''));
+        const endMin = toMinutes(String(reqData.end_time || ''));
+        const shiftStart = toMinutes(String(shift.start_time || ''));
+        const shiftEnd = toMinutes(String(shift.end_time || ''));
+
+        if (
+          startMin === null ||
+          endMin === null ||
+          shiftStart === null ||
+          shiftEnd === null ||
+          startMin >= endMin ||
+          shiftStart >= shiftEnd
+        ) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid overtime or schedule time range.'
+          });
+        }
+
+        const durationMin = endMin - startMin;
+
+        if (
+          durationMin < MIN_OT_MINUTES ||
+          durationMin > MAX_OT_MINUTES
+        ) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(400).json({
+            success: false,
+            message:
+              `Overtime duration must be between ` +
+              `${MIN_OT_MINUTES} and ${MAX_OT_MINUTES} minutes.`
+          });
+        }
+
+        if (
+          reqOtType === 'Compensatory Time Off (CTO)' &&
+          durationMin < 60
+        ) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(400).json({
+            success: false,
+            message: 'CTO requires at least one hour of overtime.'
+          });
+        }
+
+        if (
+          reqData.scenario_type === 'early_ot' &&
+          endMin > shiftStart
+        ) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(400).json({
+            success: false,
+            message:
+              'Early overtime must end at or before shift start.'
+          });
+        }
+
+        if (
+          reqData.scenario_type === 'normal_ot' &&
+          startMin < shiftEnd
+        ) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(400).json({
+            success: false,
+            message:
+              'Normal overtime must start at or after shift end.'
+          });
+        }
+
+        const [overlap] = await connection.query(
+          `SELECT id, status
+           FROM overtime_requests
+           WHERE (user_id = ? OR user_id = ?)
+             AND DATE(date) = DATE(?)
+             AND status IN ('pending', 'approved')
+             AND id <> ?
+             AND NOT (end_time <= ? OR start_time >= ?)
+           LIMIT 1`,
+          [
+            reqData.employee_id,
+            reqData.internal_user_id,
+            workDate,
+            id,
+            reqData.start_time,
+            reqData.end_time
+          ]
+        );
+
+        if (overlap.length) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message:
+              `Overtime overlaps another ${overlap[0].status} request.`
+          });
+        }
+
+        const [evidence] = await connection.query(
+          `SELECT id
+           FROM attendance
+           WHERE (user_id = ? OR user_id = ?)
+             AND schedule_id = ?
+             AND DATE(date) = DATE(?)
+             AND time_in IS NOT NULL
+             AND time_out IS NOT NULL
+           LIMIT 1`,
+          [
+            reqData.employee_id,
+            reqData.internal_user_id,
+            reqData.schedule_id,
+            workDate
+          ]
+        );
+
+        if (!evidence.length && !reqData.attachment) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message:
+              'Completed attendance or supporting evidence is required. ' +
+              'HR must verify the actual overtime interval.'
+          });
+        }
+
+        if (
+          reqOtType === 'Regular Overtime' &&
+          await uvIsPayrollSnapshotLocked(
+            connection,
+            reqData.internal_user_id,
+            workDate
+          )
+        ) {
+          await connection.rollback();
+          transactionStarted = false;
+
+          return res.status(409).json({
+            success: false,
+            message:
+              'Payroll already exists for this period. ' +
+              'Use an authorized payroll adjustment.'
+          });
+        }
+
+        if (reqOtType === 'Compensatory Time Off (CTO)') {
+          const [typeRows] = await connection.query(
+            `SELECT id
+             FROM leave_types
+             WHERE name = 'Compensatory Paid Off'
+                OR name LIKE '%Compensatory%'
+             LIMIT 1`
+          );
+
+          if (!typeRows.length) {
+            await connection.rollback();
+            transactionStarted = false;
+
+            return res.status(409).json({
+              success: false,
+              message:
+                'Compensatory leave type is not configured. ' +
+                'HR must configure it before CTO approval.'
+            });
+          }
+
+          const overtimeHours = durationMin / 60;
+          const earnedDays = overtimeHours / 8;
+
+          const [dateRows] = await connection.query(
+            `SELECT YEAR(DATE(?)) AS leave_year`,
+            [workDate]
+          );
+
+          const leaveYear = Number(dateRows[0]?.leave_year);
           const leaveTypeId = typeRows[0].id;
 
           await connection.query(
@@ -14562,102 +17171,105 @@ if (reqData.internal_user_id === req.user.id) {
             [reqData.internal_user_id, leaveTypeId, leaveYear]
           );
 
-          await connection.query(
+          const [creditResult] = await connection.query(
             `UPDATE employee_leave_balances
-                SET remaining_days = remaining_days + ?, last_updated = CURDATE()
-              WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-            [earnedDays, reqData.internal_user_id, leaveTypeId, leaveYear]
+             SET remaining_days = remaining_days + ?,
+                 last_updated = CURDATE()
+             WHERE user_id = ?
+               AND leave_type_id = ?
+               AND year = ?`,
+            [
+              earnedDays,
+              reqData.internal_user_id,
+              leaveTypeId,
+              leaveYear
+            ]
           );
+
+          if (creditResult.affectedRows !== 1) {
+            throw new Error('Unable to credit CTO leave balance.');
+          }
 
           await connection.query(
             `INSERT INTO cto_credits
-               (user_id, employee_id, credit_hours, adjustment_days, reason, created_at)
+               (user_id, employee_id, credit_hours,
+                adjustment_days, reason, created_at)
              VALUES (?, ?, ?, ?, ?, ?)`,
             [
-              reqData.internal_user_id, reqData.employee_id, overtimeHours, earnedDays,
-              `Approved Overtime (${reqData.date}): ${reqData.reason || 'No reason provided'}`,
+              reqData.internal_user_id,
+              reqData.employee_id,
+              overtimeHours,
+              earnedDays,
+              `Approved Overtime: ${reqData.reason || 'No reason provided'}`,
               phNow
             ]
           );
         }
-      } else {
-        // Monetary OT — attach to payroll if it already exists
-        const rate = await hourlyRateFromUser(reqData.internal_user_id);
-        const overtimePay = overtimeHours * (rate * 1.25);
-        const monthYear = new Date(reqData.date).toLocaleString('default', { month: 'long', year: 'numeric' });
-
-        const [payrollRows] = await connection.query(
-          `SELECT id, overtime_hours, overtime_pay FROM payroll WHERE user_id = ? AND month_year = ?`,
-          [reqData.internal_user_id, monthYear]
-        );
-
-        if (payrollRows.length > 0) {
-          const newOTHours = (parseFloat(payrollRows[0].overtime_hours) || 0) + overtimeHours;
-          const newOTPay   = (parseFloat(payrollRows[0].overtime_pay)   || 0) + overtimePay;
-          await connection.query(
-            `UPDATE payroll
-                SET overtime_hours = ?, overtime_pay = ?,
-                    gross_pay = gross_pay + ?, net_pay = net_pay + ?
-              WHERE id = ?`,
-            [newOTHours, newOTPay, overtimePay, overtimePay, payrollRows[0].id]
-          );
-        }
-        // If payroll hasn't been run yet, `run-monthly` will pick up approved OT via the
-        // overtime_requests aggregate — no action needed here.
       }
 
-      // ---- Attendance recording ----
-      // Only 'early_ot' and 'normal_ot' can reach here (legacy scenarios blocked above).
-      // Preserves actual clock-in/out; only fills missing time_out (covers forgot-to-clock-out).
-      if (reqData.schedule_id) {
-        const [existingAtt] = await connection.query(
-          `SELECT id FROM attendance
-            WHERE (user_id = ? OR user_id = ?) AND schedule_id = ?`,
-          [reqData.employee_id, reqData.internal_user_id, reqData.schedule_id]
-        );
+      const [reviewResult] = await connection.query(
+        `UPDATE overtime_requests
+         SET status = ?,
+             admin_remarks = ?,
+             reviewed_at = ?,
+             reviewed_by = ?
+         WHERE id = ?
+           AND status = 'pending'`,
+        [
+          status,
+          cleanAdminRemarks,
+          phNow,
+          req.user.id,
+          id
+        ]
+      );
 
-        if (existingAtt.length > 0) {
-          await connection.query(
-            `UPDATE attendance
-                SET time_in  = COALESCE(time_in, ?),
-                    time_out = COALESCE(time_out, ?),
-                    total_hours = TIMESTAMPDIFF(
-                                    MINUTE,
-                                    COALESCE(time_in, ?),
-                                    COALESCE(time_out, ?)
-                                  ) / 60,
-                    status = 'overtime'
-              WHERE id = ?`,
-            [
-              reqData.start_time, reqData.end_time,
-              reqData.start_time, reqData.end_time,
-              existingAtt[0].id
-            ]
-          );
-        } else {
-          await connection.query(
-            `INSERT INTO attendance
-               (user_id, schedule_id, date, time_in, time_out, status, location, total_hours, correction_requested)
-             VALUES (?, ?, ?, ?, ?, 'overtime', 'Approved Overtime', ?, 0)`,
-            [reqData.employee_id, reqData.schedule_id, reqData.date,
-             reqData.start_time, reqData.end_time, overtimeHours]
-          );
-        }
+      if (reviewResult.affectedRows !== 1) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message: 'This overtime request has already been reviewed.'
+        });
       }
+
+      await connection.commit();
+      transactionStarted = false;
+
+      logAction(
+        req.user.id,
+        status === 'approved'
+          ? 'APPROVE_OVERTIME'
+          : 'REJECT_OVERTIME',
+        'overtime_request',
+        id,
+        req
+      );
+
+      return res.json({
+        success: true,
+        message: `Overtime successfully ${status}.`
+      });
+
+    } catch (error) {
+      if (connection && transactionStarted) {
+        await connection.rollback().catch(console.error);
+      }
+
+      console.error('Overtime status update error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Server error while reviewing overtime.'
+      });
+
+    } finally {
+      if (connection) connection.release();
     }
-
-    await connection.commit();
-    const action = status === 'approved' ? 'APPROVE_OVERTIME' : 'REJECT_OVERTIME';
-    logAction(req.user.id, action, 'overtime_request', id, req);
-    res.json({ success: true, message: `Overtime successfully ${status}.` });
-  } catch (err) {
-    await connection.rollback();
-    console.error("Overtime status update error:", err);
-    res.status(500).json({ success: false, message: err.message || 'Server error while updating request.' });
-  } finally {
-    connection.release();
   }
-});
+);
+
 
 // Payroll Calculations Helpers
 function calculateHours(start, end) {
@@ -14820,171 +17432,143 @@ app.get('/api/leave-requests/grouped', authenticateToken, (req, res) => {
   );
 });
 
+
 app.put('/api/leave-requests/batch-status', authenticateToken, requireAction('leaves:batch'), async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden. Admin access required.' });
-  }
-  
-  const { ids, status, admin_remarks } = req.body;
-  const phtNow = getPHDateTime();
-  
-  if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({ success: false, message: 'No requests selected for batch update.' });
-  }
-  if (!['Approved', 'Rejected'].includes(status)) {
-    return res.status(400).json({ success: false, message: 'Invalid status provided.' });
+  if (!['admin', 'hr_admin'].includes(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Forbidden.'
+    });
   }
 
-  const cleanAdminRemarks = admin_remarks ? String(admin_remarks).trim() : null;
-  if (cleanAdminRemarks && cleanAdminRemarks.length > 500) {
-    return res.status(400).json({ success: false, message: 'Admin remarks must be 500 characters or fewer.' });
+  const { ids, status, admin_remarks } = req.body || {};
+  const remarks = admin_remarks == null
+    ? null
+    : String(admin_remarks).trim() || null;
+
+  if (
+    !Array.isArray(ids) ||
+    !ids.length ||
+    ids.length > 30 ||
+    ids.some(id => !Number.isSafeInteger(Number(id)) || Number(id) <= 0) ||
+    new Set(ids.map(Number)).size !== ids.length ||
+    !['Approved', 'Rejected'].includes(status)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid batch request IDs or status.'
+    });
   }
 
-  const connection = await db.promise().getConnection();
-  await connection.beginTransaction();
+  if (
+    (remarks && remarks.length > 500) ||
+    (status === 'Rejected' && (!remarks || remarks.length < 5))
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'Rejection requires 5–500 characters; other remarks are limited to 500.'
+    });
+  }
+
+  let connection;
+  let started = false;
 
   try {
-    let skippedCount = 0; // Track already processed requests
+    connection = await db.promise().getConnection();
+    await connection.beginTransaction();
+    started = true;
 
-    for (const reqId of ids) {
-      // 🚨 FIX: Fetch status and lock row
-      const [leaveRows] = await connection.query(
-        `SELECT user_id, request_date, type, duration, status FROM leave_requests WHERE id = ? FOR UPDATE`, 
-        [reqId]
-      );
-      
-      if (leaveRows.length === 0) continue;
-      
-      // 🚨 FIX: Skip if already processed to prevent double deduction
-      if (leaveRows[0].status !== 'Pending') {
-        skippedCount++;
-        continue;
-      }
+    const orderedIds = ids.map(Number).sort((a, b) => a - b);
+    const leaves = [];
 
-      const { user_id: employee_id, request_date, type, duration } = leaveRows[0];
-
-      const [requesterRows] = await connection.query(
-  "SELECT id FROM users WHERE employee_id = ? LIMIT 1",
-  [employee_id]
-);
-if (requesterRows.length > 0 && requesterRows[0].id === req.user.id) {
-  await connection.rollback();
-  return res.status(403).json({
-    success: false,
-    message: "You cannot approve your own leave request."
-  });
-}
-      const deductionAmount = (duration === '1st Half' || duration === '2nd Half') ? 0.5 : 1.0;
-      
-      const [userRows] = await connection.query("SELECT id FROM users WHERE employee_id = ?", [employee_id]);
-      if (userRows.length === 0) {
-        throw new Error(`User account not found for employee ${employee_id}.`);
-      }
-      const internalUserId = userRows[0].id;
-
-      await connection.query(
-        `UPDATE leave_requests SET status = ?, admin_remarks = ?, reviewed_at = ? WHERE id = ?`, 
-        [status, cleanAdminRemarks, phtNow, reqId]
+    for (const id of orderedIds) {
+      const [rows] = await connection.query(
+        `SELECT *,
+                DATE_FORMAT(request_date, '%Y-%m-%d') AS date_key
+         FROM leave_requests
+         WHERE id = ?
+         FOR UPDATE`,
+        [id]
       );
 
+      if (
+        rows.length !== 1 ||
+        String(rows[0].status).toLowerCase() !== 'pending'
+      ) {
+        throw uvLeaveApprovalConflict(
+          `Leave ${id} was not found or is no longer pending.`
+        );
+      }
+
+      leaves.push(rows[0]);
+    }
+
+    for (const leave of leaves) {
       if (status === 'Approved') {
-        
-        const [existingAtt] = await connection.query(
-          "SELECT id FROM attendance WHERE (user_id = ? OR user_id = ?) AND date = ? AND time_in IS NOT NULL",
-          [employee_id, internalUserId, request_date]
+        await uvApplyApprovedLeave(
+          connection,
+          leave,
+          req.user.id
         );
-        
-        if (existingAtt.length > 0) {
-          throw new Error(`Cannot approve leave for ${employee_id}: Employee has already clocked in on ${request_date}.`);
-        }
+      }
 
-        // 🚨 NEW (Defense-in-depth): Enforce "one leave per date, no exceptions".
-        // Throws if ANY other Pending or Approved leave exists on the same date
-        // for the same employee. The batch handler catches and rolls back.
-        const [otherLeaves] = await connection.query(
-          `SELECT id, status FROM leave_requests
-            WHERE (user_id = ? OR user_id = ?)
-              AND request_date = ?
-              AND status IN ('Pending', 'Approved')
-              AND id <> ?
-            LIMIT 1`,
-          [employee_id, internalUserId, request_date, reqId]
+      const [updated] = await connection.query(
+        `UPDATE leave_requests
+         SET status = ?,
+             admin_remarks = ?,
+             reviewed_at = ?
+         WHERE id = ?
+           AND status = 'Pending'`,
+        [
+          status,
+          remarks,
+          getPHDateTime(),
+          leave.id
+        ]
+      );
+
+      if (updated.affectedRows !== 1) {
+        throw uvLeaveApprovalConflict(
+          `Leave ${leave.id} changed during review.`
         );
-
-        if (otherLeaves.length > 0) {
-          const other = otherLeaves[0];
-          throw new Error(
-            `Cannot approve leave for ${employee_id} on ${request_date}: another ${other.status.toLowerCase()} leave already exists for this date. Only one leave per date is allowed. Please reject the duplicate first.`
-          );
-        }
-
-        const leaveYear = new Date(request_date).getFullYear();
-        const [typeRows] = await connection.query(`SELECT id FROM leave_types WHERE name = ?`, [type]);
-        
-        if (typeRows.length > 0) {
-          const leaveTypeId = typeRows[0].id;
-          
-          const [balanceRows] = await connection.query(
-            `SELECT remaining_days FROM employee_leave_balances WHERE user_id = ? AND leave_type_id = ? AND year = ? FOR UPDATE`,
-            [internalUserId, leaveTypeId, leaveYear]
-          );
-          
-          if (balanceRows.length > 0 && balanceRows[0].remaining_days >= deductionAmount) {
-            const newBalance = balanceRows[0].remaining_days - deductionAmount;
-            await connection.query(
-              `UPDATE employee_leave_balances SET remaining_days = ?, last_updated = CURDATE() WHERE user_id = ? AND leave_type_id = ? AND year = ?`,
-              [newBalance, internalUserId, leaveTypeId, leaveYear]
-            );
-          } else {
-            throw new Error(`Insufficient ${type} balance for ${employee_id} to approve this request (Required: ${deductionAmount} day(s)).`);
-          }
-        } else {
-            throw new Error(`Invalid leave type: ${type}`);
-        }
-
-        const [targetSchedules] = await connection.query(
-          `SELECT id FROM schedules WHERE user_id = ? AND date = ?`,
-          [employee_id, request_date]
-        );
-
-        if (targetSchedules.length > 0) {
-          for (const sched of targetSchedules) {
-            await connection.query(
-              `INSERT INTO attendance (user_id, schedule_id, date, status, location) 
-               VALUES (?, ?, ?, 'on leave', 'Remote/Leave') 
-               ON DUPLICATE KEY UPDATE status = 'on leave'`,
-              [employee_id, sched.id, request_date]
-            );
-          }
-        } else {
-          await connection.query(
-            `INSERT INTO attendance (user_id, date, status, location) 
-             VALUES (?, ?, 'on leave', 'Remote/Leave') 
-             ON DUPLICATE KEY UPDATE status = 'on leave'`,
-            [employee_id, request_date]
-          );
-        }
       }
     }
-    
+
     await connection.commit();
-    
-    logAction(req.user.id, `BATCH_${status.toUpperCase()}_LEAVE`, 'leave_request', `Batch IDs: ${ids.join(',')}`, req);
-    
-    const processedCount = ids.length - skippedCount;
-    const msg = skippedCount > 0 
-      ? `Successfully ${status.toLowerCase()} ${processedCount} leave requests. (${skippedCount} skipped as already processed).`
-      : `Successfully ${status.toLowerCase()} ${ids.length} leave requests.`;
-      
-    res.json({ success: true, message: msg });
-  } catch (err) {
-    await connection.rollback();
-    console.error("Batch Leave Update Error:", err);
-    res.status(500).json({ success: false, message: err.message || "Database error during batch update." });
+    started = false;
+
+    logAction(
+      req.user.id,
+      `BATCH_${status.toUpperCase()}_LEAVE`,
+      'leave_request',
+      ids.join(','),
+      req
+    );
+
+    return res.json({
+      success: true,
+      message: `${leaves.length} leave request(s) ${status.toLowerCase()}.`
+    });
+  } catch (error) {
+    if (started && connection) {
+      await connection.rollback().catch(() => {});
+    }
+
+    if (!error.httpStatus) {
+      console.error('Batch leave review error:', error);
+    }
+
+    return res.status(error.httpStatus || 500).json({
+      success: false,
+      message: error.httpStatus
+        ? error.message
+        : 'Batch leave review failed; no changes were saved.'
+    });
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 });
+
 
 // ============================================
 // USER CANCELLATION ENDPOINTS
@@ -15273,22 +17857,17 @@ app.put('/api/attendance/corrections/:id/cancel', authenticateToken, async (req,
     );
 
     
-    if (rows[0].schedule_id) {
-      await connection.query(
-        `UPDATE attendance 
-         SET correction_requested = 0, 
-             correction_status = 'cancelled',
-             status = CASE 
-               WHEN time_in IS NOT NULL AND (time_out IS NULL OR time_out = '--:--') THEN 'missing clock-out'
-               WHEN time_in IS NULL THEN 'missed schedule'
-               ELSE status
-             END
-         WHERE user_id = ? 
-           AND schedule_id = ? 
-           AND DATE(date) = DATE(?)`,
-        [empId, rows[0].schedule_id, rows[0].attendance_date]
-      );
-    }
+    
+if (rows[0].schedule_id) {
+  await uvSyncCorrectionPending(
+    connection,
+    internalId,
+    empId,
+    rows[0].schedule_id,
+    rows[0].attendance_date
+  );
+}
+
 
     await connection.commit();
     logAction(userId, 'CANCEL_CORRECTION', 'attendance_correction', id, req);
@@ -15393,30 +17972,58 @@ app.get('/api/settings', authenticateToken, async (req, res) => {
   }
 });
 
-// Update system settings
+
 app.put('/api/settings', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin' && req.user.role !== 'hr_admin') {
-    return res.status(403).json({ success: false, message: 'Forbidden.' });
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'System Administrator access required.'
+    });
   }
-  const { loiter_threshold_minutes } = req.body;
-  if (loiter_threshold_minutes === undefined) {
-    return res.status(400).json({ success: false, message: 'Missing threshold value.' });
+
+  const { loiter_threshold_minutes } = req.body || {};
+
+  if (!uvConfigInteger(loiter_threshold_minutes, 1, 180)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Loitering threshold must be a whole number from 1 to 180.'
+    });
   }
 
   try {
     await db.promise().query(
-      "INSERT INTO system_settings (config_key, config_value) VALUES ('loiter_threshold_minutes', ?) ON DUPLICATE KEY UPDATE config_value = ?",
-      [loiter_threshold_minutes, loiter_threshold_minutes]
+      `INSERT INTO system_settings
+         (config_key, config_value)
+       VALUES ('loiter_threshold_minutes', ?)
+       ON DUPLICATE KEY UPDATE
+         config_value = VALUES(config_value)`,
+      [loiter_threshold_minutes]
     );
-    
-    
-    logAction(req.user.id, 'UPDATE_SETTINGS', 'system_settings', null, req, null, { loiter_threshold_minutes });
-    
-    res.json({ success: true, message: 'Settings updated successfully.' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Failed to update settings.' });
+
+    logAction(
+      req.user.id,
+      'UPDATE_SETTINGS',
+      'system_settings',
+      null,
+      req,
+      null,
+      { loiter_threshold_minutes }
+    );
+
+    return res.json({
+      success: true,
+      message: 'Visitor monitoring threshold updated.'
+    });
+  } catch (error) {
+    console.error('System settings update failed:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to update visitor monitoring settings.'
+    });
   }
 });
+
 
 app.get('/api/activity/recent', authenticateToken, async (req, res) => {
   if (!['admin', 'hr_admin', 'security'].includes(req.user.role)) {

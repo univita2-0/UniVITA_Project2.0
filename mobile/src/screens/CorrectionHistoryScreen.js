@@ -211,8 +211,11 @@ export default function CorrectionHistoryScreen({ navigation, route }) {
       const data = await res.json();
       if (res.ok && data.success) {
         Alert.alert('Success', 'Request cancelled successfully.');
-        closeCancelModal();
-        loadHistory();
+        setShowCancelModal(false);
+        setCancelReason('');
+        setCancelError('');
+        setSelectedRequestId(null);
+        await loadHistory();
       } else {
         setCancelError(data.message || 'Failed to cancel request.');
       }
@@ -333,8 +336,10 @@ export default function CorrectionHistoryScreen({ navigation, route }) {
                   <Clock size={16} color={isLight ? '#64748B' : colors.textSecondary} />
                   <Text style={styles.time}>
                     {item.requested_clock_in
-                      ? `Clock In Mod: ${formatTo12Hour(item.requested_clock_in)}`
-                      : `Clock Out Mod: ${formatTo12Hour(item.requested_clock_out)}`}
+                      ? `Clock In Correction: ${formatTo12Hour(item.requested_clock_in)}`
+                      : (item.correction_type === 'early_out' || String(item.reason || '').startsWith('[Early Departure]'))
+                        ? `Early Departure: ${formatTo12Hour(item.requested_clock_out)}`
+                        : `Clock Out Correction: ${formatTo12Hour(item.requested_clock_out)}`}
                   </Text>
                 </View>
 

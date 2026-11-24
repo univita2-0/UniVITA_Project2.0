@@ -121,7 +121,7 @@ const getCorrectionWindow = (type, start, end) => {
   };
   const s = toMin(start);
   const e = toMin(end);
-  if (s === null || e === null) return null;
+  if (s === null || e === null || e <= s) return null;
   if (type === 'clock_in')  return { min: s - 120, max: e,        label: '2h before shift start up to shift end' };
   if (type === 'clock_out') return { min: s,       max: e + 240,  label: 'shift start up to 4h after shift end' };
   if (type === 'early_out') return { min: s,       max: e - 1,    label: 'inside the shift, strictly before end' };
@@ -178,6 +178,8 @@ export default function RequestsScreen({ navigation, route }) {
   const [timePickerMode, setTimePickerMode] = useState('');
   const [tempDate, setTempDate] = useState(new Date());
   const [scheduleForOTDate, setScheduleForOTDate] = useState(null);
+  const [overtimeShifts, setOvertimeShifts] = useState([]);
+  const [selectedOvertimeScheduleId, setSelectedOvertimeScheduleId] = useState(null);
   const [loadingSchedule, setLoadingSchedule] = useState(false);
 
   // --- LEAVE STATE ---
@@ -225,7 +227,13 @@ export default function RequestsScreen({ navigation, route }) {
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
   const [showCorrectionCalendar, setShowCorrectionCalendar] = useState(false);
   const [scheduleForCorrection, setScheduleForCorrection] = useState(null); 
-  const [scheduleForAppeal,     setScheduleForAppeal]     = useState(null)
+  const [scheduleForAppeal, setScheduleForAppeal] = useState(null);
+  const [appealShifts, setAppealShifts] = useState([]);
+  const [correctionShifts, setCorrectionShifts] = useState([]);
+  const [appealScheduleLoading, setAppealScheduleLoading] = useState(false);
+  const [correctionScheduleLoading, setCorrectionScheduleLoading] = useState(false);
+  const [selectedAppealScheduleId, setSelectedAppealScheduleId] = useState(null);
+  const [selectedCorrectionScheduleId, setSelectedCorrectionScheduleId] = useState(null);
 
   // --- OVERTIME STATE ---
   const [overtimeStep, setOvertimeStep] = useState(1);
@@ -290,76 +298,136 @@ export default function RequestsScreen({ navigation, route }) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token || ''}` } });
     const data = await res.json();
     return Array.isArray(data) ? data : [];
-  } catch { return []; }
+  } catch { return null; }
 };
 
-  const loadScheduleForDate = async (date, setter) => {
-  if (!date) { setter(null); return; }
-  try {
-    const token = await AsyncStorage.getItem('auth_token');
-    const userStr = await AsyncStorage.getItem('user');
-    let empId = null;
-    if (userStr) { try { empId = JSON.parse(userStr).employee_id; } catch {} }
-    if (!empId) return setter(null);
+  // Fetch all instructor-owned shifts for a selected request date.
+  // Do not guess which shift is intended when more than one exists.
+  const loadRequestShifts = async (date, setShifts, setSelected, setId, setLoading, preferredId = null) => {
+    setShifts([]);
+    setSelected(null);
+    setId(null);
+    if (!date) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const userStr = await AsyncStorage.getItem('user');
+      const storedId = await AsyncStorage.getItem('employee_id');
+      let employeeId = storedId;
+      if (!employeeId && userStr) {
+        try { employeeId = JSON.parse(userStr).employee_id; } catch (_) {}
+      }
+      if (!employeeId) throw new Error('Instructor account unavailable.');
+      const response = await fetch(`${API_URL}/schedules/${employeeId}`, {
+        headers: { Authorization: `Bearer ${token || ''}` }
+      });
+      if (!response.ok) throw new Error('Unable to retrieve assigned shifts.');
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error('Unexpected schedule response.');
+      const matches = data.filter(item => String(item.date || '').slice(0, 10) === date && item.id != null)
+        .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || '')));
+      setShifts(matches);
+      const auto = matches.length === 1 ? matches[0] : (preferredId && matches.find(item => String(item.id) === String(preferredId)));
+      if (auto) { setSelected(auto); setId(String(auto.id)); }
+    } catch (error) {
+      console.warn('Request shift loading failed:', error);
+      setShifts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const res  = await fetch(`${API_URL}/schedules/${empId}`, {
-      headers: { Authorization: `Bearer ${token || ''}` }
-    });
-    const data = await res.json();
-    const sched = Array.isArray(data)
-      ? data.find(s => String(s.date).split('T')[0] === date)
-      : null;
-    setter(sched);
-  } catch { setter(null); }
-};
+  const selectAppealShift = shift => {
+    setScheduleForAppeal(shift);
+    setSelectedAppealScheduleId(String(shift.id));
+    setAppealTimeIn('');
+    setAppealTimeOut('');
+    setAppealStep(1);
+  };
+  const selectCorrectionShift = shift => {
+    setScheduleForCorrection(shift);
+    setSelectedCorrectionScheduleId(String(shift.id));
+    setCorrectionScheduleId(String(shift.id));
+    setCorrectionTime('');
+    setCorrectionStep(1);
+  };
 
+      useEffect(() => {
+    let cancelled = false;
 
-    useEffect(() => {
-        const fetchScheduleForOT = async () => {
+    const fetchScheduleForOT = async () => {
+      setScheduleForOTDate(null);
+      setOvertimeShifts([]);
+      setSelectedOvertimeScheduleId(null);
       if (!overtimeDate) {
-        setScheduleForOTDate(null);
+        setLoadingSchedule(false);
         return;
       }
+
       setLoadingSchedule(true);
       try {
         const token = await AsyncStorage.getItem('auth_token');
         const userStr = await AsyncStorage.getItem('user');
-        let empId = null;
-        if (userStr) {
-          try { empId = JSON.parse(userStr).employee_id; } catch(e) {}
+        const storedEmployeeId = await AsyncStorage.getItem('employee_id');
+        let employeeId = storedEmployeeId;
+        if (!employeeId && userStr) {
+          try { employeeId = JSON.parse(userStr).employee_id; } catch (_) {}
         }
-        
-        if (!empId) {
-           setScheduleForOTDate(null);
-           return;
-        }
+        if (!employeeId) throw new Error('Instructor account not available.');
 
-        const res = await fetch(`${API_URL}/schedules/${empId}`, {
+        const res = await fetch(`${API_URL}/schedules/${employeeId}`, {
           headers: { Authorization: `Bearer ${token || ''}` }
         });
+        if (!res.ok) throw new Error('Unable to retrieve assigned shifts.');
         const data = await res.json();
-        const sched = Array.isArray(data) ? data.find(s => String(s.date).split('T')[0] === overtimeDate) : null;
-        setScheduleForOTDate(sched);
+        if (!Array.isArray(data)) throw new Error('Unexpected schedule response.');
+        if (cancelled) return;
+
+        const matches = data
+          .filter(shift => String(shift.date || '').slice(0, 10) === overtimeDate && shift.id != null)
+          .sort((left, right) => String(left.start_time || '').localeCompare(String(right.start_time || '')));
+        setOvertimeShifts(matches);
+        // Single-shift dates remain automatic. On multi-shift dates an explicit
+        // selection is required; never silently choose the first schedule.
+        if (matches.length === 1) {
+          setSelectedOvertimeScheduleId(String(matches[0].id));
+          setScheduleForOTDate(matches[0]);
+        }
       } catch (err) {
-        console.error("Failed to fetch schedule for OT:", err);
-        setScheduleForOTDate(null);
+        if (!cancelled) {
+          console.error('Failed to fetch schedule for overtime:', err);
+          setOvertimeShifts([]);
+          setScheduleForOTDate(null);
+        }
       } finally {
-        setLoadingSchedule(false);
+        if (!cancelled) setLoadingSchedule(false);
       }
     };
+
     fetchScheduleForOT();
+    return () => { cancelled = true; };
   }, [overtimeDate]);
 
-    
-  useEffect(() => { 
-    loadScheduleForDate(correctionDate, setScheduleForCorrection); 
+  const selectOvertimeShift = shift => {
+    setSelectedOvertimeScheduleId(String(shift.id));
+    setScheduleForOTDate(shift);
+    // Reset the entered overtime times when the reference shift changes.
+    setOvertimeStart('');
+    setOvertimeEnd('');
+    setOvertimeStep(1);
+  };
+
+  useEffect(() => {
+    loadRequestShifts(correctionDate, setCorrectionShifts, setScheduleForCorrection,
+      setSelectedCorrectionScheduleId, setCorrectionScheduleLoading,
+      prefill.prefillDate === correctionDate ? prefill.prefillScheduleId : null);
   }, [correctionDate]);
 
-  useEffect(() => { 
-    loadScheduleForDate(appealDate, setScheduleForAppeal);     
+  useEffect(() => {
+    loadRequestShifts(appealDate, setAppealShifts, setScheduleForAppeal,
+      setSelectedAppealScheduleId, setAppealScheduleLoading,
+      prefill.prefillDate === appealDate ? prefill.prefillScheduleId : null);
   }, [appealDate]);
-
-  
 
   useEffect(() => {
     loadInitialLeaveData();
@@ -398,9 +466,39 @@ export default function RequestsScreen({ navigation, route }) {
   const toMinutes = (hhmm) => {
     if (!hhmm || hhmm.length < 5) return null;
     const [h, m] = hhmm.substring(0, 5).split(':').map(Number);
-    if (isNaN(h) || isNaN(m)) return null;
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
     return h * 60 + m;
   };
+
+  const renderShiftOptions = (shifts, selectedId, loading, onSelect, kind) => (
+    <View style={{ padding: 12, marginBottom: 12, borderRadius: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg }}>
+      {loading ? <Text style={{ color: colors.textSecondary }}>Checking assigned shifts...</Text> :
+       !shifts.length ? <Text style={{ color: '#EF4444' }}>No assigned shift found for this date.</Text> : (
+        <>
+          <Text style={{ fontFamily: 'Inter_18pt-Bold', color: colors.textPrimary, marginBottom: 8 }}>
+            {shifts.length > 1 ? `Select Shift for ${kind} (Required)` : `Assigned Shift for ${kind}`}
+          </Text>
+          {shifts.map((shift, index) => {
+            const selected = String(selectedId) === String(shift.id);
+            return (
+              <TouchableOpacity key={String(shift.id)} accessibilityRole="radio"
+                accessibilityState={{ selected }} onPress={() => onSelect(shift)}
+                style={{ padding: 11, marginBottom: 7, borderRadius: 9, borderWidth: 1,
+                  borderColor: selected ? '#00897B' : colors.border,
+                  backgroundColor: selected ? (isLight ? '#E0F2F1' : colors.surface) : colors.surface }}>
+                <Text style={{ fontFamily: selected ? 'Inter_18pt-Bold' : 'Inter_18pt-Medium', color: colors.textPrimary }}>
+                  {selected ? '◉' : '○'} Shift {index + 1}: {formatTo12Hour(shift.start_time)} – {formatTo12Hour(shift.end_time)}
+                </Text>
+                {!!shift.course && <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{shift.course}</Text>}
+                {!!shift.place && <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{shift.place}</Text>}
+              </TouchableOpacity>
+            );
+          })}
+          {shifts.length > 1 && !selectedId && <Text style={{ color: '#B45309', fontSize: 12 }}>Select the affected shift to continue.</Text>}
+        </>
+      )}
+    </View>
+  );
 
   const handleBackPress = () => {
     try {
@@ -703,7 +801,7 @@ export default function RequestsScreen({ navigation, route }) {
       return;
     }
 
-    if (!scheduleForAppeal) {
+    if (appealScheduleLoading || !scheduleForAppeal || !selectedAppealScheduleId || String(scheduleForAppeal.id) !== String(selectedAppealScheduleId)) {
       Alert.alert('No Schedule', 'You have no scheduled shift on this date, so an appeal cannot be filed.');
       return;
     }
@@ -739,9 +837,14 @@ export default function RequestsScreen({ navigation, route }) {
       }
     }
     const pending = await fetchMyPendingRequests('appeals');
+    if (!pending) {
+      Alert.alert('Unable to Verify', 'Appeal history could not be checked. Please reconnect and try again.');
+      return;
+    }
     const already = pending.find(p =>
       String(p.status).toLowerCase() === 'pending' &&
-      String(p.attendance_date || p.date).substring(0,10) === appealDate
+      String(p.attendance_date || p.date).substring(0,10) === appealDate &&
+      String(p.schedule_id || '') === String(selectedAppealScheduleId || '')
     );
     if (already) {
       Alert.alert(
@@ -755,6 +858,13 @@ export default function RequestsScreen({ navigation, route }) {
   };
 
   const handleSubmitAppeal = async () => {
+    if (appealScheduleLoading || !scheduleForAppeal || !selectedAppealScheduleId ||
+        String(scheduleForAppeal.id) !== String(selectedAppealScheduleId) ||
+        String(scheduleForAppeal.date || '').slice(0, 10) !== appealDate) {
+      Alert.alert('Schedule Required', 'Select the assigned shift for your appeal.');
+      setAppealStep(1);
+      return;
+    }
     setSubmittingAppeal(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -762,12 +872,15 @@ export default function RequestsScreen({ navigation, route }) {
       const result = await uploadRequestWithFile(`${API_URL}/attendance-appeals`, token, 'image', appealImage, {
         date: appealDate,
         reason: appealReason.trim(),
-        schedule_id: prefill.prefillScheduleId || '',
+        schedule_id: selectedAppealScheduleId || '',
         time_in: appealTimeIn ? formatTimeForDB(appealTimeIn) : '',
         time_out: appealTimeOut ? formatTimeForDB(appealTimeOut) : '',
       });
       if (result.ok && (result.success || result.success === undefined)) {
         Alert.alert('Success', 'Attendance appeal submitted successfully.');
+        setSelectedAppealScheduleId(null);
+        setScheduleForAppeal(null);
+        setAppealShifts([]);
         setAppealDate('');
         setAppealTimeIn('');
         setAppealTimeOut('');
@@ -799,7 +912,7 @@ export default function RequestsScreen({ navigation, route }) {
       return;
     }
 
-    if (!scheduleForCorrection) {
+    if (correctionScheduleLoading || !scheduleForCorrection || !selectedCorrectionScheduleId || String(scheduleForCorrection.id) !== String(selectedCorrectionScheduleId)) {
       Alert.alert('No Schedule', 'You have no scheduled shift on this date, so a correction cannot be filed.');
       return;
     }
@@ -825,6 +938,10 @@ export default function RequestsScreen({ navigation, route }) {
     const shiftEnd   = scheduleForCorrection.end_time;
     const window     = getCorrectionWindow(correctionType, shiftStart, shiftEnd);
 
+    if (!window) {
+      Alert.alert('Unsupported Shift', 'The selected shift cannot be validated automatically. Contact HR for overnight schedules.');
+      return;
+    }
     if (window) {
       const [h, m] = correctionTime.substring(0, 5).split(':').map(Number);
       const reqMin = h * 60 + m;
@@ -840,14 +957,20 @@ export default function RequestsScreen({ navigation, route }) {
 
     // ✅ NEW: H2 - Check for duplicate pending request
     const pending = await fetchMyPendingRequests('corrections');
+    if (!pending) {
+      Alert.alert('Unable to Verify', 'Request history could not be checked. Please reconnect and try again.');
+      return;
+    }
     const already = pending.find(p =>
       String(p.status).toLowerCase() === 'pending' &&
-      String(p.attendance_date || p.date).substring(0,10) === correctionDate
+      String(p.attendance_date || p.date).substring(0,10) === correctionDate &&
+      String(p.schedule_id || '') === String(selectedCorrectionScheduleId || '') &&
+      (correctionType === 'clock_in' ? Boolean(p.requested_clock_in) : Boolean(p.requested_clock_out))
     );
     if (already) {
       Alert.alert(
         'Already Pending',
-        'You already have a pending correction for this date. Please wait for HR to review it.'
+        'You already have a pending request for this date and clock field. Please wait for HR review.'
       );
       return;
     }
@@ -858,6 +981,13 @@ export default function RequestsScreen({ navigation, route }) {
   
 
   const handleSubmitCorrection = async () => {
+    if (correctionScheduleLoading || !scheduleForCorrection || !selectedCorrectionScheduleId ||
+        String(scheduleForCorrection.id) !== String(selectedCorrectionScheduleId) ||
+        String(scheduleForCorrection.date || '').slice(0, 10) !== correctionDate) {
+      Alert.alert('Schedule Required', 'Select the assigned shift for your attendance correction.');
+      setCorrectionStep(1);
+      return;
+    }
     setSubmittingCorrection(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
@@ -874,7 +1004,6 @@ export default function RequestsScreen({ navigation, route }) {
         return;
       }
 
-      const dbType = correctionType === 'early_out' ? 'clock_out' : correctionType;
       const finalReason = correctionType === 'early_out'
         ? `[Early Departure] ${correctionReason.trim()}`
         : correctionReason.trim();
@@ -886,13 +1015,13 @@ export default function RequestsScreen({ navigation, route }) {
   type: correctionType,
   time: formattedTime,
   reason: finalReason,
-  schedule_id: correctionScheduleId || '',
+  schedule_id: selectedCorrectionScheduleId || '',
 });
 
       if (res.ok && (res.success || res.success === undefined)) {
         Alert.alert('Success', res.message || 'Correction request submitted.');
         setCorrectionDate(''); setCorrectionTime(''); setCorrectionReason(''); setCorrectionAttachment(null);
-        setCorrectionType('clock_in'); setCorrectionScheduleId(null); setCorrectionStep(1);
+        setCorrectionType('clock_in'); setCorrectionScheduleId(null); setSelectedCorrectionScheduleId(null); setScheduleForCorrection(null); setCorrectionShifts([]); setCorrectionStep(1);
         if (navigation.setParams) {
           navigation.setParams({
             prefillTab: undefined, prefillDate: undefined, prefillType: undefined,
@@ -918,6 +1047,12 @@ export default function RequestsScreen({ navigation, route }) {
       Alert.alert('Validation Error', 'Please select a date.');
       return;
     }
+    // An instructor may plan overtime on a future assigned shift.
+    // Completion and evidence are checked by HR before final approval.
+    if (overtimeDate < getPHDateOffset(-7)) {
+      Alert.alert('Invalid Date', 'Overtime requests can be submitted up to seven days after the scheduled date. Future scheduled shifts may be requested in advance.');
+      return;
+    }
     if (!overtimeStart || !overtimeEnd) {
       Alert.alert('Validation Error', 'Start and end times are required.');
       return;
@@ -930,7 +1065,7 @@ export default function RequestsScreen({ navigation, route }) {
       return;
     }
     if (startMin >= endMin) {
-      Alert.alert('Validation Error', 'Overtime end time must be strictly after the start time.');
+      Alert.alert('Overnight Request Requires HR Review', 'This version supports same-day overtime only. Contact HR for overnight shifts instead of entering an incorrect date.');
       return;
     }
 
@@ -955,8 +1090,8 @@ export default function RequestsScreen({ navigation, route }) {
   Alert.alert('Please Wait', 'Checking your schedule...');
   return;
 }
-if (!scheduleForOTDate) {
-  Alert.alert('No Schedule Found', 'You do not have a scheduled shift on this date.');
+if (!scheduleForOTDate || !selectedOvertimeScheduleId || String(scheduleForOTDate.id) !== String(selectedOvertimeScheduleId)) {
+   Alert.alert('Select Assigned Shift', overtimeShifts.length > 1 ? 'Select the specific assigned shift for your overtime request.' : 'You do not have a valid selected shift on this date.');
   return;
 }
 
@@ -986,6 +1121,10 @@ if (!scheduleForOTDate) {
       }
     }
 
+    if (!overtimeImage) {
+      Alert.alert('Proof Required', 'Attach a document or image supporting the overtime request. Future requests may use advance authorization or a work plan; HR must verify completed work before approval.');
+      return;
+    }
     const trimmed = overtimeReason.trim();
     if (!trimmed || trimmed.length < 5) {
       Alert.alert('Validation Error', 'Please provide a detailed reason (minimum 5 characters).');
@@ -1020,6 +1159,18 @@ if (!scheduleForOTDate) {
   };
 
   const handleSubmitOvertime = async () => {
+    if (!overtimeImage) {
+      Alert.alert('Proof Required', 'Please attach your overtime supporting document before submission.');
+      setOvertimeStep(1);
+      return;
+    }
+    if (loadingSchedule || !scheduleForOTDate || !selectedOvertimeScheduleId ||
+        String(scheduleForOTDate.id) !== String(selectedOvertimeScheduleId) ||
+        String(scheduleForOTDate.date || '').slice(0, 10) !== overtimeDate) {
+      Alert.alert('Schedule Required', 'Select a valid assigned shift before submitting overtime.');
+      setOvertimeStep(1);
+      return;
+    }
     const start5 = overtimeStart.substring(0, 5);
     const end5 = overtimeEnd.substring(0, 5);
     const conflict = myOvertimeRequests.find(r => {
@@ -1038,43 +1189,25 @@ if (!scheduleForOTDate) {
     setSubmittingOvertime(true);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      let response;
       const dbScenarioType = overtimeTiming === 'Early OT' ? 'early_ot' : 'normal_ot';
-      const scheduleId = scheduleForOTDate?.id || prefill?.prefillScheduleId || null;
+      const scheduleId = selectedOvertimeScheduleId;
 
-      if (overtimeImage) {
-        response = await uploadRequestWithFile(`${API_URL}/overtime-requests`, token, 'attachment', overtimeImage, {
-          date: overtimeDate,
-          start_time: formatTimeForDB(overtimeStart),
-          end_time: formatTimeForDB(overtimeEnd),
-          reason: overtimeReason.trim(),
-          scenario_type: dbScenarioType,
-          overtime_type: overtimeType,
-          schedule_id: scheduleId || '',
-        });
-      } else {
-        response = await fetch(`${API_URL}/overtime-requests`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            date: overtimeDate,
-            start_time: formatTimeForDB(overtimeStart),
-            end_time: formatTimeForDB(overtimeEnd),
-            reason: overtimeReason.trim(),
-            scenario_type: dbScenarioType,
-            overtime_type: overtimeType,
-            schedule_id: scheduleId,
-          }),
-        });
-      }
-
-      const result = response?.ok !== undefined ? response : await parseServerResponse(response);
+      const response = await uploadRequestWithFile(`${API_URL}/overtime-requests`, token, 'attachment', overtimeImage, {
+        date: overtimeDate,
+        start_time: formatTimeForDB(overtimeStart),
+        end_time: formatTimeForDB(overtimeEnd),
+        reason: overtimeReason.trim(),
+        scenario_type: dbScenarioType,
+        overtime_type: overtimeType,
+        schedule_id: scheduleId,
+      });
+      const result = response;
       if (response && result.ok && (result.success || result.success === undefined)) {
         Alert.alert('Success', result.message || 'Overtime request submitted successfully.');
         setOvertimeDate('');
+        setOvertimeShifts([]);
+        setScheduleForOTDate(null);
+        setSelectedOvertimeScheduleId(null);
         setOvertimeStart('');
         setOvertimeEnd('');
         setOvertimeReason('');
@@ -1352,18 +1485,7 @@ if (!scheduleForOTDate) {
                   </TouchableOpacity>
                   {renderCalendar(showAppealCalendar, setShowAppealCalendar, appealDate, setAppealDate, thirtyDaysAgoStr, todayStr)}
 
-                  {/* ✅ NEW: Shift Info Banner for Appeal */}
-                  {appealDate && (
-                    <View style={{ padding: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 12, marginBottom: 12 }}>
-                      {scheduleForAppeal
-                        ? <Text style={{ fontSize: 12, color: '#00897B', fontFamily: 'Inter_18pt-Medium' }}>
-                            💡 Shift on this date: {formatTo12Hour(scheduleForAppeal.start_time)} – {formatTo12Hour(scheduleForAppeal.end_time)}
-                          </Text>
-                        : <Text style={{ fontSize: 12, color: '#EF4444', fontFamily: 'Inter_18pt-Medium' }}>
-                            ⚠️ No scheduled shift on this date — appeal cannot be filed.
-                          </Text>}
-                    </View>
-                  )}
+                   {appealDate && renderShiftOptions(appealShifts, selectedAppealScheduleId, appealScheduleLoading, selectAppealShift, 'Appeal')}
 
                   <Text style={styles.label}>Time In (optional)</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('appealIn'); setShowTimePicker(true); }}>
@@ -1465,20 +1587,7 @@ if (!scheduleForOTDate) {
                   </TouchableOpacity>
                   {renderCalendar(showCorrectionCalendar, setShowCorrectionCalendar, correctionDate, setCorrectionDate, thirtyDaysAgoStr, todayStr)}
                   
-                  {/* ✅ NEW: Shift Info Banner for Correction */}
-                  {correctionDate && (
-                    <View style={{ padding: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 12, marginBottom: 12 }}>
-                      {scheduleForCorrection
-                        ? <Text style={{ fontSize: 12, color: '#00897B', fontFamily: 'Inter_18pt-Medium' }}>
-                            💡 Shift on this date: {formatTo12Hour(scheduleForCorrection.start_time)} – {formatTo12Hour(scheduleForCorrection.end_time)}
-                          </Text>
-                        : <Text style={{ fontSize: 12, color: '#EF4444', fontFamily: 'Inter_18pt-Medium' }}>
-                            ⚠️ No scheduled shift on this date — correction cannot be filed.
-                          </Text>}
-                    </View>
-                  )}
-
-                 
+                   {correctionDate && renderShiftOptions(correctionShifts, selectedCorrectionScheduleId, correctionScheduleLoading, selectCorrectionShift, 'Correction')}
 
                   <Text style={styles.label}>What to correct?</Text>
                   <View style={styles.typeGroup}>
@@ -1598,6 +1707,9 @@ if (!scheduleForOTDate) {
                   </TouchableOpacity>
 
                   <Text style={styles.label}>Date</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+                    Future scheduled dates are allowed. Your request stays Pending until the overtime period ends and HR verifies evidence.
+                  </Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => setShowOvertimeCalendar(true)}>
                     <CalendarIcon size={20} color="#00897B" />
                     <Text style={styles.dateText}>{overtimeDate || 'Select date'}</Text>
@@ -1607,8 +1719,8 @@ if (!scheduleForOTDate) {
   setShowOvertimeCalendar, 
   overtimeDate, 
   setOvertimeDate, 
-  getPHDateOffset(-7), 
-  todayStr             
+  getPHDateOffset(-7),
+  null // Future dates are allowed when there is an assigned shift.
 )}
 
                   <Text style={styles.label}>Overtime Type</Text>
@@ -1637,22 +1749,46 @@ if (!scheduleForOTDate) {
                     ))}
                   </View>
 
-                  {/* ✅ NEW: Display User's Shift for Context */}
-                  {overtimeDate && (
-                    <View style={{ marginBottom: 16, padding: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 12 }}>
-                      {loadingSchedule ? (
-                        <Text style={{ fontFamily: 'Inter_18pt-Medium', color: colors.textSecondary, fontSize: 12 }}>Checking your schedule...</Text>
-                      ) : scheduleForOTDate ? (
-                        <Text style={{ fontFamily: 'Inter_18pt-Medium', color: isLight ? '#475569' : colors.textSecondary, fontSize: 12 }}>
-                          💡 Your shift on this date is: <Text style={{ fontFamily: 'Inter_18pt-Bold', color: '#00897B' }}>{formatTo12Hour(scheduleForOTDate.start_time)} – {formatTo12Hour(scheduleForOTDate.end_time)}</Text>
-                        </Text>
-                      ) : (
-                        <Text style={{ fontFamily: 'Inter_18pt-Medium', color: '#EF4444', fontSize: 12 }}>
-                          ⚠️ You do not have a scheduled shift on this date. Overtime requires an existing schedule.
-                        </Text>
-                      )}
-                    </View>
-                  )}
+                   {/* Explicit shift selection for dates with multiple assignments. */}
+                   {overtimeDate && (
+                     <View style={{ marginBottom: 16, padding: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 12 }}>
+                       {loadingSchedule ? (
+                         <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Checking your assigned shifts...</Text>
+                       ) : overtimeShifts.length === 0 ? (
+                         <Text style={{ color: '#EF4444', fontSize: 12 }}>
+                           No assigned shift found for this date. An assigned shift is required.
+                         </Text>
+                       ) : (
+                         <>
+                           <Text style={{ fontFamily: 'Inter_18pt-Bold', color: isLight ? '#334155' : colors.textPrimary, marginBottom: 8 }}>
+                             {overtimeShifts.length > 1 ? 'Select Assigned Shift (Required)' : 'Assigned Shift'}
+                           </Text>
+                           {overtimeShifts.map((shift, index) => {
+                             const selected = String(selectedOvertimeScheduleId) === String(shift.id);
+                             return (
+                               <TouchableOpacity
+                                 key={String(shift.id)}
+                                 accessibilityRole="radio"
+                                 accessibilityState={{ selected }}
+                                 onPress={() => selectOvertimeShift(shift)}
+                                 style={{ padding: 12, marginBottom: 7, borderRadius: 9, borderWidth: 1,
+                                   borderColor: selected ? '#00897B' : colors.border,
+                                   backgroundColor: selected ? (isLight ? '#E0F2F1' : colors.surface) : colors.surface }}
+                               >
+                                 <Text style={{ fontFamily: selected ? 'Inter_18pt-Bold' : 'Inter_18pt-Medium', color: isLight ? '#0F172A' : colors.textPrimary }}>
+                                   {selected ? '◉' : '○'} Shift {index + 1}: {formatTo12Hour(shift.start_time)} – {formatTo12Hour(shift.end_time)}
+                                 </Text>
+                                 {!!shift.course && <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 3 }}>{shift.course}</Text>}
+                               </TouchableOpacity>
+                             );
+                           })}
+                           {overtimeShifts.length > 1 && !scheduleForOTDate && (
+                             <Text style={{ color: '#B45309', fontSize: 12 }}>Choose the shift your requested overtime relates to.</Text>
+                           )}
+                         </>
+                       )}
+                     </View>
+                   )}
 
                   <Text style={styles.label}>Start Time</Text>
                   <TouchableOpacity style={styles.datePicker} onPress={() => { setTimePickerMode('overtimeStart'); setShowTimePicker(true); }}>
@@ -1693,10 +1829,10 @@ return <Text style={{ color: '#059669', fontFamily: 'Inter_18pt-Medium', fontSiz
                     onChangeText={setOvertimeReason}
                   />
 
-                  <Text style={styles.label}>Attachment (Optional - PDF, DOC, JPG up to 5MB)</Text>
+                  <Text style={styles.label}>Supporting Proof (Required - PDF, DOC, JPG up to 5MB)</Text>
                   <TouchableOpacity style={styles.uploadBtn} onPress={() => pickDocument(setOvertimeImage, overtimeImage)}>
                     <Upload size={18} color="#00897B" />
-                    <Text style={styles.uploadText}>{overtimeImage ? (overtimeImage.name || 'File Attached') : 'Upload File'}</Text>
+                    <Text style={styles.uploadText}>{overtimeImage ? (overtimeImage.name || 'File Attached') : 'Upload Proof'}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity style={styles.submitBtn} onPress={handleNextOvertime}>
@@ -1712,6 +1848,11 @@ return <Text style={{ color: '#059669', fontFamily: 'Inter_18pt-Medium', fontSiz
                     <View style={styles.reviewRow}>
                       <Text style={styles.reviewLabel}>Type</Text>
                       <Text style={styles.reviewValue}>{overtimeType || 'Regular Overtime'}</Text>
+                     </View>
+                     <View style={styles.reviewDivider} />
+                     <View style={styles.reviewRow}>
+                       <Text style={styles.reviewLabel}>Assigned Shift</Text>
+                       <Text style={styles.reviewValue}>{scheduleForOTDate ? `${formatTo12Hour(scheduleForOTDate.start_time)} – ${formatTo12Hour(scheduleForOTDate.end_time)}` : 'Not selected'}</Text>
                     </View>
                     <View style={styles.reviewDivider} />
 

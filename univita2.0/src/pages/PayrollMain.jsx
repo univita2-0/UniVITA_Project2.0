@@ -1,831 +1,208 @@
-// src/pages/PayrollMain.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import './PayrollMain.css';
-import {
-  ChevronLeft, ChevronRight, Search, X
-} from 'lucide-react';
+// UniVITA / PayrollMain.jsx — cutoff-aware HR interface.
+// Requires the matching server.js and SQL changes described in the delivery notes.
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import { ChevronLeft, ChevronRight, Search, X, RefreshCw, LockKeyhole } from 'lucide-react';
 import { API_BASE } from '../api';
+import './PayrollMain.css';
+import { getUserRole } from '../permissions';
 
-const getAuthHeaders = () => ({
-  headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
-});
-
-const getPayrollAuthHeaders = () => ({
-  headers: { Authorization: `Bearer ${localStorage.getItem('payroll_token')}` }
-});
-
-// ==========================================
-// PHILIPPINE STATUTORY COMPLIANCE UTILITIES
-// ==========================================
-const taxTable = [
-  { min: 0, max: 20833, rate: 0, base: 0 },
-  { min: 20833, max: 33332, rate: 0.15, base: 0 },
-  { min: 33332, max: 66666, rate: 0.20, base: 1875 }, 
-  { min: 66666, max: 166666, rate: 0.25, base: 8541.80 }, 
-  { min: 166666, max: 666666, rate: 0.30, base: 33541.80 },
-  { min: 666666, max: Infinity, rate: 0.35, base: 183541.80 }, 
+const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const auth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } });
+const payrollAuth = () => ({ headers: { Authorization: `Bearer ${localStorage.getItem('payroll_token')}` } });
+const money = v => `₱${Number(v || 0).toLocaleString('en-PH', {minimumFractionDigits:2,maximumFractionDigits:2})}`;
+const displayDate = d => new Date(`${d}T12:00:00`).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric'});
+const periodFor = (year, month, cutoff) => {
+  const mm = String(month).padStart(2,'0');
+  if (cutoff === '11-25') return { label: `${months[month-1]} ${year} | 11-25`, start: `${year}-${mm}-11`, end:`${year}-${mm}-25` };
+  const prior = new Date(year,month-2,26);
+  const yy = prior.getFullYear(), pm = String(prior.getMonth()+1).padStart(2,'0');
+  return {label:`${months[month-1]} ${year} | 26-10`, start:`${yy}-${pm}-26`, end:`${year}-${mm}-10`};
+};
+const fields = [
+  ['transport_allowance','Transport allowance'], ['meal_allowance','Meal allowance'],
+  ['housing_allowance','Housing allowance'], ['bonus','Bonus / 13th month (approved amount)'],
+  ['mbf_deduction','MBF deduction'], ['loan_deduction','Loan / advances'],
+  ['other_deduction','Other authorized deductions']
 ];
-
-const computeMonthlyTax = (taxableIncome) => {
-  for (let bracket of taxTable) {
-    if (taxableIncome > bracket.min && taxableIncome <= bracket.max) {
-      return bracket.base + (taxableIncome - bracket.min) * bracket.rate;
-    }
-  }
-  return 0;
-};
-
-const computeSSS = (monthlySalary, year = 2026) => {
-  if (monthlySalary <= 0) return 0;
-  const min = year >= 2025 ? 5000 : 4000;
-  const max = year >= 2025 ? 35000 : 30000;
-  const rate = year >= 2025 ? 0.05 : 0.045;
-  const msc = monthlySalary < min + 250 ? min : Math.min(max, min + Math.floor((monthlySalary - (min - 250)) / 500) * 500);
-  return msc * rate;
-};
-
-const computePhilHealth = (monthlySalary) => {
-  if (monthlySalary <= 0) return 0;
-  let base = monthlySalary;
-  if (base < 10000) base = 10000;
-  if (base > 100000) base = 100000;
-  return (base * 0.05) / 2;
-};
-
-const computePagIbig = (monthlySalary, year = 2026, month = 1) => {
-  if (monthlySalary <= 0) return 0;
-  let base = monthlySalary;
-  base = Math.min(base, (year > 2024 || (year === 2024 && month >= 2)) ? 10000 : 5000);
-  return base * (monthlySalary <= 1500 ? 0.01 : 0.02);
-};
-
-const OT_MULTIPLIER = 1.25;
+const blankAdjustments = () => Object.fromEntries(fields.map(([key])=>[key,'0']));
+const showApiError = e => e?.response?.data?.message || e?.response?.data?.error || e.message || 'Request failed.';
 
 const PayrollMain = ({ setView, onLock, onChangePin, onShowHistory }) => {
-  const [employees, setEmployees] = useState([]);
-  const [attendanceSummary, setAttendanceSummary] = useState({});
-  const [finalizedPayrolls, setFinalizedPayrolls] = useState({});
-  const [savedPayrolls, setSavedPayrolls] = useState({});
-  const [searchQuery, setSearchQuery] = useState('');
-  const [rosterPage, setRosterPage] = useState(1);
-  const PAGE_SIZE = 10;
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [employeeExtras, setEmployeeExtras] = useState({});
-  
-  const [showMonthlyModal, setShowMonthlyModal] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [finalizingEmployeeId, setFinalizingEmployeeId] = useState(null);
-  const [confirmingPaidId, setConfirmingPaidId] = useState(null);
-  
-  const [showPayslipModal, setShowPayslipModal] = useState(false);
-  const [payslipEmployee, setPayslipEmployee] = useState(null);
-  
-  const [loading, setLoading] = useState(false);
-
-  const monthName = new Date(selectedYear, selectedMonth - 1).toLocaleString('default', { month: 'long' });
-  const monthYearStr = `${monthName} ${selectedYear}`;
+  const isHR = getUserRole() === 'hr_admin';
   const now = new Date();
-  const isFutureMonth = selectedYear > now.getFullYear() || (selectedYear === now.getFullYear() && selectedMonth > now.getMonth() + 1);
+  const [month,setMonth] = useState(now.getMonth()+1);
+  const [year,setYear] = useState(now.getFullYear());
+  const [cutoff,setCutoff] = useState(now.getDate() > 10 ? '11-25' : '26-10');
+  const [people,setPeople] = useState([]);
+  const [history,setHistory] = useState([]);
+  const [query,setQuery] = useState('');
+  const [page,setPage] = useState(1);
+  const [loading,setLoading] = useState(false);
+  const [selected,setSelected] = useState(null);
+  const [adjustments,setAdjustments] = useState(blankAdjustments);
+  const [preview,setPreview] = useState(null);
+  const [previewSource,setPreviewSource] = useState(null);
+  const [busy,setBusy] = useState(false);
+  const [batchOpen,setBatchOpen] = useState(false);
+  const [batchBusy,setBatchBusy] = useState(false);
+  const [periodError,setPeriodError] = useState('');
+  const period = useMemo(()=>periodFor(year,month,cutoff),[year,month,cutoff]);
+  const currentDay = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const incomplete = period.end > currentDay;
+  const records = useMemo(()=>new Map(history.filter(x=>x.month_year===period.label).map(x=>[Number(x.user_id),x])),[history,period.label]);
 
-  useEffect(() => {
-    toast.success('Access granted.', { toastId: 'payroll-main-success' });
-  }, []);
-  
-  const loadData = useCallback(async () => {
-    if (isFutureMonth) return;
+  const load = useCallback(async()=>{
+    if (!isHR) return;
     setLoading(true);
     try {
-      const [empRes, attRes, historyRes] = await Promise.all([
-        axios.get(`${API_BASE}/employees`, getAuthHeaders()),
-        axios.get(`${API_BASE}/attendance-monthly?month=${selectedMonth}&year=${selectedYear}`, getAuthHeaders()),
-        axios.get(`${API_BASE}/payroll/history`, getAuthHeaders())
+      const [a,b]= await Promise.all([
+        axios.get(`${API_BASE}/employees`,auth()),
+        axios.get(`${API_BASE}/payroll/history`,auth())
       ]);
-
-      const activeInstructors = empRes.data.filter(u => u.role.toLowerCase() === 'instructor' && u.status === 'active');
-      setEmployees(activeInstructors);
-
-      const attMap = {};
-      attRes.data.forEach(record => {
-        attMap[record.employee_id] = {
-          regularHours: Number(record.regular_hours || 0),
-          overtimeHours: Number(record.overtime_hours || 0),
-          leaveDays: Number(record.leave_days || 0),
-          lateMinutes: Number(record.late_minutes || 0)
-        };
-      });
-      setAttendanceSummary(attMap);
-
-      // Determine who is already finalized for this specific month
-      const finalizedMap = {};
-      const savedMap = {};
-      historyRes.data.forEach(p => {
-        if (p.month_year === monthYearStr) {
-          finalizedMap[p.user_id] = true; // user_id here is the internal ID
-          if (!savedMap[p.user_id]) savedMap[p.user_id] = p;
-        }
-      });
-      setFinalizedPayrolls(finalizedMap);
-      setSavedPayrolls(savedMap);
-
-      const extras = {};
-      activeInstructors.forEach(emp => {
-        extras[emp.employee_id] = {
-          transport: 0, meal: 0, housing: 0, loans: 0, other: 0, bonus: 0,
-          lateMinutesOverride: null,
-          sssOverride: null, philHealthOverride: null, pagIbigOverride: null
-        };
-      });
-      setEmployeeExtras(extras);
-    } catch (err) {
-      console.error("Error loading payroll data:", err);
-      toast.error('Failed to load payroll data.');
-    } finally {
-      setLoading(false);
+      if (!Array.isArray(a.data)||!Array.isArray(b.data)) throw new Error('The server returned an invalid payroll response.');
+      // Historical records remain available even after employment separation.
+      setPeople(a.data.filter(x=>String(x.role||'').toLowerCase()==='instructor' && !['deleted','archived'].includes(String(x.status||'').toLowerCase())));
+      setHistory(b.data);
+      setPeriodError('');
+    } catch(e){setPeriodError(showApiError(e));toast.error(showApiError(e));}
+    finally{setLoading(false);}
+  },[isHR]);
+  useEffect(()=>{load();},[load]);
+  useEffect(()=>{setPage(1);setSelected(null);setPreview(null);},[year,month,cutoff,query]);
+  const matching=people.filter(x=>[x.full_name,x.employee_id,x.position_level].some(v=>String(v||'').toLowerCase().includes(query.toLowerCase())));
+  const pages=Math.max(1,Math.ceil(matching.length/10));
+  const visible=matching.slice((Math.min(page,pages)-1)*10,Math.min(page,pages)*10);
+  const finalized=[...records.values()];
+  const totals=finalized.reduce((a,r)=>({gross:a.gross+Number(r.gross_pay||0),net:a.net+Number(r.net_pay||0)}),{gross:0,net:0});
+  const lock=()=>{localStorage.removeItem('payroll_token');if(onLock)onLock();else if(setView)setView('payroll');};
+  const shiftMonth=d=>{const date=new Date(year,month-1+d,1);setYear(date.getFullYear());setMonth(date.getMonth()+1);};
+  const openEmployee=emp=>{
+    setSelected(emp);setPreview(null);setPreviewSource(null);
+    const record=records.get(Number(emp.id));
+    const values=blankAdjustments();
+    if(record) Object.keys(values).forEach(k=>{values[k]=String(record[k]??0);});
+    setAdjustments(values);
+  };
+  const parseAdjustments=()=>{
+    const output={};
+    for(const [key] of fields){
+      const value=String(adjustments[key]??'').trim();
+      if(!/^\d+(?:\.\d{1,2})?$/.test(value)||Number(value)>1000000) throw new Error(`${key.replaceAll('_',' ')} must be between 0 and 1,000,000 with up to 2 decimals.`);
+      output[key]=Number(value);
     }
-  }, [selectedMonth, selectedYear, isFutureMonth, monthYearStr]);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  const handleLockModule = () => {
-    localStorage.removeItem('payroll_token'); 
-    if (onLock) onLock();
-    else if (setView) setView('payroll');
-    else window.location.href = '/payroll';
+    return output;
   };
-
-  const filteredEmployees = employees.filter(emp =>
-    (emp.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (emp.employee_id || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const rosterPages = Math.max(1, Math.ceil(filteredEmployees.length / PAGE_SIZE));
-  const visibleEmployees = filteredEmployees.slice((rosterPage - 1) * PAGE_SIZE, rosterPage * PAGE_SIZE);
-
-  const computePayroll = (emp) => {
-    const att = attendanceSummary[emp.employee_id] || { regularHours: 0, overtimeHours: 0, leaveDays: 0, lateMinutes: 0 };
-    let monthlySalary = Number(emp.monthly_salary) || 0;
-    let workDays = Number(emp.work_days_per_month) || 22;
-    
-    const hourlyRate = workDays > 0 ? (monthlySalary / workDays / 8) : 0;
-    
-    const regularHours = Number(att.regularHours);
-    const leaveDays = Number(att.leaveDays);
-    const paidLeaveHours = leaveDays * 8; 
-    const baseEarnings = (regularHours + paidLeaveHours) * hourlyRate; 
-
-    const overtimeHours = Number(att.overtimeHours);
-    const overtimePay = overtimeHours * hourlyRate * OT_MULTIPLIER;
-    const extras = employeeExtras[emp.employee_id] || {};
-
-    let lateMinutes = (extras.lateMinutesOverride != null) ? extras.lateMinutesOverride : Number(att.lateMinutes);
-    if (isNaN(lateMinutes)) lateMinutes = 0;
-    const lateDeduction = (lateMinutes / 60) * hourlyRate;
-
-    const allowances = (Number(extras.transport) || 0) + (Number(extras.meal) || 0) + (Number(extras.housing) || 0);
-    const bonusPay = Number(extras.bonus) || 0;
-    
-    const grossPay = baseEarnings + overtimePay + allowances + bonusPay;
-    
-    const netBaseForStatutory = Math.max(0, (monthlySalary > 0 ? monthlySalary : baseEarnings) - lateDeduction);
-
-    let sss = (extras.sssOverride != null) ? Number(extras.sssOverride) : computeSSS(netBaseForStatutory, selectedYear); 
-    let philHealth = (extras.philHealthOverride != null) ? Number(extras.philHealthOverride) : computePhilHealth(netBaseForStatutory); 
-    let pagIbig = (extras.pagIbigOverride != null) ? Number(extras.pagIbigOverride) : computePagIbig(netBaseForStatutory, selectedYear, selectedMonth); 
-
-    const taxableIncome = Math.max(0, (baseEarnings + overtimePay + allowances + bonusPay - lateDeduction) - sss - philHealth - pagIbig);
-    const tax = computeMonthlyTax(taxableIncome);
-    
-    const loans = Number(extras.loans) || 0;
-    const other = Number(extras.other) || 0;
-    
-    const totalDeductions = tax + sss + philHealth + pagIbig + loans + other + lateDeduction;
-    const netPay = Math.max(0, grossPay - totalDeductions);
-
-    const calculated = {
-      regularHours, leaveDays, paidLeaveHours, overtimeHours, overtimePay, allowances, bonusPay, grossPay, baseEarnings,
-      sss, philHealth, pagIbig, loans, other, tax, netPay, totalDeductions, lateDeduction,
-      monthlySalary, hourlyRate, workDays, lateMinutes,
-    };
-    const saved = savedPayrolls[emp.id];
-    // For finalized months, financial values come from the stored server snapshot.
-    // The live attendance preview is only an estimate before finalization.
-    if (!saved) return calculated;
-    const stored = (name, fallback) => saved[name] == null ? fallback : Number(saved[name]);
-    const savedGross = stored('gross_pay', grossPay);
-    const savedNet = stored('net_pay', netPay);
-    const savedRate = stored('salary_rate', hourlyRate);
-    const savedHours = stored('total_hours', regularHours + paidLeaveHours);
-    const savedBase = savedHours * savedRate;
-    const savedOvertime = stored('overtime_pay', overtimePay);
-    const savedAllowances = stored('transport_allowance', 0) + stored('meal_allowance', 0) + stored('housing_allowance', 0);
-    return {
-      ...calculated,
-      hourlyRate: savedRate,
-      regularHours: savedHours, paidLeaveHours: 0, leaveDays: 0,
-      baseEarnings: savedBase, bonusPay: Math.max(0, savedGross - savedBase - savedOvertime - savedAllowances),
-      overtimeHours: stored('overtime_hours', overtimeHours),
-      overtimePay: savedOvertime,
-      grossPay: savedGross,
-      allowances: savedAllowances,
-      sss: stored('sss_deduction', sss), philHealth: stored('philhealth_deduction', philHealth),
-      pagIbig: stored('pagibig_deduction', pagIbig), loans: stored('loan_deduction', loans),
-      other: stored('other_deduction', other), lateDeduction: stored('late_deduction', lateDeduction),
-      tax: stored('tax_deduction', tax), netPay: savedNet,
-      totalDeductions: savedGross - savedNet,
-    };
+  const getPayload=()=>({ user_id: selected.id, month_year:period.label,...parseAdjustments() });
+  const canPrepare = person => String(person?.employment_status || 'active').toLowerCase() === 'active' && String(person?.status || 'active').toLowerCase() === 'active';
+  const calculate=async()=>{
+    if(!selected || records.has(Number(selected.id)) || !canPrepare(selected))return;
+    setBusy(true);
+    try{
+      const data=(await axios.post(`${API_BASE}/payroll/preview`,getPayload(),payrollAuth())).data;
+      if(!data.success||!data.calculated)throw new Error('Server did not return a verified calculation.');
+      setPreview(data.calculated);setPreviewSource(data.source||null);
+      toast.success('Server payroll preview ready.');
+    } catch(e){setPreview(null);toast.error(showApiError(e));if([401,403].includes(e.response?.status))lock();}
+    finally{setBusy(false);}
   };
-
-  const handleFinalize = async (emp) => {
-    if (!emp.id) return toast.error('Employee ID missing.');
-    if (finalizingEmployeeId !== null || finalizedPayrolls[emp.id]) return;
-    const extras = employeeExtras[emp.employee_id] || {};
-    // Only authorized adjustments travel to the server. All earned pay, hours,
-    // government deductions, tax, and net pay are recalculated by the API.
-    const payload = {
-      user_id: emp.id,
-      month_year: monthYearStr,
-      transport_allowance: extras.transport || 0,
-      meal_allowance: extras.meal || 0,
-      housing_allowance: extras.housing || 0,
-      bonus: extras.bonus || 0,
-      loan_deduction: extras.loans || 0,
-      other_deduction: extras.other || 0
-    };
-    setFinalizingEmployeeId(emp.id);
-    try {
-      const preview = await axios.post(`${API_BASE}/payroll/preview`, payload, getPayrollAuthHeaders());
-      if (!preview.data?.success || !preview.data?.calculated) {
-        throw new Error('Could not verify the payroll calculation.');
-      }
-      const authoritative = preview.data.calculated;
-      const amount = Number(authoritative.net_pay).toLocaleString('en-PH', {
-        minimumFractionDigits: 2, maximumFractionDigits: 2
-      });
-      const leaveDays = Number(preview.data.source?.paid_leave_days || 0);
-      if (!window.confirm(`Finalize ${emp.full_name} for ${monthYearStr}?\n\nServer-calculated net pay: ₱${amount}\nApproved paid leave days: ${leaveDays}\n\nThis will save a single final payroll record.`)) return;
-      const res = await axios.post(`${API_BASE}/payroll/finalize`, payload, getPayrollAuthHeaders());
-      if (res.data?.success) {
-        toast.success(`Payroll finalized for ${emp.full_name}. Saved net pay: ₱${Number(res.data.calculated?.net_pay ?? authoritative.net_pay).toFixed(2)}`);
-        await loadData();
-      } else {
-        toast.error(res.data?.message || 'Failed to finalize payroll.');
-      }
-    } catch (err) {
-      if (err.response?.status === 403 || err.response?.status === 401) {
-        toast.error('Payroll session expired. Please re-enter your PIN.');
-        handleLockModule();
-      } else {
-        toast.error(err.response?.data?.message || err.message || 'Server error during finalization.');
-      }
-    } finally {
-      setFinalizingEmployeeId(null);
-    }
+  const finalize=async()=>{
+    if(!selected||!preview||records.has(Number(selected.id))||incomplete||!canPrepare(selected))return;
+    if(!window.confirm(`Finalize ${selected.full_name} for ${period.label}?\n\nNet pay (last server preview): ${money(preview.net_pay)}\nThe server recalculates the cutoff during finalization. Review the resulting saved record before payment confirmation.`))return;
+    setBusy(true);
+    try{
+      const data=(await axios.post(`${API_BASE}/payroll/finalize`,getPayload(),payrollAuth())).data;
+      if(!data.success)throw new Error(data.message||'Finalization failed.');
+      toast.success('Payroll finalized and awaiting actual payment.');setSelected(null);await load();
+    }catch(e){toast.error(showApiError(e));if([401,403].includes(e.response?.status))lock();}
+    finally{setBusy(false);}
   };
-
-  const handleMarkPaid = async (emp) => {
-    const record = savedPayrolls[emp.id];
-    if (!record || record.status !== 'pending' || confirmingPaidId !== null) return;
-    if (!window.confirm(`Confirm actual payment of ₱${Number(record.net_pay).toLocaleString('en-PH', { minimumFractionDigits: 2 })} to ${emp.full_name} for ${monthYearStr}?\n\nDo not confirm unless payment has been disbursed.`)) return;
-    setConfirmingPaidId(record.id);
-    try {
-      const response = await axios.post(`${API_BASE}/payroll/${record.id}/mark-paid`, { confirm_paid: true }, getPayrollAuthHeaders());
-      if (response.data?.success) {
-        toast.success('Payment confirmation recorded.');
-        await loadData();
-      } else {
-        toast.error(response.data?.message || 'Payment confirmation failed.');
-      }
-    } catch (err) {
-      if ([401, 403].includes(err.response?.status)) {
-        toast.error('Payroll access expired or payment confirmation is not permitted.');
-      } else {
-        toast.error(err.response?.data?.message || 'Could not confirm payment.');
-      }
-    } finally {
-      setConfirmingPaidId(null);
-    }
+  const confirmPaid=async rec=>{
+    if(rec.status!=='pending'||!window.confirm(`Confirm actual disbursement of ${money(rec.net_pay)}? This is not an electronic fund transfer.`))return;
+    setBusy(true);
+    try{
+      const data=(await axios.post(`${API_BASE}/payroll/${rec.id}/mark-paid`,{confirm_paid:true},payrollAuth())).data;
+      if(!data.success)throw new Error(data.message||'Payment confirmation failed.');
+      toast.success('Payment confirmation recorded.');await load();
+    }catch(e){toast.error(showApiError(e));}finally{setBusy(false);}
   };
-
-  const handleMonthlyPayroll = async () => {
-    setIsProcessing(true);
-    try {
-      const response = await axios.post(
-        `${API_BASE}/payroll/run-monthly`, 
-        { month: selectedMonth, year: selectedYear }, 
-        getPayrollAuthHeaders()
-      );
-      
-      if (response.data.success) {
-        toast.success(`Processed: ${response.data.processed} finalized. ${response.data.skipped > 0 ? `(${response.data.skipped} skipped).` : ''}`);
-        setShowMonthlyModal(false);
-        loadData();
-      } else {
-        toast.error('Failed to process monthly payroll.');
-      }
-    } catch (err) {
-      if (err.response?.status === 403) {
-        toast.error('Payroll session expired. Please re-enter your PIN.');
-        setShowMonthlyModal(false); 
-        handleLockModule();         
-      } else {
-        toast.error(err.response?.data?.message || err.response?.data?.error || 'Server error');
-      }
-    } finally {
-      setIsProcessing(false);
-    }
+  const runBatch=async()=>{
+    if(incomplete)return toast.error('Wait until the cutoff period has ended.');
+    setBatchBusy(true);
+    try{
+      const data=(await axios.post(`${API_BASE}/payroll/run-cutoff`,{month_year:period.label},payrollAuth())).data;
+      if(!data.success)throw new Error(data.message||'Batch failed.');
+      toast.success(`${data.processed} payroll record(s) finalized; ${data.skipped} skipped.`);setBatchOpen(false);await load();
+    }catch(e){toast.error(showApiError(e));}finally{setBatchBusy(false);}
   };
-
-  const updateExtras = (empId, field, value) => {
-    let cleanValue = String(value).replace(/[^0-9.]/g, '');
-    const parts = cleanValue.split('.');
-    if (parts.length > 2) cleanValue = parts[0] + '.' + parts.slice(1).join('');
-    const numericValue = cleanValue === '' ? null : Math.max(0, parseFloat(cleanValue) || 0);
-    
-    setEmployeeExtras(prev => ({
-      ...prev,
-      [empId]: { ...prev[empId], [field]: numericValue }
-    }));
+  const exportRemittance=()=>{
+    if(!finalized.length)return toast.warning('No finalized cutoff records to export.');
+    const headers=['Employee ID','Name','Cutoff','SSS contribution','PhilHealth','Pag-IBIG','MBF','Tax'];
+    const esc=value=>{const str=String(value??'');return `"${(/^[\s]*[=+@\-]/.test(str)?"'":"")+str.replaceAll('"','""')}"`;};
+    const data=[headers.join(','),...finalized.map(r=>[
+      r.employee_id,r.full_name,r.month_year,r.sss_deduction,r.philhealth_deduction,
+      r.pagibig_deduction,r.mbf_deduction||0,r.tax_deduction
+    ].map(esc).join(','))].join('\r\n');
+    const href=URL.createObjectURL(new Blob([data],{type:'text/csv;charset=utf-8'}));
+    const a=document.createElement('a');a.href=href;a.download=`UniVITA_Remittance_${year}_${String(month).padStart(2,'0')}_${cutoff}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),1000);
   };
-
-  const openPayslip = (emp) => {
-    setPayslipEmployee(emp);
-    setShowPayslipModal(true);
+  const printSavedPayslip=()=>{
+    if(!saved)return toast.warning('Finalize the payroll before printing an official payslip.');
+    const escape=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+    const rows=[
+      ['Hourly rate',money(saved.salary_rate)],['Payable hours',String(saved.total_hours||0)],
+      ['Overtime',money(saved.overtime_pay)],['Transport',money(saved.transport_allowance)],
+      ['Meal',money(saved.meal_allowance)],['Housing',money(saved.housing_allowance)],
+      ['Bonus',money(saved.bonus)],['Gross pay',money(saved.gross_pay)],
+      ['SSS',money(saved.sss_deduction)],['PhilHealth',money(saved.philhealth_deduction)],
+      ['Pag-IBIG',money(saved.pagibig_deduction)],['MBF',money(saved.mbf_deduction)],
+      ['Tax',money(saved.tax_deduction)],['Loans',money(saved.loan_deduction)],
+      ['Other deductions',money(saved.other_deduction)],['Late deductions',money(saved.late_deduction)],
+      ['NET TAKE-HOME PAY',money(saved.net_pay)]
+    ];
+    const w=window.open('','_blank','width=800,height=900');
+    if(!w)return toast.error('Enable pop-ups to print the payslip.');
+    w.document.write(`<html><head><title>UniVITA Payslip</title><style>body{font:13px Arial,sans-serif;max-width:700px;margin:35px auto;color:#0f172a}h1{text-align:center}p{text-align:center}table{width:100%;border-collapse:collapse}td{padding:9px 7px;border-bottom:1px solid #ddd}td:last-child{text-align:right}tr:last-child{font-weight:bold;font-size:17px;border-top:2px solid black}@media print{body{margin:12mm}}</style></head><body><h1>HCT ACADEMY — PAYSLIP</h1><p>${escape(selected.full_name)} (${escape(selected.employee_id)})</p><p>${escape(period.label)} • ${escape(displayDate(period.start))} – ${escape(displayDate(period.end))}</p><p>PAYMENT STATUS: ${escape(saved.status==='paid'?'PAID':'FINALIZED; PAYMENT NOT CONFIRMED')}</p><table>${rows.map(([name,value])=>`<tr><td>${escape(name)}</td><td>${escape(value)}</td></tr>`).join('')}</table><p>Confidential payroll document — authorized HR issue only.</p></body></html>`);
+    w.document.close();w.focus();w.print();
   };
-
-  const printPayslip = (emp) => {
-    const calc = computePayroll(emp);
-    const extras = employeeExtras[emp.employee_id] || {};
-    const info = emp.additional_info ? (typeof emp.additional_info === 'string' ? JSON.parse(emp.additional_info) : emp.additional_info) : {};
-    const printWindow = window.open('', '_blank', 'width=800,height=900');
-    
-    printWindow.document.write(`
-      <html><head><title>Payslip - ${emp.full_name}</title>
-      <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        @page { size: A4 portrait; margin: 15mm; }
-        body { font-family: 'Inter', Arial, sans-serif; padding: 0; color: #000; background: #FFF; font-size: 11px; line-height: 1.3; -webkit-print-color-adjust: exact; }
-        .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; page-break-inside: avoid; }
-        .header h1 { margin: 0 0 2px 0; font-size: 18px; font-weight: 800; letter-spacing: 1px; }
-        .header p { margin: 0; font-size: 10px; color: #333; }
-        .header h2 { margin: 10px 0 0 0; font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 30px; margin-bottom: 15px; padding: 10px; border: 1px solid #000; page-break-inside: avoid; }
-        .info-row { display: flex; justify-content: space-between; }
-        .info-label { font-weight: 600; color: #555; text-transform: uppercase; font-size: 9px; }
-        .info-value { font-weight: 600; text-align: right; }
-        .payslip-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #000; page-break-inside: avoid; }
-        .payslip-table th, .payslip-table td { padding: 4px 8px; border-bottom: 1px solid #ccc; }
-        .payslip-table th { background: #F8FAFC; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #000; }
-        .payslip-table tr:last-child td { border-bottom: none; }
-        .amount { text-align: right; font-family: 'Courier New', Courier, monospace; font-weight: 600; }
-        .deduction-amount { text-align: right; font-family: 'Courier New', Courier, monospace; }
-        .section-header td { background: #F1F5F9; font-weight: 700; text-transform: uppercase; font-size: 10px; border-bottom: 2px solid #000; }
-        .summary-container { display: flex; justify-content: flex-end; margin-bottom: 20px; page-break-inside: avoid; }
-        .summary-box { width: 300px; border: 2px solid #000; }
-        .summary-row { display: flex; justify-content: space-between; padding: 5px 10px; border-bottom: 1px solid #ccc; }
-        .summary-row:last-child { border-bottom: none; background: #F8FAFC; font-weight: 800; font-size: 13px; }
-        .summary-label { text-transform: uppercase; font-size: 10px; font-weight: 600; }
-        .summary-value { font-family: 'Courier New', Courier, monospace; font-weight: 600; }
-        .signature-section { display: flex; justify-content: space-between; margin-top: 30px; page-break-inside: avoid; }
-        .sig-block { width: 200px; text-align: center; }
-        .sig-line { border-bottom: 1px solid #000; height: 25px; margin-bottom: 4px; }
-        .sig-name { font-weight: 700; font-size: 10px; text-transform: uppercase; }
-        .sig-title { font-size: 9px; color: #555; }
-        .footer-note { margin-top: 20px; text-align: center; font-size: 8px; color: #666; border-top: 1px solid #ccc; padding-top: 8px; page-break-inside: avoid; }
-        .page-wrapper { display: flex; flex-direction: column; min-height: 100vh; }
-        @media print { .payslip-table, .summary-container, .signature-section { page-break-inside: avoid; } }
-      </style></head><body>
-      
-      <div class="page-wrapper">
-        <div class="header">
-          <h1>HCT ACADEMY</h1>
-          <p>Healthcare Training Center & Clinical Simulation Laboratories</p>
-          <p>HCT Academy 611 Shaw Blvd 1550, Pasig, Metro Manila</p>
-          <h2>EMPLOYEE PAYSLIP — ${savedPayrolls[emp.id]?.status === 'paid' ? 'PAID' : 'FINALIZED / PAYMENT NOT CONFIRMED'}</h2>
-        </div>
-
-        <div class="info-grid">
-          <div class="info-row"><span class="info-label">Employee Name:</span><span class="info-value">${emp.full_name}</span></div>
-          <div class="info-row"><span class="info-label">Pay Period:</span><span class="info-value">${monthYearStr}</span></div>
-          <div class="info-row"><span class="info-label">Employee ID:</span><span class="info-value">${emp.employee_id}</span></div>
-          <div class="info-row"><span class="info-label">Generated On:</span><span class="info-value">${new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</span></div>
-          <div class="info-row"><span class="info-label">SSS No:</span><span class="info-value">${info.sss || info.sss_number || 'N/A'}</span></div>
-          <div class="info-row"><span class="info-label">PhilHealth No:</span><span class="info-value">${info.philhealth || info.philhealth_number || 'N/A'}</span></div>
-          <div class="info-row"><span class="info-label">Pag-IBIG No:</span><span class="info-value">${info.pagibig || info.pagibig_number || 'N/A'}</span></div>
-          <div class="info-row"><span class="info-label">TIN:</span><span class="info-value">${info.tin || info.tin_number || 'N/A'}</span></div>
-        </div>
-        
-        <table class="payslip-table">
-          <thead><tr><th style="width: 60%;">Earnings</th><th style="width: 40%;" class="amount">Amount (PHP)</th></tr></thead>
-          <tbody>
-            <tr><td>Basic Pay (${savedPayrolls[emp.id] ? 'finalized paid hours' : 'estimated logged and paid-leave hours'})</td><td class="amount">${calc.baseEarnings.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Overtime Pay (${calc.overtimeHours} hrs)</td><td class="amount">${calc.overtimePay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Transport Allowance</td><td class="amount">${Number(savedPayrolls[emp.id]?.transport_allowance ?? extras.transport ?? 0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Meal Allowance</td><td class="amount">${Number(savedPayrolls[emp.id]?.meal_allowance ?? extras.meal ?? 0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Housing Allowance</td><td class="amount">${Number(savedPayrolls[emp.id]?.housing_allowance ?? extras.housing ?? 0).toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>13th Month / Bonus</td><td class="amount">${calc.bonusPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr class="section-header"><td>Total Gross Earnings</td><td class="amount">${calc.grossPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-          </tbody>
-        </table>
-
-        <table class="payslip-table">
-          <thead><tr><th style="width: 60%;">Deductions</th><th style="width: 40%;" class="deduction-amount">Amount (PHP)</th></tr></thead>
-          <tbody>
-            <tr><td>Withholding Tax</td><td class="deduction-amount">${calc.tax.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>SSS Contribution (Employee Share)</td><td class="deduction-amount">${calc.sss.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>PhilHealth (Employee Share)</td><td class="deduction-amount">${calc.philHealth.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Pag-IBIG Contribution (Employee Share)</td><td class="deduction-amount">${calc.pagIbig.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Late / Undertime Deductions (${calc.lateMinutes} mins)</td><td class="deduction-amount">${calc.lateDeduction.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Loans / Advances</td><td class="deduction-amount">${calc.loans.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr><td>Other Deductions</td><td class="deduction-amount">${calc.other.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-            <tr class="section-header"><td>Total Deductions</td><td class="deduction-amount">${calc.totalDeductions.toLocaleString('en-PH', {minimumFractionDigits: 2})}</td></tr>
-          </tbody>
-        </table>
-
-        <div class="summary-container">
-          <div class="summary-box">
-            <div class="summary-row"><span class="summary-label">Gross Pay</span><span class="summary-value">₱${calc.grossPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span></div>
-            <div class="summary-row"><span class="summary-label">Total Deductions</span><span class="summary-value">-₱${calc.totalDeductions.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span></div>
-            <div class="summary-row"><span class="summary-label">Net Take-Home Pay</span><span class="summary-value">₱${calc.netPay.toLocaleString('en-PH', {minimumFractionDigits: 2})}</span></div>
-          </div>
-        </div>
-
-        <div class="signature-section">
-          <div class="sig-block"><div class="sig-line"></div><div class="sig-name">${emp.full_name}</div><div class="sig-title">Employee Signature</div></div>
-          <div class="sig-block"><div class="sig-line"></div><div class="sig-name">HR DEPARTMENT</div><div class="sig-title">Authorized Representative</div></div>
-        </div>
-
-        <div class="footer-note"><strong>CONFIDENTIAL</strong> - This document contains privileged payroll information intended solely for the named employee. <br/>Unauthorized distribution or reproduction is strictly prohibited under the Data Privacy Act of 2012 (RA 10173).</div>
-      </div>
-      
-      <script>window.onload = () => { window.print(); setTimeout(() => window.close(), 500); }</script>
-      </body></html>
-    `);
-    printWindow.document.close();
+  const exportCsv=()=>{
+    if(!finalized.length)return toast.warning('No finalized records for this cutoff.');
+    const csv=(v)=>{const s=String(v??'');return `"${(/^[\s]*[=+@\-]/.test(s)?"'":"")+s.replaceAll('"','""')}"`;};
+    const keys=['employee_id','full_name','month_year','gross_pay','sss_deduction','philhealth_deduction','pagibig_deduction','mbf_deduction','tax_deduction','net_pay','status'];
+    const data=[keys.join(','),...finalized.map(r=>keys.map(k=>csv(r[k])).join(','))].join('\r\n');
+    const href=URL.createObjectURL(new Blob([data],{type:'text/csv;charset=utf-8'}));
+    const a=document.createElement('a');a.href=href;a.download=`UniVITA_Payroll_${year}_${String(month).padStart(2,'0')}_${cutoff}.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),1000);
   };
-
-  const exportToCSV = () => {
-    if (filteredEmployees.length === 0) return toast.warning("No data to export.");
-    const headers = ["Full Name","Employee ID","Regular Hours","Paid Leave Hours", "Overtime Hours","Late Minutes","Late Deduction","Base Earnings","Overtime Pay","Allowances", "13th Month / Bonus", "Gross Pay","SSS","PhilHealth","Pag-IBIG","Loans","Other Deductions","Tax","Net Pay"];
-    const rows = visibleEmployees.map(emp => {
-      const calc = computePayroll(emp);
-      return [emp.full_name, emp.employee_id, calc.regularHours, calc.paidLeaveHours, calc.overtimeHours, calc.lateMinutes, calc.lateDeduction, calc.baseEarnings, calc.overtimePay, calc.allowances, calc.bonusPay, calc.grossPay, calc.sss, calc.philHealth, calc.pagIbig, calc.loans, calc.other, calc.tax, calc.netPay].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
-    });
-    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `Payroll_Export_${monthName}_${selectedYear}.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    toast.info('CSV export downloaded.');
-  };
-
-  const exportRemittance = () => {
-    if (filteredEmployees.length === 0) return toast.warning("No data to export.");
-    const headers = ["Employee ID", "Full Name", "SSS Number", "SSS Deduction", "PhilHealth PIN", "PhilHealth Deduction", "Pag-IBIG MID", "Pag-IBIG Deduction", "TIN", "Withholding Tax"];
-    const rows = visibleEmployees.map(emp => {
-      const calc = computePayroll(emp);
-      let sssNo = 'Not Provided', phicNo = 'Not Provided', hdmfNo = 'Not Provided', tinNo = 'Not Provided';
-      if (emp.additional_info) {
-        try {
-          const info = typeof emp.additional_info === 'string' ? JSON.parse(emp.additional_info) : emp.additional_info;
-          sssNo = info.sss || info.sss_no || info.sss_number || 'Not Provided';
-          phicNo = info.philhealth || info.philhealth_no || info.philhealth_pin || 'Not Provided';
-          hdmfNo = info.pagibig || info.pagibig_no || info.pagibig_mid || 'Not Provided';
-          tinNo = info.tin || info.tin_no || info.taxpayer_id || 'Not Provided';
-        } catch(e) {}
-      }
-      return [`"${emp.employee_id}"`,`"${emp.full_name}"`,`="${sssNo}"`, calc.sss.toFixed(2),`="${phicNo}"`, calc.philHealth.toFixed(2),`="${hdmfNo}"`, calc.pagIbig.toFixed(2),`="${tinNo}"`, calc.tax.toFixed(2)].join(',');
-    });
-    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `Govt_Remittance_${monthName}_${selectedYear}.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    toast.info('Statutory Remittance CSV generated successfully.');
-  };
-
-  const summary = !isFutureMonth ? filteredEmployees.reduce((acc, emp) => {
-    const calc = computePayroll(emp);
-    acc.totalGross += calc.grossPay;
-    acc.totalTax += calc.tax;
-    acc.totalNet += calc.netPay;
-    return acc;
-  }, { totalEmployees: filteredEmployees.length, totalGross: 0, totalTax: 0, totalNet: 0 }) : { totalEmployees: 0, totalGross: 0, totalTax: 0, totalNet: 0 };
-
-  const isAllowanceEligible = (emp) => {
-    const type = emp.contract_type || emp.employment_type || '';
-    return ['Full-time', 'Regular', 'Provisionary'].includes(type);
-  };
-
-  return (
-    <div className="pm-container">
-      <header className="pm-page-heading">
-        <div>
-         
-          <p>Review instructor payroll, finalize calculated records, and confirm disbursements.</p>
-        </div>
-        <span className="pm-access-note">Authorized HR access</span>
-      </header>
-      <div className="pm-top-bar">
-        <div className="pm-period-group">
-          <span className="pm-period-label">Payroll period</span>
-          <div className="pm-date-navigator">
-            <button className="pm-nav-arrow" aria-label="Previous payroll month" onClick={() => {
-              setRosterPage(1);
-              if (selectedMonth === 1) {
-                setSelectedMonth(12);
-                setSelectedYear(selectedYear - 1);
-              } else {
-                setSelectedMonth(selectedMonth - 1);
-              }
-            }}><ChevronLeft size={18}/></button>
-            <div className="pm-current-date"><span>{monthName} {selectedYear}</span></div>
-            <button className="pm-nav-arrow" aria-label="Next payroll month" disabled={isFutureMonth || (selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1)} onClick={() => {
-              setRosterPage(1);
-              if (selectedMonth === 12) {
-                setSelectedMonth(1);
-                setSelectedYear(selectedYear + 1);
-              } else {
-                setSelectedMonth(selectedMonth + 1);
-              }
-            }}><ChevronRight size={18}/></button>
-          </div>
-        </div>
-        <div className="pm-period-actions">
-          <span className="pm-period-helper">Select a month to review payroll records.</span>
-          <button type="button" className="pm-btn-lock" onClick={handleLockModule} title="Lock Payroll Module">Lock Payroll</button>
-        </div>
-      </div>
-
-      {isFutureMonth ? (
-        <div className="pm-empty-state">
-          <h3>Future Period</h3>
-          <p>Payroll data is not available for future dates. Please select the current or a past month.</p>
-        </div>
-      ) : (
-        <>
-          <section className="pm-metrics-grid" aria-label="Payroll summary">
-            <div className="pm-metric-card">
-              <span className="pm-metric-label">Instructors in View</span>
-              <strong className="pm-metric-value">{summary.totalEmployees}</strong>
-              <span className="pm-metric-note">Matching payroll records</span>
-            </div>
-            <div className="pm-metric-card">
-              <span className="pm-metric-label">Total Gross Pay</span>
-              <strong className="pm-metric-value">₱{summary.totalGross.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-              <span className="pm-metric-note">Before deductions</span>
-            </div>
-            <div className="pm-metric-card">
-              <span className="pm-metric-label">Tax Withheld</span>
-              <strong className="pm-metric-value">₱{summary.totalTax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-              <span className="pm-metric-note">Calculated withholding tax</span>
-            </div>
-            <div className="pm-metric-card">
-              <span className="pm-metric-label">Total Net Pay</span>
-              <strong className="pm-metric-value">₱{summary.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong>
-              <span className="pm-metric-note">After deductions</span>
-            </div>
-          </section>
-
-          <div className="pm-roster-container">
-            <div className="pm-roster-heading">
-              <div>
-                <h2>Instructor Payroll Register</h2>
-                <p>Review individual calculations and payment status for the selected period.</p>
-              </div>
-              <span>{filteredEmployees.length} record{filteredEmployees.length !== 1 ? 's' : ''}</span>
-            </div>
-            <div className="pm-toolbar">
-              <div className="pm-search-box">
-                <Search size={15} aria-hidden="true" />
-                <input type="text" aria-label="Search by instructor name or employee ID" placeholder="Search by name or employee ID" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setRosterPage(1); }} />
-              </div>
-              <div className="pm-toolbar-actions">
-                <button className="pm-btn-outline" type="button" onClick={exportToCSV}>Export Payroll CSV</button>
-                <button className="pm-btn-outline" type="button" onClick={exportRemittance} title="Export SSS, PhilHealth and Pag-IBIG remittance data">Export Remittance</button>
-                <button className="pm-btn-primary" type="button" onClick={() => setShowMonthlyModal(true)}>Run Monthly Payroll</button>
-              </div>
-            </div>
-
-            <div className="pm-table-wrapper">
-              {loading ? (
-                <div className="pm-empty-state"><p>Loading payroll records...</p></div>
-              ) : (
-                <table className="pm-table">
-                  <thead>
-                    <tr>
-                      <th>Employee ID</th><th>Instructor</th><th>Position</th><th>Employment Type</th><th>Status</th><th className="text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEmployees.length === 0 ? (
-                      <tr><td colSpan="6"><div className="pm-empty-state"><p>No matching employees found.</p></div></td></tr>
-                    ) : (
-                      visibleEmployees.map(emp => {
-                        const isFinalized = finalizedPayrolls[emp.id];
-                        return (
-                          <tr key={emp.employee_id}>
-                            <td><span className="pm-emp-id">{emp.employee_id}</span></td>
-                            <td><span className="pm-emp-name">{emp.full_name}</span></td>
-                            <td><span className="pm-text-regular">{emp.position_level || emp.position || 'N/A'}</span></td>
-                            <td><span className="pm-badge-neutral">{emp.employment_type || emp.contract_type || 'Full-time'}</span></td>
-                            <td>
-                              <span className={`pm-status ${isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'paid' : 'pending') : 'draft'}`}>
-                                {isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'Paid' : 'Awaiting Payment') : 'Not Finalized'}
-                              </span>
-                            </td>
-                            <td className="text-right">
-                              <div className="pm-action-group">
-                                <button type="button" className="pm-btn-outline pm-table-action" onClick={() => openPayslip(emp)}>View</button>
-                                {isFinalized ? (
-                                  savedPayrolls[emp.id]?.status === 'pending' && (
-                                    <button type="button" className="pm-btn-primary pm-table-action" disabled={confirmingPaidId !== null} onClick={() => handleMarkPaid(emp)}>
-                                      {confirmingPaidId === savedPayrolls[emp.id].id ? 'Saving...' : 'Confirm Paid'}
-                                    </button>
-                                  )
-                                ) : (
-                                  <button type="button" className="pm-btn-primary pm-table-action" onClick={() => handleFinalize(emp)} disabled={finalizingEmployeeId !== null}>
-                                    {finalizingEmployeeId === emp.id ? 'Finalizing...' : 'Finalize'}
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            {!loading && filteredEmployees.length > PAGE_SIZE && (
-              <nav className="pm-pagination" aria-label="Payroll register pages">
-                <span>Showing {(rosterPage - 1) * PAGE_SIZE + 1}–{Math.min(rosterPage * PAGE_SIZE, filteredEmployees.length)} of {filteredEmployees.length}</span>
-                <div className="pm-pagination-actions">
-                  <button type="button" onClick={() => setRosterPage(p => Math.max(1, p - 1))} disabled={rosterPage === 1}><ChevronLeft size={15} /> Previous</button>
-                  <span>Page {rosterPage} of {rosterPages}</span>
-                  <button type="button" onClick={() => setRosterPage(p => Math.min(rosterPages, p + 1))} disabled={rosterPage >= rosterPages}>Next <ChevronRight size={15} /></button>
-                </div>
-              </nav>
-            )}
-          </div>
-        </>
-      )}
-
-      {showMonthlyModal && (
-        <div className="pm-modal-backdrop" onClick={() => setShowMonthlyModal(false)}>
-          <div className="pm-modal-card small" onClick={e => e.stopPropagation()}>
-            <div className="pm-modal-header"><h3>Process Monthly Batch</h3><button className="pm-modal-close" onClick={() => setShowMonthlyModal(false)}><X size={18}/></button></div>
-            <div className="pm-modal-body">
-              <p className="pm-modal-desc">Process the selected payroll period for eligible instructors. Existing finalized records are skipped by the server.</p>
-              <div className="pm-form-row">
-                <div className="pm-form-group">
-                  <label>Month</label>
-                  <select value={selectedMonth} onChange={(e) => setSelectedMonth(parseInt(e.target.value))} className="pm-input">
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (<option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('default', { month: 'long' })}</option>))}
-                  </select>
-                </div>
-                <div className="pm-form-group">
-                  <label>Year</label>
-                  <select value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value))} className="pm-input">
-                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(y => (<option key={y} value={y}>{y}</option>))}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="pm-modal-footer">
-              <button className="pm-btn-outline" onClick={() => setShowMonthlyModal(false)}>Cancel</button>
-              <button className="pm-btn-primary" onClick={handleMonthlyPayroll} disabled={isProcessing}>{isProcessing ? 'Processing...' : 'Run Batch Payroll'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showPayslipModal && payslipEmployee && (() => {
-        const emp = payslipEmployee;
-        const calc = computePayroll(emp);
-        const extras = employeeExtras[emp.employee_id] || {};
-        const eligible = isAllowanceEligible(emp);
-        const isFinalized = finalizedPayrolls[emp.id];
-        const info = emp.additional_info ? (typeof emp.additional_info === 'string' ? JSON.parse(emp.additional_info) : emp.additional_info) : {};
-        
-        return (
-          <div className="pm-modal-backdrop" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}>
-            <div className="pm-modal-card wide" onClick={e => e.stopPropagation()}>
-              <div className="pm-modal-header">
-                <div>
-                  <h3>Payroll Details</h3>
-                  <span className="pm-modal-subtitle">{emp.full_name} · {emp.employee_id} · {monthYearStr}</span>
-                </div>
-                <button className="pm-modal-close" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}><X size={18}/></button>
-              </div>
-              
-              <div className="pm-modal-body bg-gray">
-                
-                <div className="pm-payslip-summary">
-                  <div><span>Employee</span><strong>{emp.full_name}</strong></div>
-                  <div><span>Payroll Period</span><strong>{monthYearStr}</strong></div>
-                  <div>
-                    <span>Record Status</span>
-                    <strong className={`pm-status ${isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'paid' : 'pending') : 'draft'}`}>
-                      {isFinalized ? (savedPayrolls[emp.id]?.status === 'paid' ? 'Paid' : 'Awaiting Payment') : 'Not Finalized'}
-                    </strong>
-                  </div>
-                </div>
-
-                {/* Existing government ID fields, retained for HR verification */}
-                <div className="pm-govt-ids-box">
-                  <h5>Government Information</h5>
-                  <div className="pm-govt-grid">
-                    <div><span>SSS No:</span> {info.sss || info.sss_number || '—'}</div>
-                    <div><span>PhilHealth No:</span> {info.philhealth || info.philhealth_number || '—'}</div>
-                    <div><span>Pag-IBIG No:</span> {info.pagibig || info.pagibig_number || '—'}</div>
-                    <div><span>TIN:</span> {info.tin || info.tin_number || '—'}</div>
-                  </div>
-                </div>
-
-                <div className="pm-formal-payslip">
-                  {/* Earnings */}
-                  <div className="pm-formal-section">
-                    <div className="pm-formal-section-header"><h4>Earnings & Allowances</h4></div>
-                    <div className="pm-formal-list">
-                      <div className="pm-formal-row"><span className="pm-formal-label">Hourly Rate</span><span className="pm-formal-value">₱{calc.hourlyRate.toLocaleString('en-PH', { minimumFractionDigits: 2 })}/hr</span></div>
-                      <div className="pm-formal-row"><span className="pm-formal-label">Base Pay ({calc.regularHours}h logged + {calc.paidLeaveHours}h leave)</span><span className="pm-formal-value">₱{calc.baseEarnings.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
-                      <div className="pm-formal-row"><span className="pm-formal-label">Overtime Pay ({calc.overtimeHours} hrs)</span><span className="pm-formal-value">₱{calc.overtimePay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
-                      <div className="pm-formal-divider"></div>
-                      
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">13th Month / Bonus</span>
-                        <input type="text" value={extras.bonus || ''} onChange={e => updateExtras(emp.employee_id, 'bonus', e.target.value)} className="pm-formal-input" placeholder="0.00" disabled={isFinalized} />
-                      </div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">Transport Allowance {!eligible && <span className="text-danger">(Ineligible)</span>}</span>
-                        {eligible ? <input type="text" value={extras.transport || ''} onChange={e => updateExtras(emp.employee_id, 'transport', e.target.value)} className="pm-formal-input" placeholder="0.00" disabled={isFinalized} /> : <span className="pm-formal-value">₱0.00</span>}
-                      </div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">Meal Allowance</span>
-                        {eligible ? <input type="text" value={extras.meal || ''} onChange={e => updateExtras(emp.employee_id, 'meal', e.target.value)} className="pm-formal-input" placeholder="0.00" disabled={isFinalized} /> : <span className="pm-formal-value">₱0.00</span>}
-                      </div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">Housing Allowance</span>
-                        {eligible ? <input type="text" value={extras.housing || ''} onChange={e => updateExtras(emp.employee_id, 'housing', e.target.value)} className="pm-formal-input" placeholder="0.00" disabled={isFinalized} /> : <span className="pm-formal-value">₱0.00</span>}
-                      </div>
-                    </div>
-                    <div className="pm-formal-footer"><span>Gross Earnings</span><strong>₱{calc.grossPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
-                  </div>
-
-                  {/* Deductions */}
-                  <div className="pm-formal-section mt-4">
-                    <div className="pm-formal-section-header"><h4>Taxes & Deductions</h4></div>
-                    <div className="pm-formal-list">
-                      <div className="pm-formal-row"><span className="pm-formal-label">Withholding Tax</span><span className="pm-formal-value">₱{calc.tax.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
-                      <div className="pm-formal-row"><span className="pm-formal-label">Late Deductions ({calc.lateMinutes} mins)</span><span className="pm-formal-value text-danger">-₱{calc.lateDeduction.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span></div>
-                      <div className="pm-formal-divider"></div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">SSS Contribution</span>
-                        <input type="text" value={calc.sss.toFixed(2)} className="pm-formal-input" disabled title="Calculated by the backend when finalizing" />
-                      </div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">PhilHealth</span>
-                        <input type="text" value={calc.philHealth.toFixed(2)} className="pm-formal-input" disabled title="Calculated by the backend when finalizing" />
-                      </div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">Pag-IBIG</span>
-                        <input type="text" value={calc.pagIbig.toFixed(2)} className="pm-formal-input" disabled title="Calculated by the backend when finalizing" />
-                      </div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">Loans / Advances</span>
-                        <input type="text" value={extras.loans || ''} onChange={e => updateExtras(emp.employee_id, 'loans', e.target.value)} className="pm-formal-input" placeholder="0.00" disabled={isFinalized} />
-                      </div>
-                      <div className="pm-formal-row input-row">
-                        <span className="pm-formal-label">Other Deductions</span>
-                        <input type="text" value={extras.other || ''} onChange={e => updateExtras(emp.employee_id, 'other', e.target.value)} className="pm-formal-input" placeholder="0.00" disabled={isFinalized} />
-                      </div>
-                    </div>
-                    <div className="pm-formal-footer"><span>Total Deductions</span><strong>-₱{calc.totalDeductions.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
-                  </div>
-                </div>
-
-                <div className="pm-net-banner">
-                  <span className="pm-net-label">Net Take-Home Pay</span>
-                  <span className="pm-net-amount">₱{calc.netPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-
-              <div className="pm-modal-footer">
-                <button className="pm-btn-outline" onClick={() => { setShowPayslipModal(false); setPayslipEmployee(null); }}>Close</button>
-                <button className="pm-btn-primary" onClick={() => printPayslip(payslipEmployee)}>Print / Save as PDF</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-    </div>
-  );
+  if(!isHR)return <div className="pm-container"><p>Payroll management is restricted to authorized HR personnel.</p></div>;
+  const saved=selected?records.get(Number(selected.id)):null;
+  const allowanceEligible = selected && (String(selected.contract_type||" ").toLowerCase()==="regular" || String(selected.employment_type||"").toLowerCase()==="part-time");
+  const calc=saved||preview;
+  return <main className="pm-container">
+    <header className="pm-page-heading"><div><p>Prepare, review and finalize instructor payroll by cutoff period.</p></div><div className="pm-toolbar-actions"><button className="pm-btn-outline" onClick={lock}><LockKeyhole size={15}/> Lock payroll</button></div></header>
+    <section className="pm-top-bar">
+      <div className="pm-period-group"><span className="pm-period-label">Payroll cutoff</span><div className="pm-date-navigator"><button className="pm-nav-arrow" onClick={()=>shiftMonth(-1)}><ChevronLeft size={17}/></button><div className="pm-current-date">{months[month-1]} {year}</div><button className="pm-nav-arrow" onClick={()=>shiftMonth(1)} disabled={year>now.getFullYear()||(year===now.getFullYear()&&month>=now.getMonth()+1)}><ChevronRight size={17}/></button></div></div>
+      <div className="pm-period-group"><label className="pm-period-label" htmlFor="pm-cutoff">Cutoff period</label><select id="pm-cutoff" className="pm-input" value={cutoff} onChange={e=>setCutoff(e.target.value)}><option value="26-10">26th (previous month) – 10th</option><option value="11-25">11th – 25th</option></select></div>
+      <div className="pm-period-actions"><span className="pm-period-helper">{displayDate(period.start)} – {displayDate(period.end)} {incomplete?'• In progress':'• Completed'}</span><button className="pm-btn-outline" onClick={load} disabled={loading}><RefreshCw size={15}/> Refresh</button></div>
+    </section>
+    {periodError&&<div className="pm-alert" role="alert">{periodError}</div>}
+    <section className="pm-metrics-grid"><div className="pm-metric-card"><span>Instructors in roster</span><strong>{matching.length}</strong></div><div className="pm-metric-card"><span>Finalized for cutoff</span><strong>{finalized.length}</strong></div><div className="pm-metric-card"><span>Finalized gross pay</span><strong>{money(totals.gross)}</strong></div><div className="pm-metric-card"><span>Finalized net pay</span><strong>{money(totals.net)}</strong></div></section>
+    <section className="pm-roster-container"><div className="pm-roster-heading"><div><h2>Cutoff Payroll Register</h2><p>{period.label}. Finalized amounts are loaded from stored payroll records.</p></div><span>{matching.length} people</span></div>
+      <div className="pm-toolbar"><div className="pm-search-box"><Search size={15}/><input aria-label="Search payroll" placeholder="Search employee name or ID" value={query} onChange={e=>setQuery(e.target.value)}/></div><div className="pm-toolbar-actions"><button className="pm-btn-outline" onClick={exportCsv}>Export finalized CSV</button><button className="pm-btn-outline" onClick={exportRemittance}>Export remittance CSV</button><button className="pm-btn-primary" onClick={()=>setBatchOpen(true)} disabled={incomplete||busy||batchBusy||loading||Boolean(periodError)}>Run cutoff batch</button></div></div>
+      <div className="pm-table-wrapper"><table className="pm-table"><thead><tr><th>Employee ID</th><th>Instructor</th><th>Job title</th><th>Contract</th><th>Status</th><th className="text-right">Action</th></tr></thead><tbody>{loading?<tr><td colSpan={6}>Loading payroll data…</td></tr>:visible.length===0?<tr><td colSpan={6}>No matching instructor records.</td></tr>:visible.map(emp=>{const r=records.get(Number(emp.id));return <tr key={emp.id}><td>{emp.employee_id}</td><td>{emp.full_name}</td><td>{emp.position_level||emp.position||'—'}</td><td>{emp.contract_type||emp.employment_type||'—'}</td><td><span className={`pm-status ${r?(r.status==='paid'?'paid':'pending'):'draft'}`}>{r?(r.status==='paid'?'Paid':'Awaiting Payment'):'Not Finalized'}</span></td><td className="text-right"><div className="pm-action-group"><button className="pm-btn-outline pm-table-action" onClick={()=>openEmployee(emp)}>View</button>{r?.status==='pending'&&<button className="pm-btn-primary pm-table-action" onClick={()=>confirmPaid(r)} disabled={busy}>Confirm paid</button>}</div></td></tr>})}</tbody></table></div>
+      <div className="pm-pagination"><span>Page {Math.min(page,pages)} of {pages}</span><div className="pm-pagination-actions"><button disabled={page<=1} onClick={()=>setPage(p=>p-1)}>Previous</button><button disabled={page>=pages} onClick={()=>setPage(p=>p+1)}>Next</button></div></div>
+    </section>
+    {selected&&<div className="pm-modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setSelected(null);}}><section className="pm-modal-card wide" role="dialog" aria-modal="true" aria-label="Payroll details"><header className="pm-modal-header"><div><h3>{saved?'Finalized payslip':'Payroll preview'}</h3><span className="pm-modal-subtitle">{selected.full_name} • {period.label}</span></div><button className="pm-modal-close" onClick={()=>setSelected(null)}><X/></button></header><div className="pm-modal-body">
+      <div className="pm-payslip-summary"><div><span>Employee</span><strong>{selected.employee_id}</strong></div><div><span>Dates</span><strong>{displayDate(period.start)} – {displayDate(period.end)}</strong></div><div><span>Status</span><strong>{saved?(saved.status==='paid'?'Paid':'Finalized'):'Draft (not saved)'}</strong></div></div>
+      {!saved&&<><p className="pm-modal-desc">Enter approved adjustments and request a server-authoritative preview. Changes invalidate the previous preview. Finalization is unavailable before the cutoff ends. Allowances are restricted by employee classification.</p><div className="pm-form-row pm-adjustment-grid">{fields.map(([key,label])=><div className="pm-form-group" key={key}><label htmlFor={`pm-${key}`}>{label}</label><input id={`pm-${key}`} className="pm-input" inputMode="decimal" disabled={!allowanceEligible && ["transport_allowance","meal_allowance","housing_allowance"].includes(key)} value={adjustments[key]} onChange={e=>{setAdjustments(a=>({...a,[key]:e.target.value}));setPreview(null);}}/></div>)}</div><button className="pm-btn-outline" onClick={calculate} disabled={busy||!canPrepare(selected)}>Calculate on server</button></>}
+      {calc?<div className="pm-formal-payslip"><h4>Earnings & deductions</h4>{[
+        ['Recorded / paid hours',Number(calc.total_hours||0).toFixed(2)+' hrs'],['Hourly basis',money(calc.salary_rate)],['Overtime pay',money(calc.overtime_pay)],
+        ['Transport allowance',money(calc.transport_allowance)],['Meal allowance',money(calc.meal_allowance)],['Housing allowance',money(calc.housing_allowance)],['Bonus',money(calc.bonus)],
+        ['Gross earnings',money(calc.gross_pay)],['Tax',money(calc.tax_deduction)],['SSS',money(calc.sss_deduction)],['PhilHealth',money(calc.philhealth_deduction)],['Pag-IBIG',money(calc.pagibig_deduction)],['MBF',money(calc.mbf_deduction)],['Loans',money(calc.loan_deduction)],['Other deductions',money(calc.other_deduction)],['Late / undertime',money(calc.late_deduction)]
+      ].map(([k,v])=><div className="pm-formal-row" key={k}><span>{k}</span><strong>{v}</strong></div>)}<div className="pm-net-banner"><strong>Net take-home pay</strong><strong>{money(calc.net_pay)}</strong></div>{previewSource&&<p className="pm-modal-desc">Verified: {previewSource.regular_hours} working hours, {previewSource.paid_leave_days} approved paid leave days, {previewSource.overtime_hours} approved overtime hours.</p>}</div>:<p className="pm-modal-desc">{saved?'No stored amount available.':'Select Calculate on server to obtain payroll amounts.'}</p>}
+    </div><footer className="pm-modal-footer"><button className="pm-btn-outline" onClick={()=>setSelected(null)}>Close</button>{saved&&<button className="pm-btn-outline" onClick={printSavedPayslip}>Print / Save PDF</button>}{!saved&&<button className="pm-btn-primary" disabled={busy||!preview||incomplete||!canPrepare(selected)} onClick={finalize}>Finalize cutoff</button>}</footer></section></div>}
+    {batchOpen&&<div className="pm-modal-backdrop"><section className="pm-modal-card small" role="dialog" aria-modal="true"><header className="pm-modal-header"><h3>Run cutoff payroll</h3><button className="pm-modal-close" onClick={()=>setBatchOpen(false)}><X/></button></header><div className="pm-modal-body"><p className="pm-modal-desc">Finalize eligible instructors for <strong>{period.label}</strong>. The server validates all records and skips already-finalized employee/cutoff pairs. Confirm approved allowances and payroll policies before proceeding.</p></div><footer className="pm-modal-footer"><button className="pm-btn-outline" onClick={()=>setBatchOpen(false)}>Cancel</button><button className="pm-btn-primary" disabled={batchBusy||incomplete} onClick={runBatch}>{batchBusy?'Processing…':'Run cutoff batch'}</button></footer></section></div>}
+  </main>;
 };
 
 export default PayrollMain;

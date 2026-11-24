@@ -241,3 +241,23 @@
   .pm-formal-row { flex-direction: column; gap: 5px; }
   .pm-formal-input { text-align: left; }
 }
+
+/* Cutoff-aware extensions — match enterprise UniVITA admin standard */
+.pm-alert { margin: 10px 0; padding: 12px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; border-radius: 5px; }
+.pm-adjustment-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 16px; }
+.pm-formal-payslip { margin-top: 18px; padding: 13px; }
+.pm-formal-payslip h4 { margin: 0 0 11px; font-size: 13px; }
+.pm-modal-body .pm-payslip-summary { grid-template-columns: 1fr 1fr 1fr; }
+.pm-top-bar .pm-input { min-width: 230px; }
+.pm-metric-card > span { font-size: 11px; color: #64748b; }
+.pm-metric-card > strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.pm-modal-body .pm-net-banner strong:last-child { font-size: 19px; }
+@media(max-width:650px){ .pm-adjustment-grid {grid-template-columns:1fr;} .pm-modal-body .pm-payslip-summary{grid-template-columns:1fr;} }
+
+/* Period-specific page labels, forms and accessibility */
+.pm-page-heading h1{margin:0 0 4px;}
+.pm-modal-body .pm-formal-payslip .pm-formal-row strong{font-variant-numeric:tabular-nums;text-align:right;}
+.pm-modal-body .pm-formal-payslip h4{margin:0 0 8px;}
+.pm-modal-body .pm-adjustment-grid input:disabled{background:#f1f5f9;cursor:not-allowed;}
+.pm-roster-container .pm-table td:last-child{white-space:nowrap;}
+.pm-alert{line-height:1.5;}

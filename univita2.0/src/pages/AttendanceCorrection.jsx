@@ -311,11 +311,21 @@ const AttendanceCorrection = () => {
     // A ref blocks a second submission immediately, before React re-renders.
     if (reviewingCorrectionRef.current !== null) return;
     const verb = status === 'approved' ? 'approve' : 'reject';
+    let adminRemarks = null;
+    if (status === 'rejected') {
+      const reason = window.prompt('Enter the rejection reason (5–500 characters):');
+      if (reason === null) return;
+      if (reason.trim().length < 5 || reason.trim().length > 500) {
+        toast.error('A rejection reason of 5–500 characters is required.');
+        return;
+      }
+      adminRemarks = reason.trim();
+    }
     if (!window.confirm(`Are you sure you want to ${verb} this correction request?`)) return;
     reviewingCorrectionRef.current = id;
     setReviewingCorrectionId(id);
     try {
-      await axios.put(`${API_BASE}/attendance/corrections/${id}/review`, { status }, getAuthHeaders());
+      await axios.put(`${API_BASE}/attendance/corrections/${id}/review`, { status, admin_remarks: adminRemarks }, getAuthHeaders());
       toast.success(`Correction request ${status}`);
       await Promise.all([fetchPendingCorrections(), fetchDefaultRecords(), ...(searchDone ? [fetchRecords()] : [])]);
     } catch (err) {
@@ -702,6 +712,10 @@ const AttendanceCorrection = () => {
                           <div className="ac-minimal-field">
                             <label>Attendance Date</label>
                             <span>{formatDate(c.attendance_date)}</span>
+                          </div>
+                          <div className="ac-minimal-field">
+                            <label>Assigned Shift</label>
+                            <span>{c.schedule_id ? `Schedule #${c.schedule_id}` : 'Not specified'}</span>
                           </div>
                           <div className="ac-minimal-field">
                             <label>Requested Time</label>

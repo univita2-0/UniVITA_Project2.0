@@ -83,6 +83,10 @@ const useDebouncedValue = (value, delay = 300) => {
 };
 
 // C10 legacy-data visibility: flag possible missing stored hours; never infer payable hours.
+const leaveDurationLabel = value => ({ 'Whole Day': 'Full-day leave', '1st Half': 'First-half leave', '2nd Half': 'Second-half leave' }[value] || null);
+const isApprovedFullLeave = r => r?.leave_duration === 'Whole Day' || (String(r?.status || '').toLowerCase() === 'on leave' && !r?.leave_duration);
+const hasApprovedPartialLeave = r => ['1st Half', '2nd Half'].includes(r?.leave_duration);
+
 const hasStoredHoursDiscrepancy = (record) => {
   const valid = value => /^\d{1,2}:\d{2}(?::\d{2})?$/.test(String(value || ''));
   if (!valid(record?.time_in) || !valid(record?.time_out)) return false;
@@ -218,32 +222,21 @@ const Attendance = () => {
 
         const recoveryBySchedule = new Map(recoveryRows.map(r => [String(r.schedule_id), r]));
         const processed = rawData.map(record => {
-          let calcStatus = '';
           const c12 = recoveryBySchedule.get(String(record.schedule_id));
           const sStart = record.start_time || record.scheduled_start;
           const sEnd = record.end_time || record.scheduled_end;
-
-          if (!sStart || sStart === '--:--') {
-            calcStatus = 'No Schedule';
-          } else if (record.time_in && record.time_in !== '--:--') {
-            const graceEnd = addMinutes(sStart, 15);
-            calcStatus = record.time_in > graceEnd ? 'Late' : 'Present';
-          } else {
-            if (isToday) {
-              calcStatus = (sEnd && currentTimeStr < sEnd) ? 'Scheduled' : 'Absent';
-            } else if (isPastDay) {
-              calcStatus = 'Absent';
-            } else {
-              calcStatus = 'Scheduled';
-            }
-          }
+          const storedStatus = String(record.status || '').trim();
+          const approvedFullLeave = record.leave_duration === 'Whole Day';
+          const knownStatuses = ['Present', 'Late', 'Absent', 'Scheduled', 'No Schedule', 'Pending', 'Missing Clock-Out', 'In Progress', 'On Leave', 'Partial Leave', 'Pending HR Review'];
+          let calcStatus = approvedFullLeave ? 'On Leave' : (knownStatuses.find(s => s.toLowerCase() === storedStatus.toLowerCase()) || 'Scheduled');
+          if (calcStatus === 'Scheduled' && (!sStart || sStart === '--:--')) calcStatus = 'No Schedule';
           return {
             ...record,
-            status: c12?.status === 'MISSING_CLOCK_OUT' ? 'Missing Clock-Out'
+            status: approvedFullLeave ? 'On Leave' : c12?.status === 'MISSING_CLOCK_OUT' ? 'Missing Clock-Out'
               : c12?.status === 'IN_PROGRESS' ? 'In Progress'
               : ['PENDING_HR_REVIEW', 'OFFLINE_PENDING_REVIEW'].includes(c12?.status) ? 'Pending HR Review'
               : c12?.status === 'ON_LEAVE' ? 'On Leave'
-              : ['Missing Clock-Out','In Progress','Pending'].includes(record.status) ? record.status : calcStatus,
+              : calcStatus,
             start_time: sStart,
             end_time: sEnd,
             location: (record.time_in && record.time_in !== '--:--') ? (record.location || 'Main Campus') : '--',
@@ -279,17 +272,19 @@ const Attendance = () => {
           if (Number.isFinite(hours) && hours > 8) emp.overtime_days += 1;
 
           const hasClockedIn = record.time_in && record.time_in !== '--:--';
+          const approvedFullLeave = isApprovedFullLeave(record);
+          const approvedPartialLeave = hasApprovedPartialLeave(record);
           const hasSchedule = record.scheduled_start && record.scheduled_start !== '--:--';
 
           if (hasClockedIn) {
             emp.present_days += 1;
             if (hasSchedule) {
-              const graceEnd = addMinutes(record.scheduled_start, 15);
+              const graceEnd = addMinutes(record.scheduled_start, 30);
               if (record.time_in > graceEnd) {
                 emp.late_days += 1;
               }
             }
-          } else if (hasSchedule) {
+          } else if (hasSchedule && !approvedFullLeave && !approvedPartialLeave) {
             const recordDate =
               parseDateInput(String(record.attendance_date || '').slice(0, 10), 'daily') ||
               new Date(record.attendance_date);
@@ -352,6 +347,7 @@ const Attendance = () => {
     let counts = { present: 0, absent: 0, late: 0, overtime: 0 };
     data.forEach(item => {
       const s = item.status?.toLowerCase();
+      if (isApprovedFullLeave(item)) return;
       if (s === 'present') counts.present++;
       else if (s === 'absent') counts.absent++;
       else if (s === 'late') counts.late++;
@@ -431,19 +427,53 @@ const Attendance = () => {
   const canGoForward = view === 'daily' ? startOfDay(currentDate) < maxDaily : startOfMonth(currentDate) < maxMonthly;
   const colSpan = view === 'daily' ? 6 : 5;
 
-  const statCards = view === 'daily'
-    ? [
-        { label: 'Present Today', value: isFuture ? 0 : stats.present, color: 'green' },
-        { label: 'Absent Today', value: isFuture ? 0 : stats.absent, color: 'red' },
-        { label: 'Late Arrivals', value: isFuture ? 0 : stats.late, color: 'orange' },
-        { label: 'Overtime', value: isFuture ? 0 : stats.overtime, color: 'purple' },
-      ]
-    : [
-        { label: 'Present (Month)', value: stats.present, color: 'green' },
-        { label: 'Absent (Month)', value: stats.absent, color: 'red' },
-        { label: 'Late (Month)', value: stats.late, color: 'orange' },
-        { label: 'Overtime Days', value: stats.overtime, color: 'purple' },
-      ];
+  
+const statCards = view === 'daily'
+  ? [
+      {
+        label: 'Present Today',
+        value: isFuture ? 0 : stats.present,
+        color: 'green'
+      },
+      {
+        label: 'Absent Today',
+        value: isFuture ? 0 : stats.absent,
+        color: 'red'
+      },
+      {
+        label: 'Late Arrivals',
+        value: isFuture ? 0 : stats.late,
+        color: 'orange'
+      },
+      {
+        label: 'Recorded Shifts Over 8h',
+        value: isFuture ? 0 : stats.overtime,
+        color: 'purple'
+      }
+    ]
+  : [
+      {
+        label: 'Present (Month)',
+        value: stats.present,
+        color: 'green'
+      },
+      {
+        label: 'Absent (Month)',
+        value: stats.absent,
+        color: 'red'
+      },
+      {
+        label: 'Late (Month)',
+        value: stats.late,
+        color: 'orange'
+      },
+      {
+        label: 'Recorded Days Over 8h',
+        value: stats.overtime,
+        color: 'purple'
+      }
+    ];
+
 
   const metricIcons = [UserCheck, UserX, Clock3, Timer];
   const periodLabel = view === 'daily'
@@ -498,7 +528,7 @@ const Attendance = () => {
         <div className="att-workspace-header">
           <div className="att-workspace-title">
            
-            <div><h2>Attendance Records</h2><p>{view === 'daily' ? 'Daily clock-in and clock-out records' : 'Monthly attendance totals by employee'}</p></div>
+            <div><h2>Attendance Records</h2><p>{view === 'daily' ? 'Daily clock-in and clock-out records (long shifts are not automatically approved overtime)' : 'Monthly attendance totals by employee'}</p></div>
           </div>
           <span className="att-record-count">{loading ? 'Loading' : `${filteredData.length} record${filteredData.length === 1 ? '' : 's'}`}</span>
         </div>
@@ -526,7 +556,7 @@ const Attendance = () => {
             value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="att-input" aria-label="Search employee" /></div>
           {view === 'daily' && <select className="att-select" aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="All Status">All statuses</option><option value="Present">Present</option><option value="Late">Late</option>
-            <option value="Absent">Absent</option><option value="Missing Clock-Out">Missing Clock-Out</option><option value="In Progress">In Progress</option><option value="Pending HR Review">Pending HR Review</option><option value="On Leave">On Leave</option><option value="Scheduled">Scheduled</option><option value="No Schedule">No Schedule</option>
+            <option value="Absent">Absent</option><option value="Missing Clock-Out">Missing Clock-Out</option><option value="In Progress">In Progress</option><option value="Pending HR Review">Pending HR Review</option><option value="On Leave">On Leave</option><option value="Partial Leave">Partial Leave</option><option value="Scheduled">Scheduled</option><option value="No Schedule">No Schedule</option>
           </select>}
           <div className="att-filter-spacer" />
           <span className="att-filter-hint">Showing {filteredData.length} of {attendanceData.length} employees</span>
@@ -577,7 +607,7 @@ const Attendance = () => {
                           <div className="att-emp-name">{row.full_name}</div>
                           <div className="att-emp-id">{row.employee_id}</div>
                         </td>
-                        <td><span className={`att-status-badge ${row.status?.toLowerCase().replace(' ', '-')}`}>{row.status}</span></td>
+                        <td><span className={`att-status-badge ${row.status?.toLowerCase().replace(' ', '-')}`}>{row.status}</span>{hasApprovedPartialLeave(row) && <span className="att-leave-note">{leaveDurationLabel(row.leave_duration)} approved</span>}</td>
                         <td>{formatTo12Hour(row.time_in)}</td>
                         <td>{formatTo12Hour(row.time_out)}</td>
                         <td>{row.total_hours} hrs{hasStoredHoursDiscrepancy(row) && <span title="Recorded clock times differ, but stored hours are zero. Verify with HR before payroll use." style={{ display: 'block', color: '#b45309', fontSize: 11 }}>Review hours</span>}</td>
@@ -687,6 +717,7 @@ const Attendance = () => {
               <div className="att-detail-field">
                 <span className="att-detail-label">Status</span>
                 <span className="att-detail-value">{selectedRecord.status}</span>
+                {selectedRecord.leave_duration && <span className="att-leave-note">Approved: {leaveDurationLabel(selectedRecord.leave_duration)}</span>}
               </div>
               <div className="att-detail-field">
                 <span className="att-detail-label">Total Hours</span>

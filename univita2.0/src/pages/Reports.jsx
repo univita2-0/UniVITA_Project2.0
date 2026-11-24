@@ -154,8 +154,8 @@ const Reports = () => {
     setAttendanceData(data.map(e => ({
       ...e,
       regular_hours: Number(e.regular_hours) || 0,
-      overtime_hours: Number(e.overtime_hours) || 0,
-      leave_days: Number(e.leave_days) || 0,
+      overtime_hours: e.overtime_hours === null || e.overtime_hours === undefined ? null : Number(e.overtime_hours),
+      leave_days: e.leave_days === null || e.leave_days === undefined ? null : Number(e.leave_days),
       scheduled_shifts: Number(e.scheduled_shifts) || Number(e.scheduled_days) || 0,
       present_shifts: Number(e.present_shifts) || Number(e.present_days) || 0,
       late_count: Number(e.late_count) || Number(e.late_days) || 0
@@ -166,7 +166,7 @@ const Reports = () => {
     const res = await axios.get(`${API_BASE}/payroll/history`, getAuthHeaders());
     const all = Array.isArray(res.data) ? res.data : [];
     const target = new Date(selectedMonth + '-01').toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-    setPayrollData(all.filter(p => p.month_year === target));
+    setPayrollData(all.filter(p => p.month_year === target || String(p.month_year || '').startsWith(target + ' | ')));
   };
 
   const fetchVisitorData = async () => {
@@ -242,11 +242,11 @@ const Reports = () => {
     let filename = `Report_${selectedReport}_${selectedMonth}.csv`;
 
     if (selectedReport === 'attendance') {
-      headers = ['Employee ID', 'Name', 'Regular Hours', 'Overtime Hours (Unverified)', 'Leave Days (Unverified)'];
-      rows = attendanceData.map(e => [e.employee_id, e.full_name, e.regular_hours, 'Not verified', 'Not verified']);
+      headers = ['Employee ID', 'Name', 'Regular Hours', 'Approved Overtime Hours', 'Approved Leave Days'];
+      rows = attendanceData.map(e => [e.employee_id, e.full_name, e.regular_hours, e.overtime_hours == null ? 'Unavailable' : e.overtime_hours, e.leave_days == null ? 'Unavailable' : e.leave_days]);
     } else if (selectedReport === 'payroll') {
-      headers = ['Employee ID', 'Name', 'Gross Pay', 'SSS', 'PhilHealth', 'Pag-IBIG', 'Tax', 'Net Pay'];
-      rows = payrollData.map(p => [p.employee_id, p.full_name, p.gross_pay, p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.tax_deduction, p.net_pay]);
+      headers = ['Employee ID', 'Name', 'Cutoff', 'Gross Pay', 'SSS', 'PhilHealth', 'Pag-IBIG', 'MBF', 'Tax', 'Net Pay'];
+      rows = payrollData.map(p => [p.employee_id, p.full_name, p.month_year, p.gross_pay, p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.mbf_deduction || 0, p.tax_deduction, p.net_pay]);
     } else if (selectedReport === 'visitor' && isSecurity) {
       headers = ['Visitor', 'Visit Date', 'Visit Time', 'Purpose', 'Status'];
       rows = visitorList.map(v => [
@@ -289,31 +289,34 @@ const Reports = () => {
 
   const renderAttendanceReport = () => {
     const totalReg = attendanceData.reduce((s, e) => s + e.regular_hours, 0);
-    const totalOT = 0; // Monthly API returns a hard-coded zero; do not claim it as a measured total.
-    const totalLeave = 0; // The current monthly query excludes 'on leave' rows.
-    const hoursBreakdown = [{ name: 'Regular Hours', value: totalReg }]; // The source API does not return reconciled overtime.
+    const totalOT = attendanceData.every(e => e.overtime_hours != null && Number.isFinite(e.overtime_hours))
+      ? attendanceData.reduce((sum, e) => sum + e.overtime_hours, 0) : null;
+    const totalLeave = attendanceData.every(e => e.leave_days !== null && Number.isFinite(e.leave_days))
+      ? attendanceData.reduce((sum, e) => sum + e.leave_days, 0) : null;
+    const hoursBreakdown = [{ name: 'Regular Hours', value: totalReg },
+      ...(totalOT != null ? [{ name: 'Approved Overtime Hours', value: totalOT }] : [])];
     const topEmployees = [...attendanceData]
       .sort((a, b) => b.regular_hours - a.regular_hours)
       .slice(0, 10)
       .map(e => ({
         name: e.full_name?.split(' ')[0] || e.employee_id,
         Regular: Number(e.regular_hours.toFixed(1)),
-        Overtime: 0
+        Overtime: e.overtime_hours == null ? 0 : Number(e.overtime_hours.toFixed(1))
       }));
 
     return (
       <div className="formal-rep-screen">
         <div className="formal-rep-stats-grid">
           <StatBox label="Total Regular Hours" value={`${totalReg.toFixed(1)} hrs`} />
-          <StatBox label="Overtime Hours" value="Not verified" />
-          <StatBox label="Approved Leave Days" value="Not verified" />
+          <StatBox label="Approved Overtime Hours" value={totalOT == null ? "Unavailable" : `${totalOT.toFixed(1)} hrs`} />
+          <StatBox label="Approved Leave Days" value={totalLeave == null ? "Unavailable" : totalLeave.toFixed(1)} />
           <StatBox label="Faculty Tracked" value={attendanceData.length} />
         </div>
         <div className="formal-rep-chart-grid">
           <div className="formal-rep-card">
-            <div className="formal-rep-card-header"><h3>Recorded Regular Instruction Hours</h3></div>
+            <div className="formal-rep-card-header"><h3>Recorded Hours Within Scheduled Shifts</h3></div>
             <div className="formal-rep-card-body">
-              {totalReg === 0 && totalOT === 0 ? <div className="formal-rep-empty">No regular attendance hours returned for this month.</div> : (
+              {totalReg === 0 && (totalOT == null || totalOT === 0) ? <div className="formal-rep-empty">No regular attendance or approved overtime hours returned for this month.</div> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <RPieChart>
                     <Pie data={hoursBreakdown} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={65} outerRadius={95} paddingAngle={4} label>
@@ -327,7 +330,7 @@ const Reports = () => {
             </div>
           </div>
           <div className="formal-rep-card">
-            <div className="formal-rep-card-header"><h3>Recorded Regular Hours by Faculty (Top 10)</h3></div>
+            <div className="formal-rep-card-header"><h3>Scheduled-Shift Hours by Faculty (Top 10)</h3></div>
             <div className="formal-rep-card-body">
               {topEmployees.length === 0 ? <div className="formal-rep-empty">No faculty hours recorded.</div> : (
                 <ResponsiveContainer width="100%" height={280}>
@@ -338,6 +341,7 @@ const Reports = () => {
                     <Tooltip cursor={{ fill: '#F8FAFC' }} contentStyle={tooltipStyle} />
                     <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '0.85rem' }} />
                     <Bar dataKey="Regular" stackId="a" fill="#0F172A" maxBarSize={32} />
+                    <Bar dataKey="Overtime" stackId="a" fill="#0D9488" maxBarSize={32} />
                     </BarChart>
                 </ResponsiveContainer>
               )}
@@ -363,7 +367,29 @@ const Reports = () => {
           <StatBox label="Payroll Records" value={payrollData.length} />
           <StatBox label="Total Gross Earnings" value={`₱${grossSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} />
           <StatBox label="Total Net Pay" value={`₱${netSum.toLocaleString(undefined, {minimumFractionDigits: 2})}`} />
-          <StatBox label="Average Net Salary" value={`₱${(payrollData.length ? netSum / payrollData.length : 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`} />
+          <StatBox label="Average Net per Record" value={`₱${(payrollData.length ? netSum / payrollData.length : 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`} />
+        </div>
+        <div className="formal-rep-card">
+          <div className="formal-rep-card-header"><h3>Saved cutoff records</h3></div>
+          <div className="formal-rep-card-body p-0">
+            {payrollData.length === 0 ? <p className="formal-rep-empty">No saved payroll records.</p> : (
+              <div className="formal-rep-table-wrapper">
+                <table className="formal-rep-table">
+                  <thead><tr><th>Employee</th><th>Payroll cutoff</th><th>Status</th><th>Gross pay</th><th>MBF</th><th>Net pay</th></tr></thead>
+                  <tbody>{payrollData.map((p, i) => (
+                    <tr key={p.id || `${p.user_id}-${p.month_year}-${i}`}>
+                      <td><strong>{p.full_name || p.employee_id || p.user_id}</strong></td>
+                      <td>{p.month_year || 'Unspecified legacy period'}</td>
+                      <td>{p.status === 'paid' ? 'Paid' : 'Finalized / payment pending'}</td>
+                      <td>₱{Number(p.gross_pay || 0).toLocaleString('en-PH', {minimumFractionDigits:2})}</td>
+                      <td>₱{Number(p.mbf_deduction || 0).toLocaleString('en-PH', {minimumFractionDigits:2})}</td>
+                      <td><strong>₱{Number(p.net_pay || 0).toLocaleString('en-PH', {minimumFractionDigits:2})}</strong></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
         <div className="formal-rep-card">
           <div className="formal-rep-card-header"><h3>Recorded Gross and Net Payroll (Top 10)</h3></div>
@@ -561,7 +587,7 @@ const Reports = () => {
         </div>
         <div className="print-audit-box">
           <div className="print-dcn">DCN: {reportCode}-{currentYear}{currentMonthNum}-{Date.now().toString().slice(-4)}</div>
-          <div><strong>Period:</strong> {monthLabel} 01–{lastDayStr}, {currentYear}</div>
+          <div><strong>Period:</strong> {reportCode === 'REP-PAY' ? `${monthLabel} (all saved cutoffs)` : `${monthLabel} 01–${lastDayStr}, ${currentYear}`}</div>
           <div><strong>Department:</strong> Faculty & Simulation Operations</div>
           <div><strong>Generated:</strong> {new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })}</div>
         </div>
@@ -717,13 +743,13 @@ const Reports = () => {
           <PrintableHeader
             title="MONTHLY FACULTY TIMEKEEPING & ATTENDANCE REGISTER"
             reportCode="REP-DTR"
-            methodologyText="Compiled from the monthly attendance source. Overtime and approved leave totals are unavailable from this feed. This register is an internal summary, not an individual DTR or audited certification."
+            methodologyText="Compiled from the monthly attendance source. Overtime hours represent approved requests for completed, same-day overtime intervals. Approved leave days are taken from approved leave requests. This register is an internal summary, not an individual DTR or audited certification."
           />
           <div className="print-kpi-row">
             <div className="print-kpi-cell">Total Tracked: <strong>{attendanceData.length} Instructors</strong></div>
             <div className="print-kpi-cell">Total Rendered: <strong>{attendanceData.reduce((s, e) => s + e.regular_hours, 0).toFixed(1)} hrs</strong></div>
-            <div className="print-kpi-cell">Overtime: <strong>Unavailable in monthly source</strong></div>
-            <div className="print-kpi-cell">Approved Leave: <strong>Unavailable in monthly source</strong></div>
+            <div className="print-kpi-cell">Approved Overtime: <strong>{attendanceData.every(e => e.overtime_hours != null && Number.isFinite(e.overtime_hours)) ? `${attendanceData.reduce((sum, e) => sum + e.overtime_hours, 0).toFixed(1)} hrs` : "Unavailable"}</strong></div>
+            <div className="print-kpi-cell">Approved Leave: <strong>{attendanceData.every(e => e.leave_days != null && Number.isFinite(e.leave_days)) ? `${attendanceData.reduce((sum, e) => sum + e.leave_days, 0).toFixed(1)} days` : "Unavailable"}</strong></div>
           </div>
           <table className="formal-print-table">
             <thead>
@@ -744,14 +770,14 @@ const Reports = () => {
                   <td className="font-mono">{emp.employee_id}</td>
                   <td><strong>{emp.full_name}</strong></td>
                   <td className="text-right">{emp.regular_hours.toFixed(1)}h</td>
-                  <td className="text-right">Unavailable</td>
-                  <td className="text-center">Unavailable</td>
+                  <td className="text-right">{emp.overtime_hours == null ? "Unavailable" : `${emp.overtime_hours.toFixed(1)}h`}</td>
+                  <td className="text-center">{emp.leave_days == null ? "Unavailable" : emp.leave_days.toFixed(1)}</td>
                   <td className="text-center">{emp.regular_hours > 0 ? 'RECORDED' : 'NO HOURS IN SOURCE'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="print-legend">Regular hours are taken from the monthly attendance source. Overtime and approved leave are unavailable from this feed. A displayed zero may indicate an unrecorded schedule rather than confirmed absence. Record verification requires individual DTR reconciliation.</p>
+          <p className="print-legend">Regular hours represent recorded attendance overlapping assigned schedules in the monthly source. Approved overtime is counted from completed-work requests; it is not a payroll amount. Approved leave days are counted from approved leave requests. A displayed zero may indicate an unrecorded schedule rather than confirmed absence. Record verification requires individual DTR reconciliation.</p>
           <PrintableFooter />
         </div>
       )}
@@ -759,12 +785,12 @@ const Reports = () => {
       {canWrite && selectedReport === 'payroll' && (
         <div className="print-only">
           <PrintableHeader
-            title="MONTHLY PAYROLL REGISTER & COMPENSATION REVIEW"
+            title="PAYROLL REGISTER — SAVED CUTOFFS & COMPENSATION REVIEW"
             reportCode="REP-PAY"
-            methodologyText="Saved payroll calculations for the selected period. Finalized records may be pending payment; verify payment status independently."
+            methodologyText="Saved payroll calculations for the selected payroll month, including the 26th–10th and 11th–25th cutoffs when present. Older monthly records remain identified as legacy. Finalized records may still be awaiting payment confirmation."
           />
           <div className="print-kpi-row">
-            <div className="print-kpi-cell">Payroll Records: <strong>{payrollData.length} Personnel</strong></div>
+            <div className="print-kpi-cell">Payroll Records: <strong>{payrollData.length} Saved Entries</strong></div>
             <div className="print-kpi-cell">Gross Payroll: <strong>₱{payrollData.reduce((s, p) => s + (parseFloat(p.gross_pay) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
             <div className="print-kpi-cell">Total Deductions: <strong>₱{payrollData.reduce((s, p) => s + Math.max(0, (parseFloat(p.gross_pay) || 0) - (parseFloat(p.net_pay) || 0)), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
             <div className="print-kpi-cell">Total Net Payroll: <strong>₱{payrollData.reduce((s, p) => s + (parseFloat(p.net_pay) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
@@ -774,12 +800,14 @@ const Reports = () => {
               <tr>
                 <th style={{ width: '4%' }}>No.</th>
                 <th style={{ width: '12%' }}>Employee ID</th>
-                <th style={{ width: '24%' }}>Personnel Name</th>
-                <th style={{ width: '12%' }} className="text-right">Gross Earnings</th>
+                <th style={{ width: '18%' }}>Personnel Name</th>
+                <th style={{ width: '15%' }}>Pay Period / Cutoff</th>
+                <th className="text-right">Gross Earnings</th>
                 <th style={{ width: '12%' }} className="text-right">SSS</th>
                 <th style={{ width: '12%' }} className="text-right">PhilHealth</th>
-                <th style={{ width: '12%' }} className="text-right">Pag-IBIG</th>
-                <th style={{ width: '12%' }} className="text-right">Tax</th>
+                <th className="text-right">Pag-IBIG</th>
+                <th className="text-right">MBF</th>
+                <th className="text-right">Tax</th>
                 <th style={{ width: '12%' }} className="text-right">Net Pay</th>
               </tr>
             </thead>
@@ -789,10 +817,12 @@ const Reports = () => {
                   <td className="text-center">{i + 1}</td>
                   <td className="font-mono">{p.employee_id || p.user_id}</td>
                   <td><strong>{p.full_name}</strong></td>
+                  <td className="font-mono">{p.month_year || 'Legacy period'}</td>
                   <td className="text-right">₱{Number(p.gross_pay || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="text-right text-danger">₱{Number(p.sss_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="text-right text-danger">₱{Number(p.philhealth_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="text-right text-danger">₱{Number(p.pagibig_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="text-right text-danger">₱{Number(p.mbf_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="text-right text-danger">₱{Number(p.tax_deduction || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   <td className="text-right"><strong>₱{Number(p.net_pay || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
                 </tr>

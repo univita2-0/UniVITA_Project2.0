@@ -29,6 +29,24 @@ const formatTo12Hour = (timeStr) => {
   return `${hours}:${minutes} ${ampm}`;
 };
 
+// Current overtime requests support same-day intervals only.
+// Compare the Philippine local wall clock with the selected overtime end.
+const phNowTimestamp = () => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date());
+  const get = type => parts.find(part => part.type === type)?.value || '00';
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+};
+
+const overtimeHasEnded = request => {
+  const date = formatDate(String(request?.date || ''));
+  const time = String(request?.end_time || '').slice(0, 8);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}(?::\d{2})?$/.test(time)) return false;
+  return `${date} ${time.length === 5 ? `${time}:00` : time}` <= phNowTimestamp();
+};
+
 const normalizeStatus = (status) => {
   const s = String(status || '').toLowerCase().trim();
   if (['pending', 'approved', 'rejected', 'cancelled'].includes(s)) return s;
@@ -76,8 +94,11 @@ const OvertimeRequests = () => {
   const [viewingRequest, setViewingRequest] = useState(null);
   const [reviewingRequest, setReviewingRequest] = useState(null);
   const [reviewRemarks, setReviewRemarks] = useState('');
+  const [evidenceVerified, setEvidenceVerified] = useState(false);
   const [reviewAction, setReviewAction] = useState('approved');
   const [processing, setProcessing] = useState(false);
+  // Approval records an authorization; it does not prove actual clocked work.
+  // HR should reconcile submitted evidence with attendance before approval.
 
   const [historyPage, setHistoryPage] = useState(1);
   const [pendingPage, setPendingPage] = useState(1);
@@ -127,6 +148,7 @@ const OvertimeRequests = () => {
     setReviewingRequest(req);
     setReviewAction(action);
     setReviewRemarks('');
+    setEvidenceVerified(false);
   };
 
   const handleAction = async (id, status, remarks) => {
@@ -136,6 +158,18 @@ const OvertimeRequests = () => {
       return;
     }
     if (processing) return;
+    if (status === 'approved' && !overtimeHasEnded(reviewingRequest)) {
+      toast.error('The requested overtime must be completed before final approval. Keep it Pending.');
+      return;
+    }
+    if (status === 'approved' && !evidenceVerified) {
+      toast.error('Verify the actual overtime evidence before approving.');
+      return;
+    }
+    if (status === 'rejected' && String(remarks || '').trim().length < 5) {
+      toast.error('Please explain the rejection (minimum 5 characters).');
+      return;
+    }
     if (String(remarks || '').trim().length > 500) {
       toast.error('Review remarks must not exceed 500 characters.');
       return;
@@ -144,7 +178,7 @@ const OvertimeRequests = () => {
     try {
       await axios.put(
         `${API_BASE}/overtime-requests/${id}/status`,
-        { status, admin_remarks: remarks?.trim() || null },
+        { status, admin_remarks: remarks?.trim() || null, evidence_verified: status === 'approved' && evidenceVerified },
         getAuthHeaders()
       );
       toast.success(`Request ${status}`);
@@ -153,6 +187,7 @@ const OvertimeRequests = () => {
       setViewingRequest(null);
       setReviewingRequest(null);
       setReviewRemarks('');
+      setEvidenceVerified(false);
     } catch (err) {
       toast.error(err.response?.data?.message || `Failed to ${status} request`);
     } finally {
@@ -416,13 +451,14 @@ const OvertimeRequests = () => {
                 {normalizeStatus(viewingRequest.status) === 'pending' && canDecide && (
                   <div style={{ marginTop: '0.75rem', borderTop: '1px solid #F1F5F9', paddingTop: '0.75rem' }}>
                     <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.02em', display: 'block', marginBottom: '0.35rem' }}>
-                      Admin Remarks (Optional)
+                      Review Remarks (required for rejection)
                     </label>
                     <textarea
                       rows={3}
                       placeholder="Add remarks visible to the employee..."
                       value={reviewRemarks}
                       onChange={e => setReviewRemarks(e.target.value)}
+                      maxLength={500}
                       style={{
                         width: '100%', padding: '0.6rem', border: '1px solid #CBD5E1',
                         borderRadius: '8px', fontFamily: 'inherit', fontSize: '0.85rem',
@@ -436,14 +472,17 @@ const OvertimeRequests = () => {
                       <button
                         className="ot-btn-min-reject"
                         onClick={() => handleAction(viewingRequest.id, 'rejected', reviewRemarks)}
-                        disabled={processing || !canReject}
+                        disabled={processing || !canReject || reviewRemarks.trim().length < 5}
                         style={{ opacity: processing ? 0.6 : 1, cursor: processing ? 'not-allowed' : 'pointer' }}
                       >
                         {processing ? 'Processing...' : 'Reject'}
                       </button>
                       <button
                         className="ot-btn-min-approve"
-                        onClick={() => handleAction(viewingRequest.id, 'approved', reviewRemarks)}
+                        onClick={() => {
+  openReview(viewingRequest, 'approved');
+  setViewingRequest(null);
+}}
                         disabled={processing || !canApprove}
                         style={{ opacity: processing ? 0.6 : 1, cursor: processing ? 'not-allowed' : 'pointer' }}
                       >
@@ -632,6 +671,20 @@ const OvertimeRequests = () => {
                   )}
                 </div>
 
+                {reviewAction === 'approved' && (
+                  <div style={{ marginTop: '0.75rem', padding: '12px', border: '1px solid #E2E8F0', borderRadius: 6, background: '#F8FAFC' }}>
+                    {!overtimeHasEnded(reviewingRequest) && (
+                      <p role="alert" style={{ color: '#B45309', fontSize: 12, margin: '0 0 8px' }}>
+                        This overtime period has not ended. The request must remain Pending. You can reject it, or return to review it after the period ends.
+                      </p>
+                    )}
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 12, lineHeight: 1.5, color: '#334155', cursor: overtimeHasEnded(reviewingRequest) ? 'pointer' : 'not-allowed' }}>
+                      <input type="checkbox" checked={evidenceVerified} disabled={!overtimeHasEnded(reviewingRequest)}
+                        onChange={e => setEvidenceVerified(e.target.checked)} style={{ marginTop: 3 }} />
+                      I have verified that the requested overtime period has ended and reviewed the supporting work evidence or completed attendance record.
+                    </label>
+                  </div>
+                )}
                 <div style={{ marginTop: '0.75rem' }}>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.02em', display: 'block', marginBottom: '0.35rem' }}>
                     Admin Remarks (Visible to Employee)
@@ -664,7 +717,7 @@ const OvertimeRequests = () => {
               <button
                 className={reviewAction === 'approved' ? 'ot-btn-min-approve' : 'ot-btn-min-reject'}
                 onClick={() => handleAction(reviewingRequest.id, reviewAction, reviewRemarks)}
-                disabled={processing}
+                disabled={processing || (reviewAction === 'rejected' && reviewRemarks.trim().length < 5) || (reviewAction === 'approved' && (!overtimeHasEnded(reviewingRequest) || !evidenceVerified))}
                 style={{ padding: '0.6rem 1rem', opacity: processing ? 0.6 : 1, cursor: processing ? 'not-allowed' : 'pointer' }}
               >
                 {processing ? 'Processing...' : `Confirm ${reviewAction === 'approved' ? 'Approval' : 'Rejection'}`}
