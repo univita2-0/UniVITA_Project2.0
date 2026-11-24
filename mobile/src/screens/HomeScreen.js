@@ -59,6 +59,31 @@ const getTodayString = () => new Date().toLocaleDateString('en-CA', { timeZone: 
 const EARLY_GRACE_MINUTES = 5;
 const LATE_GRACE_MINUTES  = 15; 
 
+const isRecoveryClockOutOverdue = (item, referenceDate = new Date()) => {
+  if (item?.status !== 'MISSING_CLOCK_OUT') return false;
+
+  const shiftDate = String(item.date || '').slice(0, 10);
+  const shiftEnd = String(item.end_time || '').split('.')[0];
+  const match = /^(\d{1,2}):(\d{2})/.exec(shiftEnd);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(shiftDate) || !match) return false;
+
+  const endHour = Number(match[1]);
+  const endMinute = Number(match[2]);
+  if (endHour > 23 || endMinute > 59) return false;
+
+  const today = referenceDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+  if (shiftDate < today) return true;
+  if (shiftDate > today) return false;
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: false
+  }).formatToParts(referenceDate);
+  const hours = Number(parts.find(part => part.type === 'hour')?.value ?? 0);
+  const minutes = Number(parts.find(part => part.type === 'minute')?.value ?? 0);
+  return (hours * 60 + minutes) > (endHour * 60 + endMinute + LATE_GRACE_MINUTES);
+};
+
+
 
 const getReliableAttendanceLocation = async () => {
   const MAX_ACCURACY_METERS = 50;
@@ -271,7 +296,11 @@ export default function HomeScreen({ navigation }) {
   };
 
   
-  const [c12Recovery, setC12Recovery] = useState({ missing: 0, pendingReview: 0, waitingSync: 0 });
+  const [c12Recovery, setC12Recovery] = useState({ missingRows: [], pendingReview: 0, waitingSync: 0 });
+  const overdueMissingCount = useMemo(
+    () => c12Recovery.missingRows.filter(item => isRecoveryClockOutOverdue(item, currentTime)).length,
+    [c12Recovery.missingRows, currentTime]
+  );
   const [rawHistory, setRawHistory] = useState([]);
   const [rawSchedule, setRawSchedule] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(getInitialMonthString());
@@ -821,7 +850,7 @@ let permissionObservedAt = null;
         ]);
         const monitored = recovery?.success ? recovery.data : [];
         setC12Recovery({
-          missing: monitored.filter(e => e.status === 'MISSING_CLOCK_OUT').length,
+          missingRows: monitored.filter(e => e.status === 'MISSING_CLOCK_OUT'),
           pendingReview: monitored.filter(e => ['OFFLINE_PENDING_REVIEW','PENDING_HR_REVIEW'].includes(e.status)).length,
           waitingSync: localEvents?.success ? localEvents.data.length : 0
         });
@@ -1453,25 +1482,6 @@ const canClockOutNow =
               <Text style={{ color: colors.textPrimary }}>{homeLoadError} Tap to retry.</Text>
             </TouchableOpacity>
           )}
-          {(c12Recovery.missing > 0 || c12Recovery.pendingReview > 0 || c12Recovery.waitingSync > 0) && (
-            <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('AttendanceHistory')}
-              style={{ backgroundColor: isLight ? '#FFFBEB' : colors.surface, borderColor: '#EAB308', borderWidth: 1,
-                borderRadius: 8, padding: 12, marginBottom: 14 }}>
-              <Text style={{ color: isLight ? '#92400E' : colors.textPrimary, fontFamily: 'Inter_18pt-Bold', fontSize: 13 }}>
-                Attendance needs attention
-              </Text>
-              {c12Recovery.missing > 0 && <Text style={{ color: colors.textPrimary, fontSize: 12 }}>
-                {c12Recovery.missing} shift(s) have a missing Clock Out. Open Attendance History for the affected date and request a correction using the actual time.
-              </Text>}
-              {c12Recovery.pendingReview > 0 && <Text style={{ color: colors.textPrimary, fontSize: 12 }}>
-                {c12Recovery.pendingReview} attendance request(s) are awaiting HR review. Track the result in Correction or Appeal History; do not submit duplicates.
-              </Text>}
-              {c12Recovery.waitingSync > 0 && <Text style={{ color: colors.textPrimary, fontSize: 12 }}>
-                {c12Recovery.waitingSync} offline attendance event(s) are still saved on this phone, awaiting sync.
-              </Text>}
-              <Text style={{ color: '#0D9488', fontSize: 12, marginTop: 5 }}>View attendance history</Text>
-            </TouchableOpacity>
-          )}
           <View style={styles.glassBanner}>
             <View style={styles.bannerContentLeft}>
               <View style={styles.calendarIconWrapper}><Calendar size={22} color={isLight ? "#0F172A" : colors.textPrimary} strokeWidth={1.5} /></View>
@@ -1640,6 +1650,37 @@ const canClockOutNow =
   </Text>
 </TouchableOpacity>
           </View>
+
+          {(overdueMissingCount > 0 || c12Recovery.pendingReview > 0 || c12Recovery.waitingSync > 0) && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Open attendance history for attendance recovery details"
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate('AttendanceHistory')}
+              style={styles.recoveryNotice}
+            >
+              <AlertCircle
+                size={17}
+                color={overdueMissingCount > 0 ? (isLight ? '#B45309' : '#FBBF24') : (isLight ? '#0F766E' : '#5EEAD4')}
+                strokeWidth={1.8}
+              />
+              <View style={styles.recoveryNoticeContent}>
+                <Text style={styles.recoveryNoticeTitle}>
+                  {overdueMissingCount > 0 ? 'Attendance action required'
+                    : c12Recovery.waitingSync > 0 ? 'Attendance awaiting sync'
+                    : 'Attendance review in progress'}
+                </Text>
+                <Text style={styles.recoveryNoticeDescription}>
+                  {overdueMissingCount > 0
+                    ? `${overdueMissingCount} previous or overdue shift${overdueMissingCount === 1 ? '' : 's'} without a recorded clock-out. Review the affected date.`
+                    : c12Recovery.waitingSync > 0
+                      ? `${c12Recovery.waitingSync} offline attendance event${c12Recovery.waitingSync === 1 ? '' : 's'} saved on this phone, awaiting synchronization.`
+                      : `${c12Recovery.pendingReview} attendance request${c12Recovery.pendingReview === 1 ? '' : 's'} awaiting HR review. Do not submit duplicates.`}
+                </Text>
+              </View>
+              <ArrowUpRight size={17} color={isLight ? '#64748B' : colors.textSecondary} />
+            </TouchableOpacity>
+          )}
 
           <View style={styles.sectionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -1841,7 +1882,11 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   statusScheduled: { backgroundColor: isLight ? '#F1F5F9' : '#334155' },
   statusInProgress: { backgroundColor: isLight ? '#D1FAE5' : 'rgba(52, 211, 153, 0.2)' },
   statusMissed: { backgroundColor: isLight ? '#ECFDF5' : 'rgba(52, 211, 153, 0.15)' },
-  actionContainer: { flexDirection: 'row', gap: 14, marginBottom: 32 },
+  actionContainer: { flexDirection: 'row', gap: 14, marginBottom: 16 },
+  recoveryNotice: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 12, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, backgroundColor: isLight ? '#FFFFFF' : colors.surface, marginBottom: 22 },
+  recoveryNoticeContent: { flex: 1, gap: 3 },
+  recoveryNoticeTitle: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#0F172A' : colors.textPrimary },
+  recoveryNoticeDescription: { fontFamily: 'Inter_18pt-Medium', fontSize: 11, lineHeight: 16, color: isLight ? '#64748B' : colors.textSecondary },
   btnPillPrimary: { flex: 1, flexDirection: 'row', backgroundColor: isLight ? '#0F172A' : colors.buttonBg, paddingVertical: 18, borderRadius: 30, alignItems: 'center', justifyContent: 'center', gap: 8 },
   btnPillPrimaryText: { fontFamily: 'Inter_18pt-Bold', color: isLight ? '#FFFFFF' : colors.buttonText, fontSize: 14, letterSpacing: 0.5 },
   btnPillOutline: { flex: 1, flexDirection: 'row', backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, paddingVertical: 18, borderRadius: 30, alignItems: 'center', justifyContent: 'center', gap: 8 },

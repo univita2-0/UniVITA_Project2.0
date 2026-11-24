@@ -157,14 +157,32 @@ const ChatPanel = ({ token }) => {
       if (wsRef.current === ws) setConnectionState('offline');
       setChatError('Chat connection failed. Check your internet connection and try again.');
     };
-    ws.onclose = () => {
-      if (wsRef.current === ws) {
-        setConnectionState('offline');
-        setIsSending(false);
-        pendingMessageRef.current = null;
-        setChatError('Messages are disconnected. Select Reconnect to continue.');
-      }
-    };
+    
+ws.onclose = (event) => {
+  if (wsRef.current !== ws) return;
+
+  console.warn('UniVITA Chat WebSocket closed:', {
+    code: event.code,
+    reason: event.reason || 'No reason provided',
+    wasClean: event.wasClean,
+    url: WS_URL
+  });
+
+  setConnectionState('offline');
+  setIsSending(false);
+  pendingMessageRef.current = null;
+
+  if (event.code === 4001 || event.code === 4003) {
+    setChatError(
+      'Messaging authentication failed. Please sign in again.'
+    );
+  } else {
+    setChatError(
+      'Messaging connection was interrupted. Select Retry to reconnect.'
+    );
+  }
+};
+
     return () => {
       if (wsRef.current === ws) wsRef.current = null;
       ws.close();
@@ -508,9 +526,22 @@ const ChatPanel = ({ token }) => {
                     {connectionState === 'online' ? 'Connected' : connectionState === 'connecting' ? 'Connecting' : 'Disconnected'}
                   </span>
                 </div>
-                {connectionState === 'offline' && (
-                  <button type="button" className="cp-reconnect" onClick={() => { setChatError(''); setReconnectKey(value => value + 1); }}>Reconnect</button>
-                )}
+                
+{connectionState === 'offline' && (
+  <button
+    type="button"
+    className="cp-reconnect"
+    title="Reconnect to messaging"
+    aria-label="Reconnect to messaging"
+    onClick={() => {
+      setChatError('');
+      setReconnectKey(value => value + 1);
+    }}
+  >
+    Retry
+  </button>
+)}
+
                 <button type="button" className="cp-icon-btn cp-close-btn" aria-label="Close messages" onClick={togglePanel}><X size={19} /></button>
               </header>
 

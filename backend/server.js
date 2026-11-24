@@ -7274,8 +7274,13 @@ async function c14ReconcileForUser(user) {
      WHERE s.user_id = ? AND a.time_in IS NOT NULL AND a.time_out IS NULL
        AND DATE(s.date) BETWEEN DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR) - INTERVAL 3 DAY
                             AND DATE(UTC_TIMESTAMP() + INTERVAL 8 HOUR)
-       AND TIMESTAMP(DATE(s.date), s.end_time)
-           + INTERVAL (s.end_time <= s.start_time) DAY < UTC_TIMESTAMP() + INTERVAL 8 HOUR
+       
+AND (
+  TIMESTAMP(DATE(s.date), s.end_time)
+  + INTERVAL (s.end_time <= s.start_time) DAY
+  + INTERVAL 15 MINUTE
+) < (UTC_TIMESTAMP() + INTERVAL 8 HOUR)
+
        AND NOT EXISTS (SELECT 1 FROM attendance_corrections c
          WHERE c.schedule_id = s.id AND c.status = 'pending')
        AND NOT EXISTS (SELECT 1 FROM attendance_appeals ap
@@ -7450,9 +7455,17 @@ async function c12RecoveryRows(req, res, employeeId = null, transform = null) {
         a.total_hours,
         c.id AS correction_id, c.status AS correction_status, c.reason AS correction_reason,
         ap.id AS appeal_id, ap.status AS appeal_status,
-        CASE WHEN (TIMESTAMP(DATE(s.date), s.end_time)
-                 + INTERVAL (s.end_time <= s.start_time) DAY)
-                 < (UTC_TIMESTAMP() + INTERVAL 8 HOUR) THEN 1 ELSE 0 END AS shift_ended
+        
+CASE
+  WHEN (
+    TIMESTAMP(DATE(s.date), s.end_time)
+    + INTERVAL (s.end_time <= s.start_time) DAY
+    + INTERVAL 15 MINUTE
+  ) < (UTC_TIMESTAMP() + INTERVAL 8 HOUR)
+  THEN 1
+  ELSE 0
+END AS shift_ended
+
       FROM schedules s
       JOIN users u ON u.employee_id = s.user_id AND u.role = 'instructor' AND u.status IN ('active', 'deactivated')
       LEFT JOIN attendance a ON a.schedule_id = s.id
