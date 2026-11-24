@@ -21,6 +21,43 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// An explicit date from the authenticated employee response takes precedence.
+// Older backend responses only provide password_last_changed. In that case,
+// the 365-day legacy policy is an estimate, NOT a verified admin setting.
+const LEGACY_PASSWORD_EXPIRY_DAYS = 365;
+const getPasswordExpiryInfo = (employee) => {
+  const explicit = employee?.password_expires_at || employee?.password_expiry_date;
+  if (explicit) {
+    const expiry = new Date(explicit);
+    if (!Number.isNaN(expiry.getTime())) {
+      return {
+        days: Math.max(0, Math.ceil((expiry.getTime() - Date.now()) / 86400000)),
+        estimated: false,
+        disabled: false,
+      };
+    }
+  }
+
+  const configured = employee?.password_expiry_days ?? employee?.password_policy_expiry_days;
+  const configuredDays = configured === undefined || configured === null || configured === ''
+    ? null : Number(configured);
+  if (configuredDays === 0) return { days: null, estimated: false, disabled: true };
+
+  const lastChanged = employee?.password_last_changed || employee?.password_updated_at;
+  if (!lastChanged) return { days: null, estimated: false, disabled: false };
+  const changedDate = new Date(lastChanged);
+  if (Number.isNaN(changedDate.getTime())) return { days: null, estimated: false, disabled: false };
+
+  const verifiedPolicy = Number.isSafeInteger(configuredDays) && configuredDays > 0;
+  const policyDays = verifiedPolicy ? configuredDays : LEGACY_PASSWORD_EXPIRY_DAYS;
+  const expiryMs = changedDate.getTime() + policyDays * 86400000;
+  return {
+    days: Math.max(0, Math.ceil((expiryMs - Date.now()) / 86400000)),
+    estimated: !verifiedPolicy,
+    disabled: false,
+  };
+};
+
 export default function ProfileScreen({ navigation }) {
   const { isDark, toggleTheme } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
@@ -28,7 +65,7 @@ export default function ProfileScreen({ navigation }) {
   const styles = useMemo(() => getDynamicStyles(colors, isLight), [colors, isLight]);
   
   const [loading, setLoading] = useState(false);
-  const [daysRemaining, setDaysRemaining] = useState(null);
+  const [expiryInfo, setExpiryInfo] = useState({ days: null, estimated: false, disabled: false });
   const [userData, setUserData] = useState({ id: '', name: 'Loading...', email: '', role: '' });
   
   // Profile Picture States
@@ -151,15 +188,11 @@ export default function ProfileScreen({ navigation }) {
             await AsyncStorage.setItem(`@profile_picture_${userId}`, fullUrl);
           }
 
-          // Only display a deadline if the authenticated endpoint supplies one.
-          // Password-expiry policy is configurable in System Configuration.
-          const expiryValue = freshUser.password_expires_at || freshUser.password_expiry_date;
-          const expiryMs = expiryValue ? Date.parse(expiryValue) : NaN;
-          setDaysRemaining(Number.isFinite(expiryMs)
-            ? Math.max(0, Math.ceil((expiryMs - Date.now()) / 86400000))
-            : null);
+          // Show verified expiry when available; clearly mark legacy estimates.
+          setExpiryInfo(getPasswordExpiryInfo(freshUser));
         } catch (error) {
           console.log("Profile fetch error:", error);
+          setExpiryInfo({ days: null, estimated: false, disabled: false });
           const id = await AsyncStorage.getItem('user_id');
           const name = await AsyncStorage.getItem('user_name');
           const email = await AsyncStorage.getItem('user_email');
@@ -353,9 +386,24 @@ export default function ProfileScreen({ navigation }) {
             </View>
             <Text style={styles.userName}>{userData.name}</Text>
             <Text style={styles.userEmail}>{userData.email}</Text>
-            <View style={[styles.expiryBadge, (daysRemaining === null || daysRemaining > 30) && styles.expiryBadgeNeutral]}>
-              <Text style={[styles.expiryText, (daysRemaining === null || daysRemaining > 30) && styles.expiryTextNeutral]}>
-                {daysRemaining === null ? 'Password policy managed by HR' : daysRemaining === 0 ? 'Password expired' : `Password expires in ${daysRemaining} days`}
+            <View style={[
+              styles.expiryBadge,
+              (expiryInfo.disabled || expiryInfo.days === null || expiryInfo.days > 30) && styles.expiryBadgeNeutral,
+              expiryInfo.days === 0 && styles.expiryBadgeCritical,
+            ]}>
+              <ShieldCheck size={15} color={expiryInfo.days === 0 ? '#DC2626' : expiryInfo.days !== null && expiryInfo.days <= 30 ? '#B45309' : colors.textSecondary} />
+              <Text style={[
+                styles.expiryText,
+                (expiryInfo.disabled || expiryInfo.days === null || expiryInfo.days > 30) && styles.expiryTextNeutral,
+                expiryInfo.days === 0 && styles.expiryTextCritical,
+              ]}>
+                {expiryInfo.disabled
+                  ? 'Password expiration disabled'
+                  : expiryInfo.days === null
+                    ? 'Password expiration date unavailable'
+                    : expiryInfo.days === 0
+                      ? 'Password expired — update required'
+                      : `${expiryInfo.estimated ? 'Estimated · ' : ''}Password expires in ${expiryInfo.days} ${expiryInfo.days === 1 ? 'day' : 'days'}`}
               </Text>
             </View>
           </View>
@@ -562,10 +610,12 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   
   userName: { fontFamily: 'Inter_18pt-Bold', fontSize: 24, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 6 },
   userEmail: { fontFamily: 'Inter_18pt-Medium', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 16 },
-  expiryBadge: { backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: isLight ? '#FDE68A' : 'rgba(251, 191, 36, 0.2)' },
+  expiryBadge: { flexDirection: 'row', gap: 7, alignItems: 'center', backgroundColor: isLight ? '#FEF3C7' : 'rgba(251, 191, 36, 0.1)', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: isLight ? '#FDE68A' : 'rgba(251, 191, 36, 0.2)' },
   expiryText: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#D97706' : '#FBBF24' },
   expiryBadgeNeutral: { backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderColor: isLight ? '#E2E8F0' : colors.border },
   expiryTextNeutral: { color: isLight ? '#64748B' : colors.textSecondary },
+  expiryBadgeCritical: { backgroundColor: isLight ? '#FEF2F2' : 'rgba(220,38,38,.12)', borderColor: '#FECACA' },
+  expiryTextCritical: { color: isLight ? '#DC2626' : '#F87171' },
   
   menuSection: { marginBottom: 28 },
   sectionHeader: { fontFamily: 'Inter_18pt-Bold', fontSize: 12, color: isLight ? '#64748B' : colors.textSecondary, marginBottom: 12, marginLeft: 4, letterSpacing: 1.2 },

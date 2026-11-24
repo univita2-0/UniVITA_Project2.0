@@ -29,7 +29,8 @@ const getLocationAlertMeta = (alert) => {
     alert?.alert_message || ''
   ).trim().toLowerCase();
 
-  if (message === 'gps turned on' || message === 'location signal restored') {
+  if (message === 'gps turned on' || message === 'location signal restored' ||
+      message === 'location permission restored (reported by device)') {
     return {
       category: 'GPS Status',
       severity: 'information'
@@ -38,7 +39,9 @@ const getLocationAlertMeta = (alert) => {
 
   if (
     message === 'gps turned off' ||
-    message === 'location signal lost'
+    message === 'location signal lost' ||
+    message === 'location permission disabled (reported by device)' ||
+    message === 'location services disabled (reported by device)'
   ) {
     return {
       category: 'GPS Status',
@@ -532,7 +535,7 @@ const filteredAlertHistory = useMemo(() => {
           time: seg.startTime,
           type: 'GPS Status',
           severity: seg.location_enabled ? 'information' : 'warning',
-          detail: seg.location_enabled ? 'GPS location observation recorded' : 'GPS-disabled observation recorded',
+          detail: seg.location_enabled ? 'GPS location observation recorded' : (seg.location_name === 'Location Disabled' ? 'Location disabled (reported by device)' : 'GPS-disabled observation recorded'),
         });
         if (seg.location_enabled) {
           events.push({
@@ -796,14 +799,14 @@ else if (attStatus.toLowerCase().includes('late')) {
                          inst.last_position_name === 'GPS Disabled';
                        const trackingLabel = !isToday ? 'HISTORICAL'
                          : !hasOpenAttendance ? 'INACTIVE'
-                         : isExplicitlyDisabled ? 'GPS DISABLED'
+                         : isExplicitlyDisabled ? (reportedGps === 'Location Disabled' || inst.last_position_name === 'Location Disabled' ? 'LOCATION DISABLED' : 'GPS DISABLED')
                          : reportedGps === 'Signal Lost' || (gpsIsStale && gpsLastPing !== null) ? 'SIGNAL LOST'
                          : gpsIsStale ? 'NO SIGNAL'
                          : reportedGps === 'GPS ON' ? 'ON' : 'OFF';
                        const displayGpsOn = trackingLabel === 'ON';
                        const displayLocation = displayGpsOn ? Number(inst.last_is_inside) : null;
                        const trackingBadgeClass = trackingLabel === 'ON' ? 'gps-on'
-                         : trackingLabel === 'GPS DISABLED' || trackingLabel === 'SIGNAL LOST' ? 'warning' : 'gps-off';
+                         : trackingLabel === 'LOCATION DISABLED' ? 'location-disabled' : trackingLabel === 'GPS DISABLED' || trackingLabel === 'SIGNAL LOST' ? 'warning' : 'gps-off';
 
                       const hasClockedIn =
                         inst.time_in !== null &&
@@ -819,7 +822,7 @@ else if (attStatus.toLowerCase().includes('late')) {
                         !gpsIsStale &&
                         shiftIsOpen &&
                         (
-                          reportedGps === 'GPS Disabled' ||
+                          ['GPS Disabled', 'Location Disabled'].includes(reportedGps) ||
                            (displayGpsOn && Number(inst.last_is_inside) === 0)
                         );
 
@@ -1119,7 +1122,7 @@ else if (attStatus.toLowerCase().includes('late')) {
                   <span className="lt-user-id">{selectedInstructor?.employee_id || '—'}</span>
                 </div>
               </div>
-              <span className={`lt-status-badge ${selectedInstructor?.gps_status === 'GPS ON' ? 'gps-on' : 'gps-off'}`}>
+              <span className={`lt-status-badge ${selectedInstructor?.gps_status === 'GPS ON' ? 'gps-on' : selectedInstructor?.gps_status === 'Location Disabled' ? 'location-disabled' : 'gps-off'}`}>
                 {selectedInstructor?.gps_status || 'STATUS N/A'}
               </span>
             </div>

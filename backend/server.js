@@ -390,6 +390,17 @@ const broadcastInstructorStatus = async (employeeId) => {
       s.id AS schedule_id, s.place AS schedule_place, s.course AS schedule_course, s.start_time, s.end_time,
       (CASE 
         WHEN CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF'  -- ✅ [1] Replaced NOW()
+
+WHEN (
+  SELECT t.location_name
+  FROM instructor_location_tracking t
+  WHERE t.employee_id = u.employee_id
+    AND t.schedule_id = s.id
+  ORDER BY t.id DESC
+  LIMIT 1
+) = 'Location Disabled'
+  THEN 'Location Disabled'
+
         WHEN u.location_tracking_enabled = 0 THEN 'GPS Disabled'
         WHEN u.last_location_ping IS NULL THEN 'Unavailable'
         WHEN TIMESTAMPDIFF(SECOND, u.last_location_ping, ?) > ? THEN 'Signal Lost' -- ✅ [2, 3] Replaced NOW()
@@ -408,6 +419,19 @@ CASE
     THEN 'GPS OFF'
   WHEN u.last_location_ping IS NULL
     THEN 'Unavailable'
+
+
+WHEN (
+  SELECT t.location_name
+  FROM instructor_location_tracking t
+  WHERE t.employee_id = u.employee_id
+    AND t.schedule_id = s.id
+  ORDER BY t.id DESC
+  LIMIT 1
+) = 'Location Disabled'
+  THEN 'Location Disabled'
+
+
   WHEN u.location_tracking_enabled = 0
     THEN 'GPS Disabled'
   WHEN TIMESTAMPDIFF(
@@ -417,7 +441,7 @@ CASE
   ) > ?
     THEN 'Signal Lost'
   ELSE 'GPS ON'
-END AS gps_status
+END) AS gps_status
 
     FROM users u
     LEFT JOIN schedules s ON (u.employee_id = s.user_id OR u.id = s.user_id) AND DATE(s.date) = ?
@@ -891,17 +915,22 @@ function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-
-
-const getRecentLocationPings = async (dbClient, employeeId, limit = 10) => {
+const getRecentLocationPings = async (
+  dbClient,
+  employeeId,
+  limit = 10
+) => {
   const [rows] = await dbClient.query(
     `SELECT latitude, longitude, ping_time
      FROM instructor_location_tracking
      WHERE employee_id = ?
+       AND location_enabled = 1
+       AND NOT (latitude = 0 AND longitude = 0)
      ORDER BY id DESC
      LIMIT ?`,
     [employeeId, limit]
   );
+
   return rows;
 };
 
@@ -2465,11 +2494,12 @@ if (gpsQualityError) {
   const selfiePath = `/uploads/selfies/${req.file.filename}`;
   const { date: todayDate, time: currentTime } = getPHTime();
 
-  const connection = await db.promise().getConnection();
   
-  try {
-    await connection.beginTransaction();
+const connection = await db.promise().getConnection();
+let attendanceCommitted = false;
 
+try {
+  await connection.beginTransaction();
     const [userRows] = await connection.query(
       "SELECT employee_id, full_name FROM users WHERE id = ? AND status = 'active' FOR UPDATE",
       [userId]
@@ -2749,23 +2779,66 @@ if (distance > schoolGeo.radius) {
       [employee_id]
     );
 
-    await connection.commit();
+    
+await connection.commit();
+attendanceCommitted = true;
 
-    logAction(req.user.id, 'CLOCK_IN', 'attendance', result.insertId, req);
-    await broadcastInstructorStatus(employee_id);
+try {
+  logAction(
+    req.user.id,
+    'CLOCK_IN',
+    'attendance',
+    result.insertId,
+    req
+  );
 
-    res.json({ success: true, message: `Clocked in successfully as ${status} at ${formatTo12Hour(currentTime)}.` });
+  await broadcastInstructorStatus(employee_id);
+} catch (notificationError) {
+  console.error(
+    'Clock-in follow-up notification failed:',
+    notificationError
+  );
+}
 
-  } catch (err) {
-    await connection.rollback();
-    console.error("Clock-in error:", err);
-    if (fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+return res.json({
+  success: true,
+  message: `Clocked in successfully as ${status} at ${formatTo12Hour(currentTime)}.`
+});
+
+} catch (err) {
+  console.error('Clock-in error:', err);
+
+  if (attendanceCommitted) {
+    if (!res.headersSent) {
+      return res.json({
+        success: true,
+        message:
+          'Clock-in was saved. Refresh attendance to confirm its status.'
+      });
     }
-    res.status(500).json({ success: false, message: "A server error occurred during clock-in." });
-  } finally {
-    connection.release();
+    return;
   }
+
+  try {
+    await connection.rollback();
+  } catch (rollbackError) {
+    console.error('Clock-in rollback failed:', rollbackError);
+  }
+
+  if (req.file?.path && fs.existsSync(req.file.path)) {
+    fs.unlinkSync(req.file.path);
+  }
+
+  if (!res.headersSent) {
+    return res.status(500).json({
+      success: false,
+      message: 'A server error occurred during clock-in.'
+    });
+  }
+} finally {
+  connection.release();
+}
+
 });
 
 app.post('/api/attendance/clock-out', clockLimiter, authenticateToken, multerSelfie.single('selfie'), c11SingleFlight('clock-out'), async (req, res) => {
@@ -3108,10 +3181,23 @@ clockOutSaved = true;
       [employee_id]
     );
 
-    await broadcastInstructorStatus(employee_id);
-    logAction(req.user.id, 'CLOCK_OUT', 'attendance', existing[0].id, req);
+try {
+  await broadcastInstructorStatus(employee_id);
 
-    
+  logAction(
+    req.user.id,
+    'CLOCK_OUT',
+    'attendance',
+    existing[0].id,
+    req
+  );
+} catch (notificationError) {
+  console.error(
+    'Clock-out follow-up notification failed:',
+    notificationError
+  );
+}
+
     // Return success after attendance has been saved.
     return res.json({
       success: true,
@@ -3119,25 +3205,36 @@ clockOutSaved = true;
     });
 
   } catch (err) {
-    console.error("Clock-out error:", err);
+    console.error('Clock-out error:', err);
 
-   
-    if (!clockOutSaved) {
-      discardSelfie();
+    if (clockOutSaved) {
+      console.error(
+        'Clock-out was saved, but a follow-up operation failed:',
+        err
+      );
+
+      if (!res.headersSent) {
+        return res.status(200).json({
+          success: true,
+          message:
+            'Clock-out was saved successfully. ' +
+            'Refresh attendance to confirm its status.'
+        });
+      }
+
+      return;
     }
 
-    
+    discardSelfie();
+
     if (!res.headersSent) {
       return res.status(500).json({
         success: false,
-        message: clockOutSaved
-          ? "Clock-out was saved, but a follow-up operation failed. Please refresh your attendance."
-          : "A server error occurred during clock-out."
+        message: 'A server error occurred during clock-out.'
       });
     }
   }
 });
-
 
 async function uvIsPayrollSnapshotLocked(
   connection,
@@ -14272,6 +14369,300 @@ app.put('/api/visitor-requests/:id/destination', authenticateToken, async (req, 
 const GPS_STALE_SECONDS = 180;  
 const GPS_ALERT_COOLDOWN_SECONDS = 300; 
 
+app.post(
+  '/api/instructor/location-permission',
+  authenticateToken,
+  async (req, res) => {
+    if (req.user.role !== 'instructor') {
+      return res.status(403).json({
+        success: false,
+        message: 'Instructor access required.'
+      });
+    }
+
+    
+const { state, reason, observed_at } = req.body || {};
+
+const observedMs =
+  typeof observed_at === 'string'
+    ? Date.parse(observed_at)
+    : NaN;
+
+const reportAgeMs = Date.now() - observedMs;
+
+// Require a recent device observation.
+// Allow up to 30 seconds of device clock difference
+// and up to 10 minutes of network delay.
+if (
+  !Number.isFinite(observedMs) ||
+  !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(
+    observed_at || ''
+  )
+) {
+  return res.status(400).json({
+    success: false,
+    message: 'A valid location observation timestamp is required.'
+  });
+}
+
+if (reportAgeMs < -30000 || reportAgeMs > 600000) {
+  return res.json({
+    success: true,
+    ignored: true,
+    reason: 'expired_observation',
+    message: 'Outdated location report ignored.'
+  });
+}
+
+const observedAtPH = getPHTimeFromDate(new Date(observedMs));
+
+
+    const validReasons = [
+      'permission_denied',
+      'services_disabled'
+    ];
+
+    if (
+      state !== 'disabled' ||
+      !validReasons.includes(reason)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid location permission report.'
+      });
+    }
+
+    const { date: today } = getPHTime();
+    const phNow = getPHDateTime();
+
+    let connection;
+    let transactionStarted = false;
+    let employeeId;
+    let fullName;
+    let scheduleId;
+    let schedulePlace;
+    let changed = false;
+
+    try {
+      connection = await db.promise().getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+
+      
+const [users] = await connection.query(
+  `SELECT id, employee_id, full_name
+   FROM users
+   WHERE id = ?
+     AND role = 'instructor'
+     AND status = 'active'
+     AND employment_status = 'active'
+   LIMIT 1
+   FOR UPDATE`,
+  [req.user.id]
+);
+
+
+      if (users.length !== 1) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(403).json({
+          success: false,
+          message: 'Active instructor account required.'
+        });
+      }
+
+      employeeId = users[0].employee_id;
+      fullName = users[0].full_name;
+
+      
+const [shifts] = await connection.query(
+  `SELECT
+      s.id,
+      s.place
+   FROM schedules s
+   INNER JOIN attendance a
+     ON a.schedule_id = s.id
+    AND DATE(a.date) = DATE(s.date)
+   WHERE (s.user_id = ? OR s.user_id = ?)
+     AND (a.user_id = ? OR a.user_id = ?)
+     AND a.time_in IS NOT NULL
+     AND a.time_out IS NULL
+     AND DATE(s.date) BETWEEN DATE_SUB(DATE(?), INTERVAL 1 DAY)
+                          AND DATE(?)
+   ORDER BY s.date DESC, s.start_time DESC, s.id DESC
+   LIMIT 1`,
+  [
+    employeeId,
+    req.user.id,
+    employeeId,
+    req.user.id,
+    today,
+    today
+  ]
+);
+
+      if (!shifts.length) {
+        await connection.rollback();
+        transactionStarted = false;
+
+        return res.status(409).json({
+          success: false,
+          message:
+            'No active clocked-in shift was found for location monitoring.'
+        });
+      }
+
+      scheduleId = shifts[0].id;
+      schedulePlace = shifts[0].place;
+
+const [newerGpsRows] = await connection.query(
+  `SELECT id
+   FROM instructor_location_tracking
+   WHERE employee_id = ?
+     AND schedule_id = ?
+     AND location_enabled = 1
+     AND NOT (
+       latitude = 0
+       AND longitude = 0
+     )
+     AND ping_time >= ?
+   ORDER BY id DESC
+   LIMIT 1`,
+  [
+    employeeId,
+    scheduleId,
+    observedAtPH
+  ]
+);
+
+if (newerGpsRows.length > 0) {
+  await connection.rollback();
+  transactionStarted = false;
+
+  return res.json({
+    success: true,
+    ignored: true,
+    reason: 'newer_gps_recorded',
+    message:
+      'An equal or newer valid GPS observation already exists. ' +
+      'The outdated location-disabled report was ignored.'
+  });
+}
+
+
+      // Check the last recorded state for this specific shift.
+      const [previousRows] = await connection.query(
+        `SELECT id, location_enabled, location_name
+         FROM instructor_location_tracking
+         WHERE employee_id = ?
+           AND schedule_id = ?
+         ORDER BY id DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [employeeId, scheduleId]
+      );
+
+      const previous = previousRows[0];
+
+      changed = !(
+        previous &&
+        Number(previous.location_enabled) === 0 &&
+        previous.location_name === 'Location Disabled'
+      );
+
+      if (changed) {
+        await connection.query(
+          `INSERT INTO instructor_location_tracking
+           (
+             employee_id,
+             schedule_id,
+             latitude,
+             longitude,
+             location_name,
+             is_inside_campus,
+             location_enabled,
+             ping_time
+           )
+           VALUES (?, ?, 0, 0, ?, 0, 0, ?)`,
+          [
+            employeeId,
+            scheduleId,
+            'Location Disabled',
+            phNow
+          ]
+        );
+      }
+
+      await connection.query(
+        `UPDATE users
+         SET location_tracking_enabled = 0
+         WHERE id = ?`,
+        [req.user.id]
+      );
+
+      await connection.commit();
+      transactionStarted = false;
+
+      if (changed) {
+  const message = reason === 'permission_denied'
+    ? 'Location permission disabled (reported by device)'
+    : 'Location services disabled (reported by device)';
+
+  try {
+    await insertAndBroadcastAlert(message, {
+      employeeId,
+      fullName,
+      scheduleId,
+      locationName: schedulePlace || 'Unavailable',
+      latitude: null,
+      longitude: null
+    });
+  } catch (notificationError) {
+    console.error(
+      'Post-commit location notification failed:',
+      notificationError
+    );
+  }
+}
+
+      // Broadcasting is secondary to the saved state.
+      try {
+        await broadcastInstructorStatus(employeeId);
+      } catch (broadcastError) {
+        console.error(
+          'Location-status broadcast failed:',
+          broadcastError
+        );
+      }
+
+      return res.json({
+        success: true,
+        gps_status: 'Location Disabled',
+        reason,
+        changed
+      });
+
+    } catch (error) {
+      if (transactionStarted && connection) {
+        await connection.rollback().catch(console.error);
+      }
+
+      console.error(
+        'Location-permission reporting failed:',
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to record location permission state.'
+      });
+
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+);
 
 app.post('/api/instructor/location', authenticateToken, async (req, res) => {
   if (req.user.role !== 'instructor') {
@@ -14544,9 +14935,26 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
         : 'Outside Campus Perimeter';
 
     } else {
-      isInside = false;
-      resolvedLocationName = 'GPS Disabled';
-    }
+  isInside = false;
+
+  const [latestState] = await db.promise().query(
+    `SELECT location_name, location_enabled
+     FROM instructor_location_tracking
+     WHERE employee_id = ?
+       AND schedule_id = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [employeeId, currentSchedule.id]
+  );
+
+  const explicitlyDisabled =
+    latestState[0]?.location_name === 'Location Disabled' &&
+    Number(latestState[0]?.location_enabled) === 0;
+
+  resolvedLocationName = explicitlyDisabled
+    ? 'Location Disabled'
+    : 'GPS Disabled';
+}
 
     const [lastRec] = await db.promise().query(
   `SELECT
@@ -14564,6 +14972,12 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
 );
 
     const previous = lastRec[0] || null;
+
+
+const locationPermissionWasDisabled =
+  previous?.location_name === 'Location Disabled' &&
+  Number(previous?.location_enabled) === 0;
+
 
     const lastGpsState = previous
       ? Number(previous.location_enabled) === 1 ? 1 : 0
@@ -14622,53 +15036,95 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       signalWasLost = lossAlerts.length > 0;
     }
 
-    const storedLat = isLocEnabled ? parsedLat : 0;
-    const storedLon = isLocEnabled ? parsedLon : 0;
 
-    await db.promise().query(
-      `INSERT INTO instructor_location_tracking
-       (
-         employee_id,
-         schedule_id,
-         latitude,
-         longitude,
-         location_name,
-         is_inside_campus,
-         location_enabled,
-         ping_time
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        employeeId,
-        currentSchedule.id,
-        storedLat,
-        storedLon,
-        resolvedLocationName,
-        isInside ? 1 : 0,
-        isLocEnabled ? 1 : 0,
-        phNow
-      ]
+const storedLat = isLocEnabled ? parsedLat : 0;
+const storedLon = isLocEnabled ? parsedLon : 0;
+
+
+const locationConnection =
+  await db.promise().getConnection();
+
+let locationTransactionStarted = false;
+
+try {
+  await locationConnection.beginTransaction();
+  locationTransactionStarted = true;
+
+  const [lockedUsers] = await locationConnection.query(
+    `SELECT id
+     FROM users
+     WHERE id = ?
+       AND role = 'instructor'
+       AND status = 'active'
+       AND employment_status = 'active'
+     FOR UPDATE`,
+    [userId]
+  );
+
+  if (lockedUsers.length !== 1) {
+    throw new Error(
+      'Instructor account became unavailable.'
     );
+  }
 
-    // =====================================================
-    // 8. UPDATE INSTRUCTOR TRACKING STATE
-    // =====================================================
-    await db.promise().query(
-      `UPDATE users
-       SET last_location_ping = ?,
-           location_tracking_enabled = ?
-       WHERE employee_id = ? OR id = ?`,
-      [
-        phNow,
-        isLocEnabled ? 1 : 0,
-        employeeId,
-        userId
-      ]
+  await locationConnection.query(
+    `INSERT INTO instructor_location_tracking
+     (
+       employee_id,
+       schedule_id,
+       latitude,
+       longitude,
+       location_name,
+       is_inside_campus,
+       location_enabled,
+       ping_time
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      employeeId,
+      currentSchedule.id,
+      storedLat,
+      storedLon,
+      resolvedLocationName,
+      isInside ? 1 : 0,
+      isLocEnabled ? 1 : 0,
+      phNow
+    ]
+  );
+
+  await locationConnection.query(
+    `UPDATE users
+     SET last_location_ping = ?,
+         location_tracking_enabled = ?
+     WHERE id = ?`,
+    [
+      phNow,
+      isLocEnabled ? 1 : 0,
+      userId
+    ]
+  );
+
+  await locationConnection.commit();
+  locationTransactionStarted = false;
+
+} catch (locationWriteError) {
+  if (locationTransactionStarted) {
+    await locationConnection.rollback().catch(
+      rollbackError => {
+        console.error(
+          'Location transaction rollback failed:',
+          rollbackError
+        );
+      }
     );
+  }
 
-    // =====================================================
-    // 9. DETECT GPS AND CAMPUS TRANSITIONS
-    // =====================================================
+  throw locationWriteError;
+
+} finally {
+  locationConnection.release();
+}
+
     if (isOnDuty) {
       const nowMs = Date.now();
       const currentGps = isLocEnabled ? 1 : 0;
@@ -14683,9 +15139,6 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
         longitude: isLocEnabled ? parsedLon : null
       };
 
-      // Shared transition confirmation:
-      // a new state must remain observed for GPS_GRACE_MS
-      // before a transition alert is generated.
       const advanceTransition = async (
         stateMap,
         currentValue,
@@ -14788,6 +15241,23 @@ app.post('/api/instructor/location', authenticateToken, async (req, res) => {
       campusStates.delete(employeeId);
     }
 
+if (
+  isOnDuty &&
+  isLocEnabled &&
+  locationPermissionWasDisabled
+) {
+  await insertAndBroadcastAlert(
+    'Location permission restored (reported by device)',
+    {
+      employeeId,
+      fullName,
+      scheduleId: currentSchedule.id,
+      locationName: resolvedLocationName,
+      latitude: parsedLat,
+      longitude: parsedLon
+    }
+  );
+}
 
     if (signalWasLost && isLocEnabled) {
       await insertAndBroadcastAlert(
@@ -14917,9 +15387,17 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         CASE
           WHEN a.time_in IS NULL OR a.time_out IS NOT NULL
             THEN 'Unavailable'
-          WHEN ilt.ping_time IS NULL THEN 'Unavailable'
-          WHEN ilt.location_enabled = 0 THEN 'GPS Disabled'
-          WHEN u.location_tracking_enabled = 0 THEN 'Unavailable'
+          
+WHEN ilt.ping_time IS NULL
+  THEN 'Unavailable'
+WHEN ilt.location_enabled = 0
+     AND ilt.location_name = 'Location Disabled'
+  THEN 'Location Disabled'
+WHEN ilt.location_enabled = 0
+  THEN 'GPS Disabled'
+WHEN u.location_tracking_enabled = 0
+  THEN 'Unavailable'
+
           WHEN TIMESTAMPDIFF(SECOND, ilt.ping_time, ?) > ?
             THEN 'Signal Lost'
           ELSE COALESCE(ilt.location_name, 'Unavailable')
@@ -14938,9 +15416,16 @@ app.get('/api/location-tracking/status', authenticateToken, async (req, res) => 
         CASE
           WHEN a.time_in IS NULL OR a.time_out IS NOT NULL
             OR CONCAT(s.date, ' ', s.end_time) < ? THEN 'GPS OFF'
-          WHEN ilt.ping_time IS NULL THEN 'Unavailable'
-          WHEN ilt.location_enabled = 0 THEN 'GPS Disabled'
-          WHEN u.location_tracking_enabled = 0 THEN 'Unavailable'
+          
+WHEN ilt.ping_time IS NULL THEN 'Unavailable'
+WHEN ilt.location_enabled = 0
+     AND ilt.location_name = 'Location Disabled'
+  THEN 'Location Disabled'
+WHEN ilt.location_enabled = 0
+  THEN 'GPS Disabled'
+WHEN u.location_tracking_enabled = 0
+  THEN 'Unavailable'
+
           WHEN TIMESTAMPDIFF(SECOND, ilt.ping_time, ?) > ?
             THEN 'Signal Lost'
           ELSE 'GPS ON'
@@ -15143,14 +15628,20 @@ const classifyLocationAlert = (message) => {
   switch (value) {
     case 'gps turned on':
     case 'location signal restored':
+      case 'location permission restored (reported by device)':
   return {
     category: 'GPS Status',
     severity: 'information'
   };
 
-    case 'gps turned off':
-    case 'location signal lost':
-      return { category: 'GPS Status', severity: 'warning' };
+case 'gps turned off':
+case 'location signal lost':
+case 'location permission disabled (reported by device)':
+case 'location services disabled (reported by device)':
+  return {
+    category: 'GPS Status',
+    severity: 'warning'
+  };
 
     case 'entered campus perimeter':
     case 'entered campus':

@@ -534,6 +534,41 @@ const greeting = useMemo(() => {
 }, [todaySchedule, rawHistory, currentMinutes]);
 
   
+  // Report only an explicitly observed device-permission/service change.
+  // This does not replace the existing permission prompt for attendance.
+  const locationDisabledReportedRef = useRef(false);
+  
+
+const reportLocationDisabled = useCallback(
+  async (reason, observedAt) => {
+    if (locationDisabledReportedRef.current) return;
+
+    const token = await AsyncStorage.getItem('auth_token');
+    if (!token) return;
+
+    const response = await axios.post(
+      `${API_URL}/instructor/location-permission`,
+      {
+        state: 'disabled',
+        reason,
+        observed_at: observedAt
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        timeout: 12000
+      }
+    );
+
+    if (response.data?.success && !response.data?.ignored) {
+      locationDisabledReportedRef.current = true;
+    }
+  },
+  []
+);
+
+
   const trackingRef = useRef({ allTodaySchedules, todaySchedule, currentMinutes });
 
   const loadDataRef = useRef(null); 
@@ -561,20 +596,42 @@ const greeting = useMemo(() => {
       });
 
       if (hasActiveOrUpcomingShift) {
-        let isGpsFullyActive = false;
+        let permissionFailureReason = null;
+let permissionObservedAt = null;
         try {
           const gpsHardwareOn = await Location.hasServicesEnabledAsync();
           const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
-          isGpsFullyActive = gpsHardwareOn && fgStatus === 'granted';
+          if (fgStatus === 'denied') permissionFailureReason = 'permission_denied';
+          else if (!gpsHardwareOn) permissionFailureReason = 'services_disabled';
+          else if (fgStatus !== 'granted') permissionFailureReason = 'permission_undetermined';
         } catch (permErr) {
-          isGpsFullyActive = false;
+          // A native API failure is not evidence of disabled location permission.
+          console.warn('Unable to check location permission:', permErr);
+          return;
         }
 
-        if (!isGpsFullyActive) {
-          await setTrackingEnabled(false);
-          await sendLocationPing(0, 0, false, 'GPS Disabled');
+        if (
+  permissionFailureReason === 'permission_denied' ||
+  permissionFailureReason === 'services_disabled'
+) {
+  permissionObservedAt = new Date().toISOString();
+}
+
+        if (permissionFailureReason) {
           const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
           if (isRegistered) await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+          // Do not falsely classify an unknown permission state as disabled.
+          if (permissionFailureReason !== 'permission_undetermined') {
+            try {
+              await reportLocationDisabled(
+  permissionFailureReason,
+  permissionObservedAt
+);
+            } catch (reportError) {
+              console.warn('Location-disabled report could not be delivered:', reportError?.message);
+              // The server retains Signal Lost when device state is unknown.
+            }
+          }
           return;
         }
 
@@ -596,7 +653,10 @@ const greeting = useMemo(() => {
             latitude, longitude, true, todaySchedule?.place || 'Campus',
             { accuracy, timestamp: new Date(measuredAt).toISOString() }
           );
-          if (result?.success) await setTrackingEnabled(true);
+          if (result?.success) {
+            locationDisabledReportedRef.current = false;
+            await setTrackingEnabled(true);
+          }
         }
 
         const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
@@ -650,7 +710,7 @@ const greeting = useMemo(() => {
     subscription.remove();
     clearInterval(interval);
   };
-}, [colors.primary]);
+}, [colors.primary, reportLocationDisabled]);
 
   const captureSelfie = async () => {
   const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -1602,11 +1662,11 @@ const canClockOutNow =
           <View style={styles.modulesGrid}>
             <TouchableOpacity style={styles.moduleCard} onPress={() => navigation.navigate('Requests')} activeOpacity={0.8}>
               <View style={styles.moduleTopRow}><View style={styles.moduleIconWrapper}><FileText size={22} color={isLight ? "#334155" : colors.textPrimary} strokeWidth={1.5} /></View><ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} /></View>
-              <Text style={styles.moduleText}>System{'\n'}Requests</Text>
+              <Text style={styles.moduleText}>My{'\n'}Requests</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.moduleCard} onPress={() => navigation.navigate('MyPayroll')} activeOpacity={0.8}>
               <View style={styles.moduleTopRow}><View style={styles.moduleIconWrapper}><TrendingUp size={22} color={isLight ? "#334155" : colors.textPrimary} strokeWidth={1.5} /></View><ArrowUpRight size={18} color={isLight ? "#94A3B8" : colors.textSecondary} /></View>
-              <Text style={styles.moduleText}>Payroll{'\n'}Details</Text>
+              <Text style={styles.moduleText}>My{'\n'}Payroll</Text>
             </TouchableOpacity>
           </View>
 

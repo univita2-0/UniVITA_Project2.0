@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator,
   RefreshControl, Modal, TouchableOpacity, StatusBar
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { CalendarDays, X, FileText, ChevronRight, Wallet, TrendingDown, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeContext, themeColors } from '../context/ThemeContext';
@@ -29,7 +29,6 @@ export default function MyPayrollScreen({ navigation }) {
     if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}`;
     return s.toLowerCase();
   };
-  const insets = useSafeAreaInsets();
   const { isDark } = useContext(ThemeContext);
   const colors = isDark ? themeColors.dark : themeColors.light;
   const isLight = !isDark;
@@ -340,7 +339,7 @@ export default function MyPayrollScreen({ navigation }) {
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.background} />
-      <SafeAreaView edges={['top']} style={styles.container}>
+      <SafeAreaView edges={['left', 'right']} style={styles.container}>
         <ScrollView
           contentContainerStyle={styles.scroll}
           showsVerticalScrollIndicator={false}
@@ -392,8 +391,8 @@ export default function MyPayrollScreen({ navigation }) {
 const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   container: { flex: 1, backgroundColor: isLight ? '#F8FAFC' : colors.background },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isLight ? '#F8FAFC' : colors.background },
-  scroll: { paddingHorizontal: 24, paddingBottom: 80, paddingTop: 16 },
-  sectionHeading: { fontFamily: 'Inter_18pt-Medium', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 20, letterSpacing: -0.5 },
+  scroll: { paddingHorizontal: 20, paddingBottom: 48, paddingTop: 12, flexGrow: 1 },
+  sectionHeading: { fontFamily: 'Inter_18pt-Bold', fontSize: 18, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 14, letterSpacing: -0.3 },
   
   primaryCard: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 32, padding: 24, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, marginBottom: 36, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: isLight ? 0.04 : 0.15, shadowRadius: 24, elevation: 6 },
   primaryCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 },
@@ -415,10 +414,10 @@ const getDynamicStyles = (colors, isLight) => StyleSheet.create({
   viewDetailsBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 12, backgroundColor: isLight ? '#F1F5F9' : colors.iconBg, borderRadius: 16 },
   viewDetailsBtnText: { fontFamily: 'Inter_18pt-Medium', color: isLight ? '#0F172A' : colors.textPrimary, fontSize: 14 },
   
-  emptyCard: { alignItems: 'center', padding: 40, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 32, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderStyle: 'dashed', marginBottom: 36 },
-  emptyIconWrapper: { width: 64, height: 64, borderRadius: 32, backgroundColor: isLight ? '#F8FAFC' : colors.iconBg, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  emptyCard: { alignItems: 'center', paddingHorizontal: 22, paddingVertical: 30, backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 20, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, borderStyle: 'dashed', marginBottom: 20 },
+  emptyIconWrapper: { width: 52, height: 52, borderRadius: 26, backgroundColor: isLight ? '#F8FAFC' : colors.iconBg, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
   emptyText: { fontFamily: 'Inter_18pt-Medium', fontSize: 16, color: isLight ? '#0F172A' : colors.textPrimary, marginBottom: 8 },
-  emptySubtext: { fontFamily: 'Inter_18pt-Regular', fontSize: 14, color: isLight ? '#64748B' : colors.textSecondary, textAlign: 'center', lineHeight: 22 },
+  emptySubtext: { fontFamily: 'Inter_18pt-Regular', fontSize: 13, color: isLight ? '#64748B' : colors.textSecondary, textAlign: 'center', lineHeight: 20 },
   
   historySection: { marginTop: 8 },
   historyList: { backgroundColor: isLight ? '#FFFFFF' : colors.surface, borderRadius: 32, borderWidth: 1, borderColor: isLight ? '#E2E8F0' : colors.border, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: isLight ? 0.02 : 0.1, shadowRadius: 16, elevation: 2 },
