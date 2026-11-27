@@ -744,7 +744,7 @@ function AppContent() {
         <Animated.View style={[styles.customSplashContainer, { opacity: splashFadeAnim }]}>
           <StatusBar barStyle="light-content" backgroundColor="#020817" />
           <View style={styles.splashCenterContent}>
-            <Text style={styles.splashBrand}><Text style={{ color: '#FFFFFF' }}>Uni</Text><Text style={{ color: '#0EA5E9' }}>VÍTA</Text></Text>
+            <Text style={styles.splashBrand}><Text style={{ color: '#FFFFFF' }}>Uni</Text><Text style={{ color: '#0EA5E9' }}>VITA</Text></Text>
             <Text style={styles.splashTagline}>SIMPLER  •  SMARTER  •  TOGETHER</Text>
           </View>
           <View style={styles.progressBarWrapper}>

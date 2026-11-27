@@ -620,7 +620,7 @@ const handleResendOtp = async () => {
           <View style={styles.header}>
             <Text style={styles.brandTitle}>
               <Text style={{ color: '#FFFFFF' }}>Uni</Text>
-              <Text style={{ color: '#0EA5E9' }}>VÍTA</Text>
+              <Text style={{ color: '#0EA5E9' }}>VITA</Text>
             </Text>
             <Text style={styles.brandSubtitle}>Welcome back!</Text>
             <View style={styles.headerDivider} />

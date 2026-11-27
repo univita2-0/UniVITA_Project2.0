@@ -107,7 +107,13 @@ const Schedule = () => {
         axios.get(`${API_BASE}/courses`, getAuthHeaders()),
         axios.get(`${API_BASE}/programs`, getAuthHeaders())
       ]);
-      const instList = empRes.data.filter(u => u.role.toLowerCase() === 'instructor' && u.status === 'active');
+      const instList = (Array.isArray(empRes.data) ? empRes.data : [])
+  .filter(
+    (u) =>
+      String(u.role || '').toLowerCase() === 'instructor' &&
+      String(u.status || '').toLowerCase() === 'active' &&
+      String(u.employment_status || 'active').toLowerCase() === 'active'
+  );
       setInstructors(instList);
 
       const cleaned = (schedRes.data || []).map(s => ({
