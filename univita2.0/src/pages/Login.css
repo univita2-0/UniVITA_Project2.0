@@ -369,3 +369,5 @@ input::-webkit-credentials-auto-fill-button {
     gap: 0.75rem;
   }
 }
+/* Mandatory first-login password setup */
+.cl-password-policy { color: #64748b; font-size: 0.78rem; line-height: 1.5; margin: 0; }

@@ -43,14 +43,6 @@ const ROLE_LABELS = {
   instructor: 'Instructor'
 };
 
-const ACCOUNT_STATUS_OPTIONS = [
-  { value: 'all', label: 'All account statuses' },
-  { value: 'not_provisioned', label: 'Not Provisioned' },
-  { value: 'pending_role', label: 'Pending Role' },
-  { value: 'active', label: 'Active' },
-  { value: 'deactivated', label: 'Deactivated' },
-];
-
 const getAuthHeaders = () => ({
   headers: {
     Authorization: `Bearer ${localStorage.getItem('auth_token')}`
@@ -66,6 +58,34 @@ const isPasswordValid = (value) =>
   value.length >= 8 &&
   /[A-Z]/.test(value) &&
   /[!@#$%^&*(),.?":{}|<>]/.test(value);
+
+// Temporary credential: Hctunivita + numeric employee ID + ! + 12 secure random characters.
+// Example format only: Hctunivita012!K7p4Q8r2M5x9
+// The employee ID is not a secret; security depends on the random suffix.
+const generateStrongPassword = (employeeId) => {
+  const match = /^E(\d+)$/i.exec(String(employeeId || '').trim());
+  if (!match) {
+    throw new Error('Employee ID must use the E### format to generate a temporary password.');
+  }
+
+  if (!window.crypto?.getRandomValues) {
+    throw new Error('Secure random generation is unavailable in this browser.');
+  }
+
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const max = alphabet.length;
+  const limit = 256 - (256 % max);
+  const bytes = new Uint8Array(1);
+  const randomChar = () => {
+    do {
+      window.crypto.getRandomValues(bytes);
+    } while (bytes[0] >= limit);
+    return alphabet[bytes[0] % max];
+  };
+
+  const randomSuffix = Array.from({ length: 12 }, randomChar).join('');
+  return `Hctunivita${match[1]}!${randomSuffix}`;
+};
 
 const formatDate = (value) =>
   value ? String(value).slice(0, 10) : '—';
@@ -92,8 +112,8 @@ const AccountManagement = () => {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [directoryTab, setDirectoryTab] = useState('all');
+  const [personnelType, setPersonnelType] = useState('all');
+  const [accountTab, setAccountTab] = useState('active');
   const [openMenuId, setOpenMenuId] = useState(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [currentPage, setCurrentPage] = useState(1);
@@ -106,6 +126,17 @@ const AccountManagement = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  const handleGeneratePassword = () => {
+    try {
+      const value = generateStrongPassword(selectedAccount?.employee_id);
+      setPassword(value);
+      setConfirmPassword(value);
+      setShowPassword(true);
+    } catch (error) {
+      toast.error(error.message || 'Unable to generate a secure temporary password.');
+    }
+  };
 
   // ----------------------------------------------------------
   // API: account directory
@@ -146,25 +177,79 @@ const AccountManagement = () => {
   }, [isAuthorized, loadAccounts]);
 
   useEffect(() => {
+    if (!isAuthorized) return undefined;
+    const refresh = window.setInterval(() => {
+      axios.get(`${API_BASE}/accounts`, getAuthHeaders()).then(response => {
+        if (Array.isArray(response.data)) {
+          setAccounts(response.data.filter(item => !['archived', 'deleted'].includes(item.account_status)));
+        }
+      }).catch(() => {});
+    }, 30000);
+    return () => window.clearInterval(refresh);
+  }, [isAuthorized]);
+
+  useEffect(() => {
+    if (!isAdmin || typeof WebSocket === 'undefined') return undefined;
+    const token = localStorage.getItem('auth_token');
+    if (!token) return undefined;
+    const socketBase = API_BASE.replace(/\/api\/?$/, '').replace(/^http/, 'ws');
+    const ws = new WebSocket(`${socketBase}/?token=${encodeURIComponent(token)}`);
+    ws.onmessage = event => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'employment_separation_review') {
+          toast.warning(`${data.employee_name || 'An employee'} was separated. Review Account Access for deactivation.`, { toastId: `separation-${data.employee_id}` });
+          loadAccounts();
+        }
+      } catch { /* Ignore unrelated messages */ }
+    };
+    return () => ws.close();
+  }, [isAdmin, loadAccounts]);
+
+  useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter, directoryTab]);
+  }, [searchTerm, personnelType, accountTab]);
 
   // ----------------------------------------------------------
   // Derived directory data
   // ----------------------------------------------------------
+  const requiresDeactivation = (item) =>
+    item.account_status === 'active' && item.employment_status === 'separated';
+
+  const matchesAccountTab = (item, tab) => {
+    if (tab === 'active') return item.account_status === 'active';
+    if (tab === 'provisioning') return ['not_provisioned', 'pending_role'].includes(item.account_status);
+    if (tab === 'deactivated') return item.account_status === 'deactivated';
+    return true;
+  };
+
+  const accountTabs = [
+    { key: 'active', label: 'Active Accounts' },
+    { key: 'provisioning', label: 'Provisioning Required' },
+    { key: 'deactivated', label: 'Deactivated Accounts' },
+    { key: 'all', label: 'All Accounts' }
+  ];
+
+  const tabCounts = useMemo(() => ({
+    active: accounts.filter(item => matchesAccountTab(item, 'active')).length,
+    provisioning: accounts.filter(item => matchesAccountTab(item, 'provisioning')).length,
+    deactivated: accounts.filter(item => matchesAccountTab(item, 'deactivated')).length,
+    all: accounts.length
+  }), [accounts]);
+
+  const deactivationRequired = useMemo(() =>
+    accounts.filter(requiresDeactivation), [accounts]);
+
   const filteredAccounts = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
 
     return accounts.filter((account) => {
-      const isInstructor = account.role === 'instructor';
+      // For unassigned records, use HR's recommendation solely for directory grouping.
+      const isInstructor = (account.role || account.requested_role) === 'instructor';
       const matchesDirectory =
-        directoryTab === 'all' ||
-        (directoryTab === 'instructors' && isInstructor) ||
-        (directoryTab === 'staff' && !isInstructor);
-
-      const matchesStatus =
-        statusFilter === 'all' ||
-        account.account_status === statusFilter;
+        personnelType === 'all' ||
+        (personnelType === 'instructors' && isInstructor) ||
+        (personnelType === 'staff' && !isInstructor);
 
       const searchableText = [
         account.full_name,
@@ -173,9 +258,9 @@ const AccountManagement = () => {
         account.role
       ].join(' ').toLowerCase();
 
-      return matchesDirectory && matchesStatus && searchableText.includes(query);
-    });
-  }, [accounts, searchTerm, statusFilter, directoryTab]);
+      return matchesAccountTab(account, accountTab) && matchesDirectory && searchableText.includes(query);
+    }).sort((left, right) => Number(requiresDeactivation(right)) - Number(requiresDeactivation(left)));
+  }, [accounts, searchTerm, personnelType, accountTab]);
 
   const totalPages = Math.max(
     1,
@@ -188,22 +273,17 @@ const AccountManagement = () => {
     safePage * PAGE_SIZE
   );
 
-  const directoryCounts = useMemo(() => ({
-    all: accounts.length,
-    instructors: accounts.filter((item) => item.role === 'instructor').length,
-    staff: accounts.filter((item) => item.role !== 'instructor').length
-  }), [accounts]);
-
   const accountCounts = useMemo(() => ({
     total: accounts.length,
     active: accounts.filter((item) => item.account_status === 'active').length,
-    notProvisioned: accounts.filter(
-      (item) => item.account_status === 'not_provisioned'
+    provisioning: accounts.filter(
+      (item) => ['not_provisioned', 'pending_role'].includes(item.account_status)
     ).length,
     deactivated: accounts.filter(
       (item) => item.account_status === 'deactivated'
-    ).length
-  }), [accounts]);
+    ).length,
+    deactivationRequired: deactivationRequired.length
+  }), [accounts, deactivationRequired.length]);
 
   // ----------------------------------------------------------
   // Compact actions menu
@@ -253,7 +333,7 @@ const AccountManagement = () => {
 
   useEffect(() => {
     setOpenMenuId(null);
-  }, [directoryTab, searchTerm, statusFilter, currentPage]);
+  }, [personnelType, searchTerm, currentPage, accountTab]);
 
   // ----------------------------------------------------------
   // Modal handlers
@@ -409,14 +489,27 @@ const AccountManagement = () => {
           <span>Active accounts</span>
         </div>
         <div>
-          <strong>{accountCounts.notProvisioned}</strong>
-          <span>Not provisioned</span>
+          <strong>{accountCounts.provisioning}</strong>
+          <span>Provisioning required</span>
         </div>
         <div>
           <strong>{accountCounts.deactivated}</strong>
           <span>Deactivated</span>
         </div>
       </section>
+
+      {isAdmin && deactivationRequired.length > 0 && (
+        <section className="ac4-deactivation-alert" role="status">
+          <ShieldOff size={18} aria-hidden="true" />
+          <div>
+            <strong>{deactivationRequired.length} account{deactivationRequired.length !== 1 ? 's' : ''} require deactivation review</strong>
+            <p>HR has marked these employees as separated. Their access is blocked by employment validation, but their account status is still Active. Admin should review and formally deactivate them.</p>
+          </div>
+          <button type="button" className="ac4-button" onClick={() => { setAccountTab('active'); setPersonnelType('all'); setSearchTerm(''); }}>
+            Review Active Accounts
+          </button>
+        </section>
+      )}
 
       {/* Account directory */}
       <section className="ac4-panel" aria-label="Account directory">
@@ -426,49 +519,45 @@ const AccountManagement = () => {
           <span>{filteredAccounts.length} records</span>
         </div>
 
-        <div className="ac4-directory-tabs" role="tablist" aria-label="Account category">
-          {[
-            { key: 'all', label: 'All accounts' },
-            { key: 'instructors', label: 'Instructors' },
-            { key: 'staff', label: 'Staff' }
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={directoryTab === tab.key}
-              className={`ac4-directory-tab ${directoryTab === tab.key ? 'active' : ''}`}
-              onClick={() => setDirectoryTab(tab.key)}
-            >
-              {tab.label}
-              <span className="ac4-tab-count">{directoryCounts[tab.key]}</span>
+        <div className="ac4-status-tabs" role="tablist" aria-label="Account status">
+          {accountTabs.map(tab => (
+            <button key={tab.key} type="button" role="tab"
+              aria-selected={accountTab === tab.key}
+              className={`ac4-status-tab ${accountTab === tab.key ? 'active' : ''}`}
+              onClick={() => { setAccountTab(tab.key); setPersonnelType('all'); setSearchTerm(''); }}>
+              {tab.label} <span className="ac4-tab-count">{tabCounts[tab.key]}</span>
             </button>
           ))}
         </div>
 
         <div className="ac4-toolbar">
           <label className="ac4-search">
-            <Search size={17} />
+            <Search size={16} aria-hidden="true" />
             <input
-              aria-label="Search account access"
-              placeholder="Search by name, employee ID, email, or role"
+              type="search"
+              aria-label="Search accounts"
+              placeholder="Search name, ID, or email"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
             />
           </label>
-
           <select
-            aria-label="Account status filter"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
+            aria-label="Filter personnel type"
+            value={personnelType}
+            onChange={(event) => setPersonnelType(event.target.value)}
           >
-            {ACCOUNT_STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
+            <option value="all">All personnel</option>
+            <option value="instructors">Instructors</option>
+            <option value="staff">Staff</option>
           </select>
         </div>
+
+        {accountTab === 'provisioning' && (
+          <p className="ac4-tab-guidance">
+            {accounts.filter(item => item.account_status === 'not_provisioned').length} need credentials;
+            {' '}{accounts.filter(item => item.account_status === 'pending_role').length} await role assignment in Role Management.
+          </p>
+        )}
 
         <div className="ac4-table-wrap">
           <table className="ac4-table">
@@ -504,6 +593,8 @@ const AccountManagement = () => {
                       <td className="ac4-employee-cell">
                         <strong>{account.full_name || '—'}</strong>
                         <small>{account.email || '—'}</small>
+                        {requiresDeactivation(account) && <small className="ac4-review-text">Deactivation required — employment separated</small>}
+                        {accountTab === 'provisioning' && accountStatus === 'pending_role' && <small className="ac4-next-step">Next: Assign role in Role Management</small>}
                       </td>
                       <td>{getRoleLabel(account.role)}</td>
                       <td>
@@ -672,6 +763,7 @@ const AccountManagement = () => {
                 ['Login email', selectedAccount.email || '—'],
                 ['Employment status', selectedAccount.employment_status || 'Review Required'],
                 ['Account status', getAccountStatusLabel(selectedAccount.account_status)],
+                ['Requested role', getRoleLabel(selectedAccount.requested_role)],
                 ['Current role', getRoleLabel(selectedAccount.role)],
                 [
                   'Account expiration',
@@ -694,6 +786,18 @@ const AccountManagement = () => {
                       : 'Set a replacement password. The employee record and assigned role will be preserved.'}
                   </p>
 
+                  {activeModal === 'provision' && (
+                    <div className="ac4-generate-row">
+                      <button type="button" className="ac4-button" disabled={busyId !== null} onClick={handleGeneratePassword}>
+                        <KeyRound size={15} /> Generate Temporary Password
+                      </button>
+                    </div>
+                  )}
+                  {activeModal === 'provision' && (
+                    <small className="ac4-temporary-hint">
+                      Format: Hctunivita + employee ID digits + ! + 12 random characters. Share credentials through an approved secure channel.
+                    </small>
+                  )}
                   <label className="ac4-field">
                     <span>New password</span>
                     <div className="ac4-password">

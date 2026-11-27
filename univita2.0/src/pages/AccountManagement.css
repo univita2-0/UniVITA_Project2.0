@@ -645,3 +645,63 @@
     text-align: left;
   }
 }
+
+/* Optional secure password generation during account provisioning */
+.ac4-generate-row { display: flex; justify-content: flex-start; margin: 2px 0 6px; }
+.ac4-generate-row .ac4-button { min-height: 35px; border-color: #99c9c2; color: #0f766e; background: #f0fdfa; }
+.ac4-generate-row .ac4-button:hover:not(:disabled) { background: #ccfbf1; }
+
+/* Generated temporary credential guidance */
+.ac4-temporary-hint {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Account lifecycle tabs and separation review */
+.ac4-page { padding: 5px 10px 10px; }
+.ac4-status-tabs { display: flex; flex-wrap: wrap; gap: 18px; padding: 0 18px; border-bottom: 1px solid #dfe7ec; }
+.ac4-status-tab { background: transparent; border: 0; border-bottom: 2px solid transparent; min-height: 43px; padding: 9px 2px; color: #64748b; font: 600 12px Inter, sans-serif; cursor: pointer; }
+.ac4-status-tab.active { color: #0f766e; border-bottom-color: #0d9488; }
+.ac4-status-tab:hover { color: #0f766e; }
+.ac4-deactivation-alert { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 15px; margin-bottom: 13px; border: 1px solid #f3d4a2; border-radius: 6px; background: #fffbeb; color: #92400e; }
+.ac4-deactivation-alert > div { flex: 1 1 320px; }
+.ac4-deactivation-alert strong { font-size: 12.5px; }
+.ac4-deactivation-alert p { margin: 3px 0 0; font-size: 11.5px; line-height: 1.5; }
+.ac4-review-text { color: #b45309 !important; font-weight: 700; }
+@media(max-width:600px) { .ac4-status-tabs { flex-wrap: nowrap; overflow-x: auto; gap: 16px; padding-inline: 12px; } .ac4-status-tab { white-space: nowrap; } }
+
+/* Streamlined account lifecycle directory and single-outline input controls */
+.ac4-page { padding: 5px 10px 10px; }
+.ac4-status-tabs { gap: 22px; flex-wrap: nowrap; overflow-x: auto; }
+.ac4-status-tab { white-space: nowrap; }
+.ac4-toolbar { justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ac4-page .ac4-search {
+  flex: 0 1 380px; width: min(380px, 100%); max-width: 380px;
+  min-width: 200px; height: 38px; padding: 0 12px;
+  border: 1px solid #cbd5e1; border-radius: 6px;
+  background: #fff; box-shadow: none; gap: 9px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ac4-page .ac4-search:focus-within { border-color: #0d9488; box-shadow: 0 0 0 2px rgba(13,148,136,.08); }
+.ac4-page .ac4-search input,
+.ac4-page .ac4-search input:focus,
+.ac4-page .ac4-search input:focus-visible {
+  flex: 1 1 auto; min-width: 0; width: 100%; height: 100%;
+  padding: 0; border: 0; outline: none !important;
+  outline-offset: 0 !important; box-shadow: none !important;
+  background: transparent; font: 400 12px Inter,system-ui,sans-serif;
+}
+.ac4-page .ac4-search input::-webkit-search-cancel-button { cursor: pointer; }
+.ac4-page .ac4-search svg { flex: 0 0 auto; }
+.ac4-page .ac4-toolbar > select {
+  flex: 0 0 205px; min-width: 180px; width: 205px; height: 38px;
+  border-radius: 6px; font-size: 12px;
+}
+.ac4-tab-guidance { margin: 0; padding: 10px 18px; border-bottom: 1px solid #edf1f5; background: #fafcfd; font-size: 11.5px; color: #64748b; }
+.ac4-next-step { color: #0f766e !important; font-weight: 600; }
+@media (max-width:600px) {
+  .ac4-page .ac4-search { flex: 1 1 100%; width: 100%; max-width: none; min-width: 0; }
+  .ac4-page .ac4-toolbar > select { flex: 1 1 100%; width: 100%; }
+}

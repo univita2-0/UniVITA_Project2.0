@@ -114,8 +114,17 @@ const positionOptions = [
   'IT Personnel',
   'Administrative Staff'
 ];
+const REQUESTED_ROLE_OPTIONS = [
+  { value: 'instructor', label: 'Instructor' },
+  { value: 'admin', label: 'System Administrator' },
+  { value: 'hr_admin', label: 'HR Personnel' },
+  { value: 'security', label: 'Security Personnel' }
+];
+const SIMULATIONIST_POSITIONS = ['Entry Level Simulationist', 'Senior Simulationist'];
+const ROLE_POSITION_DEFAULTS = { hr_admin: 'HR Personnel', security: 'Security Personnel' };
+
 const blank = () => ({
-  employee_id: '', first_name: '', middle_initial: '', last_name: '', email: '',
+  requested_role: '', employee_id: '', first_name: '', middle_initial: '', last_name: '', email: '',
   phone_number: '', position_level: '', contract_type: 'Regular', employment_type: 'Full-time', compensation_basis: 'monthly', hourly_rate: '',
   monthly_salary: '', work_days_per_month: '22', date_of_joining: '',
   date_of_birth: '', gender: 'prefer_not_to_say', emergency_contact_name: '',
@@ -201,6 +210,9 @@ const EmployeeManagement = () => {
   const [resume, setResume] = useState(null);
   const [saving, setSaving] = useState(false);
   const [changingStatus, setChangingStatus] = useState(null);
+  const [separationTarget, setSeparationTarget] = useState(null);
+  const [separationReason, setSeparationReason] = useState('');
+  const [separationNotes, setSeparationNotes] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -223,7 +235,7 @@ const EmployeeManagement = () => {
     if (filter === 'review' && status != null && status !== '') return false;
     if (filter !== 'all' && filter !== 'review' && status !== filter) return false;
     // Directory grouping reflects system role only. Job title is separately maintained by HR.
-    const instructor = emp.role === 'instructor';
+    const instructor = emp.role === 'instructor' || (!emp.role && emp.requested_role === 'instructor');
     if (directory === 'instructor' && !instructor) return false;
     if (directory === 'staff' && instructor) return false;
     const text = [emp.full_name, emp.employee_id, emp.email, emp.position_level].join(' ').toLowerCase();
@@ -250,6 +262,13 @@ const EmployeeManagement = () => {
   };
   const change = (name, value) => setForm(current => {
     const updated = { ...current, [name]: value };
+    if (name === 'requested_role') {
+      if (ROLE_POSITION_DEFAULTS[value]) {
+        updated.position_level = ROLE_POSITION_DEFAULTS[value];
+      } else if (!SIMULATIONIST_POSITIONS.includes(current.position_level) || current.requested_role !== value) {
+        updated.position_level = '';
+      }
+    }
     if (name === 'employment_type') updated.contract_type = contractOptions[value]?.[0] || '';
     if (name === 'compensation_basis' && value === 'monthly') updated.hourly_rate = ''; 
     if (name === 'region' && String(value).startsWith('NCR')) updated.state_province = 'Metro Manila';
@@ -260,10 +279,38 @@ const EmployeeManagement = () => {
     // Salary, job title and system role must never change each other implicitly.
     return updated;
   });
+  const canEditRequestedRole = (modal === 'add' || (modal === 'edit' && !selected?.role));
   const fullName = [form.first_name, form.middle_initial, form.last_name].filter(Boolean).map(x => String(x).trim()).join(' ');
   const validate = () => {
     if (!form.employee_id.trim() || !form.first_name.trim() || !form.last_name.trim()) return 'Employee ID, first name, and last name are required.';
-    if (!String(form.position_level || '').trim()) return 'Enter the actual employment position or job title.';
+    if (modal === 'add') {
+      if (!REQUESTED_ROLE_OPTIONS.some(item => item.value === form.requested_role)) {
+        return 'Please select a requested system role.';
+      }
+      if (['instructor', 'admin'].includes(form.requested_role) &&
+          !SIMULATIONIST_POSITIONS.includes(form.position_level)) {
+        return 'Select a valid Simulationist position.';
+      }
+      if (ROLE_POSITION_DEFAULTS[form.requested_role] &&
+          form.position_level !== ROLE_POSITION_DEFAULTS[form.requested_role]) {
+        return 'The employment position does not match the requested role.';
+      }
+    } else if (modal === 'edit' && !selected?.role && form.requested_role) {
+      if (!REQUESTED_ROLE_OPTIONS.some(item => item.value === form.requested_role)) {
+        return 'Select a valid requested system role.';
+      }
+      if (['instructor', 'admin'].includes(form.requested_role) &&
+          !SIMULATIONIST_POSITIONS.includes(form.position_level)) {
+        return 'Select a valid Simulationist position.';
+      }
+      if (ROLE_POSITION_DEFAULTS[form.requested_role] &&
+          form.position_level !== ROLE_POSITION_DEFAULTS[form.requested_role]) {
+        return 'The employment position does not match the requested role.';
+      }
+    }
+    if (!String(form.position_level || '').trim()) {
+      return 'Enter the employment position or job title.';
+    }
     if (!employmentOptions.includes(form.employment_type)) return 'Select a valid employment type.';
     if (!(contractOptions[form.employment_type] || []).includes(form.contract_type)) return 'Select a valid contract classification.';
     if (!['monthly','hourly'].includes(form.compensation_basis)) return 'Select a compensation basis.';
@@ -287,6 +334,7 @@ const EmployeeManagement = () => {
       if (modal === 'add') {
         payload.append('employee_id', form.employee_id.trim());
         payload.append('full_name', fullName);
+        payload.append('requested_role', form.requested_role);
         editKeys.forEach(key => payload.append(key, form[key] ?? ''));
         payload.append('position', form.position_level.trim());
         // The Phase 3 POST accepts an onboarding JSON object and resume_file.
@@ -295,6 +343,7 @@ const EmployeeManagement = () => {
         if (resume) payload.append('resume_file', resume);
         await axios.post(`${API_BASE}/employees`, payload, auth());
       } else {
+        if (!selected?.role && form.requested_role) payload.append('requested_role', form.requested_role);
         // The Phase 3 employee GET does not yet return additional_info. Do not overwrite
         // existing statutory/onboarding data with empty values when editing.
         editKeys.forEach(key => payload.append(key, form[key] ?? ''));
@@ -318,15 +367,49 @@ const EmployeeManagement = () => {
   };
   const changeEmployment = async person => {
     if (!isHR || changingStatus) return;
-    const next = person.employment_status === 'active' ? 'separated' : 'active';
-    if (!['active', 'separated'].includes(person.employment_status)) return toast.error('Legacy status requires review before changing.');
-    if (!window.confirm(`Mark ${person.full_name} as ${next === 'separated' ? 'Separated' : 'Active'}? Historical records will be retained. Account access is managed separately by Admin.`)) return;
+    if (!['active', 'separated'].includes(person.employment_status)) {
+      return toast.error('Legacy employment status requires review.');
+    }
+    if (person.employment_status === 'active') {
+      setSeparationReason('');
+      setSeparationNotes('');
+      setSeparationTarget(person);
+      return;
+    }
+    if (!window.confirm(`Reactivate employment for ${person.full_name}? Account access will remain controlled by the System Administrator.`)) return;
     setChangingStatus(person.id);
     try {
-      await axios.put(`${API_BASE}/employees/${person.id}/employment-status`, { employment_status: next }, auth());
-      toast.success(`Employment status set to ${next}.`); await load();
-    } catch (error) { toast.error(error.response?.data?.message || 'Unable to change employment status.'); }
-    finally { setChangingStatus(null); }
+      await axios.put(`${API_BASE}/employees/${person.id}/employment-status`, { employment_status: 'active' }, auth());
+      toast.success('Employment reactivated. Admin must separately review account access.');
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Unable to reactivate employment.');
+    } finally { setChangingStatus(null); }
+  };
+
+  const confirmSeparation = async () => {
+    if (!isHR || !separationTarget || changingStatus) return;
+    if (!['resignation', 'retirement', 'contract_end', 'termination', 'other'].includes(separationReason)) {
+      return toast.warning('Select a separation reason.');
+    }
+    if (separationReason === 'other' && !separationNotes.trim()) {
+      return toast.warning('Provide a description for Other.');
+    }
+    if (separationNotes.length > 500) return toast.warning('Remarks must be 500 characters or fewer.');
+    const target = separationTarget;
+    setChangingStatus(target.id);
+    try {
+      await axios.put(`${API_BASE}/employees/${target.id}/employment-status`, {
+        employment_status: 'separated',
+        separation_reason: separationReason,
+        separation_remarks: separationNotes.trim()
+      }, auth());
+      toast.success('Employment separated. Admin will see an account deactivation review alert.');
+      setSeparationTarget(null);
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Unable to end employment.');
+    } finally { setChangingStatus(null); }
   };
 
   // ------------------------------------------------------------
@@ -402,7 +485,7 @@ const EmployeeManagement = () => {
             <Search size={16} aria-hidden="true" />
             <input
               aria-label="Search employees"
-              placeholder="Search by name, ID, email, or position"
+              placeholder="Search employee name, ID, or email"
               value={search}
               onChange={event => setSearch(event.target.value)}
             />
@@ -480,7 +563,7 @@ const EmployeeManagement = () => {
                                 className="em4-table-action em4-table-action-status"
                                 onClick={() => changeEmployment(emp)}
                               >
-                                {emp.employment_status === 'active' ? 'Mark Separated' : 'Mark Active'}
+                                {emp.employment_status === 'active' ? 'End Employment' : 'Reactivate Employment'}
                               </button>
                             )}
                           </>
@@ -507,6 +590,37 @@ const EmployeeManagement = () => {
           </div>
         </footer>
       </section>
+
+      {separationTarget && (
+        <div className="em4-overlay" onMouseDown={event => { if (event.target === event.currentTarget && !changingStatus) setSeparationTarget(null); }}>
+          <section className="em4-dialog em4-separation-dialog" role="dialog" aria-modal="true" aria-label="Confirm Employment Separation">
+            <div className="em4-dialog-head">
+              <div><h2>End Employment</h2><p>{separationTarget.full_name} · {separationTarget.employee_id}</p></div>
+              <button type="button" aria-label="Close" disabled={!!changingStatus} onClick={() => setSeparationTarget(null)}><X size={20}/></button>
+            </div>
+            <div className="em4-dialog-body">
+              <p className="em4-separation-warning">Employment access will be blocked immediately. Admin must review and formally deactivate the account. Historical employment records are retained.</p>
+              <label className="em4-field"><span>Separation reason *</span>
+                <select value={separationReason} onChange={event => setSeparationReason(event.target.value)}>
+                  <option value="">Select a reason</option><option value="resignation">Resignation</option>
+                  <option value="retirement">Retirement</option><option value="contract_end">End of Contract</option>
+                  <option value="termination">Termination</option><option value="other">Other</option>
+                </select>
+              </label>
+              <label className="em4-field"><span>Remarks {separationReason === 'other' ? '*' : '(optional)'}</span>
+                <textarea maxLength={500} rows={3} value={separationNotes} onChange={event => setSeparationNotes(event.target.value)} placeholder="Document the separation details..." />
+                <small>{separationNotes.length}/500 characters</small>
+              </label>
+            </div>
+            <footer className="em4-dialog-footer">
+              <button className="em4-secondary" type="button" disabled={!!changingStatus} onClick={() => setSeparationTarget(null)}>Cancel</button>
+              <button className="em4-primary" type="button" disabled={!!changingStatus || !separationReason || (separationReason === 'other' && !separationNotes.trim())} onClick={confirmSeparation}>
+                {changingStatus ? 'Processing…' : 'Confirm Separation'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       {/* Create / edit / view employee */}
       {modal && (
@@ -573,8 +687,36 @@ const EmployeeManagement = () => {
                   Entry-level and senior simulationist salary ranges are references only; HR verifies the agreed amount.
                 </p>
               )}
+              {activeTab === 'general' && (
+                <div className="em4-field em4-role-selection">
+                  <span>Requested System Role {modal === 'add' ? '*' : ''}</span>
+                  {canEditRequestedRole ? (
+                    <select
+                      value={form.requested_role || ''}
+                      required={modal === 'add'}
+                      onChange={event => change('requested_role', event.target.value)}
+                    >
+                      <option value="">{modal === 'edit' ? 'Not specified — select a role' : 'Select requested role'}</option>
+                      {REQUESTED_ROLE_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="em4-display">
+                      {REQUESTED_ROLE_OPTIONS.find(option => option.value === form.requested_role)?.label || 'Not specified'}
+                    </div>
+                  )}
+                  <small className="em4-role-help">
+                    {selected?.role
+                      ? 'An access role is already assigned. Only System Admin can change the actual role in Role Management.'
+                      : 'HR recommendation only; System Admin approves actual login access in Role Management.'}
+                  </small>
+                </div>
+              )}
               <div className="em4-form-grid">
-                {fields[activeTab].map(([key, label, type]) => (
+                {fields[activeTab]
+                  .filter(([key]) => !(canEditRequestedRole && key === 'position_level' && ['hr_admin', 'security'].includes(form.requested_role)))
+                  .map(([key, label, type]) => (
                   <label className={`em4-field ${type === 'textarea' ? 'wide' : ''} ${key === 'hourly_rate' && form.compensation_basis !== 'hourly' ? 'em4-field-muted' : ''}`} key={key}>
                     <span>
                       {label}{['employee_id', 'first_name', 'last_name', 'email', 'position_level', 'employment_type', 'contract_type'].includes(key) ? ' *' : ''}
@@ -587,6 +729,16 @@ const EmployeeManagement = () => {
                       <div className="em4-display" title="Employee API must return additional_info for safe editing">
                         Details unavailable until API supports additional_info
                       </div>
+                    ) : key === 'position_level' && canEditRequestedRole && ['instructor', 'admin'].includes(form.requested_role) ? (
+                      <select
+                        value={form.position_level || ''}
+                        onChange={event => change('position_level', event.target.value)}
+                        disabled={!['instructor', 'admin'].includes(form.requested_role)}
+                        required
+                      >
+                        <option value="">Select Simulationist position</option>
+                        {SIMULATIONIST_POSITIONS.map(item => <option key={item} value={item}>{item}</option>)}
+                      </select>
                     ) : type === 'employment' ? (
                       <select value={form.employment_type || ''} onChange={event => change(key, event.target.value)}>
                         {employmentOptions.map(v => <option key={v} value={v}>{v}</option>)}

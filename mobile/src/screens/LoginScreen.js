@@ -28,6 +28,11 @@ export default function LoginScreen({ navigation }) {
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otp, setOtp] = useState('');
   const [pendingLoginToken, setPendingLoginToken] = useState('');
+  const [firstLoginToken, setFirstLoginToken] = useState('');
+  const [showFirstLoginModal, setShowFirstLoginModal] = useState(false);
+  const [firstLoginPassword, setFirstLoginPassword] = useState('');
+  const [firstLoginConfirm, setFirstLoginConfirm] = useState('');
+  const [firstLoginSaving, setFirstLoginSaving] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
   const [sendingOtpResend, setSendingOtpResend] = useState(false);
@@ -309,6 +314,22 @@ const handleVerifyOtp = async () => {
       pendingLoginToken
     );
 
+    if (result?.success && result?.requiresPasswordChange) {
+      if (!result.changeToken) {
+        showToast('Password setup unavailable. Sign in again.', 'error');
+        setShowOtpModal(false);
+        return;
+      }
+      setFirstLoginToken(result.changeToken);
+      setFirstLoginPassword('');
+      setFirstLoginConfirm('');
+      setPendingLoginToken('');
+      setOtp('');
+      setShowOtpModal(false);
+      setShowFirstLoginModal(true);
+      return;
+    }
+
     if (result?.success && result?.user && result?.token) {
       if (result.user.role !== 'instructor') {
         showToast(
@@ -375,6 +396,44 @@ const handleVerifyOtp = async () => {
 
 
   
+const handleFirstLoginPasswordChange = async () => {
+  if (!firstLoginToken) {
+    showToast('Password setup has expired. Sign in again.', 'error');
+    setShowFirstLoginModal(false);
+    return;
+  }
+  if (firstLoginPassword.length < 12 || !/[A-Z]/.test(firstLoginPassword) ||
+      !/[a-z]/.test(firstLoginPassword) || !/[0-9]/.test(firstLoginPassword) ||
+      !/[!@#$%^&*(),.?":{}|<>]/.test(firstLoginPassword)) {
+    showToast('Use 12+ characters, uppercase, lowercase, number and special character.', 'error');
+    return;
+  }
+  if (firstLoginPassword !== firstLoginConfirm) {
+    showToast('Passwords do not match.', 'error');
+    return;
+  }
+  setFirstLoginSaving(true);
+  Keyboard.dismiss();
+  try {
+    const response = await axios.post(
+      `${API_URL}/auth/first-login-password`,
+      { newPassword: firstLoginPassword },
+      { headers: { Authorization: `Bearer ${firstLoginToken}` }, timeout: 15000 }
+    );
+    if (!response.data?.success) throw new Error(response.data?.message || 'Unable to update password.');
+    setFirstLoginToken('');
+    setFirstLoginPassword('');
+    setFirstLoginConfirm('');
+    setPassword('');
+    setShowFirstLoginModal(false);
+    Alert.alert('Password Created', 'Sign in again with your new personal password.');
+  } catch (error) {
+    showToast(error.response?.data?.message || error.message || 'Unable to change password.', 'error');
+  } finally {
+    setFirstLoginSaving(false);
+  }
+};
+
 const handleResendOtp = async () => {
   if (!pendingLoginToken) {
     showToast(
@@ -553,7 +612,7 @@ const handleResendOtp = async () => {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#060913" />
 
-      {!(showOtpModal || showForgotModal) && renderToast()}
+      {!(showOtpModal || showForgotModal || showFirstLoginModal) && renderToast()}
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
         <View style={styles.containerInner}>
@@ -666,6 +725,39 @@ const handleResendOtp = async () => {
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Mandatory first-login password replacement. No app session is stored. */}
+      <Modal visible={showFirstLoginModal} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.modalOverlay}>
+          {renderToast()}
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Create Your Personal Password</Text>
+            <Text style={styles.modalSubtitle}>Replace your temporary password before accessing UniVITA. Sign in again afterward.</Text>
+            <TextInput style={styles.resetInput} secureTextEntry
+              placeholder="New password (12+ characters)"
+              placeholderTextColor="#64748B"
+              value={firstLoginPassword} onChangeText={setFirstLoginPassword}
+              autoCapitalize="none" autoCorrect={false} textContentType="newPassword" />
+            <TextInput style={styles.resetInput} secureTextEntry
+              placeholder="Confirm personal password"
+              placeholderTextColor="#64748B"
+              value={firstLoginConfirm} onChangeText={setFirstLoginConfirm}
+              autoCapitalize="none" autoCorrect={false} textContentType="newPassword" />
+            <Text style={styles.firstLoginHelp}>At least 12 characters including uppercase, lowercase, number and special character.</Text>
+            <TouchableOpacity
+              style={[styles.modalButton, firstLoginSaving && styles.buttonDisabled]}
+              disabled={firstLoginSaving || firstLoginPassword.length < 12 || firstLoginPassword !== firstLoginConfirm}
+              onPress={handleFirstLoginPasswordChange}>
+              <Text style={styles.modalButtonText}>{firstLoginSaving ? 'Updating...' : 'Set Password'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity disabled={firstLoginSaving}
+              onPress={() => { setShowFirstLoginModal(false); setFirstLoginToken(''); setFirstLoginPassword(''); setFirstLoginConfirm(''); }}
+              style={{ marginTop: 16 }}>
+              <Text style={styles.cancelText}>Cancel and Return to Sign In</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -825,6 +917,7 @@ const styles = StyleSheet.create({
   modalSubtitle: { fontFamily: 'Inter_18pt-Regular', fontSize: 13, color: '#94A3B8', textAlign: 'center', marginBottom: 20, lineHeight: 18 },
   
   otpInput: { width: '100%', height: 52, borderWidth: 1, encrypted: true, borderColor: '#1E293B', borderRadius: 12, paddingHorizontal: 16, fontFamily: 'Inter_18pt-Bold', fontSize: 24, letterSpacing: 8, backgroundColor: '#060913', marginBottom: 20, color: '#FFFFFF' },
+  firstLoginHelp: { color: '#94A3B8', fontSize: 12, lineHeight: 18, marginBottom: 16 },
   resetInput: { width: '100%', height: 48, borderWidth: 1, borderColor: '#1E293B', borderRadius: 12, paddingHorizontal: 16, fontFamily: 'Inter_18pt-Regular', fontSize: 14, backgroundColor: '#060913', color: '#FFFFFF', marginBottom: 16 },
   
   modalButton: { backgroundColor: '#FFFFFF', width: '100%', height: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },

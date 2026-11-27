@@ -21,6 +21,7 @@ const Login = ({ onBack }) => {
   const [step, setStep] = useState('login'); 
   const [otp, setOtp] = useState('');
   const [pendingLoginToken, setPendingLoginToken] = useState('');
+  const [firstLoginToken, setFirstLoginToken] = useState('');
   const [resetOtp, setResetOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
@@ -201,6 +202,21 @@ const handleVerifyOtp = async (e) => {
     const data = await res.json();
 
     if (res.ok && data?.success) {
+      // Backend issues a one-purpose token after successful OTP verification.
+      // Never save a normal session until the temporary password is replaced.
+      if (data.requiresPasswordChange) {
+        if (!data.changeToken) {
+          toast.error('Password setup could not start. Please sign in again.');
+          return;
+        }
+        setFirstLoginToken(data.changeToken);
+        setPendingLoginToken('');
+        setOtp('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setStep('first-login-password');
+        return;
+      }
       // Validate the authenticated response.
       if (!data.token || !data.user) {
         toast.error(
@@ -297,6 +313,52 @@ const handleVerifyOtp = async (e) => {
 
 
   
+  const handleFirstLoginPasswordChange = async (event) => {
+    event.preventDefault();
+    if (!firstLoginToken) {
+      toast.error('Password setup expired. Please sign in again.');
+      setStep('login');
+      return;
+    }
+    if (newPassword.length < 12 || !/[A-Z]/.test(newPassword) ||
+        !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword) ||
+        !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
+      toast.warning('Use at least 12 characters with uppercase, lowercase, number and special character.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.warning('Passwords do not match.');
+      return;
+    }
+    setOtpLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/auth/first-login-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${firstLoginToken}`
+        },
+        body: JSON.stringify({ newPassword })
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        toast.error(data?.message || 'Could not update your password.');
+        return;
+      }
+      setFirstLoginToken('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPassword('');
+      setShowNewPassword(false);
+      setStep('login');
+      toast.success('Password created. Sign in again with your new password.');
+    } catch (error) {
+      toast.error('Unable to update password. Check your connection.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
 const handleResendOtp = async () => {
   const emailClean = email.trim().toLowerCase();
 
@@ -585,6 +647,52 @@ const handleResendOtp = async () => {
                   {otpLoading ? 'Verifying...' : 'Verify'}
                 </button>
               </div>
+            </form>
+          </div>
+        )}
+
+        {/* First login: mandatory password replacement after verified OTP */}
+        {step === 'first-login-password' && (
+          <div className="cl-form">
+            <div className="cl-instruction">
+              <h4>Create Your Personal Password</h4>
+              <p>Your temporary password must be replaced before UniVITA access is enabled. You will sign in again afterward.</p>
+            </div>
+            <form onSubmit={handleFirstLoginPasswordChange} className="cl-step-form">
+              <div className="cl-form-group">
+                <label className="cl-label" htmlFor="first-login-web-password">New Password</label>
+                <div className="cl-input-wrap">
+                  <Lock size={18} className="cl-input-icon" />
+                  <input id="first-login-web-password" autoComplete="new-password"
+                    type={showNewPassword ? 'text' : 'password'} className="cl-input"
+                    value={newPassword} onChange={e => setNewPassword(e.target.value)}
+                    minLength={12} required placeholder="Create a personal password" />
+                  <button type="button" className="cl-eye-btn"
+                    aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowNewPassword(v => !v)}>
+                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+              <div className="cl-form-group">
+                <label className="cl-label" htmlFor="first-login-web-confirm">Confirm Password</label>
+                <div className="cl-input-wrap">
+                  <KeyRound size={18} className="cl-input-icon" />
+                  <input id="first-login-web-confirm" autoComplete="new-password"
+                    type={showNewPassword ? 'text' : 'password'} className="cl-input"
+                    value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                    minLength={12} required placeholder="Repeat new password" />
+                </div>
+              </div>
+              <p className="cl-password-policy">Minimum 12 characters, with uppercase, lowercase, number, and special character. Do not reuse your temporary password.</p>
+              <button type="submit" className="cl-btn-primary"
+                disabled={otpLoading || newPassword.length < 12 || newPassword !== confirmPassword}>
+                {otpLoading ? 'Updating password...' : 'Set Password'}
+              </button>
+              <button type="button" className="cl-btn-secondary"
+                onClick={() => { setFirstLoginToken(''); setNewPassword(''); setConfirmPassword(''); setStep('login'); }}>
+                Cancel and Return to Sign In
+              </button>
             </form>
           </div>
         )}

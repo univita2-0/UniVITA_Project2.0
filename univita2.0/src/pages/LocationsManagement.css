@@ -689,3 +689,217 @@
 .facility-locations .facility-header-actions {
   justify-content: flex-end;
 }
+
+/* =========================================================
+   UniVITA — Unified Search Bar UI Fix
+   Fixes overlapping input borders and double focus outlines.
+   ========================================================= */
+
+/* Search field container */
+:is(
+  .jp-search,
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper,
+  .uv-admin-audit .al-filter-group.search,
+  .pm-search-box
+) {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  height: 40px !important;
+  min-width: 0;
+  padding: 0 12px !important;
+  background: #FFFFFF !important;
+  border: 1px solid #CBD5E1 !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  box-sizing: border-box !important;
+  transition: border-color 0.15s ease,
+              box-shadow 0.15s ease !important;
+}
+
+/* Search text input - never display a second border */
+:is(
+  .jp-search,
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper,
+  .uv-admin-audit .al-filter-group.search,
+  .pm-search-box
+) > input {
+  display: block !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  color: #0F172A !important;
+}
+
+/* Remove nested borders on focus */
+:is(
+  .jp-search,
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper,
+  .uv-admin-audit .al-filter-group.search,
+  .pm-search-box
+) > input:focus,
+:is(
+  .jp-search,
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper,
+  .uv-admin-audit .al-filter-group.search,
+  .pm-search-box
+) > input:focus-visible {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Apply focus only to the outer search container */
+:is(
+  .jp-search,
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper,
+  .uv-admin-audit .al-filter-group.search,
+  .pm-search-box
+):focus-within {
+  border-color: #0D9488 !important;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.10) !important;
+}
+
+/* Consistent search icon */
+:is(
+  .jp-search,
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper,
+  .uv-admin-audit .al-filter-group.search,
+  .pm-search-box
+) > svg {
+  flex-shrink: 0;
+  width: 17px;
+  height: 17px;
+  color: #94A3B8;
+}
+
+/* Placeholder */
+:is(
+  .jp-search,
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper,
+  .uv-admin-audit .al-filter-group.search,
+  .pm-search-box
+) > input::placeholder {
+  color: #94A3B8 !important;
+  opacity: 1;
+}
+
+/* Clear button, when available */
+:is(
+  .lt-search-input-group,
+  .aa-search-input-group,
+  .ac-search-input-wrapper:not(.date-picker),
+  .ot-search-input-group,
+  .lbm-search-input-group,
+  .lm-page .expert-search-input-group,
+  .vm-search-input-group,
+  .univita-scanner-page .expert-search-input-group,
+  .univita-ble-page .expert-search-input-group,
+  .facility-locations .expert-search-input-group,
+  .mr-search-wrapper
+) > button {
+  flex-shrink: 0;
+}
+
+/* Responsive search sizing */
+@media (max-width: 640px) {
+  :is(
+    .jp-search,
+    .lt-search-input-group,
+    .aa-search-input-group,
+    .ac-search-input-wrapper:not(.date-picker),
+    .ot-search-input-group,
+    .lbm-search-input-group,
+    .lm-page .expert-search-input-group,
+    .vm-search-input-group,
+    .univita-scanner-page .expert-search-input-group,
+    .univita-ble-page .expert-search-input-group,
+    .facility-locations .expert-search-input-group,
+    .mr-search-wrapper,
+    .uv-admin-audit .al-filter-group.search,
+    .pm-search-box
+  ) {
+    max-width: 100% !important;
+  }
+}

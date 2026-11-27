@@ -44,6 +44,7 @@ const RoleManagement = () => {
   const [updating, setUpdating] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [accountTab, setAccountTab] = useState('active');
   
   const currentUserId = useMemo(() => {
     try {
@@ -108,7 +109,18 @@ const RoleManagement = () => {
       toast.error('Role changes require active employment and an active or pending-role account.');
       return;
     }
-    if (!window.confirm(`Reassign ${target.full_name} from ${target.role} to ${newRole}? This changes access to the web and mobile applications.`)) return;
+    const getLabel = value => ROLE_OPTIONS.find(option => option.value === value)?.label || 'Not Specified';
+    const different = target.requested_role && target.requested_role !== newRole;
+    const confirmationMessage = [
+      `Employee: ${target.full_name}`,
+      `Requested by HR: ${getLabel(target.requested_role)}`,
+      `Current role: ${target.role ? getLabel(target.role) : 'Unassigned'}`,
+      `Selected role: ${getLabel(newRole)}`,
+      '',
+      different ? 'Warning: the selected role differs from HR’s recommendation.' : 'This applies the selected access level.',
+      'Confirm role assignment?'
+    ].join('\n');
+    if (!window.confirm(confirmationMessage)) return;
     setUpdating(userId);
 
     try {
@@ -139,6 +151,23 @@ const RoleManagement = () => {
     return classes[role] || 'rm-badge-default';
   };
 
+  const roleTabs = [
+    { key: 'active', label: 'Active Accounts' },
+    { key: 'pending', label: 'Pending Role Assignment' },
+    { key: 'deactivated', label: 'Deactivated Accounts' }
+  ];
+
+  const matchesRoleTab = (user, tab) =>
+    tab === 'active' ? user.account_status === 'active' :
+    tab === 'pending' ? user.account_status === 'pending_role' :
+    user.account_status === 'deactivated';
+
+  const roleTabCounts = {
+    active: users.filter(user => matchesRoleTab(user, 'active')).length,
+    pending: users.filter(user => matchesRoleTab(user, 'pending')).length,
+    deactivated: users.filter(user => matchesRoleTab(user, 'deactivated')).length
+  };
+
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
       const matchesSearch =
@@ -148,16 +177,17 @@ const RoleManagement = () => {
 
       const matchesRole = roleFilter ? user.role === roleFilter : true;
 
-      return matchesSearch && matchesRole;
+      return matchesRoleTab(user, accountTab) && matchesSearch && matchesRole;
     });
-  }, [users, searchTerm, roleFilter]);
+  }, [users, searchTerm, roleFilter, accountTab]);
 
   const totalUsers = filteredUsers.length;
   const totalPages = Math.max(1, Math.ceil(totalUsers / rowsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
   const paginatedUsers = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
+    const start = (safePage - 1) * rowsPerPage;
     return filteredUsers.slice(start, start + rowsPerPage);
-  }, [filteredUsers, currentPage, rowsPerPage]);
+  }, [filteredUsers, safePage, rowsPerPage]);
 
   const roleCounts = useMemo(() => {
     return {
@@ -224,13 +254,24 @@ const RoleManagement = () => {
           <span>Account directory</span>
           <span>{totalUsers} matching accounts</span>
         </div>
+        <div className="rm-status-tabs" role="tablist" aria-label="Account lifecycle">
+          {roleTabs.map(tab => (
+            <button type="button" role="tab" key={tab.key}
+              aria-selected={accountTab === tab.key}
+              className={`rm-status-tab ${accountTab === tab.key ? 'active' : ''}`}
+              onClick={() => { setAccountTab(tab.key); setSearchTerm(''); setRoleFilter(''); setCurrentPage(1); }}>
+              {tab.label} <span>{roleTabCounts[tab.key]}</span>
+            </button>
+          ))}
+        </div>
         <div className="expert-search-card">
           <div className="rm-filters">
             <div className="rm-search-group">
               <Search size={18} className="text-muted" />
               <input
-                type="text"
-                placeholder="Search by name, ID, or email..."
+                type="search"
+                aria-label="Search roles by employee"
+                placeholder="Search name, ID, or email"
                 value={searchTerm}
                 onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 className="expert-clean-input"
@@ -240,6 +281,7 @@ const RoleManagement = () => {
             <div className="rm-filter-group">
               <select
                 className="rm-select-filter"
+                aria-label="Filter by role"
                 value={roleFilter}
                 onChange={e => { setRoleFilter(e.target.value); setCurrentPage(1); }}
               >
@@ -259,6 +301,7 @@ const RoleManagement = () => {
               <tr>
                 <th>Employee ID</th>
                 <th>User Details</th>
+                <th>Requested Role</th>
                 <th>Current Role</th>
                 <th>Account Status</th>
                 <th className="text-right">Access Action</th>
@@ -267,7 +310,7 @@ const RoleManagement = () => {
             <tbody>
               {paginatedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="expert-empty">
+                  <td colSpan="6" className="expert-empty">
                     <Users size={48} className="text-muted" />
                     <p>No users found matching your criteria.</p>
                     <span>Try broadening your search or filter settings.</span>
@@ -282,8 +325,13 @@ const RoleManagement = () => {
                       <div className="rm-emp-email">{user.email}</div>
                     </td>
                     <td>
+                      <span className={`rm-badge ${getRoleBadgeClass(user.requested_role)}`}>
+                        {ROLE_OPTIONS.find(option => option.value === user.requested_role)?.label || 'Not Specified'}
+                      </span>
+                    </td>
+                    <td>
                       <span className={`rm-badge ${getRoleBadgeClass(user.role)}`}>
-                        {user.role === 'hr_admin' ? 'HR' : user.role || 'Unassigned'}
+                        {ROLE_OPTIONS.find(option => option.value === user.role)?.label || 'Unassigned'}
                       </span>
                     </td>
                     <td>
@@ -325,6 +373,11 @@ const RoleManagement = () => {
                             </option>
                           ))}
                         </select>
+                        {!user.role && user.requested_role && (
+                          <small className="rm-role-suggestion">
+                            HR recommends: {ROLE_OPTIONS.find(option => option.value === user.requested_role)?.label || user.requested_role}
+                          </small>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -353,15 +406,15 @@ const RoleManagement = () => {
             <div className="expert-page-controls">
               <button
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
+                disabled={safePage === 1}
                 className="expert-page-btn"
               >
                 <ChevronLeft size={16} /> Prev
               </button>
-              <span className="expert-page-current">{currentPage} / {totalPages || 1}</span>
+              <span className="expert-page-current">{safePage} / {totalPages || 1}</span>
               <button
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
+                disabled={safePage >= totalPages}
                 className="expert-page-btn"
               >
                 Next <ChevronRight size={16} />

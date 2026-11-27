@@ -195,6 +195,19 @@ const wsClients = new Map();     // userId -> Set<WebSocket>
 
 const OTP_MAX_ATTEMPTS = 5;
 
+const DEBUG_AUTH_OTP =
+  process.env.NODE_ENV === 'development' &&
+  process.env.DEBUG_AUTH_OTP === 'true';
+  console.log('[AUTH TEST] OTP debug enabled:', DEBUG_AUTH_OTP);
+console.log('[AUTH TEST] Environment:', process.env.NODE_ENV || 'unset');
+
+function logDevelopmentOtp(type, email, otp, expiryMinutes) {
+  if (!DEBUG_AUTH_OTP) return;
+  console.log(`Type    : ${type}`);
+  console.log(`Email   : ${email}`);
+  console.log(`OTP     : ${otp}`);
+}
+
 const otpStorageKey = (email, purpose) =>
   `${purpose}:${String(email).trim().toLowerCase()}`;
 
@@ -659,7 +672,11 @@ function authenticateToken(req, res, next) {
 
     try {
       const [rows] = await db.promise().query(
-        'SELECT id, role, status, employment_status FROM users WHERE id = ? LIMIT 1', [session.id]
+        `SELECT id, role, status, employment_status,
+        must_change_password
+ FROM users
+ WHERE id = ?
+ LIMIT 1`, [session.id]
       );
       const account = rows[0];
       if (!account || account.status !== 'active' || account.employment_status !== 'active') {
@@ -668,6 +685,15 @@ function authenticateToken(req, res, next) {
       if (account.role !== session.role) {
         return res.status(401).json({ success: false, message: 'Account permissions have changed. Please sign in again.' });
       }
+      if (Number(account.must_change_password) === 1) {
+  return res.status(403).json({
+    success: false,
+    code: 'PASSWORD_CHANGE_REQUIRED',
+    message:
+      'Your temporary password must be replaced. ' +
+      'Please sign in again to complete password setup.'
+  });
+}
       req.user = session;
       return next();
     } catch (databaseError) {
@@ -1174,6 +1200,22 @@ const { otp, record } = createOtpChallenge(
   otpMinutes
 );
 
+if (DEBUG_AUTH_OTP) {
+  OTP_STORE[otpStorageKey(email, 'login')] = record;
+
+  logDevelopmentOtp(
+    'LOGIN VERIFICATION',
+    email,
+    otp,
+    otpMinutes
+  );
+
+  return res.json({
+    success: true,
+    message: 'Development OTP generated. Check your local backend terminal.'
+  });
+}
+
 
       try {
         const { data, error } = await resend.emails.send({
@@ -1199,8 +1241,18 @@ const { otp, record } = createOtpChallenge(
         
 OTP_STORE[otpStorageKey(email, 'login')] = record;
 
+logDevelopmentOtp(
+  'LOGIN VERIFICATION',
+  email,
+  otp,
+  otpMinutes
+);
 
-        res.json({ success: true, message: 'OTP sent to your email.' });
+return res.json({
+  success: true,
+  message: 'OTP sent to your email.'
+});
+
       } catch (err) {
         console.error('Unexpected email error:', err);
         return res.status(500).json({ success: false, message: 'Server error while sending OTP.' });
@@ -1287,6 +1339,31 @@ app.post(
           });
         }
 
+if (Number(user.must_change_password) === 1) {
+  const passwordVersion = crypto
+    .createHash('sha256')
+    .update(String(user.password))
+    .digest('hex');
+
+  const changeToken = jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      purpose: 'first-login-password',
+      passwordVersion
+    },
+    JWT_SECRET,
+    { expiresIn: '10m' }
+  );
+
+  return res.json({
+    success: true,
+    requiresPasswordChange: true,
+    changeToken,
+    message: 'You must replace your temporary password.'
+  });
+}
+
         const token = jwt.sign(
           {
             id: user.id,
@@ -1357,6 +1434,21 @@ const { otp, record } = createOtpChallenge(
   otpMinutes
 );
 
+if (DEBUG_AUTH_OTP) {
+  OTP_STORE[otpStorageKey(email, 'reset')] = record;
+
+  logDevelopmentOtp(
+    'PASSWORD RESET',
+    email,
+    otp,
+    otpMinutes
+  );
+
+  return res.json({
+    success: true,
+    message: 'Development reset OTP generated. Check your local backend terminal.'
+  });
+}
 
       try {
         const { data, error } = await resend.emails.send({
@@ -1380,11 +1472,20 @@ const { otp, record } = createOtpChallenge(
           return res.status(500).json({ success: false, message: 'Failed to send password reset email.' });
         }
 
-        
 OTP_STORE[otpStorageKey(email, 'reset')] = record;
 
+logDevelopmentOtp(
+  'PASSWORD RESET',
+  email,
+  otp,
+  otpMinutes
+);
 
-        res.json({ success: true, message: 'OTP sent to your email.' });
+return res.json({
+  success: true,
+  message: 'OTP sent to your email.'
+});        
+
       } catch (err) {
         console.error('Unexpected email error:', err);
         return res.status(500).json({ success: false, message: 'Server error while sending reset OTP.' });
@@ -1504,7 +1605,8 @@ app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
     const [result] = await db.promise().query(
       `UPDATE users
        SET password = ?,
-           password_last_changed = CURRENT_DATE
+           password_last_changed = CURRENT_DATE,
+            must_change_password = 0
        WHERE email = ?
          AND status = 'active'`,
       [hashedPassword, email]
@@ -1534,18 +1636,189 @@ app.post('/api/auth/reset-password', otpLimiter, async (req, res) => {
   }
 });
 
+app.post(
+  '/api/auth/first-login-password',
+  otpLimiter,
+  async (req, res) => {
+    const authorization = req.headers.authorization || '';
+
+    const token = authorization.startsWith('Bearer ')
+      ? authorization.slice(7)
+      : null;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Password setup session is required.'
+      });
+    }
+
+    let claims;
+
+    try {
+      claims = jwt.verify(token, JWT_SECRET);
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: 'Password setup session expired. Sign in again.'
+      });
+    }
+
+    if (
+      claims.purpose !== 'first-login-password' ||
+      !claims.id ||
+      !claims.passwordVersion
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Invalid password setup session.'
+      });
+    }
+
+    const newPassword = req.body?.newPassword;
+
+    if (
+      typeof newPassword !== 'string' ||
+      newPassword.length < 12 ||
+      !/[A-Z]/.test(newPassword) ||
+      !/[a-z]/.test(newPassword) ||
+      !/[0-9]/.test(newPassword) ||
+      !/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Password must have at least 12 characters, ' +
+          'including uppercase, lowercase, a number, ' +
+          'and a special character.'
+      });
+    }
+
+    try {
+      const [rows] = await db.promise().query(
+        `SELECT id, email, password, role, status,
+                employment_status, must_change_password
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [claims.id]
+      );
+
+      if (rows.length !== 1) {
+        return res.status(404).json({
+          success: false,
+          message: 'Employee account not found.'
+        });
+      }
+
+      const user = rows[0];
+
+      if (
+        user.status !== 'active' ||
+        user.employment_status !== 'active' ||
+        !['admin', 'hr_admin', 'security', 'instructor']
+          .includes(user.role) ||
+        Number(user.must_change_password) !== 1 ||
+        String(user.email).toLowerCase() !==
+          String(claims.email || '').toLowerCase()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: 'Password setup is not available for this account.'
+        });
+      }
+
+      const currentVersion = crypto
+        .createHash('sha256')
+        .update(String(user.password))
+        .digest('hex');
+
+      const suppliedVersion = String(claims.passwordVersion);
+
+      if (
+        !/^[a-f0-9]{64}$/.test(suppliedVersion) ||
+        !crypto.timingSafeEqual(
+          Buffer.from(currentVersion, 'hex'),
+          Buffer.from(suppliedVersion, 'hex')
+        )
+      ) {
+        return res.status(401).json({
+          success: false,
+          message: 'Password setup session is no longer valid.'
+        });
+      }
+
+      const sameAsTemporary = await bcrypt.compare(
+        newPassword,
+        user.password
+      );
+
+      if (sameAsTemporary) {
+        return res.status(400).json({
+          success: false,
+          message: 'Choose a password different from your temporary password.'
+        });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+      const [updated] = await db.promise().query(
+        `UPDATE users
+         SET password = ?,
+             password_last_changed = CURRENT_DATE,
+             must_change_password = 0
+         WHERE id = ?
+           AND password = ?
+           AND must_change_password = 1
+           AND status = 'active'
+           AND employment_status = 'active'`,
+        [
+          hashedPassword,
+          user.id,
+          user.password
+        ]
+      );
+
+      if (updated.affectedRows !== 1) {
+        return res.status(409).json({
+          success: false,
+          message: 'Account state changed. Please sign in again.'
+        });
+      }
+
+      logAction(
+        user.id,
+        'FIRST_LOGIN_PASSWORD_CHANGED',
+        'user',
+        user.id,
+        req
+      );
+
+      return res.json({
+        success: true,
+        message:
+          'Personal password created successfully. ' +
+          'Sign in again using your new password.'
+      });
+
+    } catch (error) {
+      console.error('First-login password change:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to change password at this time.'
+      });
+    }
+  }
+);
 
 
-
-// R05: Legacy credentials are migrated before login continues. A failed migration
-// fails closed; plaintext must not remain stored after a successful login.
 const verifyAccountPassword = async (user, candidate) => {
   if (typeof user?.password !== 'string' || typeof candidate !== 'string') return false;
   if (/^\$2[aby]\$\d{2}\$/.test(user.password)) {
     return bcrypt.compare(candidate, user.password);
   }
-  // Compatibility for imported legacy accounts only. Use the same length and
-  // constant-time byte comparison and write a bcrypt hash before accepting it.
+  
   const submitted = crypto.createHash('sha256').update(candidate).digest();
   const stored = crypto.createHash('sha256').update(user.password).digest();
   if (!crypto.timingSafeEqual(submitted, stored)) return false;
@@ -1651,7 +1924,11 @@ app.post('/api/login', loginLimiter, async (req, res) => {
       : 0;
 
     const expiryLimit = cfg.password_expiry_days ?? 365;
-    if (expiryLimit > 0 && daysSinceChange >= expiryLimit) {
+    if (
+  Number(user.must_change_password) !== 1 &&
+  expiryLimit > 0 &&
+  daysSinceChange >= expiryLimit
+) {
       const tempToken = jwt.sign({ id: user.id, email: user.email, purpose: 'password-reset' }, JWT_SECRET, { expiresIn: '15m' });
       return res.json({
         success: true,
@@ -1794,7 +2071,7 @@ app.put('/api/users/:id/reset-password', authenticateToken, async (req, res) => 
       return res.status(403).json({success:false,message:'Use your personal password-change flow for your own account.'});
     }
     const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
-    db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE WHERE id = ?", [hashedPassword, userId], (err, result) => {
+    db.query("UPDATE users SET password = ?, password_last_changed = CURRENT_DATE, must_change_password = 1 WHERE id = ?", [hashedPassword, userId], (err, result) => {
       if (err) return res.status(500).json({ success: false, message: err.message });
       if (result.affectedRows === 0) return res.status(404).json({ success: false, message: 'User not found.' });
       
@@ -6526,40 +6803,216 @@ app.get(
   }
 );
 
+app.put(
+  '/api/employees/:id/employment-status',
+  authenticateToken,
+  requireAction('employees:change-status'),
+  async (req, res) => {
+    const {
+      employment_status,
+      separation_reason,
+      separation_remarks
+    } = req.body || {};
 
-app.put('/api/employees/:id/employment-status', authenticateToken,
-  requireAction('employees:change-status'), async (req,res) => {
-  const { employment_status } = req.body || {};
-  if (!['active','separated'].includes(employment_status)) {
-    return res.status(400).json({success:false,message:'Employment status must be active or separated.'});
-  }
-  try {
-    const [rows] = await db.promise().query('SELECT id,role,employment_status FROM users WHERE id = ? LIMIT 1',[req.params.id]);
-    if (!rows.length) return res.status(404).json({success:false,message:'Employee not found.'});
-    const current = rows[0];
-    if (current.employment_status === null) return res.status(409).json({success:false,message:'Legacy employment status requires manual classification before a transition.'});
-    if (current.employment_status === employment_status) return res.json({success:true,message:'Employment status unchanged.'});
-    if (current.role === 'admin' && employment_status === 'separated') {
-      const [[count]] = await db.promise().query(
-        "SELECT COUNT(*) AS total FROM users WHERE role='admin' AND status='active' AND employment_status='active' AND id <> ?",[current.id]);
-      if (count.total === 0) return res.status(403).json({success:false,message:'Cannot separate the last active System Administrator.'});
+    if (!['active', 'separated'].includes(employment_status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid employment status.'
+      });
     }
-    await db.promise().query('UPDATE users SET employment_status=? WHERE id=?',[employment_status,current.id]);
-    logAction(req.user.id,'CHANGE_EMPLOYMENT_STATUS','user',current.id,req,
-      {employment_status:current.employment_status},{employment_status});
-    return res.json({success:true,employment_status,message:'Employment status updated; access remains managed by Admin.'});
-  } catch (err) {
-    console.error('Employment status change:',err);
-    return res.status(500).json({success:false,message:'Failed to update employment status.'});
+
+    const reasons = new Set([
+      'resignation',
+      'retirement',
+      'contract_end',
+      'termination',
+      'other'
+    ]);
+
+    const remarks =
+      typeof separation_remarks === 'string'
+        ? separation_remarks.trim()
+        : '';
+
+    if (
+      employment_status === 'separated' &&
+      (
+        !reasons.has(separation_reason) ||
+        remarks.length > 500 ||
+        (separation_reason === 'other' && !remarks)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Select a valid separation reason and provide valid remarks.'
+      });
+    }
+
+    try {
+      const [rows] = await db.promise().query(
+        `SELECT
+           id,
+           employee_id,
+           full_name,
+           role,
+           status,
+           employment_status
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [req.params.id]
+      );
+
+      if (!rows.length) {
+        return res.status(404).json({
+          success: false,
+          message: 'Employee not found.'
+        });
+      }
+
+      const target = rows[0];
+
+      if (target.employment_status === null) {
+        return res.status(409).json({
+          success: false,
+          message: 'Legacy employment status requires review.'
+        });
+      }
+
+      if (target.employment_status === employment_status) {
+        return res.json({
+          success: true,
+          message: 'Employment status unchanged.'
+        });
+      }
+
+      if (
+        target.role === 'admin' &&
+        employment_status === 'separated'
+      ) {
+        const [[count]] = await db.promise().query(
+          `SELECT COUNT(*) AS total
+           FROM users
+           WHERE role = 'admin'
+             AND status = 'active'
+             AND employment_status = 'active'
+             AND id <> ?`,
+          [target.id]
+        );
+
+        if (!count.total) {
+          return res.status(403).json({
+            success: false,
+            message:
+              'Cannot separate the last active System Administrator.'
+          });
+        }
+      }
+
+      const [updated] = await db.promise().query(
+        `UPDATE users
+         SET employment_status = ?
+         WHERE id = ?
+           AND employment_status = ?`,
+        [
+          employment_status,
+          target.id,
+          target.employment_status
+        ]
+      );
+
+      if (updated.affectedRows !== 1) {
+        return res.status(409).json({
+          success: false,
+          message:
+            'Employment status changed. Refresh and retry.'
+        });
+      }
+
+      logAction(
+        req.user.id,
+        'CHANGE_EMPLOYMENT_STATUS',
+        'user',
+        target.id,
+        req,
+        {
+          employment_status: target.employment_status
+        },
+        {
+          employment_status,
+          ...(employment_status === 'separated'
+            ? {
+                separation_reason,
+                separation_remarks: remarks
+              }
+            : {})
+        }
+      );
+
+      if (employment_status === 'separated') {
+        for (
+          const client of
+          wsClients.get(Number(target.id)) || []
+        ) {
+          try {
+            client.close(4003, 'Employment ended');
+          } catch (_) {
+          
+          }
+        }
+
+        if (target.status === 'active') {
+          const payload = JSON.stringify({
+            type: 'employment_separation_review',
+            employee_id: target.employee_id,
+            employee_name: target.full_name
+          });
+
+          wss.clients.forEach(client => {
+            if (
+              client.readyState === WebSocket.OPEN &&
+              client.user?.role === 'admin'
+            ) {
+              client.send(payload);
+            }
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        employment_status,
+        message: 'Employment status updated.'
+      });
+    } catch (err) {
+      console.error('Employment status change:', err);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update employment status.'
+      });
+    }
   }
-});
+);
+
 
 app.get('/api/accounts', authenticateToken, requireAction('accounts:view'), async(req,res) => {
   try {
     const [rows] = await db.promise().query(
-      `SELECT id,employee_id,full_name,email,role,status AS account_status,employment_status,
-              account_expiration_date, password_last_changed
-       FROM users ORDER BY full_name ASC`);
+      `SELECT
+    id,
+    employee_id,
+    full_name,
+    email,
+    role,
+    requested_role,
+    status AS account_status,
+    employment_status,
+    account_expiration_date,
+    password_last_changed
+ FROM users
+ ORDER BY full_name ASC`);
     res.json(rows);
   } catch(err) {
     console.error('Account directory:',err);
@@ -6586,7 +7039,16 @@ app.post('/api/accounts/:id/provision', authenticateToken,
     if (!emailCheck.valid) return res.status(400).json({success:false,message:emailCheck.reason});
     const hash=await bcrypt.hash(password,12);
     const [result]=await db.promise().query(
-      "UPDATE users SET password=?,password_last_changed=CURRENT_DATE,status='pending_role' WHERE id=? AND status='not_provisioned' AND password IS NULL AND role IS NULL AND employment_status='active'",
+      `UPDATE users
+ SET password = ?,
+     password_last_changed = CURRENT_DATE,
+     must_change_password = 1,
+     status = 'pending_role'
+ WHERE id = ?
+   AND status = 'not_provisioned'
+   AND password IS NULL
+   AND role IS NULL
+   AND employment_status = 'active'`,
       [hash,target.id]);
     if (result.affectedRows!==1) return res.status(409).json({success:false,message:'Account provisioning state changed. Reload and retry.'});
     logAction(req.user.id,'PROVISION_ACCOUNT','user',target.id,req);
@@ -6628,7 +7090,7 @@ app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','secu
       return res.json(results || []);
     }
 
-        let sql = `SELECT id, employee_id, full_name, first_name, last_name, email, role, status, employment_status,
+        let sql = `SELECT id, employee_id, full_name, first_name, last_name, email, role, requested_role, status, employment_status,
               employment_type, position_level, contract_type, monthly_salary, 
               work_days_per_month, payroll_access, middle_initial, date_of_joining, 
               account_expiration_date, date_of_birth, phone_number, gender, 
@@ -6645,9 +7107,13 @@ app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','secu
     sql += ` ORDER BY full_name ASC`;
 
     const [results] = await db.promise().query(sql, params);
-    // Cross-department directory access is view-only and contains only basic fields.
-    // Do not expose salary, personal identity details, or emergency contacts across departments.
-    const directoryFields = ['id','employee_id','full_name','email','role','status',
+    const directoryFields = [
+  'id',
+  'employee_id',
+  'full_name',
+  'email',
+  'role',
+  'status',
       'position_level','position','contract_type','employment_type','phone_number','date_of_joining'];
     const safeResults = (results || []).map(person => {
       const ownsRecord = req.user.role === 'hr_admin' || req.user.role === 'admin';
@@ -6664,7 +7130,7 @@ app.get('/api/employees', authenticateToken, allowRoles('admin','hr_admin','secu
 app.post('/api/employees', authenticateToken, requireAction('employees:create'), uploadResume.single('resume_file'), async (req, res) => {
   // HR creates personnel records only; an Admin provisions login separately.
   const data = req.body || {};
-  const { employee_id, full_name, first_name, last_name, email,
+  const { employee_id, full_name, first_name, last_name, email, requested_role,
     employment_type, position_level, contract_type, monthly_salary, work_days_per_month,
     payroll_access, payroll_pin, middle_initial, date_of_joining, date_of_birth,
     phone_number, gender, emergency_contact_name, emergency_contact_phone,
@@ -6672,6 +7138,63 @@ app.post('/api/employees', authenticateToken, requireAction('employees:create'),
   if (![employee_id, full_name, email].every(v => typeof v === 'string' && v.trim())) {
     return res.status(400).json({ success:false, message:'Employee ID, name and email are required.' });
   }
+  const VALID_REQUESTED_ROLES = [
+  'admin',
+  'hr_admin',
+  'security',
+  'instructor'
+];
+
+const SIMULATIONIST_POSITIONS = [
+  'Entry Level Simulationist',
+  'Senior Simulationist'
+];
+
+const ROLE_POSITION_DEFAULTS = {
+  hr_admin: 'HR Personnel',
+  security: 'Security Personnel'
+};
+
+if (
+  typeof requested_role !== 'string' ||
+  !VALID_REQUESTED_ROLES.includes(requested_role)
+) {
+  return res.status(400).json({
+    success: false,
+    message: 'Please select a valid requested system role.'
+  });
+}
+
+let resolvedPosition;
+
+if (['admin', 'instructor'].includes(requested_role)) {
+  if (
+    typeof position_level !== 'string' ||
+    !SIMULATIONIST_POSITIONS.includes(position_level)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message:
+        'Select Entry Level Simulationist or Senior Simulationist.'
+    });
+  }
+
+  resolvedPosition = position_level;
+} else {
+  resolvedPosition = ROLE_POSITION_DEFAULTS[requested_role];
+
+  if (
+    position_level !== undefined &&
+    position_level !== null &&
+    String(position_level).trim() !== '' &&
+    position_level !== resolvedPosition
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: 'The position does not match the requested role.'
+    });
+  }
+}
   const emailCheck = await validateEmailForAccount(email, { checkDns:true });
   if (!emailCheck.valid) return res.status(400).json({success:false,message:emailCheck.reason});
   
@@ -6778,24 +7301,104 @@ if (infoObj.compensation_basis !== undefined) {
 
   if (req.file) infoObj.resume_file = `/uploads/resumes/${req.file.filename}`;
   try {
-    const sql = `INSERT INTO users
-      (employee_id,full_name,first_name,last_name,email,password,role,status,employment_status,
-       employment_type,position_level,contract_type,monthly_salary,work_days_per_month,
-       payroll_access,payroll_pin,middle_initial,date_of_joining,account_expiration_date,
-       date_of_birth,phone_number,gender,emergency_contact_name,emergency_contact_phone,
-       street_address,city,state_province,postal_code,country,additional_info,position,password_last_changed)
-      VALUES (?,?,?,?,?,NULL,NULL,'not_provisioned','active',?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`;
-    const params = [employee_id.trim(),full_name.trim(),first_name || null,last_name || null,email.trim().toLowerCase(),
-      selectedType,
-position_level || 'Entry Level Simulationist',
-selectedContract,
-      salary,workdays,payroll_access || 0,finalPin,middle_initial || null,date_of_joining || null,
-      date_of_birth || null,phone_number || null,gender || 'prefer_not_to_say',
-      emergency_contact_name || null,emergency_contact_phone || null,
-      street_address || null,city || null,state_province || null,postal_code || null,
-      country || 'Philippines',Object.keys(infoObj).length ? JSON.stringify(infoObj) : null,position || null];
+    const sql = `
+  INSERT INTO users
+  (
+    employee_id,
+    full_name,
+    first_name,
+    last_name,
+    email,
+    password,
+    role,
+    requested_role,
+    status,
+    employment_status,
+    employment_type,
+    position_level,
+    contract_type,
+    monthly_salary,
+    work_days_per_month,
+    payroll_access,
+    payroll_pin,
+    middle_initial,
+    date_of_joining,
+    account_expiration_date,
+    date_of_birth,
+    phone_number,
+    gender,
+    emergency_contact_name,
+    emergency_contact_phone,
+    street_address,
+    city,
+    state_province,
+    postal_code,
+    country,
+    additional_info,
+    position,
+    password_last_changed
+  )
+  VALUES
+  (
+    ?, ?, ?, ?, ?,
+    NULL, NULL, ?,
+    'not_provisioned', 'active',
+    ?, ?, ?, ?, ?,
+    ?, ?, ?, ?,
+    NULL,
+    ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?,
+    ?, NULL
+  )
+`;
+
+const params = [
+  employee_id.trim(),
+  full_name.trim(),
+  first_name || null,
+  last_name || null,
+  email.trim().toLowerCase(),
+
+  requested_role,
+
+  selectedType,
+  resolvedPosition,
+  selectedContract,
+  salary,
+  workdays,
+  payroll_access || 0,
+  finalPin,
+  middle_initial || null,
+  date_of_joining || null,
+
+  date_of_birth || null,
+  phone_number || null,
+  gender || 'prefer_not_to_say',
+  emergency_contact_name || null,
+  emergency_contact_phone || null,
+  street_address || null,
+  city || null,
+  state_province || null,
+  postal_code || null,
+  country || 'Philippines',
+  Object.keys(infoObj).length
+    ? JSON.stringify(infoObj)
+    : null,
+  resolvedPosition
+];
     const [result] = await db.promise().query(sql, params);
-    logAction(req.user.id,'CREATE_EMPLOYEE','user',result.insertId,req);
+    logAction(
+  req.user.id,
+  'CREATE_EMPLOYEE',
+  'user',
+  result.insertId,
+  req,
+  null,
+  {
+    requested_role,
+    position_level: resolvedPosition
+  }
+);
     return res.status(201).json({success:true,message:'Employee record created. Account not provisioned.',employeeId:employee_id, id:result.insertId});
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({success:false,message:'Employee ID or email already exists.'});
@@ -6847,6 +7450,79 @@ app.put('/api/employees/:id', authenticateToken, uploadResume.single('resume_fil
     const [oldRecord] = await db.promise().query("SELECT * FROM users WHERE id = ?", [employeeId]);
     if (oldRecord.length === 0) return res.status(404).json({ success: false, message: 'Employee not found.' });
     const oldData = oldRecord[0];
+
+if (updates.requested_role !== undefined) {
+  if (!isHR) {
+    return res.status(403).json({
+      success: false,
+      message: 'Only HR may update the requested system role.'
+    });
+  }
+
+  if (oldData.role !== null && oldData.role !== '') {
+    return res.status(409).json({
+      success: false,
+      message:
+        'This employee already has an assigned system role. ' +
+        'Use Role Management for access changes.'
+    });
+  }
+
+  const allowedRequestedRoles = [
+    'instructor',
+    'admin',
+    'hr_admin',
+    'security'
+  ];
+
+  if (!allowedRequestedRoles.includes(updates.requested_role)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Select a valid requested system role.'
+    });
+  }
+
+  const simulationistPositions = [
+    'Entry Level Simulationist',
+    'Senior Simulationist'
+  ];
+
+  const rolePositions = {
+    hr_admin: 'HR Personnel',
+    security: 'Security Personnel'
+  };
+
+  if (['instructor', 'admin'].includes(updates.requested_role)) {
+    const selectedPosition =
+      updates.position_level ?? oldData.position_level;
+
+    if (!simulationistPositions.includes(selectedPosition)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Select a valid Simulationist position.'
+      });
+    }
+
+    updates.position_level = selectedPosition;
+    updates.position = selectedPosition;
+  } else {
+    const expectedPosition = rolePositions[updates.requested_role];
+
+    if (
+      updates.position_level !== undefined &&
+      updates.position_level !== expectedPosition
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'The position does not match the requested system role.'
+      });
+    }
+
+    updates.position_level = expectedPosition;
+    updates.position = expectedPosition;
+  }
+}
 
     if (oldData.role === 'admin') {
       
@@ -7077,6 +7753,7 @@ if (infoObj.compensation_basis !== undefined) {
     delete updates.payroll_pin;
 
     const fieldMapping = {
+      requested_role: 'requested_role',
       full_name: 'full_name',
       first_name: 'first_name',
       last_name: 'last_name',

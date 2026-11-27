@@ -674,3 +674,42 @@
 .uv-admin-roles .expert-table th:last-child, .uv-admin-roles .expert-table td:last-child {
   text-align: right;
 }
+
+/* Non-authorizing role recommendation */
+.uv-admin-roles .rm-role-suggestion { display: block; margin-top: 5px; color: #64748b; font-size: 10.5px; line-height: 1.4; text-align: left; }
+.uv-admin-roles .rm-select-wrapper { min-width: 150px; }
+
+/* Account lifecycle navigation; deactivated roles are read-only */
+.uv-admin-roles .rm-status-tabs { display: flex; flex-wrap: wrap; gap: 20px; padding: 0 16px; border-bottom: 1px solid #e2e8f0; }
+.uv-admin-roles .rm-status-tab { padding: 11px 2px; border: 0; border-bottom: 2px solid transparent; background: transparent; font: 600 12px Inter, sans-serif; color: #64748b; cursor: pointer; }
+.uv-admin-roles .rm-status-tab.active { color: #0f766e; border-bottom-color: #0d9488; }
+.uv-admin-roles .rm-status-tab span { margin-left: 6px; font-size: 10.5px; }
+@media(max-width:650px) { .uv-admin-roles .rm-status-tabs { flex-wrap: nowrap; overflow-x: auto; gap: 15px; } .uv-admin-roles .rm-status-tab { white-space: nowrap; } }
+
+/* Compact, single-outline search field and consistent Role Management toolbar */
+.uv-admin-roles.expert-container { padding: 5px 10px 10px; }
+.uv-admin-roles .rm-filters { justify-content: space-between; gap: 12px; }
+.uv-admin-roles .rm-search-group {
+  flex: 0 1 380px; width: min(380px,100%); max-width: 380px; min-width: 200px;
+  height: 38px; padding: 0 12px; gap: 9px;
+  border: 1px solid #cbd5e1; border-radius: 6px; background: #fff;
+  box-shadow: none;
+}
+.uv-admin-roles .rm-search-group:focus-within {
+  border-color: #0d9488; box-shadow: 0 0 0 2px rgba(13,148,136,.08);
+}
+.uv-admin-roles .rm-search-group .expert-clean-input,
+.uv-admin-roles .rm-search-group .expert-clean-input:focus,
+.uv-admin-roles .rm-search-group .expert-clean-input:focus-visible {
+  flex: 1 1 auto; width: 100%; min-width: 0; height: 100%; padding: 0;
+  border: 0 !important; outline: none !important; outline-offset: 0 !important;
+  box-shadow: none !important; background: transparent;
+  font: 400 12px Inter,system-ui,sans-serif;
+}
+.uv-admin-roles .rm-search-group svg { flex: 0 0 auto; }
+.uv-admin-roles .rm-filter-group { flex: 0 0 205px; min-width: 180px; }
+.uv-admin-roles .rm-select-filter { height: 38px; border-radius: 6px; font-size: 12px; }
+@media (max-width:768px) {
+  .uv-admin-roles .rm-search-group,
+  .uv-admin-roles .rm-filter-group { flex: 1 1 100%; width: 100%; max-width: none; min-width: 0; }
+}
